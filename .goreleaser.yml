@@ -1,0 +1,114 @@
+# GoReleaser configuration for DevSpecs CLI
+# https://goreleaser.com
+
+version: 2
+
+project_name: devspecs
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ds
+    main: ./cmd/ds
+    binary: ds
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X github.com/devspecs-com/devspecs-cli/internal/version.Version={{.Version}}
+      - -X github.com/devspecs-com/devspecs-cli/internal/version.Commit={{.Commit}}
+      - -X github.com/devspecs-com/devspecs-cli/internal/version.Date={{.Date}}
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: devspecs-com
+    name: devspecs-cli
+  prerelease: auto
+  draft: false
+
+nfpms:
+  - id: devspecs
+    package_name: devspecs
+    vendor: devspecs-com
+    homepage: "https://github.com/devspecs-com/devspecs-cli"
+    maintainer: "DevSpecs <support@devspecs.com>"
+    description: "DevSpecs CLI — index and reference your specs, plans, and ADRs"
+    license: "MIT"
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+
+brews:
+  - name: devspecs
+    repository:
+      owner: devspecs-com
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/devspecs-com/devspecs-cli"
+    description: "DevSpecs CLI — index and reference your specs, plans, and ADRs"
+    license: "MIT"
+    skip_upload: false
+    test: |
+      system "#{bin}/ds", "--version"
+    install: |
+      bin.install "ds"
+
+scoops:
+  - name: devspecs
+    repository:
+      owner: devspecs-com
+      name: scoop-bucket
+      token: "{{ .Env.SCOOP_BUCKET_GITHUB_TOKEN }}"
+    homepage: "https://github.com/devspecs-com/devspecs-cli"
+    description: "DevSpecs CLI — index and reference your specs, plans, and ADRs"
+    license: "MIT"
+    skip_upload: false
