@@ -29,6 +29,12 @@ issues, and future workflows.`,
 
 	rootCmd.AddCommand(commands.NewInitCmd())
 	rootCmd.AddCommand(commands.NewScanCmd())
+	rootCmd.AddCommand(commands.NewListCmd())
+	rootCmd.AddCommand(commands.NewShowCmd())
+	rootCmd.AddCommand(commands.NewFindCmd())
+	rootCmd.AddCommand(commands.NewResolveCmd())
+	rootCmd.AddCommand(commands.NewContextCmd())
+	rootCmd.AddCommand(commands.NewTodosCmd())
 
 	return rootCmd
 }
