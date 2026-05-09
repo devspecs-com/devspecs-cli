@@ -81,3 +81,11 @@ CREATE INDEX IF NOT EXISTS idx_todos_revision ON artifact_todos(revision_id);
 CREATE INDEX IF NOT EXISTS idx_sources_identity ON sources(source_identity);
 CREATE INDEX IF NOT EXISTS idx_artifacts_repo ON artifacts(repo_id);
 CREATE INDEX IF NOT EXISTS idx_revisions_artifact ON artifact_revisions(artifact_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS artifacts_fts USING fts5(
+  artifact_id UNINDEXED,
+  title,
+  body,
+  source_path,
+  tokenize='unicode61'
+);

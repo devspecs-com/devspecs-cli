@@ -128,6 +128,7 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 				todoID, existingArtID, revID, td.Ordinal, td.Text, done, td.SourceFile, td.SourceLine, now)
 		}
 
+		db.IndexArtifactFTS(existingArtID, art.Title, art.Body, relPath)
 		return outputCapture(cmd, existingArtID, relPath, asJSON)
 	}
 
@@ -158,6 +159,7 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 			todoID, artifactID, revID, td.Ordinal, td.Text, done, td.SourceFile, td.SourceLine, now)
 	}
 
+	db.IndexArtifactFTS(artifactID, art.Title, art.Body, relPath)
 	return outputCapture(cmd, artifactID, relPath, asJSON)
 }
 

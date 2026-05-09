@@ -1,0 +1,24 @@
+{
+  "body": "# Golden Plan\n\n- [ ] First task\n- [x] Second task\n",
+  "id": "\u003cMASKED\u003e",
+  "kind": "plan",
+  "source_path": "plan.md",
+  "status": "draft",
+  "title": "Golden Plan",
+  "todos": [
+    {
+      "done": false,
+      "ordinal": 0,
+      "source_file": "plan.md",
+      "source_line": 8,
+      "text": "First task"
+    },
+    {
+      "done": true,
+      "ordinal": 1,
+      "source_file": "plan.md",
+      "source_line": 9,
+      "text": "Second task"
+    }
+  ]
+}

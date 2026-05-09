@@ -84,15 +84,11 @@ func parseLine(trimmed string) (Todo, bool) {
 		return Todo{}, false
 	}
 
-	// Must have space after ]
-	if len(trimmed) < 6 || trimmed[5] != ' ' {
+	// Must have space after ] (len >= 6 guaranteed by check above)
+	if trimmed[5] != ' ' {
 		return Todo{}, false
 	}
 
-	text := strings.TrimSpace(trimmed[6:])
-	if text == "" {
-		return Todo{}, false
-	}
-
+	text := trimmed[6:]
 	return Todo{Text: text, Done: done}, true
 }

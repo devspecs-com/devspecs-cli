@@ -57,7 +57,10 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON bool) error {
 	}
 	defer db.Close()
 
-	cfg, _ := config.LoadRepoConfig(repoRoot)
+	cfg, err := config.LoadRepoConfig(repoRoot)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
 
 	ids := idgen.NewFactory()
 	adpts := []adapters.Adapter{&openspec.Adapter{}, &adr.Adapter{}, &markdown.Adapter{}}

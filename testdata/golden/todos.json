@@ -1,0 +1,20 @@
+[
+  {
+    "artifact_id": "\u003cMASKED\u003e",
+    "done": false,
+    "ordinal": 0,
+    "revision_id": "\u003cMASKED\u003e",
+    "source_file": "plan.md",
+    "source_line": 8,
+    "text": "First task"
+  },
+  {
+    "artifact_id": "\u003cMASKED\u003e",
+    "done": true,
+    "ordinal": 1,
+    "revision_id": "\u003cMASKED\u003e",
+    "source_file": "plan.md",
+    "source_line": 9,
+    "text": "Second task"
+  }
+]

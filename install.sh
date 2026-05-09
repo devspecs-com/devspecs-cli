@@ -73,7 +73,7 @@ main() {
     info "Latest version: $VERSION"
 
     VERSION_NUM="${VERSION#v}"
-    FILENAME="${BINARY_NAME}_${VERSION_NUM}_${OS}_${ARCH}.tar.gz"
+    FILENAME="devspecs_${VERSION_NUM}_${OS}_${ARCH}.tar.gz"
     DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${FILENAME}"
 
     info "Downloading $FILENAME..."

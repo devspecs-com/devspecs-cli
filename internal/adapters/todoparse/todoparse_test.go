@@ -88,6 +88,26 @@ func TestTodoParser(t *testing.T) {
 			expected: nil,
 		},
 		{
+			name:     "truncated marker too short",
+			input:    "- [x",
+			expected: nil,
+		},
+		{
+			name:     "missing closing bracket",
+			input:    "- [x  some text",
+			expected: nil,
+		},
+		{
+			name:     "only marker no text",
+			input:    "- [x]",
+			expected: nil,
+		},
+		{
+			name:     "marker with only whitespace after",
+			input:    "- [ ]    ",
+			expected: nil,
+		},
+		{
 			name:  "line number accuracy with mixed content",
 			input: "# Title\n\nSome text\n\n- [ ] Task one\n\n- [x] Task two\n",
 			expected: []Todo{

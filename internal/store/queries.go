@@ -269,7 +269,46 @@ func (db *DB) ListAllTodos(repoRoot string, openOnly, doneOnly bool) ([]TodoRow,
 }
 
 // FindArtifacts does a text search across title, source path, and body.
+// It tries FTS5 first, falling back to LIKE if FTS returns no results or errors.
 func (db *DB) FindArtifacts(query string, kind string) ([]ArtifactRow, error) {
+	result, err := db.findArtifactsFTS(query, kind)
+	if err == nil && len(result) > 0 {
+		return result, nil
+	}
+	return db.findArtifactsLIKE(query, kind)
+}
+
+func (db *DB) findArtifactsFTS(query string, kind string) ([]ArtifactRow, error) {
+	sqlQuery := `SELECT DISTINCT a.id, a.repo_id, a.kind, a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at
+		FROM artifacts_fts f
+		JOIN artifacts a ON a.id = f.artifact_id
+		WHERE artifacts_fts MATCH ?`
+	args := []any{query}
+
+	if kind != "" {
+		sqlQuery += " AND a.kind = ?"
+		args = append(args, kind)
+	}
+	sqlQuery += " ORDER BY a.last_observed_at DESC"
+
+	rows, err := db.Query(sqlQuery, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []ArtifactRow
+	for rows.Next() {
+		var r ArtifactRow
+		if err := rows.Scan(&r.ID, &r.RepoID, &r.Kind, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+func (db *DB) findArtifactsLIKE(query string, kind string) ([]ArtifactRow, error) {
 	likePattern := "%" + query + "%"
 	sqlQuery := `SELECT DISTINCT a.id, a.repo_id, a.kind, a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at
 		FROM artifacts a
@@ -299,6 +338,14 @@ func (db *DB) FindArtifacts(query string, kind string) ([]ArtifactRow, error) {
 		result = append(result, r)
 	}
 	return result, rows.Err()
+}
+
+// IndexArtifactFTS inserts or updates the FTS5 index for an artifact.
+func (db *DB) IndexArtifactFTS(artifactID, title, body, sourcePath string) error {
+	db.Exec("DELETE FROM artifacts_fts WHERE artifact_id = ?", artifactID)
+	_, err := db.Exec("INSERT INTO artifacts_fts (artifact_id, title, body, source_path) VALUES (?, ?, ?, ?)",
+		artifactID, title, body, sourcePath)
+	return err
 }
 
 // InsertLink adds a link for an artifact.

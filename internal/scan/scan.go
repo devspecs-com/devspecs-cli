@@ -110,6 +110,7 @@ func (s *Scanner) upsertArtifact(repoID string, art adapters.Artifact, sources [
 		if err := s.replaceTodos(artifactID, revID, todos, now); err != nil {
 			return err
 		}
+		s.indexFTS(artifactID, art)
 		result.New++
 		return nil
 	}
@@ -138,8 +139,17 @@ func (s *Scanner) upsertArtifact(repoID string, art adapters.Artifact, sources [
 	if err := s.replaceTodos(artifactID, revID, todos, now); err != nil {
 		return err
 	}
+	s.indexFTS(artifactID, art)
 	result.Updated++
 	return nil
+}
+
+func (s *Scanner) indexFTS(artifactID string, art adapters.Artifact) {
+	sourcePath := ""
+	if art.PrimaryPath != "" {
+		sourcePath = art.PrimaryPath
+	}
+	s.db.IndexArtifactFTS(artifactID, art.Title, art.Body, sourcePath)
 }
 
 func (s *Scanner) insertArtifact(id, repoID string, art adapters.Artifact, revID, now string) error {

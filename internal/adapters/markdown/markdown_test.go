@@ -130,6 +130,129 @@ func TestParse_ExtractsTodos(t *testing.T) {
 	}
 }
 
+func TestAdapter_Name(t *testing.T) {
+	a := &Adapter{}
+	if a.Name() != "markdown" {
+		t.Errorf("expected 'markdown', got %q", a.Name())
+	}
+}
+
+func TestParse_FilenameFallback(t *testing.T) {
+	tmp := t.TempDir()
+	content := "No frontmatter and no H1 heading here.\n"
+	path := filepath.Join(tmp, "my-cool-plan.md")
+	os.WriteFile(path, []byte(content), 0o644)
+
+	a := &Adapter{}
+	art, _, _, err := a.Parse(context.Background(), adapters.Candidate{
+		PrimaryPath: path,
+		RelPath:     "plans/my-cool-plan.md",
+		AdapterName: "markdown",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art.Title != "My Cool Plan" {
+		t.Errorf("expected 'My Cool Plan', got %q", art.Title)
+	}
+}
+
+func TestParse_FileNotFound(t *testing.T) {
+	a := &Adapter{}
+	_, _, _, err := a.Parse(context.Background(), adapters.Candidate{
+		PrimaryPath: "/nonexistent/file.md",
+		RelPath:     "file.md",
+		AdapterName: "markdown",
+	})
+	if err == nil {
+		t.Error("expected error for missing file")
+	}
+}
+
+func TestDiscover_SinglePathConfig(t *testing.T) {
+	tmp := t.TempDir()
+	customDir := filepath.Join(tmp, "single-dir")
+	os.MkdirAll(customDir, 0o755)
+	os.WriteFile(filepath.Join(customDir, "doc.md"), []byte("# Doc"), 0o644)
+
+	cfg := &config.RepoConfig{
+		Sources: []config.SourceConfig{
+			{Type: "markdown", Path: "single-dir"},
+		},
+	}
+	a := &Adapter{}
+	candidates, err := a.Discover(context.Background(), tmp, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate, got %d", len(candidates))
+	}
+}
+
+func TestDiscover_NonexistentPath(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := &config.RepoConfig{
+		Sources: []config.SourceConfig{
+			{Type: "markdown", Paths: []string{"does-not-exist"}},
+		},
+	}
+	a := &Adapter{}
+	candidates, err := a.Discover(context.Background(), tmp, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 0 {
+		t.Errorf("expected 0 candidates for missing path, got %d", len(candidates))
+	}
+}
+
+func TestParse_NoFrontmatterStatus(t *testing.T) {
+	tmp := t.TempDir()
+	content := "# Title Only\n\nContent without status.\n"
+	path := filepath.Join(tmp, "test.md")
+	os.WriteFile(path, []byte(content), 0o644)
+
+	a := &Adapter{}
+	art, _, _, err := a.Parse(context.Background(), adapters.Candidate{
+		PrimaryPath: path,
+		RelPath:     "docs/test.md",
+		AdapterName: "markdown",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art.Status != "unknown" {
+		t.Errorf("expected 'unknown' status, got %q", art.Status)
+	}
+}
+
+func TestStripFrontmatter_UnclosedFrontmatter(t *testing.T) {
+	content := "---\ntitle: Test\nno closing marker\n"
+	result := stripFrontmatter(content)
+	if result != content {
+		t.Errorf("unclosed frontmatter should return original, got %q", result)
+	}
+}
+
+func TestFilenameTitle(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"plans/my-cool-plan.md", "My Cool Plan"},
+		{"specs/api_design.md", "Api Design"},
+		{"docs/README.md", "README"},
+		{"plans/a.md", "A"},
+	}
+	for _, tt := range tests {
+		got := filenameTitle(tt.path)
+		if got != tt.want {
+			t.Errorf("filenameTitle(%q) = %q, want %q", tt.path, got, tt.want)
+		}
+	}
+}
+
 func TestInferKind(t *testing.T) {
 	tests := []struct {
 		path string

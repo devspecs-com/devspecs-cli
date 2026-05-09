@@ -38,6 +38,7 @@ issues, and future workflows.`,
 	rootCmd.AddCommand(commands.NewCaptureCmd())
 	rootCmd.AddCommand(commands.NewStatusCmd())
 	rootCmd.AddCommand(commands.NewLinkCmd())
+	rootCmd.AddCommand(commands.NewVersionCmd())
 
 	return rootCmd
 }
