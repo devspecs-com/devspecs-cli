@@ -1,0 +1,26 @@
+# Build artifacts
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local DevSpecs DB artifacts (never commit user data)
+devspecs.db
+devspecs.db-journal
+devspecs.db-wal
