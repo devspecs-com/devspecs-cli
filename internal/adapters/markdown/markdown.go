@@ -34,6 +34,8 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 	}
 
 	var candidates []adapters.Candidate
+	seen := make(map[string]bool)
+
 	for _, p := range paths {
 		dir := filepath.Join(repoRoot, p)
 		entries, err := walkMarkdownFiles(dir)
@@ -43,6 +45,10 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 		for _, absPath := range entries {
 			rel, _ := filepath.Rel(repoRoot, absPath)
 			rel = filepath.ToSlash(rel)
+			if seen[rel] {
+				continue
+			}
+			seen[rel] = true
 			candidates = append(candidates, adapters.Candidate{
 				PrimaryPath: absPath,
 				RelPath:     rel,
@@ -50,6 +56,25 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 			})
 		}
 	}
+
+	// Root-level *.spec.md and *.plan.md files
+	for _, pattern := range []string{"*.spec.md", "*.plan.md"} {
+		matches, _ := filepath.Glob(filepath.Join(repoRoot, pattern))
+		for _, absPath := range matches {
+			rel, _ := filepath.Rel(repoRoot, absPath)
+			rel = filepath.ToSlash(rel)
+			if seen[rel] {
+				continue
+			}
+			seen[rel] = true
+			candidates = append(candidates, adapters.Candidate{
+				PrimaryPath: absPath,
+				RelPath:     rel,
+				AdapterName: "markdown",
+			})
+		}
+	}
+
 	return candidates, nil
 }
 
@@ -107,7 +132,7 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 }
 
 func defaultPaths() []string {
-	return []string{"specs", "docs/specs", "plans", "docs/plans"}
+	return []string{"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans"}
 }
 
 func walkMarkdownFiles(dir string) ([]string, error) {

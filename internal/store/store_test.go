@@ -40,13 +40,13 @@ func TestMigrate_Idempotent(t *testing.T) {
 		t.Fatal("second migration failed:", err)
 	}
 
-	// Should still have exactly one migration row
+	// Should still have exactly two migration rows (v1 + v2)
 	var count int
 	if err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 1 {
-		t.Errorf("expected 1 migration row, got %d", count)
+	if count != 2 {
+		t.Errorf("expected 2 migration rows, got %d", count)
 	}
 
 	db.Close()

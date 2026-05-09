@@ -11,8 +11,9 @@ import (
 // NewFindCmd creates the ds find command.
 func NewFindCmd() *cobra.Command {
 	var (
-		kind   string
-		asJSON bool
+		kind      string
+		asJSON    bool
+		noRefresh bool
 	)
 
 	cmd := &cobra.Command{
@@ -20,21 +21,26 @@ func NewFindCmd() *cobra.Command {
 		Short: "Search artifacts by title, path, or body",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFind(cmd, args[0], kind, asJSON)
+			return runFind(cmd, args[0], kind, asJSON, noRefresh)
 		},
 	}
 
 	cmd.Flags().StringVar(&kind, "kind", "", "Filter by kind")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
+	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	return cmd
 }
 
-func runFind(cmd *cobra.Command, query, kind string, asJSON bool) error {
+func runFind(cmd *cobra.Command, query, kind string, asJSON, noRefresh bool) error {
 	db, err := openDB()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+
+	if !noRefresh {
+		ensureFresh(cmd, db)
+	}
 
 	artifacts, err := db.FindArtifacts(query, kind)
 	if err != nil {

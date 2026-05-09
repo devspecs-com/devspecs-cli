@@ -14,6 +14,7 @@ func NewShowCmd() *cobra.Command {
 		asJSON    bool
 		content   bool
 		noContent bool
+		noRefresh bool
 	)
 
 	cmd := &cobra.Command{
@@ -22,22 +23,27 @@ func NewShowCmd() *cobra.Command {
 		Short:   "Show artifact details",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runShow(cmd, args[0], asJSON, content, noContent)
+			return runShow(cmd, args[0], asJSON, content, noContent, noRefresh)
 		},
 	}
 
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&content, "content", false, "Include full content")
 	cmd.Flags().BoolVar(&noContent, "no-content", false, "Exclude content")
+	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	return cmd
 }
 
-func runShow(cmd *cobra.Command, idOrPrefix string, asJSON, showContent, noContent bool) error {
+func runShow(cmd *cobra.Command, idOrPrefix string, asJSON, showContent, noContent, noRefresh bool) error {
 	db, err := openDB()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+
+	if !noRefresh {
+		ensureFresh(cmd, db)
+	}
 
 	art, err := db.GetArtifact(idOrPrefix)
 	if err != nil {

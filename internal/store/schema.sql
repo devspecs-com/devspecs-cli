@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS repos (
   root_path          TEXT NOT NULL,
   git_remote_url     TEXT,
   git_current_branch TEXT,
+  last_scan_commit   TEXT,
+  last_scan_at       TEXT,
   created_at         TEXT NOT NULL,
   updated_at         TEXT NOT NULL
 );

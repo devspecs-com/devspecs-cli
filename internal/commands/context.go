@@ -11,8 +11,9 @@ import (
 // NewContextCmd creates the ds context command.
 func NewContextCmd() *cobra.Command {
 	var (
-		asJSON bool
-		copy_  bool
+		asJSON    bool
+		copy_     bool
+		noRefresh bool
 	)
 
 	cmd := &cobra.Command{
@@ -20,21 +21,26 @@ func NewContextCmd() *cobra.Command {
 		Short: "Export agent-ready context for an artifact",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runContext(cmd, args[0], asJSON, copy_)
+			return runContext(cmd, args[0], asJSON, copy_, noRefresh)
 		},
 	}
 
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&copy_, "copy", false, "Copy output to clipboard")
+	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	return cmd
 }
 
-func runContext(cmd *cobra.Command, idOrPrefix string, asJSON, copyToClipboard bool) error {
+func runContext(cmd *cobra.Command, idOrPrefix string, asJSON, copyToClipboard, noRefresh bool) error {
 	db, err := openDB()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+
+	if !noRefresh {
+		ensureFresh(cmd, db)
+	}
 
 	art, err := db.GetArtifact(idOrPrefix)
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/todoparse"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
+	"github.com/devspecs-com/devspecs-cli/internal/repo"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 )
 
@@ -64,7 +65,14 @@ func (s *Scanner) Run(ctx context.Context, repoRoot string, cfg *config.RepoConf
 			}
 		}
 	}
+
+	s.recordScanMeta(repoID, repoRoot, now)
 	return result, nil
+}
+
+func (s *Scanner) recordScanMeta(repoID, repoRoot, now string) {
+	commit := repo.HeadCommit(repoRoot)
+	s.db.UpdateScanMeta(repoID, commit, now)
 }
 
 func (s *Scanner) ensureRepo(rootPath, now string) (string, error) {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/adr"
@@ -13,6 +14,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
+	"github.com/devspecs-com/devspecs-cli/internal/repo"
 	"github.com/devspecs-com/devspecs-cli/internal/scan"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/spf13/cobra"
@@ -21,29 +23,42 @@ import (
 // NewScanCmd creates the ds scan command.
 func NewScanCmd() *cobra.Command {
 	var (
-		path    string
-		verbose bool
-		asJSON  bool
+		path      string
+		verbose   bool
+		asJSON    bool
+		quiet     bool
+		ifChanged bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "scan",
 		Short: "Scan repository for specs, plans, and ADRs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScan(cmd, path, verbose, asJSON)
+			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged)
 		},
 	}
 
 	cmd.Flags().StringVar(&path, "path", ".", "Repository path to scan")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show detailed scan output")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
+	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress all output")
+	cmd.Flags().BoolVar(&ifChanged, "if-changed", false, "Only scan if source paths were touched in the last commit")
 	return cmd
 }
 
-func runScan(cmd *cobra.Command, path string, verbose, asJSON bool) error {
+func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged bool) error {
 	repoRoot, err := resolveRepoRoot(path)
 	if err != nil {
 		return err
+	}
+
+	cfg, err := config.LoadRepoConfig(repoRoot)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	if ifChanged && !sourcePathsChanged(repoRoot, cfg) {
+		return nil
 	}
 
 	dbPath, err := config.DBPath()
@@ -57,11 +72,6 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON bool) error {
 	}
 	defer db.Close()
 
-	cfg, err := config.LoadRepoConfig(repoRoot)
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-
 	ids := idgen.NewFactory()
 	adpts := []adapters.Adapter{&openspec.Adapter{}, &adr.Adapter{}, &markdown.Adapter{}}
 
@@ -69,6 +79,10 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON bool) error {
 	result, err := scanner.Run(context.Background(), repoRoot, cfg)
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
+	}
+
+	if quiet {
+		return nil
 	}
 
 	if asJSON {
@@ -87,6 +101,43 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON bool) error {
 	fmt.Fprintf(out, "  %d unchanged artifacts\n", result.Unchanged)
 	fmt.Fprintln(out, "\nRun:\n  ds list")
 	return nil
+}
+
+func sourcePathsChanged(repoRoot string, cfg *config.RepoConfig) bool {
+	changedFiles := repo.ChangedFiles(repoRoot)
+	if len(changedFiles) == 0 {
+		return false
+	}
+
+	if cfg == nil {
+		cfg = config.DefaultRepoConfig()
+	}
+
+	var sourcePrefixes []string
+	for _, src := range cfg.Sources {
+		if src.Path != "" {
+			sourcePrefixes = append(sourcePrefixes, src.Path+"/")
+		}
+		for _, p := range src.Paths {
+			sourcePrefixes = append(sourcePrefixes, p+"/")
+		}
+	}
+
+	for _, f := range changedFiles {
+		f = filepath.ToSlash(f)
+		// Root-level spec/plan files always count
+		if strings.HasSuffix(f, ".spec.md") || strings.HasSuffix(f, ".plan.md") {
+			if !strings.Contains(f, "/") {
+				return true
+			}
+		}
+		for _, prefix := range sourcePrefixes {
+			if strings.HasPrefix(f, prefix) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func resolveRepoRoot(path string) (string, error) {

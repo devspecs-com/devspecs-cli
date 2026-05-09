@@ -9,27 +9,35 @@ import (
 
 // NewResolveCmd creates the ds resolve command.
 func NewResolveCmd() *cobra.Command {
-	var asJSON bool
+	var (
+		asJSON    bool
+		noRefresh bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "resolve <id>",
 		Short: "Resolve an artifact ID to its source",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runResolve(cmd, args[0], asJSON)
+			return runResolve(cmd, args[0], asJSON, noRefresh)
 		},
 	}
 
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
+	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	return cmd
 }
 
-func runResolve(cmd *cobra.Command, idOrPrefix string, asJSON bool) error {
+func runResolve(cmd *cobra.Command, idOrPrefix string, asJSON, noRefresh bool) error {
 	db, err := openDB()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+
+	if !noRefresh {
+		ensureFresh(cmd, db)
+	}
 
 	art, err := db.GetArtifact(idOrPrefix)
 	if err != nil {

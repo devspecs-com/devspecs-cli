@@ -411,3 +411,29 @@ func (db *DB) EnsureRepo(rootPath, now string) (string, error) {
 	// Not found, but we won't create here — let scan do that
 	return "", fmt.Errorf("repo not found for %s", rootPath)
 }
+
+// RepoMeta holds freshness metadata for a repository.
+type RepoMeta struct {
+	ID             string
+	RootPath       string
+	LastScanCommit string
+	LastScanAt     string
+}
+
+// GetRepoByRoot returns the repo row for a given root path, or nil if not found.
+func (db *DB) GetRepoByRoot(rootPath string) *RepoMeta {
+	var m RepoMeta
+	err := db.QueryRow(
+		"SELECT id, root_path, COALESCE(last_scan_commit,''), COALESCE(last_scan_at,'') FROM repos WHERE root_path = ?",
+		rootPath,
+	).Scan(&m.ID, &m.RootPath, &m.LastScanCommit, &m.LastScanAt)
+	if err != nil {
+		return nil
+	}
+	return &m
+}
+
+// UpdateScanMeta records the git commit and timestamp of the last scan.
+func (db *DB) UpdateScanMeta(repoID, commit, now string) {
+	db.Exec("UPDATE repos SET last_scan_commit = ?, last_scan_at = ? WHERE id = ?", commit, now, repoID)
+}

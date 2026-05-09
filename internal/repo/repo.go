@@ -72,3 +72,29 @@ func gitSymbolicRef(repoRoot string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// HeadCommit returns the current HEAD commit SHA, or "" if not in a git repo.
+func HeadCommit(repoRoot string) string {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = repoRoot
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// ChangedFiles returns the list of files changed in the most recent commit.
+func ChangedFiles(repoRoot string) []string {
+	cmd := exec.Command("git", "diff", "--name-only", "HEAD~1", "HEAD")
+	cmd.Dir = repoRoot
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		return nil
+	}
+	return strings.Split(raw, "\n")
+}

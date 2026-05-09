@@ -12,9 +12,10 @@ import (
 // NewTodosCmd creates the ds todos command.
 func NewTodosCmd() *cobra.Command {
 	var (
-		openOnly bool
-		doneOnly bool
-		asJSON   bool
+		openOnly  bool
+		doneOnly  bool
+		asJSON    bool
+		noRefresh bool
 	)
 
 	cmd := &cobra.Command{
@@ -26,22 +27,27 @@ func NewTodosCmd() *cobra.Command {
 			if len(args) > 0 {
 				artifactID = args[0]
 			}
-			return runTodos(cmd, artifactID, openOnly, doneOnly, asJSON)
+			return runTodos(cmd, artifactID, openOnly, doneOnly, asJSON, noRefresh)
 		},
 	}
 
 	cmd.Flags().BoolVar(&openOnly, "open", false, "Show only incomplete todos")
 	cmd.Flags().BoolVar(&doneOnly, "done", false, "Show only completed todos")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
+	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	return cmd
 }
 
-func runTodos(cmd *cobra.Command, artifactID string, openOnly, doneOnly, asJSON bool) error {
+func runTodos(cmd *cobra.Command, artifactID string, openOnly, doneOnly, asJSON, noRefresh bool) error {
 	db, err := openDB()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+
+	if !noRefresh {
+		ensureFresh(cmd, db)
+	}
 
 	if artifactID != "" {
 		art, err := db.GetArtifact(artifactID)

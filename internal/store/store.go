@@ -46,6 +46,8 @@ func (db *DB) migrate() error {
 		return fmt.Errorf("apply schema: %w", err)
 	}
 
+	now := time.Now().UTC().Format(time.RFC3339)
+
 	// Record migration version 1 if not present
 	var count int
 	err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE version = 1").Scan(&count)
@@ -53,11 +55,20 @@ func (db *DB) migrate() error {
 		return err
 	}
 	if count == 0 {
-		_, err = db.Exec("INSERT INTO schema_migrations (version, applied_at) VALUES (1, ?)",
-			time.Now().UTC().Format(time.RFC3339))
-		if err != nil {
+		if _, err = db.Exec("INSERT INTO schema_migrations (version, applied_at) VALUES (1, ?)", now); err != nil {
 			return err
 		}
 	}
+
+	// Migration v2: add freshness columns to repos
+	var v2count int
+	db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE version = 2").Scan(&v2count)
+	if v2count == 0 {
+		// Add columns if they don't exist (safe for both fresh and existing DBs)
+		db.Exec("ALTER TABLE repos ADD COLUMN last_scan_commit TEXT")
+		db.Exec("ALTER TABLE repos ADD COLUMN last_scan_at TEXT")
+		db.Exec("INSERT INTO schema_migrations (version, applied_at) VALUES (2, ?)", now)
+	}
+
 	return nil
 }

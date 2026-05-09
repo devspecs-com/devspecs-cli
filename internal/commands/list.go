@@ -17,6 +17,7 @@ func NewListCmd() *cobra.Command {
 		status     string
 		sourceType string
 		asJSON     bool
+		noRefresh  bool
 	)
 
 	cmd := &cobra.Command{
@@ -24,7 +25,7 @@ func NewListCmd() *cobra.Command {
 		Aliases: []string{"ls"},
 		Short:   "List indexed artifacts",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runList(cmd, kind, status, sourceType, asJSON)
+			return runList(cmd, kind, status, sourceType, asJSON, noRefresh)
 		},
 	}
 
@@ -32,15 +33,20 @@ func NewListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status")
 	cmd.Flags().StringVar(&sourceType, "source", "", "Filter by source type")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
+	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	return cmd
 }
 
-func runList(cmd *cobra.Command, kind, status, sourceType string, asJSON bool) error {
+func runList(cmd *cobra.Command, kind, status, sourceType string, asJSON, noRefresh bool) error {
 	db, err := openDB()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+
+	if !noRefresh {
+		ensureFresh(cmd, db)
+	}
 
 	artifacts, err := db.ListArtifacts("", kind, status, sourceType)
 	if err != nil {
