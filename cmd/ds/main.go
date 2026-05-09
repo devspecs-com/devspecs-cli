@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/devspecs-com/devspecs-cli/internal/commands"
 	"github.com/devspecs-com/devspecs-cli/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -25,6 +26,8 @@ assigns stable IDs, and makes them easy to reference from agents, PRs,
 issues, and future workflows.`,
 		Version: fmt.Sprintf("%s (commit: %s, built: %s)", version.Version, version.Commit, version.Date),
 	}
+
+	rootCmd.AddCommand(commands.NewInitCmd())
 
 	return rootCmd
 }
