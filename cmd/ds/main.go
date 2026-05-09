@@ -35,6 +35,9 @@ issues, and future workflows.`,
 	rootCmd.AddCommand(commands.NewResolveCmd())
 	rootCmd.AddCommand(commands.NewContextCmd())
 	rootCmd.AddCommand(commands.NewTodosCmd())
+	rootCmd.AddCommand(commands.NewCaptureCmd())
+	rootCmd.AddCommand(commands.NewStatusCmd())
+	rootCmd.AddCommand(commands.NewLinkCmd())
 
 	return rootCmd
 }
