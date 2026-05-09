@@ -28,6 +28,7 @@ issues, and future workflows.`,
 	}
 
 	rootCmd.AddCommand(commands.NewInitCmd())
+	rootCmd.AddCommand(commands.NewScanCmd())
 
 	return rootCmd
 }

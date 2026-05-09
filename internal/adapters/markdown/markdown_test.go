@@ -1,0 +1,149 @@
+package markdown
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/devspecs-com/devspecs-cli/internal/adapters"
+	"github.com/devspecs-com/devspecs-cli/internal/config"
+)
+
+func TestDiscover_DefaultPaths(t *testing.T) {
+	tmp := t.TempDir()
+	plansDir := filepath.Join(tmp, "plans")
+	os.MkdirAll(plansDir, 0o755)
+	os.WriteFile(filepath.Join(plansDir, "refactor.md"), []byte("# Refactor\n"), 0o644)
+
+	a := &Adapter{}
+	candidates, err := a.Discover(context.Background(), tmp, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate, got %d", len(candidates))
+	}
+	if candidates[0].RelPath != "plans/refactor.md" {
+		t.Errorf("expected rel path 'plans/refactor.md', got %q", candidates[0].RelPath)
+	}
+}
+
+func TestDiscover_ConfigPaths(t *testing.T) {
+	tmp := t.TempDir()
+	customDir := filepath.Join(tmp, "my-plans")
+	os.MkdirAll(customDir, 0o755)
+	os.WriteFile(filepath.Join(customDir, "plan.md"), []byte("# Plan\n"), 0o644)
+
+	cfg := &config.RepoConfig{
+		Sources: []config.SourceConfig{
+			{Type: "markdown", Paths: []string{"my-plans"}},
+		},
+	}
+
+	a := &Adapter{}
+	candidates, err := a.Discover(context.Background(), tmp, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate, got %d", len(candidates))
+	}
+}
+
+func TestParse_FrontmatterOverrides(t *testing.T) {
+	tmp := t.TempDir()
+	content := "---\ntitle: Custom Title\nkind: spec\nstatus: draft\n---\n# Ignored H1\n\nBody here.\n"
+	path := filepath.Join(tmp, "test.md")
+	os.WriteFile(path, []byte(content), 0o644)
+
+	a := &Adapter{}
+	art, sources, _, err := a.Parse(context.Background(), adapters.Candidate{
+		PrimaryPath: path,
+		RelPath:     "test.md",
+		AdapterName: "markdown",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if art.Title != "Custom Title" {
+		t.Errorf("expected title 'Custom Title', got %q", art.Title)
+	}
+	if art.Kind != "spec" {
+		t.Errorf("expected kind 'spec', got %q", art.Kind)
+	}
+	if art.Status != "draft" {
+		t.Errorf("expected status 'draft', got %q", art.Status)
+	}
+	if len(sources) != 1 {
+		t.Errorf("expected 1 source, got %d", len(sources))
+	}
+}
+
+func TestParse_H1Fallback(t *testing.T) {
+	tmp := t.TempDir()
+	content := "# My Plan Title\n\nBody here.\n"
+	path := filepath.Join(tmp, "test.md")
+	os.WriteFile(path, []byte(content), 0o644)
+
+	a := &Adapter{}
+	art, _, _, err := a.Parse(context.Background(), adapters.Candidate{
+		PrimaryPath: path,
+		RelPath:     "plans/test.md",
+		AdapterName: "markdown",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art.Title != "My Plan Title" {
+		t.Errorf("expected 'My Plan Title', got %q", art.Title)
+	}
+	if art.Kind != "plan" {
+		t.Errorf("expected kind 'plan', got %q", art.Kind)
+	}
+}
+
+func TestParse_ExtractsTodos(t *testing.T) {
+	tmp := t.TempDir()
+	content := "# Plan\n\n- [ ] First task\n- [x] Done task\n"
+	path := filepath.Join(tmp, "plan.md")
+	os.WriteFile(path, []byte(content), 0o644)
+
+	a := &Adapter{}
+	_, _, todos, err := a.Parse(context.Background(), adapters.Candidate{
+		PrimaryPath: path,
+		RelPath:     "plans/plan.md",
+		AdapterName: "markdown",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(todos) != 2 {
+		t.Fatalf("expected 2 todos, got %d", len(todos))
+	}
+	if todos[0].Text != "First task" || todos[0].Done {
+		t.Errorf("first todo wrong: %+v", todos[0])
+	}
+	if todos[1].Text != "Done task" || !todos[1].Done {
+		t.Errorf("second todo wrong: %+v", todos[1])
+	}
+}
+
+func TestInferKind(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"plans/refactor.md", "plan"},
+		{"specs/api.md", "spec"},
+		{"docs/requirements/auth.md", "requirements"},
+		{"notes/random.md", "markdown_artifact"},
+	}
+	for _, tt := range tests {
+		got := inferKind(tt.path)
+		if got != tt.want {
+			t.Errorf("inferKind(%q) = %q, want %q", tt.path, got, tt.want)
+		}
+	}
+}
