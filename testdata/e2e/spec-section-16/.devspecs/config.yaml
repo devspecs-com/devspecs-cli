@@ -1,0 +1,11 @@
+version: 1
+
+sources:
+  - type: openspec
+    path: openspec
+  - type: adr
+    paths:
+      - docs/adrs
+  - type: markdown
+    paths:
+      - plans

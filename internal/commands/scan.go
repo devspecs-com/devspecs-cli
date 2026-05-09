@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/adr"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
 	"github.com/devspecs-com/devspecs-cli/internal/scan"
@@ -58,7 +60,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON bool) error {
 	cfg, _ := config.LoadRepoConfig(repoRoot)
 
 	ids := idgen.NewFactory()
-	adpts := []adapters.Adapter{&markdown.Adapter{}}
+	adpts := []adapters.Adapter{&openspec.Adapter{}, &adr.Adapter{}, &markdown.Adapter{}}
 
 	scanner := scan.New(db, ids, adpts)
 	result, err := scanner.Run(context.Background(), repoRoot, cfg)
