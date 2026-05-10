@@ -3,6 +3,7 @@
 package freshness
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -11,6 +12,12 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/repo"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 )
+
+func debugLog(format string, args ...any) {
+	if os.Getenv("DS_DEBUG") == "1" {
+		fmt.Fprintf(os.Stderr, "[ds:freshness] "+format+"\n", args...)
+	}
+}
 
 // Status describes whether the index is stale for a given repo.
 type Status struct {
@@ -38,8 +45,10 @@ func Check(db *store.DB, repoRoot string) *Status {
 func checkGit(meta *store.RepoMeta, repoRoot string) *Status {
 	head := repo.HeadCommit(repoRoot)
 	if head == "" {
+		debugLog("git HEAD unresolvable (not a git repo or empty?) — treating as fresh")
 		return &Status{Stale: false, RepoID: meta.ID, RepoRoot: meta.RootPath}
 	}
+	debugLog("HEAD=%s stored=%s", head, meta.LastScanCommit)
 	if meta.LastScanCommit == head {
 		return &Status{Stale: false, RepoID: meta.ID, RepoRoot: meta.RootPath}
 	}

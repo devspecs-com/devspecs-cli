@@ -85,8 +85,9 @@ func HeadCommit(repoRoot string) string {
 }
 
 // ChangedFiles returns the list of files changed in the most recent commit.
+// Uses diff-tree which works on initial commits and merge commits correctly.
 func ChangedFiles(repoRoot string) []string {
-	cmd := exec.Command("git", "diff", "--name-only", "HEAD~1", "HEAD")
+	cmd := exec.Command("git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
 	cmd.Dir = repoRoot
 	out, err := cmd.Output()
 	if err != nil {

@@ -282,7 +282,7 @@ func TestHookInstall(t *testing.T) {
 		t.Fatalf("post-commit hook not created: %v", err)
 	}
 
-	if !strings.Contains(string(content), "ds scan --quiet --if-changed") {
+	if !strings.Contains(string(content), "scan --quiet --if-changed") {
 		t.Errorf("hook content missing expected command: %s", string(content))
 	}
 	if !strings.Contains(string(content), "DevSpecs auto-index") {
@@ -380,6 +380,67 @@ func TestScanQuiet(t *testing.T) {
 
 	if outBuf.String() != "" {
 		t.Errorf("--quiet should suppress output, got: %s", outBuf.String())
+	}
+}
+
+func TestAutoScan_WorksFromSubdirectory(t *testing.T) {
+	dir := setupGitRepo(t)
+	home := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", home)
+
+	planDir := filepath.Join(dir, "plans")
+	os.MkdirAll(planDir, 0o755)
+	os.WriteFile(filepath.Join(planDir, "plan.md"), []byte("# Initial Plan\n"), 0o644)
+	cfgDir := filepath.Join(dir, ".devspecs")
+	os.MkdirAll(cfgDir, 0o755)
+	os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte("version: 1\nsources:\n  - type: markdown\n    paths:\n      - plans\n"), 0o644)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(oldWd)
+
+	// Initial scan from root
+	scanCmd := NewScanCmd()
+	scanCmd.SetArgs([]string{"--path", dir})
+	scanCmd.SetOut(&bytes.Buffer{})
+	scanCmd.Execute()
+
+	// Now commit a new plan
+	os.WriteFile(filepath.Join(planDir, "subdir-plan.md"), []byte("# Subdir Plan\n"), 0o644)
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test",
+			"GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=Test",
+			"GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		cmd.CombinedOutput()
+	}
+	run("add", ".")
+	run("commit", "-m", "add subdir plan")
+
+	// cd into a SUBDIRECTORY — this is the key part of the test
+	subDir := filepath.Join(dir, "plans")
+	os.Chdir(subDir)
+
+	// ds list should still detect staleness and auto-scan
+	listCmd := NewListCmd()
+	listCmd.SetArgs([]string{})
+	outBuf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	listCmd.SetOut(outBuf)
+	listCmd.SetErr(errBuf)
+	if err := listCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(outBuf.String(), "Subdir Plan") {
+		t.Errorf("auto-scan from subdirectory didn't discover new plan.\nOutput: %s\nStderr: %s", outBuf.String(), errBuf.String())
+	}
+	if !strings.Contains(errBuf.String(), "Index updated") {
+		t.Errorf("expected 'Index updated' from subdirectory auto-scan, got stderr: %s", errBuf.String())
 	}
 }
 

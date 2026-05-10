@@ -4,6 +4,7 @@ package commands
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -89,10 +90,26 @@ func runInit(cmd *cobra.Command, force, hooks bool) error {
 }
 
 const hookMarker = "# DevSpecs auto-index"
-const hookScript = `#!/bin/sh
-# DevSpecs auto-index
-ds scan --quiet --if-changed 2>/dev/null || true
-`
+
+func hookScriptContent() string {
+	bin := resolveDsBinary()
+	return fmt.Sprintf("#!/bin/sh\n%s\n%s scan --quiet --if-changed 2>/dev/null || true\n", hookMarker, bin)
+}
+
+func hookAppendContent() string {
+	bin := resolveDsBinary()
+	return fmt.Sprintf("\n%s\n%s scan --quiet --if-changed 2>/dev/null || true\n", hookMarker, bin)
+}
+
+// resolveDsBinary returns the absolute path to the ds binary if found in PATH,
+// falling back to "ds" if not resolvable (e.g. during tests).
+func resolveDsBinary() string {
+	path, err := exec.LookPath("ds")
+	if err == nil {
+		return path
+	}
+	return "ds"
+}
 
 func installHook(cmd *cobra.Command, wd string) {
 	info := repo.Detect(wd)
@@ -113,11 +130,9 @@ func installHook(cmd *cobra.Command, wd string) {
 	}
 
 	if err == nil && len(existing) > 0 {
-		// Append to existing hook
-		content := string(existing) + "\n" + hookMarker + "\nds scan --quiet --if-changed 2>/dev/null || true\n"
-		os.WriteFile(hookPath, []byte(content), 0o755)
+		os.WriteFile(hookPath, []byte(string(existing)+hookAppendContent()), 0o755)
 	} else {
-		os.WriteFile(hookPath, []byte(hookScript), 0o755)
+		os.WriteFile(hookPath, []byte(hookScriptContent()), 0o755)
 	}
 
 	fmt.Fprintln(cmd.OutOrStdout(), "\nInstalled git post-commit hook for auto-indexing.")
