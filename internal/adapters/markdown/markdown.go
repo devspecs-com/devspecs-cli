@@ -57,8 +57,8 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 		}
 	}
 
-	// Root-level *.spec.md and *.plan.md files
-	for _, pattern := range []string{"*.spec.md", "*.plan.md"} {
+	// Root-level glob patterns
+	for _, pattern := range rootGlobs() {
 		matches, _ := filepath.Glob(filepath.Join(repoRoot, pattern))
 		for _, absPath := range matches {
 			rel, _ := filepath.Rel(repoRoot, absPath)
@@ -106,6 +106,8 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 		status = "unknown"
 	}
 
+	tags := parseFrontmatterTags(fm)
+
 	art := adapters.Artifact{
 		SourceIdentity: c.RelPath + "|markdown",
 		Kind:           kind,
@@ -114,6 +116,7 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 		PrimaryPath:    c.PrimaryPath,
 		Body:           body,
 		Extracted:      make(map[string]any),
+		Tags:           tags,
 	}
 
 	if len(fm) > 0 {
@@ -132,7 +135,14 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 }
 
 func defaultPaths() []string {
-	return []string{"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans"}
+	return []string{"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans", "docs"}
+}
+
+func rootGlobs() []string {
+	return []string{
+		"*.spec.md", "*.plan.md", "*.prd.md",
+		"*.design.md", "*.contract.md", "*.requirements.md",
+	}
 }
 
 func walkMarkdownFiles(dir string) ([]string, error) {
@@ -217,13 +227,64 @@ func filenameTitle(relPath string) string {
 func inferKind(relPath string) string {
 	lower := strings.ToLower(relPath)
 	switch {
+	case strings.Contains(lower, "prd"):
+		return "prd"
 	case strings.Contains(lower, "plan"):
 		return "plan"
 	case strings.Contains(lower, "spec"):
 		return "spec"
 	case strings.Contains(lower, "requirement"):
 		return "requirements"
+	case strings.Contains(lower, "design"):
+		return "design"
+	case strings.Contains(lower, "contract"):
+		return "contract"
 	default:
 		return "markdown_artifact"
 	}
+}
+
+// parseFrontmatterTags extracts tags from frontmatter "tags" and "labels" keys.
+// Supports: [auth, v2], auth, v2 (comma-separated), and single values.
+func parseFrontmatterTags(fm map[string]string) []string {
+	var tags []string
+	for _, key := range []string{"tags", "labels"} {
+		val, ok := fm[key]
+		if !ok || val == "" {
+			continue
+		}
+		val = strings.TrimPrefix(val, "[")
+		val = strings.TrimSuffix(val, "]")
+		for _, part := range strings.Split(val, ",") {
+			t := strings.TrimSpace(part)
+			if t != "" {
+				tags = append(tags, t)
+			}
+		}
+	}
+	return tags
+}
+
+// InferDirectoryTag extracts a meaningful tag from the source path's directory structure.
+// Returns empty string for generic directories and root-level files.
+func InferDirectoryTag(relPath string) string {
+	genericDirs := map[string]bool{
+		"plans": true, "specs": true, "docs": true,
+		".cursor": true, "openspec": true, "changes": true,
+		"adr": true, "adrs": true,
+	}
+
+	dir := filepath.Dir(filepath.ToSlash(relPath))
+	if dir == "." || dir == "" {
+		return ""
+	}
+
+	parts := strings.Split(dir, "/")
+	for _, p := range parts {
+		if p == "" || genericDirs[p] {
+			continue
+		}
+		return p
+	}
+	return ""
 }

@@ -10,6 +10,7 @@ import (
 type ArtifactRow struct {
 	ID             string
 	RepoID         string
+	ShortID        string
 	Kind           string
 	Title          string
 	Status         string
@@ -59,29 +60,69 @@ type TodoRow struct {
 	SourceLine int
 }
 
-// ListArtifacts returns artifacts optionally filtered by kind, status, source type.
-func (db *DB) ListArtifacts(repoRoot, kind, status, sourceType string) ([]ArtifactRow, error) {
-	query := "SELECT a.id, a.repo_id, a.kind, a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at FROM artifacts a"
+// FilterParams groups all query filters.
+type FilterParams struct {
+	RepoRoot   string
+	Kind       string
+	Status     string
+	SourceType string
+	Tag        string
+	Branch     string
+	User       string
+}
+
+// TagRow represents a row from the artifact_tags table.
+type TagRow struct {
+	ArtifactID string
+	Tag        string
+	Source     string
+	CreatedAt  string
+}
+
+// ListArtifacts returns artifacts filtered by the given parameters.
+func (db *DB) ListArtifacts(fp FilterParams) ([]ArtifactRow, error) {
+	query := `SELECT a.id, a.repo_id, COALESCE(a.short_id,''), a.kind, a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at FROM artifacts a`
+	var joins []string
 	var conditions []string
 	var args []any
 
-	if repoRoot != "" {
-		query += " JOIN repos r ON a.repo_id = r.id"
+	needsRepoJoin := fp.RepoRoot != "" || fp.Branch != "" || fp.User != ""
+	if needsRepoJoin {
+		joins = append(joins, "JOIN repos r ON a.repo_id = r.id")
+	}
+	if fp.RepoRoot != "" {
 		conditions = append(conditions, "r.root_path = ?")
-		args = append(args, repoRoot)
+		args = append(args, fp.RepoRoot)
 	}
-	if kind != "" {
+	if fp.Branch != "" {
+		conditions = append(conditions, "r.git_current_branch = ?")
+		args = append(args, fp.Branch)
+	}
+	if fp.User != "" {
+		conditions = append(conditions, "r.scanned_by = ?")
+		args = append(args, fp.User)
+	}
+	if fp.Kind != "" {
 		conditions = append(conditions, "a.kind = ?")
-		args = append(args, kind)
+		args = append(args, fp.Kind)
 	}
-	if status != "" {
+	if fp.Status != "" {
 		conditions = append(conditions, "a.status = ?")
-		args = append(args, status)
+		args = append(args, fp.Status)
 	}
-	if sourceType != "" {
-		query += " JOIN sources s ON s.artifact_id = a.id"
+	if fp.SourceType != "" {
+		joins = append(joins, "JOIN sources s ON s.artifact_id = a.id")
 		conditions = append(conditions, "s.source_type = ?")
-		args = append(args, sourceType)
+		args = append(args, fp.SourceType)
+	}
+	if fp.Tag != "" {
+		joins = append(joins, "JOIN artifact_tags at ON at.artifact_id = a.id")
+		conditions = append(conditions, "at.tag = ?")
+		args = append(args, fp.Tag)
+	}
+
+	for _, j := range joins {
+		query += " " + j
 	}
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
@@ -97,7 +138,7 @@ func (db *DB) ListArtifacts(repoRoot, kind, status, sourceType string) ([]Artifa
 	var result []ArtifactRow
 	for rows.Next() {
 		var r ArtifactRow
-		if err := rows.Scan(&r.ID, &r.RepoID, &r.Kind, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.RepoID, &r.ShortID, &r.Kind, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, r)
@@ -105,21 +146,30 @@ func (db *DB) ListArtifacts(repoRoot, kind, status, sourceType string) ([]Artifa
 	return result, rows.Err()
 }
 
-// GetArtifact retrieves a single artifact by full or prefix ID.
+// GetArtifact retrieves a single artifact by full ID, short_id, or prefix.
 func (db *DB) GetArtifact(idOrPrefix string) (*ArtifactRow, error) {
+	const cols = `id, repo_id, COALESCE(short_id,''), kind, title, status, COALESCE(current_revision_id,''), created_at, updated_at, last_observed_at`
+
+	// 1. Exact full ID match
 	var r ArtifactRow
 	err := db.QueryRow(
-		"SELECT id, repo_id, kind, title, status, COALESCE(current_revision_id,''), created_at, updated_at, last_observed_at FROM artifacts WHERE id = ?",
-		idOrPrefix,
-	).Scan(&r.ID, &r.RepoID, &r.Kind, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt)
+		"SELECT "+cols+" FROM artifacts WHERE id = ?", idOrPrefix,
+	).Scan(&r.ID, &r.RepoID, &r.ShortID, &r.Kind, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt)
 	if err == nil {
 		return &r, nil
 	}
 
-	// Try prefix match
+	// 2. Exact short_id match
+	err = db.QueryRow(
+		"SELECT "+cols+" FROM artifacts WHERE short_id = ?", idOrPrefix,
+	).Scan(&r.ID, &r.RepoID, &r.ShortID, &r.Kind, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt)
+	if err == nil {
+		return &r, nil
+	}
+
+	// 3. Prefix match on full ID
 	rows, err := db.Query(
-		"SELECT id, repo_id, kind, title, status, COALESCE(current_revision_id,''), created_at, updated_at, last_observed_at FROM artifacts WHERE id LIKE ?",
-		idOrPrefix+"%",
+		"SELECT "+cols+" FROM artifacts WHERE id LIKE ?", idOrPrefix+"%",
 	)
 	if err != nil {
 		return nil, err
@@ -129,7 +179,7 @@ func (db *DB) GetArtifact(idOrPrefix string) (*ArtifactRow, error) {
 	var matches []ArtifactRow
 	for rows.Next() {
 		var m ArtifactRow
-		if err := rows.Scan(&m.ID, &m.RepoID, &m.Kind, &m.Title, &m.Status, &m.CurrentRevID, &m.CreatedAt, &m.UpdatedAt, &m.LastObservedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.RepoID, &m.ShortID, &m.Kind, &m.Title, &m.Status, &m.CurrentRevID, &m.CreatedAt, &m.UpdatedAt, &m.LastObservedAt); err != nil {
 			return nil, err
 		}
 		matches = append(matches, m)
@@ -228,23 +278,44 @@ func (db *DB) GetTodosForArtifact(artifactID string) ([]TodoRow, error) {
 }
 
 // ListAllTodos returns todos across all artifacts, optionally filtered.
-func (db *DB) ListAllTodos(repoRoot string, openOnly, doneOnly bool) ([]TodoRow, error) {
+func (db *DB) ListAllTodos(fp FilterParams, openOnly, doneOnly bool) ([]TodoRow, error) {
 	query := `SELECT t.id, t.artifact_id, t.revision_id, t.ordinal, t.text, t.done, t.source_file, t.source_line
 		FROM artifact_todos t
 		JOIN artifacts a ON a.id = t.artifact_id`
+	var joins []string
 	var conditions []string
 	var args []any
 
-	if repoRoot != "" {
-		query += " JOIN repos r ON a.repo_id = r.id"
+	needsRepoJoin := fp.RepoRoot != "" || fp.Branch != "" || fp.User != ""
+	if needsRepoJoin {
+		joins = append(joins, "JOIN repos r ON a.repo_id = r.id")
+	}
+	if fp.RepoRoot != "" {
 		conditions = append(conditions, "r.root_path = ?")
-		args = append(args, repoRoot)
+		args = append(args, fp.RepoRoot)
+	}
+	if fp.Branch != "" {
+		conditions = append(conditions, "r.git_current_branch = ?")
+		args = append(args, fp.Branch)
+	}
+	if fp.User != "" {
+		conditions = append(conditions, "r.scanned_by = ?")
+		args = append(args, fp.User)
+	}
+	if fp.Tag != "" {
+		joins = append(joins, "JOIN artifact_tags at ON at.artifact_id = a.id")
+		conditions = append(conditions, "at.tag = ?")
+		args = append(args, fp.Tag)
 	}
 	if openOnly {
 		conditions = append(conditions, "t.done = 0")
 	}
 	if doneOnly {
 		conditions = append(conditions, "t.done = 1")
+	}
+
+	for _, j := range joins {
+		query += " " + j
 	}
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
@@ -270,24 +341,49 @@ func (db *DB) ListAllTodos(repoRoot string, openOnly, doneOnly bool) ([]TodoRow,
 
 // FindArtifacts does a text search across title, source path, and body.
 // It tries FTS5 first, falling back to LIKE if FTS returns no results or errors.
-func (db *DB) FindArtifacts(query string, kind string) ([]ArtifactRow, error) {
-	result, err := db.findArtifactsFTS(query, kind)
+func (db *DB) FindArtifacts(query string, fp FilterParams) ([]ArtifactRow, error) {
+	result, err := db.findArtifactsFTS(query, fp)
 	if err == nil && len(result) > 0 {
 		return result, nil
 	}
-	return db.findArtifactsLIKE(query, kind)
+	return db.findArtifactsLIKE(query, fp)
 }
 
-func (db *DB) findArtifactsFTS(query string, kind string) ([]ArtifactRow, error) {
-	sqlQuery := `SELECT DISTINCT a.id, a.repo_id, a.kind, a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at
+func (db *DB) findArtifactsFTS(query string, fp FilterParams) ([]ArtifactRow, error) {
+	sqlQuery := `SELECT DISTINCT a.id, a.repo_id, COALESCE(a.short_id,''), a.kind, a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at
 		FROM artifacts_fts f
-		JOIN artifacts a ON a.id = f.artifact_id
-		WHERE artifacts_fts MATCH ?`
+		JOIN artifacts a ON a.id = f.artifact_id`
+	var conditions []string
 	args := []any{query}
+	conditions = append(conditions, "artifacts_fts MATCH ?")
 
-	if kind != "" {
-		sqlQuery += " AND a.kind = ?"
-		args = append(args, kind)
+	if fp.Kind != "" {
+		conditions = append(conditions, "a.kind = ?")
+		args = append(args, fp.Kind)
+	}
+	if fp.Tag != "" {
+		sqlQuery += " JOIN artifact_tags at ON at.artifact_id = a.id"
+		conditions = append(conditions, "at.tag = ?")
+		args = append(args, fp.Tag)
+	}
+	if fp.RepoRoot != "" || fp.Branch != "" || fp.User != "" {
+		sqlQuery += " JOIN repos r ON a.repo_id = r.id"
+		if fp.RepoRoot != "" {
+			conditions = append(conditions, "r.root_path = ?")
+			args = append(args, fp.RepoRoot)
+		}
+		if fp.Branch != "" {
+			conditions = append(conditions, "r.git_current_branch = ?")
+			args = append(args, fp.Branch)
+		}
+		if fp.User != "" {
+			conditions = append(conditions, "r.scanned_by = ?")
+			args = append(args, fp.User)
+		}
+	}
+
+	if len(conditions) > 0 {
+		sqlQuery += " WHERE " + strings.Join(conditions, " AND ")
 	}
 	sqlQuery += " ORDER BY a.last_observed_at DESC"
 
@@ -300,7 +396,7 @@ func (db *DB) findArtifactsFTS(query string, kind string) ([]ArtifactRow, error)
 	var result []ArtifactRow
 	for rows.Next() {
 		var r ArtifactRow
-		if err := rows.Scan(&r.ID, &r.RepoID, &r.Kind, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.RepoID, &r.ShortID, &r.Kind, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, r)
@@ -308,18 +404,43 @@ func (db *DB) findArtifactsFTS(query string, kind string) ([]ArtifactRow, error)
 	return result, rows.Err()
 }
 
-func (db *DB) findArtifactsLIKE(query string, kind string) ([]ArtifactRow, error) {
+func (db *DB) findArtifactsLIKE(query string, fp FilterParams) ([]ArtifactRow, error) {
 	likePattern := "%" + query + "%"
-	sqlQuery := `SELECT DISTINCT a.id, a.repo_id, a.kind, a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at
+	sqlQuery := `SELECT DISTINCT a.id, a.repo_id, COALESCE(a.short_id,''), a.kind, a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at
 		FROM artifacts a
-		LEFT JOIN sources s ON s.artifact_id = a.id
-		LEFT JOIN artifact_revisions r ON r.id = a.current_revision_id
-		WHERE (a.title LIKE ? OR s.path LIKE ? OR r.body LIKE ?)`
+		LEFT JOIN sources src ON src.artifact_id = a.id
+		LEFT JOIN artifact_revisions rv ON rv.id = a.current_revision_id`
+	var conditions []string
 	args := []any{likePattern, likePattern, likePattern}
+	conditions = append(conditions, "(a.title LIKE ? OR src.path LIKE ? OR rv.body LIKE ?)")
 
-	if kind != "" {
-		sqlQuery += " AND a.kind = ?"
-		args = append(args, kind)
+	if fp.Kind != "" {
+		conditions = append(conditions, "a.kind = ?")
+		args = append(args, fp.Kind)
+	}
+	if fp.Tag != "" {
+		sqlQuery += " JOIN artifact_tags at ON at.artifact_id = a.id"
+		conditions = append(conditions, "at.tag = ?")
+		args = append(args, fp.Tag)
+	}
+	if fp.RepoRoot != "" || fp.Branch != "" || fp.User != "" {
+		sqlQuery += " JOIN repos r ON a.repo_id = r.id"
+		if fp.RepoRoot != "" {
+			conditions = append(conditions, "r.root_path = ?")
+			args = append(args, fp.RepoRoot)
+		}
+		if fp.Branch != "" {
+			conditions = append(conditions, "r.git_current_branch = ?")
+			args = append(args, fp.Branch)
+		}
+		if fp.User != "" {
+			conditions = append(conditions, "r.scanned_by = ?")
+			args = append(args, fp.User)
+		}
+	}
+
+	if len(conditions) > 0 {
+		sqlQuery += " WHERE " + strings.Join(conditions, " AND ")
 	}
 	sqlQuery += " ORDER BY a.last_observed_at DESC"
 
@@ -332,7 +453,7 @@ func (db *DB) findArtifactsLIKE(query string, kind string) ([]ArtifactRow, error
 	var result []ArtifactRow
 	for rows.Next() {
 		var r ArtifactRow
-		if err := rows.Scan(&r.ID, &r.RepoID, &r.Kind, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.RepoID, &r.ShortID, &r.Kind, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, r)
@@ -418,22 +539,137 @@ type RepoMeta struct {
 	RootPath       string
 	LastScanCommit string
 	LastScanAt     string
+	ScannedBy      string
 }
 
 // GetRepoByRoot returns the repo row for a given root path, or nil if not found.
 func (db *DB) GetRepoByRoot(rootPath string) *RepoMeta {
 	var m RepoMeta
 	err := db.QueryRow(
-		"SELECT id, root_path, COALESCE(last_scan_commit,''), COALESCE(last_scan_at,'') FROM repos WHERE root_path = ?",
+		"SELECT id, root_path, COALESCE(last_scan_commit,''), COALESCE(last_scan_at,''), COALESCE(scanned_by,'') FROM repos WHERE root_path = ?",
 		rootPath,
-	).Scan(&m.ID, &m.RootPath, &m.LastScanCommit, &m.LastScanAt)
+	).Scan(&m.ID, &m.RootPath, &m.LastScanCommit, &m.LastScanAt, &m.ScannedBy)
 	if err != nil {
 		return nil
 	}
 	return &m
 }
 
-// UpdateScanMeta records the git commit and timestamp of the last scan.
-func (db *DB) UpdateScanMeta(repoID, commit, now string) {
-	db.Exec("UPDATE repos SET last_scan_commit = ?, last_scan_at = ? WHERE id = ?", commit, now, repoID)
+// UpdateScanMeta records the git commit, timestamp, and user of the last scan.
+func (db *DB) UpdateScanMeta(repoID, commit, scannedBy, now string) {
+	db.Exec("UPDATE repos SET last_scan_commit = ?, last_scan_at = ?, scanned_by = ? WHERE id = ?", commit, now, scannedBy, repoID)
+}
+
+// GetTagsForArtifact returns all tags for an artifact.
+func (db *DB) GetTagsForArtifact(artifactID string) ([]TagRow, error) {
+	rows, err := db.Query(
+		"SELECT artifact_id, tag, source, created_at FROM artifact_tags WHERE artifact_id = ? ORDER BY tag",
+		artifactID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []TagRow
+	for rows.Next() {
+		var r TagRow
+		if err := rows.Scan(&r.ArtifactID, &r.Tag, &r.Source, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// InsertTag adds a tag for an artifact. It is a no-op on conflict.
+func (db *DB) InsertTag(artifactID, tag, source, now string) error {
+	_, err := db.Exec(
+		"INSERT OR IGNORE INTO artifact_tags (artifact_id, tag, source, created_at) VALUES (?, ?, ?, ?)",
+		artifactID, tag, source, now,
+	)
+	return err
+}
+
+// DeleteTag removes a specific tag from an artifact.
+func (db *DB) DeleteTag(artifactID, tag string) error {
+	_, err := db.Exec("DELETE FROM artifact_tags WHERE artifact_id = ? AND tag = ?", artifactID, tag)
+	return err
+}
+
+// DeleteAutoTags removes all frontmatter and inferred tags for an artifact (preserving manual).
+func (db *DB) DeleteAutoTags(artifactID string) error {
+	_, err := db.Exec("DELETE FROM artifact_tags WHERE artifact_id = ? AND source IN ('frontmatter', 'inferred')", artifactID)
+	return err
+}
+
+// ResumeArtifacts returns all artifacts for a repo, with todo counts, sorted by last_observed_at DESC.
+func (db *DB) ResumeArtifacts(repoRoot string, fp FilterParams) ([]ResumeRow, error) {
+	query := `SELECT a.id, COALESCE(a.short_id,''), a.kind, a.title, a.status, a.last_observed_at,
+		COALESCE(s.path, ''),
+		(SELECT COUNT(*) FROM artifact_todos t WHERE t.artifact_id = a.id) as total_todos,
+		(SELECT COUNT(*) FROM artifact_todos t WHERE t.artifact_id = a.id AND t.done = 0) as open_todos
+	FROM artifacts a
+	LEFT JOIN sources s ON s.artifact_id = a.id
+	JOIN repos r ON a.repo_id = r.id`
+
+	var conditions []string
+	var args []any
+
+	conditions = append(conditions, "r.root_path = ?")
+	args = append(args, repoRoot)
+
+	if fp.Tag != "" {
+		query += " JOIN artifact_tags at ON at.artifact_id = a.id"
+		conditions = append(conditions, "at.tag = ?")
+		args = append(args, fp.Tag)
+	}
+	if fp.Branch != "" {
+		conditions = append(conditions, "r.git_current_branch = ?")
+		args = append(args, fp.Branch)
+	}
+	if fp.User != "" {
+		conditions = append(conditions, "r.scanned_by = ?")
+		args = append(args, fp.User)
+	}
+
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += " ORDER BY a.last_observed_at DESC"
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []ResumeRow
+	for rows.Next() {
+		var r ResumeRow
+		if err := rows.Scan(&r.ID, &r.ShortID, &r.Kind, &r.Title, &r.Status, &r.LastObservedAt, &r.SourcePath, &r.TotalTodos, &r.OpenTodos); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// ResumeRow holds the data needed for ds resume display.
+type ResumeRow struct {
+	ID             string
+	ShortID        string
+	Kind           string
+	Title          string
+	Status         string
+	LastObservedAt string
+	SourcePath     string
+	TotalTodos     int
+	OpenTodos      int
+}
+
+// UpdateArtifactShortID sets the short_id for an artifact.
+func (db *DB) UpdateArtifactShortID(artifactID, shortID string) error {
+	_, err := db.Exec("UPDATE artifacts SET short_id = ? WHERE id = ?", shortID, artifactID)
+	return err
 }

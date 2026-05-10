@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"text/tabwriter"
 
+	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -12,6 +13,10 @@ import (
 func NewFindCmd() *cobra.Command {
 	var (
 		kind      string
+		tag       string
+		branch    string
+		user      string
+		repoName  string
 		asJSON    bool
 		noRefresh bool
 	)
@@ -21,17 +26,22 @@ func NewFindCmd() *cobra.Command {
 		Short: "Search artifacts by title, path, or body",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runFind(cmd, args[0], kind, asJSON, noRefresh)
+			fp := store.FilterParams{Kind: kind, Tag: tag, Branch: branch, User: user}
+			return runFind(cmd, args[0], fp, repoName, asJSON, noRefresh)
 		},
 	}
 
 	cmd.Flags().StringVar(&kind, "kind", "", "Filter by kind")
+	cmd.Flags().StringVar(&tag, "tag", "", "Filter by tag")
+	cmd.Flags().StringVar(&branch, "branch", "", "Filter by git branch")
+	cmd.Flags().StringVar(&user, "user", "", "Filter by scanned-by user")
+	cmd.Flags().StringVar(&repoName, "repo", "", "Filter by repo name")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	return cmd
 }
 
-func runFind(cmd *cobra.Command, query, kind string, asJSON, noRefresh bool) error {
+func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, asJSON, noRefresh bool) error {
 	db, err := openDB()
 	if err != nil {
 		return err
@@ -42,7 +52,11 @@ func runFind(cmd *cobra.Command, query, kind string, asJSON, noRefresh bool) err
 		ensureFresh(cmd, db)
 	}
 
-	artifacts, err := db.FindArtifacts(query, kind)
+	if repoName != "" {
+		fp.RepoRoot = resolveRepoRootByName(db, repoName)
+	}
+
+	artifacts, err := db.FindArtifacts(query, fp)
 	if err != nil {
 		return fmt.Errorf("find: %w", err)
 	}
@@ -55,11 +69,14 @@ func runFind(cmd *cobra.Command, query, kind string, asJSON, noRefresh bool) err
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(w, "ID\tKIND\tTITLE\n")
 	for _, a := range artifacts {
-		shortID := a.ID
-		if len(shortID) > 13 {
-			shortID = shortID[:13] + "..."
+		displayID := a.ShortID
+		if displayID == "" {
+			displayID = a.ID
+			if len(displayID) > 13 {
+				displayID = displayID[:13] + "..."
+			}
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\n", shortID, a.Kind, a.Title)
+		fmt.Fprintf(w, "%s\t%s\t%s\n", displayID, a.Kind, a.Title)
 	}
 	w.Flush()
 	return nil

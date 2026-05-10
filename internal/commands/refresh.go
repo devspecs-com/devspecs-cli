@@ -100,3 +100,20 @@ func debugLog(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, "[ds:debug] "+format+"\n", args...)
 	}
 }
+
+// resolveRepoRootByName finds the repo root_path whose basename matches name.
+func resolveRepoRootByName(db *store.DB, name string) string {
+	rows, err := db.Query("SELECT root_path FROM repos")
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var rootPath string
+		rows.Scan(&rootPath)
+		if filepath.Base(rootPath) == name {
+			return rootPath
+		}
+	}
+	return ""
+}

@@ -33,7 +33,7 @@ func seedArtifact(t *testing.T, db *DB) (repoID, artifactID, revID string) {
 
 func TestListArtifacts_Empty(t *testing.T) {
 	db := openTestDB(t)
-	arts, err := db.ListArtifacts("", "", "", "")
+	arts, err := db.ListArtifacts(FilterParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestListArtifacts_All(t *testing.T) {
 	db := openTestDB(t)
 	seedArtifact(t, db)
 
-	arts, err := db.ListArtifacts("", "", "", "")
+	arts, err := db.ListArtifacts(FilterParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,11 +62,11 @@ func TestListArtifacts_FilterByKind(t *testing.T) {
 	db := openTestDB(t)
 	seedArtifact(t, db)
 
-	arts, _ := db.ListArtifacts("", "plan", "", "")
+	arts, _ := db.ListArtifacts(FilterParams{Kind: "plan"})
 	if len(arts) != 1 {
 		t.Errorf("expected 1 plan, got %d", len(arts))
 	}
-	arts, _ = db.ListArtifacts("", "adr", "", "")
+	arts, _ = db.ListArtifacts(FilterParams{Kind: "adr"})
 	if len(arts) != 0 {
 		t.Errorf("expected 0 adrs, got %d", len(arts))
 	}
@@ -76,11 +76,11 @@ func TestListArtifacts_FilterByStatus(t *testing.T) {
 	db := openTestDB(t)
 	seedArtifact(t, db)
 
-	arts, _ := db.ListArtifacts("", "", "draft", "")
+	arts, _ := db.ListArtifacts(FilterParams{Status: "draft"})
 	if len(arts) != 1 {
 		t.Errorf("expected 1 draft, got %d", len(arts))
 	}
-	arts, _ = db.ListArtifacts("", "", "approved", "")
+	arts, _ = db.ListArtifacts(FilterParams{Status: "approved"})
 	if len(arts) != 0 {
 		t.Errorf("expected 0 approved, got %d", len(arts))
 	}
@@ -90,11 +90,11 @@ func TestListArtifacts_FilterBySourceType(t *testing.T) {
 	db := openTestDB(t)
 	seedArtifact(t, db)
 
-	arts, _ := db.ListArtifacts("", "", "", "markdown")
+	arts, _ := db.ListArtifacts(FilterParams{SourceType: "markdown"})
 	if len(arts) != 1 {
 		t.Errorf("expected 1 markdown, got %d", len(arts))
 	}
-	arts, _ = db.ListArtifacts("", "", "", "openspec")
+	arts, _ = db.ListArtifacts(FilterParams{SourceType: "openspec"})
 	if len(arts) != 0 {
 		t.Errorf("expected 0 openspec, got %d", len(arts))
 	}
@@ -257,17 +257,17 @@ func TestListAllTodos_Filters(t *testing.T) {
 	db.Exec("INSERT INTO artifact_todos (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, created_at) VALUES (?, ?, ?, 0, 'Open', 0, 't.md', 1, ?)", "td_1", artID, revID, now)
 	db.Exec("INSERT INTO artifact_todos (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, created_at) VALUES (?, ?, ?, 1, 'Done', 1, 't.md', 2, ?)", "td_2", artID, revID, now)
 
-	all, _ := db.ListAllTodos("", false, false)
+	all, _ := db.ListAllTodos(FilterParams{}, false, false)
 	if len(all) != 2 {
 		t.Errorf("all: expected 2, got %d", len(all))
 	}
 
-	open, _ := db.ListAllTodos("", true, false)
+	open, _ := db.ListAllTodos(FilterParams{}, true, false)
 	if len(open) != 1 || open[0].Text != "Open" {
 		t.Errorf("open: expected 1 'Open', got %+v", open)
 	}
 
-	done, _ := db.ListAllTodos("", false, true)
+	done, _ := db.ListAllTodos(FilterParams{}, false, true)
 	if len(done) != 1 || done[0].Text != "Done" {
 		t.Errorf("done: expected 1 'Done', got %+v", done)
 	}
@@ -277,7 +277,7 @@ func TestFindArtifacts(t *testing.T) {
 	db := openTestDB(t)
 	seedArtifact(t, db)
 
-	arts, err := db.FindArtifacts("Test", "")
+	arts, err := db.FindArtifacts("Test", FilterParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestFindArtifacts(t *testing.T) {
 		t.Errorf("expected 1 match for 'Test', got %d", len(arts))
 	}
 
-	arts, _ = db.FindArtifacts("nonexistent", "")
+	arts, _ = db.FindArtifacts("nonexistent", FilterParams{})
 	if len(arts) != 0 {
 		t.Errorf("expected 0 matches, got %d", len(arts))
 	}
@@ -295,11 +295,11 @@ func TestFindArtifacts_FilterByKind(t *testing.T) {
 	db := openTestDB(t)
 	seedArtifact(t, db)
 
-	arts, _ := db.FindArtifacts("Test", "plan")
+	arts, _ := db.FindArtifacts("Test", FilterParams{Kind: "plan"})
 	if len(arts) != 1 {
 		t.Errorf("expected 1, got %d", len(arts))
 	}
-	arts, _ = db.FindArtifacts("Test", "adr")
+	arts, _ = db.FindArtifacts("Test", FilterParams{Kind: "adr"})
 	if len(arts) != 0 {
 		t.Errorf("expected 0, got %d", len(arts))
 	}
@@ -406,7 +406,7 @@ func TestListArtifacts_FilterByRepoRoot(t *testing.T) {
 	db.InsertArtifactDirect("ds_A1", "r1", "plan", "Plan A", "draft", "rev_a1", now)
 	db.InsertArtifactDirect("ds_B1", "r2", "spec", "Spec B", "proposed", "rev_b1", now)
 
-	arts, _ := db.ListArtifacts("/repo/a", "", "", "")
+	arts, _ := db.ListArtifacts(FilterParams{RepoRoot: "/repo/a"})
 	if len(arts) != 1 || arts[0].ID != "ds_A1" {
 		t.Errorf("filter by repo root: got %+v", arts)
 	}
@@ -421,11 +421,11 @@ func TestListAllTodos_FilterByRepoRoot(t *testing.T) {
 	db.InsertRevisionDirect("rev_x1", "ds_X1", "sha256:x", "body", now)
 	db.Exec("INSERT INTO artifact_todos (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, created_at) VALUES ('td_x', 'ds_X1', 'rev_x1', 0, 'X Todo', 0, 'x.md', 1, ?)", now)
 
-	todos, _ := db.ListAllTodos("/repo/x", false, false)
+	todos, _ := db.ListAllTodos(FilterParams{RepoRoot: "/repo/x"}, false, false)
 	if len(todos) != 1 {
 		t.Errorf("expected 1 todo for /repo/x, got %d", len(todos))
 	}
-	todos, _ = db.ListAllTodos("/repo/other", false, false)
+	todos, _ = db.ListAllTodos(FilterParams{RepoRoot: "/repo/other"}, false, false)
 	if len(todos) != 0 {
 		t.Errorf("expected 0 todos for /repo/other, got %d", len(todos))
 	}
@@ -452,7 +452,7 @@ func TestFindArtifacts_ByBodyContent(t *testing.T) {
 	db.InsertArtifactDirect("ds_BODY1", "r1", "plan", "Simple Title", "draft", "rev_body1", now)
 	db.InsertRevisionDirect("rev_body1", "ds_BODY1", "sha256:b1", "This contains searchable-keyword in body.", now)
 
-	arts, _ := db.FindArtifacts("searchable-keyword", "")
+	arts, _ := db.FindArtifacts("searchable-keyword", FilterParams{})
 	if len(arts) != 1 {
 		t.Errorf("expected 1 match by body, got %d", len(arts))
 	}
@@ -465,7 +465,7 @@ func TestFindArtifacts_BySourcePath(t *testing.T) {
 	db.InsertArtifactDirect("ds_PATH1", "r1", "spec", "Spec", "draft", "rev_p1", now)
 	db.InsertSourceDirect("src_p1", "ds_PATH1", "r1", "markdown", "docs/unique-path.md", "docs/unique-path.md|markdown", now)
 
-	arts, _ := db.FindArtifacts("unique-path", "")
+	arts, _ := db.FindArtifacts("unique-path", FilterParams{})
 	if len(arts) != 1 {
 		t.Errorf("expected 1 match by path, got %d", len(arts))
 	}
@@ -484,13 +484,13 @@ func TestFTS5_FallbackParity(t *testing.T) {
 	db.IndexArtifactFTS("ds_FTS1", "Architecture Plan", "This is the body of our architecture plan.", "plans/architecture.md")
 
 	// FTS search
-	ftsResults, err := db.findArtifactsFTS("Architecture", "")
+	ftsResults, err := db.findArtifactsFTS("Architecture", FilterParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// LIKE search
-	likeResults, err := db.findArtifactsLIKE("Architecture", "")
+	likeResults, err := db.findArtifactsLIKE("Architecture", FilterParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +516,7 @@ func TestIndexArtifactFTS(t *testing.T) {
 	}
 
 	// Verify it's searchable
-	results, err := db.findArtifactsFTS("REST", "")
+	results, err := db.findArtifactsFTS("REST", FilterParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -529,7 +529,7 @@ func TestIndexArtifactFTS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	results, _ = db.findArtifactsFTS("GraphQL", "")
+	results, _ = db.findArtifactsFTS("GraphQL", FilterParams{})
 	if len(results) != 1 {
 		t.Errorf("expected 1 result after re-index, got %d", len(results))
 	}

@@ -39,6 +39,10 @@ issues, and future workflows.`,
 	rootCmd.AddCommand(commands.NewStatusCmd())
 	rootCmd.AddCommand(commands.NewLinkCmd())
 	rootCmd.AddCommand(commands.NewVersionCmd())
+	rootCmd.AddCommand(commands.NewResumeCmd())
+	rootCmd.AddCommand(commands.NewConfigCmd())
+	rootCmd.AddCommand(commands.NewTagCmd())
+	rootCmd.AddCommand(commands.NewUntagCmd())
 
 	return rootCmd
 }

@@ -14,6 +14,10 @@ func NewTodosCmd() *cobra.Command {
 	var (
 		openOnly  bool
 		doneOnly  bool
+		tag       string
+		branch    string
+		user      string
+		repoName  string
 		asJSON    bool
 		noRefresh bool
 	)
@@ -27,18 +31,23 @@ func NewTodosCmd() *cobra.Command {
 			if len(args) > 0 {
 				artifactID = args[0]
 			}
-			return runTodos(cmd, artifactID, openOnly, doneOnly, asJSON, noRefresh)
+			fp := store.FilterParams{Tag: tag, Branch: branch, User: user}
+			return runTodos(cmd, artifactID, fp, repoName, openOnly, doneOnly, asJSON, noRefresh)
 		},
 	}
 
 	cmd.Flags().BoolVar(&openOnly, "open", false, "Show only incomplete todos")
 	cmd.Flags().BoolVar(&doneOnly, "done", false, "Show only completed todos")
+	cmd.Flags().StringVar(&tag, "tag", "", "Filter by tag")
+	cmd.Flags().StringVar(&branch, "branch", "", "Filter by git branch")
+	cmd.Flags().StringVar(&user, "user", "", "Filter by scanned-by user")
+	cmd.Flags().StringVar(&repoName, "repo", "", "Filter by repo name")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	return cmd
 }
 
-func runTodos(cmd *cobra.Command, artifactID string, openOnly, doneOnly, asJSON, noRefresh bool) error {
+func runTodos(cmd *cobra.Command, artifactID string, fp store.FilterParams, repoName string, openOnly, doneOnly, asJSON, noRefresh bool) error {
 	db, err := openDB()
 	if err != nil {
 		return err
@@ -62,7 +71,11 @@ func runTodos(cmd *cobra.Command, artifactID string, openOnly, doneOnly, asJSON,
 		return outputTodos(cmd, todos, asJSON)
 	}
 
-	todos, err := db.ListAllTodos("", openOnly, doneOnly)
+	if repoName != "" {
+		fp.RepoRoot = resolveRepoRootByName(db, repoName)
+	}
+
+	todos, err := db.ListAllTodos(fp, openOnly, doneOnly)
 	if err != nil {
 		return fmt.Errorf("list todos: %w", err)
 	}

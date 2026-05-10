@@ -3,6 +3,7 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/spf13/cobra"
@@ -60,25 +61,37 @@ func runContext(cmd *cobra.Command, idOrPrefix string, asJSON, copyToClipboard, 
 		sourcePath = sources[0].Path
 	}
 
+	tags, _ := db.GetTagsForArtifact(art.ID)
+
 	if asJSON {
-		obj := buildContextJSON(art, rev, sourcePath, todos)
+		obj := buildContextJSON(art, rev, sourcePath, todos, tags)
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(obj)
 	}
 
-	output := buildContextMarkdown(art, rev, sourcePath, todos)
+	output := buildContextMarkdown(art, rev, sourcePath, todos, tags)
 	fmt.Fprint(cmd.OutOrStdout(), output)
 	return nil
 }
 
-func buildContextMarkdown(art *store.ArtifactRow, rev *store.RevisionRow, sourcePath string, todos []store.TodoRow) string {
+func buildContextMarkdown(art *store.ArtifactRow, rev *store.RevisionRow, sourcePath string, todos []store.TodoRow, tags []store.TagRow) string {
 	var s string
 	s += fmt.Sprintf("# DevSpecs Context: %s\n\n", art.Title)
 	s += fmt.Sprintf("DevSpec ID: %s\n", art.ID)
+	if art.ShortID != "" {
+		s += fmt.Sprintf("Short ID: %s\n", art.ShortID)
+	}
 	s += fmt.Sprintf("Kind: %s\n", art.Kind)
 	s += fmt.Sprintf("Status: %s\n", art.Status)
 	s += fmt.Sprintf("Source: %s\n", sourcePath)
+	if len(tags) > 0 {
+		tagStrs := make([]string, len(tags))
+		for i, t := range tags {
+			tagStrs[i] = t.Tag
+		}
+		s += fmt.Sprintf("Tags: %s\n", strings.Join(tagStrs, ", "))
+	}
 
 	s += "\n## Instructions for Agent\n\n"
 	s += "Use this artifact as the source of truth for the requested implementation or review.\n\n"
@@ -108,13 +121,21 @@ func buildContextMarkdown(art *store.ArtifactRow, rev *store.RevisionRow, source
 	return s
 }
 
-func buildContextJSON(art *store.ArtifactRow, rev *store.RevisionRow, sourcePath string, todos []store.TodoRow) map[string]any {
+func buildContextJSON(art *store.ArtifactRow, rev *store.RevisionRow, sourcePath string, todos []store.TodoRow, tags []store.TagRow) map[string]any {
 	obj := map[string]any{
 		"id":          art.ID,
+		"short_id":    art.ShortID,
 		"kind":        art.Kind,
 		"title":       art.Title,
 		"status":      art.Status,
 		"source_path": sourcePath,
+	}
+	if len(tags) > 0 {
+		tagStrs := make([]string, len(tags))
+		for i, t := range tags {
+			tagStrs[i] = t.Tag
+		}
+		obj["tags"] = tagStrs
 	}
 	if rev != nil {
 		obj["body"] = rev.Body

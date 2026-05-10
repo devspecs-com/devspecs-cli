@@ -16,6 +16,10 @@ func NewListCmd() *cobra.Command {
 		kind       string
 		status     string
 		sourceType string
+		tag        string
+		branch     string
+		user       string
+		repoName   string
 		asJSON     bool
 		noRefresh  bool
 	)
@@ -25,19 +29,27 @@ func NewListCmd() *cobra.Command {
 		Aliases: []string{"ls"},
 		Short:   "List indexed artifacts",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runList(cmd, kind, status, sourceType, asJSON, noRefresh)
+			fp := store.FilterParams{
+				Kind: kind, Status: status, SourceType: sourceType,
+				Tag: tag, Branch: branch, User: user,
+			}
+			return runList(cmd, fp, repoName, asJSON, noRefresh)
 		},
 	}
 
 	cmd.Flags().StringVar(&kind, "kind", "", "Filter by kind")
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status")
 	cmd.Flags().StringVar(&sourceType, "source", "", "Filter by source type")
+	cmd.Flags().StringVar(&tag, "tag", "", "Filter by tag")
+	cmd.Flags().StringVar(&branch, "branch", "", "Filter by git branch")
+	cmd.Flags().StringVar(&user, "user", "", "Filter by scanned-by user")
+	cmd.Flags().StringVar(&repoName, "repo", "", "Filter by repo name (basename of root_path)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	return cmd
 }
 
-func runList(cmd *cobra.Command, kind, status, sourceType string, asJSON, noRefresh bool) error {
+func runList(cmd *cobra.Command, fp store.FilterParams, repoName string, asJSON, noRefresh bool) error {
 	db, err := openDB()
 	if err != nil {
 		return err
@@ -48,7 +60,11 @@ func runList(cmd *cobra.Command, kind, status, sourceType string, asJSON, noRefr
 		ensureFresh(cmd, db)
 	}
 
-	artifacts, err := db.ListArtifacts("", kind, status, sourceType)
+	if repoName != "" {
+		fp.RepoRoot = resolveRepoRootByName(db, repoName)
+	}
+
+	artifacts, err := db.ListArtifacts(fp)
 	if err != nil {
 		return fmt.Errorf("list artifacts: %w", err)
 	}
@@ -61,11 +77,14 @@ func runList(cmd *cobra.Command, kind, status, sourceType string, asJSON, noRefr
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(w, "ID\tKIND\tSTATUS\tTITLE\n")
 	for _, a := range artifacts {
-		shortID := a.ID
-		if len(shortID) > 13 {
-			shortID = shortID[:13] + "..."
+		displayID := a.ShortID
+		if displayID == "" {
+			displayID = a.ID
+			if len(displayID) > 13 {
+				displayID = displayID[:13] + "..."
+			}
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", shortID, a.Kind, a.Status, a.Title)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", displayID, a.Kind, a.Status, a.Title)
 	}
 	w.Flush()
 	return nil

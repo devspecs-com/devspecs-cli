@@ -3,12 +3,20 @@ package idgen
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/oklog/ulid/v2"
 )
+
+// ShortID returns a deterministic 8-char hex string derived from sourceIdentity.
+func ShortID(sourceIdentity string) string {
+	h := sha256.Sum256([]byte(sourceIdentity))
+	return hex.EncodeToString(h[:4])
+}
 
 // Factory generates DevSpecs IDs. It is safe for concurrent use.
 type Factory struct {

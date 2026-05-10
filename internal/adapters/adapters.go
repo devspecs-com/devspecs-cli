@@ -31,6 +31,7 @@ type Artifact struct {
 	PrimaryPath    string
 	Body           string
 	Extracted      map[string]any
+	Tags           []string
 }
 
 // Source represents where an artifact came from.

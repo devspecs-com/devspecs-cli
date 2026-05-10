@@ -11,11 +11,13 @@ import (
 	"time"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/todoparse"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
 	"github.com/devspecs-com/devspecs-cli/internal/repo"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/devspecs-com/devspecs-cli/internal/userident"
 )
 
 // Result holds scan summary counts.
@@ -72,7 +74,8 @@ func (s *Scanner) Run(ctx context.Context, repoRoot string, cfg *config.RepoConf
 
 func (s *Scanner) recordScanMeta(repoID, repoRoot, now string) {
 	commit := repo.HeadCommit(repoRoot)
-	s.db.UpdateScanMeta(repoID, commit, now)
+	user := userident.Detect(repoRoot)
+	s.db.UpdateScanMeta(repoID, commit, user, now)
 }
 
 func (s *Scanner) ensureRepo(rootPath, now string) (string, error) {
@@ -107,6 +110,7 @@ func (s *Scanner) upsertArtifact(repoID string, art adapters.Artifact, sources [
 		if err := s.insertArtifact(artifactID, repoID, art, revID, now); err != nil {
 			return err
 		}
+		s.assignShortID(artifactID, art.SourceIdentity)
 		if err := s.insertRevision(revID, artifactID, contentHash, art.Body, now); err != nil {
 			return err
 		}
@@ -118,6 +122,7 @@ func (s *Scanner) upsertArtifact(repoID string, art adapters.Artifact, sources [
 		if err := s.replaceTodos(artifactID, revID, todos, now); err != nil {
 			return err
 		}
+		s.replaceTags(artifactID, art, now)
 		s.indexFTS(artifactID, art)
 		result.New++
 		return nil
@@ -126,6 +131,9 @@ func (s *Scanner) upsertArtifact(repoID string, art adapters.Artifact, sources [
 	// Update last_observed_at
 	s.db.Exec("UPDATE artifacts SET last_observed_at = ?, updated_at = ? WHERE id = ?", now, now, artifactID)
 
+	// Ensure short_id is set (covers artifacts created before v0.1)
+	s.assignShortID(artifactID, art.SourceIdentity)
+
 	// Check if content changed
 	var existingHash string
 	if currentRevID != "" {
@@ -133,6 +141,7 @@ func (s *Scanner) upsertArtifact(repoID string, art adapters.Artifact, sources [
 	}
 
 	if existingHash == contentHash {
+		s.replaceTags(artifactID, art, now)
 		result.Unchanged++
 		return nil
 	}
@@ -147,6 +156,7 @@ func (s *Scanner) upsertArtifact(repoID string, art adapters.Artifact, sources [
 	if err := s.replaceTodos(artifactID, revID, todos, now); err != nil {
 		return err
 	}
+	s.replaceTags(artifactID, art, now)
 	s.indexFTS(artifactID, art)
 	result.Updated++
 	return nil
@@ -205,6 +215,43 @@ func (s *Scanner) replaceTodos(artifactID, revID string, todos []todoparse.Todo,
 		}
 	}
 	return nil
+}
+
+func (s *Scanner) assignShortID(artifactID, sourceIdentity string) {
+	sid := idgen.ShortID(sourceIdentity)
+	err := s.db.UpdateArtifactShortID(artifactID, sid)
+	if err != nil && strings.Contains(err.Error(), "UNIQUE") {
+		// Collision — append suffix digit
+		s.db.UpdateArtifactShortID(artifactID, sid+"1")
+	}
+}
+
+func (s *Scanner) replaceTags(artifactID string, art adapters.Artifact, now string) {
+	s.db.DeleteAutoTags(artifactID)
+
+	for _, tag := range art.Tags {
+		s.db.InsertTag(artifactID, tag, "frontmatter", now)
+	}
+
+	// Infer directory tag if no frontmatter tags
+	if len(art.Tags) == 0 {
+		relPath := ""
+		if art.PrimaryPath != "" {
+			// Find the relative path from sources
+			rows, _ := s.db.Query("SELECT path FROM sources WHERE artifact_id = ? LIMIT 1", artifactID)
+			if rows != nil {
+				if rows.Next() {
+					rows.Scan(&relPath)
+				}
+				rows.Close()
+			}
+		}
+		if relPath != "" {
+			if dirTag := markdown.InferDirectoryTag(relPath); dirTag != "" {
+				s.db.InsertTag(artifactID, dirTag, "inferred", now)
+			}
+		}
+	}
 }
 
 func hashContent(body string) string {

@@ -444,7 +444,7 @@ func TestAutoScan_WorksFromSubdirectory(t *testing.T) {
 	}
 }
 
-func TestSchemaMigration_V2(t *testing.T) {
+func TestSchemaVersion(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	db, err := store.Open(dbPath)
 	if err != nil {
@@ -452,21 +452,20 @@ func TestSchemaMigration_V2(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Verify the new columns exist
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE version = 2").Scan(&count)
+	var version int
+	err = db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if count != 1 {
-		t.Errorf("expected migration v2 to be applied, got count=%d", count)
+	if version != store.SchemaVersion {
+		t.Errorf("expected schema version %d, got %d", store.SchemaVersion, version)
 	}
 
-	// Verify columns work
+	// Verify v0.1 columns exist
 	now := "2024-01-01T00:00:00Z"
-	_, err = db.Exec("INSERT INTO repos (id, root_path, last_scan_commit, last_scan_at, created_at, updated_at) VALUES ('test', '/tmp', 'abc123', ?, ?, ?)", now, now, now)
+	_, err = db.Exec("INSERT INTO repos (id, root_path, last_scan_commit, last_scan_at, scanned_by, created_at, updated_at) VALUES ('test', '/tmp', 'abc123', ?, 'testuser', ?, ?)", now, now, now)
 	if err != nil {
-		t.Fatalf("failed to insert with new columns: %v", err)
+		t.Fatalf("failed to insert with v0.1 columns: %v", err)
 	}
 
 	meta := db.GetRepoByRoot("/tmp")
@@ -476,7 +475,15 @@ func TestSchemaMigration_V2(t *testing.T) {
 	if meta.LastScanCommit != "abc123" {
 		t.Errorf("expected last_scan_commit=abc123, got %s", meta.LastScanCommit)
 	}
-	if meta.LastScanAt != now {
-		t.Errorf("expected last_scan_at=%s, got %s", now, meta.LastScanAt)
+	if meta.ScannedBy != "testuser" {
+		t.Errorf("expected scanned_by=testuser, got %s", meta.ScannedBy)
+	}
+
+	// Verify artifact_tags table exists by inserting with a valid artifact_id
+	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r2', '/tags', ?, ?)", now, now)
+	db.Exec("INSERT INTO artifacts (id, repo_id, kind, title, status, created_at, updated_at, last_observed_at) VALUES ('ds_TAG', 'r2', 'plan', 'Tag Test', 'draft', ?, ?, ?)", now, now, now)
+	_, err = db.Exec("INSERT INTO artifact_tags (artifact_id, tag, source, created_at) VALUES ('ds_TAG', 'test', 'manual', ?)", now)
+	if err != nil {
+		t.Fatalf("artifact_tags table missing or broken: %v", err)
 	}
 }

@@ -3,6 +3,7 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/spf13/cobra"
@@ -66,8 +67,22 @@ func runShow(cmd *cobra.Command, idOrPrefix string, asJSON, showContent, noConte
 		return enc.Encode(obj)
 	}
 
+	tags, _ := db.GetTagsForArtifact(art.ID)
+
+	repoMeta := db.GetRepoByRoot("")
+	if art.RepoID != "" {
+		var rootPath string
+		db.QueryRow("SELECT root_path FROM repos WHERE id = ?", art.RepoID).Scan(&rootPath)
+		if rootPath != "" {
+			repoMeta = db.GetRepoByRoot(rootPath)
+		}
+	}
+
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "DevSpec: %s\n", art.ID)
+	if art.ShortID != "" {
+		fmt.Fprintf(out, "Short ID: %s\n", art.ShortID)
+	}
 	fmt.Fprintf(out, "\nTitle:\n  %s\n", art.Title)
 	fmt.Fprintf(out, "\nKind:\n  %s\n", art.Kind)
 	fmt.Fprintf(out, "\nStatus:\n  %s\n", art.Status)
@@ -77,6 +92,18 @@ func runShow(cmd *cobra.Command, idOrPrefix string, asJSON, showContent, noConte
 	}
 	if rev != nil {
 		fmt.Fprintf(out, "\nCurrent revision:\n  %s\n", rev.ContentHash)
+	}
+
+	if len(tags) > 0 {
+		tagStrs := make([]string, len(tags))
+		for i, t := range tags {
+			tagStrs[i] = t.Tag
+		}
+		fmt.Fprintf(out, "\nTags:\n  %s\n", strings.Join(tagStrs, ", "))
+	}
+
+	if repoMeta != nil && repoMeta.ScannedBy != "" {
+		fmt.Fprintf(out, "\nScanned by:\n  %s\n", repoMeta.ScannedBy)
 	}
 
 	if len(links) > 0 {
@@ -106,10 +133,11 @@ func runShow(cmd *cobra.Command, idOrPrefix string, asJSON, showContent, noConte
 
 func buildShowJSON(art *store.ArtifactRow, rev *store.RevisionRow, sources []store.SourceRow, links []store.LinkRow, todos []store.TodoRow) map[string]any {
 	obj := map[string]any{
-		"id":     art.ID,
-		"kind":   art.Kind,
-		"title":  art.Title,
-		"status": art.Status,
+		"id":       art.ID,
+		"short_id": art.ShortID,
+		"kind":     art.Kind,
+		"title":    art.Title,
+		"status":   art.Status,
 	}
 	if len(sources) > 0 {
 		obj["source_path"] = sources[0].Path

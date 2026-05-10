@@ -1,4 +1,4 @@
--- DevSpecs v0 schema
+-- DevSpecs v0.1 schema (version 3)
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version    INTEGER PRIMARY KEY,
@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS repos (
   git_current_branch TEXT,
   last_scan_commit   TEXT,
   last_scan_at       TEXT,
+  scanned_by         TEXT,
   created_at         TEXT NOT NULL,
   updated_at         TEXT NOT NULL
 );
@@ -19,6 +20,7 @@ CREATE TABLE IF NOT EXISTS repos (
 CREATE TABLE IF NOT EXISTS artifacts (
   id                  TEXT PRIMARY KEY,
   repo_id             TEXT,
+  short_id            TEXT,
   kind                TEXT NOT NULL,
   title               TEXT NOT NULL,
   status              TEXT NOT NULL DEFAULT 'unknown',
@@ -78,11 +80,22 @@ CREATE TABLE IF NOT EXISTS artifact_todos (
   FOREIGN KEY (revision_id) REFERENCES artifact_revisions(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS artifact_tags (
+  artifact_id TEXT NOT NULL,
+  tag         TEXT NOT NULL,
+  source      TEXT NOT NULL DEFAULT 'frontmatter',
+  created_at  TEXT NOT NULL,
+  PRIMARY KEY (artifact_id, tag),
+  FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_todos_artifact ON artifact_todos(artifact_id);
 CREATE INDEX IF NOT EXISTS idx_todos_revision ON artifact_todos(revision_id);
 CREATE INDEX IF NOT EXISTS idx_sources_identity ON sources(source_identity);
 CREATE INDEX IF NOT EXISTS idx_artifacts_repo ON artifacts(repo_id);
 CREATE INDEX IF NOT EXISTS idx_revisions_artifact ON artifact_revisions(artifact_id);
+CREATE INDEX IF NOT EXISTS idx_tags_tag ON artifact_tags(tag);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_short_id ON artifacts(short_id);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS artifacts_fts USING fts5(
   artifact_id UNINDEXED,

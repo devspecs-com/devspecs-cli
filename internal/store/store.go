@@ -15,6 +15,9 @@ import (
 //go:embed schema.sql
 var schemaDDL string
 
+// SchemaVersion is the current schema version. Bump when schema.sql changes.
+const SchemaVersion = 3
+
 // DB wraps *sql.DB with DevSpecs-specific operations.
 type DB struct {
 	*sql.DB
@@ -48,26 +51,23 @@ func (db *DB) migrate() error {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Record migration version 1 if not present
-	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE version = 1").Scan(&count)
+	var maxVersion int
+	err := db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&maxVersion)
 	if err != nil {
 		return err
 	}
-	if count == 0 {
-		if _, err = db.Exec("INSERT INTO schema_migrations (version, applied_at) VALUES (1, ?)", now); err != nil {
-			return err
-		}
+
+	if maxVersion == 0 {
+		// Fresh DB — record current version
+		_, err = db.Exec("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)", SchemaVersion, now)
+		return err
 	}
 
-	// Migration v2: add freshness columns to repos
-	var v2count int
-	db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE version = 2").Scan(&v2count)
-	if v2count == 0 {
-		// Add columns if they don't exist (safe for both fresh and existing DBs)
-		db.Exec("ALTER TABLE repos ADD COLUMN last_scan_commit TEXT")
-		db.Exec("ALTER TABLE repos ADD COLUMN last_scan_at TEXT")
-		db.Exec("INSERT INTO schema_migrations (version, applied_at) VALUES (2, ?)", now)
+	if maxVersion < SchemaVersion {
+		return fmt.Errorf(
+			"index was created with schema v%d but this CLI requires v%d. Delete ~/.devspecs/devspecs.db and re-run 'ds scan' to rebuild",
+			maxVersion, SchemaVersion,
+		)
 	}
 
 	return nil

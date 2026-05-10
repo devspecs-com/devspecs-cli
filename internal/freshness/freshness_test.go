@@ -63,7 +63,7 @@ func TestCheck_GitFresh(t *testing.T) {
 	cmd.Dir = dir
 	out, _ := cmd.Output()
 	head := string(out[:len(out)-1])
-	db.UpdateScanMeta("r1", head, now)
+	db.UpdateScanMeta("r1", head, "", now)
 
 	status := Check(db, dir)
 	if status == nil {
@@ -80,7 +80,7 @@ func TestCheck_GitStale(t *testing.T) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', ?, ?, ?)", dir, now, now)
-	db.UpdateScanMeta("r1", "oldcommitsha", now)
+	db.UpdateScanMeta("r1", "oldcommitsha", "", now)
 
 	status := Check(db, dir)
 	if status == nil {
@@ -103,7 +103,7 @@ func TestCheck_MtimeFresh(t *testing.T) {
 	db := setupDB(t)
 	now := time.Now().Add(1 * time.Second).UTC().Format(time.RFC3339)
 	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', ?, ?, ?)", dir, now, now)
-	db.UpdateScanMeta("r1", "", now)
+	db.UpdateScanMeta("r1", "", "", now)
 
 	status := Check(db, dir)
 	if status == nil {
@@ -122,7 +122,7 @@ func TestCheck_MtimeStale(t *testing.T) {
 	db := setupDB(t)
 	past := time.Now().Add(-10 * time.Second).UTC().Format(time.RFC3339)
 	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', ?, ?, ?)", dir, past, past)
-	db.UpdateScanMeta("r1", "", past)
+	db.UpdateScanMeta("r1", "", "", past)
 
 	// Write a file after the scan timestamp
 	time.Sleep(10 * time.Millisecond)

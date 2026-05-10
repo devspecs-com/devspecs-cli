@@ -2,6 +2,7 @@
   "body": "# Golden Plan\n\n- [ ] First task\n- [x] Second task\n",
   "id": "\u003cMASKED\u003e",
   "kind": "plan",
+  "short_id": "",
   "source_path": "plan.md",
   "status": "draft",
   "title": "Golden Plan",

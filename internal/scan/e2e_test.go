@@ -52,7 +52,7 @@ func TestE2E_SpecExample(t *testing.T) {
 	}
 
 	// Verify kinds
-	arts, err := db.ListArtifacts("", "", "", "")
+	arts, err := db.ListArtifacts(store.FilterParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
