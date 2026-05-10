@@ -274,7 +274,8 @@ func InferDirectoryTag(relPath string) string {
 		"adr": true, "adrs": true,
 	}
 
-	dir := filepath.Dir(filepath.ToSlash(relPath))
+	normalized := filepath.ToSlash(relPath)
+	dir := filepath.ToSlash(filepath.Dir(normalized))
 	if dir == "." || dir == "" {
 		return ""
 	}

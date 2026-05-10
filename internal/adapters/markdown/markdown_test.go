@@ -262,11 +262,167 @@ func TestInferKind(t *testing.T) {
 		{"specs/api.md", "spec"},
 		{"docs/requirements/auth.md", "requirements"},
 		{"notes/random.md", "markdown_artifact"},
+		{"v0.prd.md", "prd"},
+		{"api.design.md", "design"},
+		{"api.contract.md", "contract"},
+		{"reqs.requirements.md", "requirements"},
+		{".cursor/plans/foo.plan.md", "plan"},
 	}
 	for _, tt := range tests {
 		got := inferKind(tt.path)
 		if got != tt.want {
 			t.Errorf("inferKind(%q) = %q, want %q", tt.path, got, tt.want)
+		}
+	}
+}
+
+func TestDefaultPaths_IncludesDocs(t *testing.T) {
+	paths := defaultPaths()
+	found := false
+	for _, p := range paths {
+		if p == "docs" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("defaultPaths() should include 'docs'")
+	}
+}
+
+func TestRootGlobs_AllPatterns(t *testing.T) {
+	globs := rootGlobs()
+	expected := []string{"*.spec.md", "*.plan.md", "*.prd.md", "*.design.md", "*.contract.md", "*.requirements.md"}
+	if len(globs) != len(expected) {
+		t.Fatalf("expected %d root globs, got %d", len(expected), len(globs))
+	}
+	for i, g := range globs {
+		if g != expected[i] {
+			t.Errorf("rootGlobs[%d] = %q, want %q", i, g, expected[i])
+		}
+	}
+}
+
+func TestDiscover_RootGlobs(t *testing.T) {
+	tmp := t.TempDir()
+	os.WriteFile(filepath.Join(tmp, "v0.prd.md"), []byte("# PRD"), 0o644)
+	os.WriteFile(filepath.Join(tmp, "api.design.md"), []byte("# Design"), 0o644)
+	os.WriteFile(filepath.Join(tmp, "auth.contract.md"), []byte("# Contract"), 0o644)
+	os.WriteFile(filepath.Join(tmp, "reqs.requirements.md"), []byte("# Reqs"), 0o644)
+
+	a := &Adapter{}
+	candidates, err := a.Discover(context.Background(), tmp, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 4 {
+		t.Fatalf("expected 4 root glob candidates, got %d", len(candidates))
+	}
+}
+
+func TestDiscover_DocsDir(t *testing.T) {
+	tmp := t.TempDir()
+	docsDir := filepath.Join(tmp, "docs")
+	os.MkdirAll(docsDir, 0o755)
+	os.WriteFile(filepath.Join(docsDir, "guide.md"), []byte("# Guide"), 0o644)
+
+	a := &Adapter{}
+	candidates, err := a.Discover(context.Background(), tmp, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate from docs/, got %d", len(candidates))
+	}
+	if candidates[0].RelPath != "docs/guide.md" {
+		t.Errorf("expected 'docs/guide.md', got %q", candidates[0].RelPath)
+	}
+}
+
+func TestParseFrontmatterTags_YAMLList(t *testing.T) {
+	fm := map[string]string{"tags": "[auth, v2]"}
+	tags := parseFrontmatterTags(fm)
+	if len(tags) != 2 || tags[0] != "auth" || tags[1] != "v2" {
+		t.Errorf("expected [auth v2], got %v", tags)
+	}
+}
+
+func TestParseFrontmatterTags_CommaSeparated(t *testing.T) {
+	fm := map[string]string{"tags": "auth, v2"}
+	tags := parseFrontmatterTags(fm)
+	if len(tags) != 2 || tags[0] != "auth" || tags[1] != "v2" {
+		t.Errorf("expected [auth v2], got %v", tags)
+	}
+}
+
+func TestParseFrontmatterTags_Labels(t *testing.T) {
+	fm := map[string]string{"labels": "security"}
+	tags := parseFrontmatterTags(fm)
+	if len(tags) != 1 || tags[0] != "security" {
+		t.Errorf("expected [security], got %v", tags)
+	}
+}
+
+func TestParseFrontmatterTags_Empty(t *testing.T) {
+	fm := map[string]string{"tags": ""}
+	tags := parseFrontmatterTags(fm)
+	if len(tags) != 0 {
+		t.Errorf("expected empty, got %v", tags)
+	}
+}
+
+func TestParseFrontmatterTags_NoKey(t *testing.T) {
+	fm := map[string]string{"title": "Test"}
+	tags := parseFrontmatterTags(fm)
+	if len(tags) != 0 {
+		t.Errorf("expected empty, got %v", tags)
+	}
+}
+
+func TestParseFrontmatterTags_Combined(t *testing.T) {
+	fm := map[string]string{"tags": "[auth, v2]", "labels": "security, backend"}
+	tags := parseFrontmatterTags(fm)
+	if len(tags) != 4 {
+		t.Errorf("expected 4 tags, got %v", tags)
+	}
+}
+
+func TestParse_ExtractsTags(t *testing.T) {
+	tmp := t.TempDir()
+	content := "---\ntitle: Tagged Plan\ntags: [auth, v2]\nlabels: security\n---\n# Tagged Plan\n\nBody.\n"
+	path := filepath.Join(tmp, "test.md")
+	os.WriteFile(path, []byte(content), 0o644)
+
+	a := &Adapter{}
+	art, _, _, err := a.Parse(context.Background(), adapters.Candidate{
+		PrimaryPath: path,
+		RelPath:     "plans/test.md",
+		AdapterName: "markdown",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(art.Tags) != 3 {
+		t.Fatalf("expected 3 tags, got %v", art.Tags)
+	}
+}
+
+func TestInferDirectoryTag(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"plans/auth/middleware.plan.md", "auth"},
+		{"plans/billing.md", ""},
+		{"specs/api.md", ""},
+		{"docs/auth/login.md", "auth"},
+		{".cursor/plans/foo.md", ""},
+		{"plans/v2/migration.md", "v2"},
+		{"random.md", ""},
+	}
+	for _, tt := range tests {
+		got := InferDirectoryTag(tt.path)
+		if got != tt.want {
+			t.Errorf("InferDirectoryTag(%q) = %q, want %q", tt.path, got, tt.want)
 		}
 	}
 }
