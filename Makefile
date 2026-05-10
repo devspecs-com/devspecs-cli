@@ -1,4 +1,4 @@
-.PHONY: build test lint cover snapshot clean
+.PHONY: build test lint cover cover-check snapshot clean
 
 BINARY := ds
 MODULE := github.com/devspecs-com/devspecs-cli
@@ -25,6 +25,13 @@ lint:
 cover:
 	go test $(RACE) -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out
+
+# Aggregate statement coverage across ./... (current baseline ~85%). Per-package floors vary.
+cover-check:
+	go test $(RACE) -coverprofile=coverage.out -covermode=atomic ./...
+	@TOTAL=$$(go tool cover -func=coverage.out | awk '/^total:/ { gsub(/%/,"",$$NF); print $$NF }'); \
+	awk -v t="$$TOTAL" 'BEGIN{ exit !(t+0 >= 80.0) }' || { echo "total coverage $$TOTAL% is below 80%"; exit 1; }; \
+	echo "total coverage $$TOTAL% (floor 80%)"
 
 snapshot:
 	goreleaser release --snapshot --clean

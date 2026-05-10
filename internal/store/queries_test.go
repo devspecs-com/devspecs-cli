@@ -699,6 +699,8 @@ func TestResumeArtifacts(t *testing.T) {
 	db.InsertArtifactDirect("ds_R1", "r1", "plan", "Resume Plan", "draft", "rev_1", now)
 	db.Exec("UPDATE artifacts SET short_id = 'abc12345' WHERE id = 'ds_R1'")
 	db.Exec("INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, created_at, updated_at) VALUES ('src_r1', 'ds_R1', 'r1', 'markdown', 'plans/x.md', 'plans/x.md|markdown', ?, ?)", now, now)
+	db.InsertTag("ds_R1", "beta", "manual", now)
+	db.InsertTag("ds_R1", "auth", "manual", now)
 
 	rows, err := db.ResumeArtifacts("/tmp/repo", FilterParams{})
 	if err != nil {
@@ -712,6 +714,70 @@ func TestResumeArtifacts(t *testing.T) {
 	}
 	if rows[0].SourcePath != "plans/x.md" {
 		t.Errorf("source path: want 'plans/x.md', got %q", rows[0].SourcePath)
+	}
+	if rows[0].TagsJoined != "auth, beta" {
+		t.Errorf("tags: want 'auth, beta', got %q", rows[0].TagsJoined)
+	}
+}
+
+func TestResumeArtifacts_DeduplicatesMultipleSources(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/tmp/repo2', ?, ?)", now, now)
+	db.InsertArtifactDirect("ds_MDUP", "r1", "plan", "Dup Sources", "draft", "rev_md", now)
+	db.Exec("INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, created_at, updated_at) VALUES ('s1', 'ds_MDUP', 'r1', 'markdown', 'z-last.md', 'z|md', ?, ?)", now, now)
+	db.Exec("INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, created_at, updated_at) VALUES ('s2', 'ds_MDUP', 'r1', 'markdown', 'a-first.md', 'a|md', ?, ?)", now, now)
+
+	rows, err := db.ResumeArtifacts("/tmp/repo2", FilterParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row (deduped), got %d", len(rows))
+	}
+	if rows[0].SourcePath != "a-first.md" {
+		t.Errorf("MIN(path): want 'a-first.md', got %q", rows[0].SourcePath)
+	}
+}
+
+func TestAssignArtifactShortID_CollisionUsesSuffix(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/tmp', ?, ?)", now, now)
+	db.InsertArtifactDirect("ds_COLA", "r1", "plan", "A", "draft", "rev_a", now)
+	db.InsertArtifactDirect("ds_COLB", "r1", "plan", "B", "draft", "rev_b", now)
+	db.UpdateArtifactShortID("ds_COLA", "deadbeef")
+
+	err := db.AssignArtifactShortID("ds_COLB", "deadbeef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	artB, err := db.GetArtifact("ds_COLB")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artB.ShortID != "deadbeef1" {
+		t.Errorf("after collision want short_id deadbeef1, got %q", artB.ShortID)
+	}
+}
+
+func TestAssignArtifactShortID_SecondCollisionUsesSuffix2(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/tmp', ?, ?)", now, now)
+	db.InsertArtifactDirect("ds_X1", "r1", "plan", "X1", "draft", "rev_1", now)
+	db.InsertArtifactDirect("ds_X2", "r1", "plan", "X2", "draft", "rev_2", now)
+	db.InsertArtifactDirect("ds_X3", "r1", "plan", "X3", "draft", "rev_3", now)
+	db.UpdateArtifactShortID("ds_X1", "cafebabe")
+	db.UpdateArtifactShortID("ds_X2", "cafebabe1")
+
+	err := db.AssignArtifactShortID("ds_X3", "cafebabe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	art, _ := db.GetArtifact("ds_X3")
+	if art.ShortID != "cafebabe2" {
+		t.Errorf("want cafebabe2, got %q", art.ShortID)
 	}
 }
 

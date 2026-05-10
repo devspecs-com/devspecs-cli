@@ -45,11 +45,6 @@ func NewResumeCmd() *cobra.Command {
 	return cmd
 }
 
-var inProgressStatuses = map[string]bool{
-	"implementing": true, "draft": true, "proposed": true,
-	"pending": true, "unknown": true,
-}
-
 var settledStatuses = map[string]bool{
 	"completed": true, "implemented": true, "approved": true,
 	"accepted": true, "rejected": true, "cancelled": true, "superseded": true,
@@ -91,17 +86,15 @@ func runResume(cmd *cobra.Command, fp store.FilterParams, repoName string, asJSO
 
 	for _, r := range rows {
 		observed, _ := time.Parse(time.RFC3339, r.LastObservedAt)
+		terminal := settledStatuses[r.Status]
+		old := !observed.IsZero() && observed.Before(thirtyDays)
 
-		if inProgressStatuses[r.Status] {
-			if !observed.IsZero() && observed.Before(thirtyDays) {
-				stale = append(stale, r)
-			} else {
-				inProgress = append(inProgress, r)
-			}
-		} else if settledStatuses[r.Status] {
+		if terminal {
 			if all || observed.After(fourteenDays) {
 				settled = append(settled, r)
 			}
+		} else if old {
+			stale = append(stale, r)
 		} else {
 			inProgress = append(inProgress, r)
 		}
@@ -171,6 +164,9 @@ func writeInProgressItem(w io.Writer, idx *int, r store.ResumeRow, now time.Time
 	if r.SourcePath != "" {
 		fmt.Fprintf(w, "    Source: %s\n", r.SourcePath)
 	}
+	if line := formatResumeTagsLine(r.TagsJoined); line != "" {
+		fmt.Fprint(w, line)
+	}
 	if r.TotalTodos > 0 {
 		fmt.Fprintf(w, "    Todos:  %d open / %d total\n", r.OpenTodos, r.TotalTodos)
 	}
@@ -188,6 +184,9 @@ func writeSettledItem(w io.Writer, idx *int, r store.ResumeRow, now time.Time) {
 	if r.SourcePath != "" {
 		fmt.Fprintf(w, "    Source: %s\n", r.SourcePath)
 	}
+	if line := formatResumeTagsLine(r.TagsJoined); line != "" {
+		fmt.Fprint(w, line)
+	}
 	fmt.Fprintf(w, "    Settled: %s (%s)\n", relativeTime(observed, now), r.LastObservedAt)
 	fmt.Fprintf(w, "    Next: verify manually, or ds context %s for downstream work\n", sid)
 	*idx++
@@ -202,8 +201,18 @@ func writeStaleItem(w io.Writer, idx *int, r store.ResumeRow, now time.Time) {
 	if r.SourcePath != "" {
 		fmt.Fprintf(w, "    Source: %s\n", r.SourcePath)
 	}
+	if line := formatResumeTagsLine(r.TagsJoined); line != "" {
+		fmt.Fprint(w, line)
+	}
 	fmt.Fprintf(w, "    Last observed: %s — consider archiving or updating\n", relativeTime(observed, now))
 	*idx++
+}
+
+func formatResumeTagsLine(tagsJoined string) string {
+	if strings.TrimSpace(tagsJoined) == "" {
+		return ""
+	}
+	return fmt.Sprintf("    Tags: %s\n", tagsJoined)
 }
 
 func shortOrTruncated(r store.ResumeRow) string {
@@ -256,6 +265,7 @@ func resumeRowsToJSON(rows []store.ResumeRow) []map[string]any {
 			"status":           r.Status,
 			"last_observed_at": r.LastObservedAt,
 			"source_path":      r.SourcePath,
+			"tags":             splitResumeTagsCSV(r.TagsJoined),
 			"total_todos":      r.TotalTodos,
 			"open_todos":       r.OpenTodos,
 		}
@@ -268,4 +278,17 @@ func capSlice(rows []store.ResumeRow, limit int) []store.ResumeRow {
 		return rows
 	}
 	return rows[:limit]
+}
+
+func splitResumeTagsCSV(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(s, ", ") {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

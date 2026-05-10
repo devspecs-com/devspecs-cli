@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,6 +143,49 @@ func TestResume_GroupedOutput(t *testing.T) {
 	if containsStr(output, "Old ADR") {
 		t.Error("old settled artifact should not appear without --all")
 	}
+	if !containsStr(output, "Tags:") || !containsStr(output, "auth") {
+		t.Error("resume output should include Tags line for tagged artifacts")
+	}
+}
+
+func TestResume_OddNonTerminalStatus_GoesToStaleWhenOld(t *testing.T) {
+	repoDir, db := setupV01Env(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	old := time.Now().Add(-40 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	db.Exec("INSERT INTO repos (id, root_path, scanned_by, git_current_branch, created_at, updated_at) VALUES ('r1', ?, 'x', 'main', ?, ?)", repoDir, now, now)
+	ids := idgen.NewFactory()
+	aid := ids.New()
+	db.Exec(`INSERT INTO artifacts (id, repo_id, short_id, kind, title, status, created_at, updated_at, last_observed_at)
+		VALUES (?, 'r1', 'abcdef01', 'plan', 'Odd Status Plan', 'reviewing', ?, ?, ?)`, aid, now, now, old)
+	db.Exec(`INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, created_at, updated_at)
+		VALUES (?, ?, 'r1', 'markdown', 'plans/odd.md', 'plans/odd.md|markdown', ?, ?)`, ids.NewWithPrefix("src_"), aid, now, now)
+	db.Close()
+
+	cmd := NewResumeCmd()
+	cmd.SetArgs([]string{"--no-refresh"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !containsStr(out, "Stale") || !containsStr(out, "Odd Status Plan") {
+		t.Errorf("expected odd non-terminal status in Stale when old; got:\n%s", out)
+	}
+	if idxProg := strings.Index(out, "\nIn Progress ("); idxProg >= 0 {
+		next := len(out)
+		for _, marker := range []string{"\nRecently Settled (", "\nStale ("} {
+			if j := strings.Index(out[idxProg+1:], marker); j >= 0 {
+				at := idxProg + 1 + j
+				if at < next {
+					next = at
+				}
+			}
+		}
+		if strings.Contains(out[idxProg:next], "Odd Status Plan") {
+			t.Error("odd-status stale artifact must not appear in In Progress section")
+		}
+	}
 }
 
 func TestResume_AllFlag(t *testing.T) {
@@ -160,6 +204,47 @@ func TestResume_AllFlag(t *testing.T) {
 
 	if !containsStr(output, "Old ADR") {
 		t.Error("--all should show old settled artifacts")
+	}
+}
+
+func TestResume_JSON_HasTagsPerRow(t *testing.T) {
+	repoDir, db := setupV01Env(t)
+	seedV01Artifacts(t, db, repoDir)
+	db.Close()
+
+	cmd := NewResumeCmd()
+	cmd.SetArgs([]string{"--no-refresh", "--json", "--all"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(buf.Bytes(), &top); err != nil {
+		t.Fatal(err)
+	}
+	var inProg []map[string]any
+	if err := json.Unmarshal(top["in_progress"], &inProg); err != nil || len(inProg) == 0 {
+		t.Fatalf("in_progress: %v", err)
+	}
+	foundAuth := false
+	for _, row := range inProg {
+		rawTags, ok := row["tags"]
+		if !ok || rawTags == nil {
+			continue
+		}
+		tagSlice, ok := rawTags.([]any)
+		if !ok {
+			continue
+		}
+		for _, t := range tagSlice {
+			if s, ok := t.(string); ok && s == "auth" {
+				foundAuth = true
+			}
+		}
+	}
+	if !foundAuth {
+		t.Errorf("expected in_progress JSON rows to include tag auth in tags array; got %#v", inProg)
 	}
 }
 

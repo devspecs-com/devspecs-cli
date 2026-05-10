@@ -72,8 +72,8 @@ func TestOpen_OldSchemaVersion(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for old schema version")
 	}
-	if !contains(err.Error(), "schema v2") {
-		t.Errorf("expected schema version mismatch error, got: %s", err)
+	if !contains(err.Error(), "schema v2") || !contains(err.Error(), "scan --rebuild") {
+		t.Errorf("expected schema version mismatch error mentioning rebuild, got: %s", err)
 	}
 }
 

@@ -218,12 +218,7 @@ func (s *Scanner) replaceTodos(artifactID, revID string, todos []todoparse.Todo,
 }
 
 func (s *Scanner) assignShortID(artifactID, sourceIdentity string) {
-	sid := idgen.ShortID(sourceIdentity)
-	err := s.db.UpdateArtifactShortID(artifactID, sid)
-	if err != nil && strings.Contains(err.Error(), "UNIQUE") {
-		// Collision — append suffix digit
-		s.db.UpdateArtifactShortID(artifactID, sid+"1")
-	}
+	_ = s.db.AssignArtifactShortID(artifactID, idgen.ShortID(sourceIdentity))
 }
 
 func (s *Scanner) replaceTags(artifactID string, art adapters.Artifact, now string) {

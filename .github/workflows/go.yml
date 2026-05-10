@@ -39,6 +39,12 @@ jobs:
       - name: Unit tests
         run: go test -v -race -coverprofile=coverage.out ./...
 
+      - name: Coverage floor (aggregate ≥80%)
+        run: |
+          TOTAL=$(go tool cover -func=coverage.out | awk '/^total:/ { gsub(/%/,"",$NF); print $NF }')
+          awk -v t="$TOTAL" 'BEGIN{ exit !(t+0 >= 80.0) }' || { echo "total coverage ${TOTAL}% is below 80%"; exit 1; }
+          echo "total coverage ${TOTAL}%"
+
       - name: Upload coverage
         uses: actions/upload-artifact@v4
         if: always()

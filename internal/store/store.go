@@ -65,7 +65,7 @@ func (db *DB) migrate() error {
 
 	if maxVersion < SchemaVersion {
 		return fmt.Errorf(
-			"index was created with schema v%d but this CLI requires v%d. Delete ~/.devspecs/devspecs.db and re-run 'ds scan' to rebuild",
+			"index was created with schema v%d but this CLI requires v%d. Run 'ds scan --rebuild' or delete ~/.devspecs/devspecs.db and run 'ds scan' to rebuild",
 			maxVersion, SchemaVersion,
 		)
 	}

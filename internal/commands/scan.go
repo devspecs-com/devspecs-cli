@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,13 +29,14 @@ func NewScanCmd() *cobra.Command {
 		asJSON    bool
 		quiet     bool
 		ifChanged bool
+		rebuild   bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "scan",
 		Short: "Scan repository for specs, plans, and ADRs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged)
+			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild)
 		},
 	}
 
@@ -43,10 +45,11 @@ func NewScanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress all output")
 	cmd.Flags().BoolVar(&ifChanged, "if-changed", false, "Only scan if source paths were touched in the last commit")
+	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "Remove the global index database and create a fresh index (requires re-scan)")
 	return cmd
 }
 
-func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged bool) error {
+func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild bool) error {
 	repoRoot, err := resolveRepoRoot(path)
 	if err != nil {
 		return err
@@ -64,6 +67,15 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged 
 	dbPath, err := config.DBPath()
 	if err != nil {
 		return fmt.Errorf("resolve db: %w", err)
+	}
+
+	if rebuild {
+		if err := os.Remove(dbPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove database for --rebuild: %w", err)
+		}
+		if verbose && !quiet {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Removed existing index for rebuild: %s\n", dbPath)
+		}
 	}
 
 	db, err := store.Open(dbPath)

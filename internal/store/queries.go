@@ -606,11 +606,11 @@ func (db *DB) DeleteAutoTags(artifactID string) error {
 // ResumeArtifacts returns all artifacts for a repo, with todo counts, sorted by last_observed_at DESC.
 func (db *DB) ResumeArtifacts(repoRoot string, fp FilterParams) ([]ResumeRow, error) {
 	query := `SELECT a.id, COALESCE(a.short_id,''), a.kind, a.title, a.status, a.last_observed_at,
-		COALESCE(s.path, ''),
+		COALESCE((SELECT MIN(s.path) FROM sources s WHERE s.artifact_id = a.id), ''),
 		(SELECT COUNT(*) FROM artifact_todos t WHERE t.artifact_id = a.id) as total_todos,
-		(SELECT COUNT(*) FROM artifact_todos t WHERE t.artifact_id = a.id AND t.done = 0) as open_todos
+		(SELECT COUNT(*) FROM artifact_todos t WHERE t.artifact_id = a.id AND t.done = 0) as open_todos,
+		COALESCE((SELECT GROUP_CONCAT(tag, ', ') FROM (SELECT tag FROM artifact_tags at2 WHERE at2.artifact_id = a.id ORDER BY tag)), '')
 	FROM artifacts a
-	LEFT JOIN sources s ON s.artifact_id = a.id
 	JOIN repos r ON a.repo_id = r.id`
 
 	var conditions []string
@@ -647,7 +647,7 @@ func (db *DB) ResumeArtifacts(repoRoot string, fp FilterParams) ([]ResumeRow, er
 	var result []ResumeRow
 	for rows.Next() {
 		var r ResumeRow
-		if err := rows.Scan(&r.ID, &r.ShortID, &r.Kind, &r.Title, &r.Status, &r.LastObservedAt, &r.SourcePath, &r.TotalTodos, &r.OpenTodos); err != nil {
+		if err := rows.Scan(&r.ID, &r.ShortID, &r.Kind, &r.Title, &r.Status, &r.LastObservedAt, &r.SourcePath, &r.TotalTodos, &r.OpenTodos, &r.TagsJoined); err != nil {
 			return nil, err
 		}
 		result = append(result, r)
@@ -666,10 +666,39 @@ type ResumeRow struct {
 	SourcePath     string
 	TotalTodos     int
 	OpenTodos      int
+	TagsJoined     string // comma-separated from SQL GROUP_CONCAT
 }
 
 // UpdateArtifactShortID sets the short_id for an artifact.
 func (db *DB) UpdateArtifactShortID(artifactID, shortID string) error {
 	_, err := db.Exec("UPDATE artifacts SET short_id = ? WHERE id = ?", shortID, artifactID)
 	return err
+}
+
+func isUniqueConstraintErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique constraint failed") ||
+		strings.Contains(msg, "constraint failed") && strings.Contains(msg, "unique")
+}
+
+// AssignArtifactShortID sets short_id to baseShort, or baseShort with a numeric suffix, until UNIQUE succeeds.
+func (db *DB) AssignArtifactShortID(artifactID, baseShort string) error {
+	if baseShort == "" {
+		return fmt.Errorf("empty base short_id")
+	}
+	suffixes := []string{"", "1", "2", "3", "4", "5", "6", "7", "8", "9"}
+	for _, suf := range suffixes {
+		cand := baseShort + suf
+		err := db.UpdateArtifactShortID(artifactID, cand)
+		if err == nil {
+			return nil
+		}
+		if !isUniqueConstraintErr(err) {
+			return err
+		}
+	}
+	return fmt.Errorf("could not assign unique short_id for artifact %s after trying suffixes", artifactID)
 }
