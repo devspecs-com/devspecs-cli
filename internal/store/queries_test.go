@@ -547,3 +547,206 @@ func containsStr(s, sub string) bool {
 	}
 	return false
 }
+
+func TestGetArtifact_ShortID(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/tmp', ?, ?)", now, now)
+	db.InsertArtifactDirect("ds_FULL001", "r1", "plan", "Short ID Test", "draft", "rev_s1", now)
+	db.Exec("UPDATE artifacts SET short_id = 'ab12cd34' WHERE id = 'ds_FULL001'")
+
+	art, err := db.GetArtifact("ab12cd34")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art.ID != "ds_FULL001" {
+		t.Errorf("short_id lookup failed: got %q", art.ID)
+	}
+	if art.ShortID != "ab12cd34" {
+		t.Errorf("short_id field: want 'ab12cd34', got %q", art.ShortID)
+	}
+}
+
+func TestGetArtifact_FullIDStillWorks(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/tmp', ?, ?)", now, now)
+	db.InsertArtifactDirect("ds_FULL002", "r1", "spec", "Full ID Test", "draft", "rev_s2", now)
+	db.Exec("UPDATE artifacts SET short_id = 'ef56gh78' WHERE id = 'ds_FULL002'")
+
+	art, err := db.GetArtifact("ds_FULL002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art.ID != "ds_FULL002" {
+		t.Errorf("full ID lookup failed: got %q", art.ID)
+	}
+}
+
+func TestTagCRUD(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/tmp', ?, ?)", now, now)
+	db.InsertArtifactDirect("ds_TAG1", "r1", "plan", "Tagged", "draft", "rev_t1", now)
+
+	// Insert tags
+	db.InsertTag("ds_TAG1", "auth", "frontmatter", now)
+	db.InsertTag("ds_TAG1", "v2", "manual", now)
+	db.InsertTag("ds_TAG1", "inferred-dir", "inferred", now)
+
+	tags, err := db.GetTagsForArtifact("ds_TAG1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tags) != 3 {
+		t.Fatalf("expected 3 tags, got %d", len(tags))
+	}
+
+	// Delete manual tag
+	db.DeleteTag("ds_TAG1", "v2")
+	tags, _ = db.GetTagsForArtifact("ds_TAG1")
+	if len(tags) != 2 {
+		t.Errorf("expected 2 tags after delete, got %d", len(tags))
+	}
+
+	// Delete auto tags (frontmatter + inferred)
+	db.DeleteAutoTags("ds_TAG1")
+	tags, _ = db.GetTagsForArtifact("ds_TAG1")
+	if len(tags) != 0 {
+		t.Errorf("expected 0 tags after DeleteAutoTags, got %d", len(tags))
+	}
+}
+
+func TestInsertTag_DuplicateIsNoOp(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/tmp', ?, ?)", now, now)
+	db.InsertArtifactDirect("ds_DUP1", "r1", "plan", "Dup", "draft", "rev_d1", now)
+
+	err := db.InsertTag("ds_DUP1", "auth", "manual", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Second insert should be no-op
+	err = db.InsertTag("ds_DUP1", "auth", "manual", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tags, _ := db.GetTagsForArtifact("ds_DUP1")
+	if len(tags) != 1 {
+		t.Errorf("expected 1 tag (no duplicate), got %d", len(tags))
+	}
+}
+
+func TestListArtifacts_FilterByTag(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/tmp', ?, ?)", now, now)
+	db.InsertArtifactDirect("ds_T1", "r1", "plan", "Auth Plan", "draft", "rev_1", now)
+	db.InsertArtifactDirect("ds_T2", "r1", "spec", "Other Spec", "draft", "rev_2", now)
+	db.InsertTag("ds_T1", "auth", "manual", now)
+
+	arts, _ := db.ListArtifacts(FilterParams{Tag: "auth"})
+	if len(arts) != 1 || arts[0].ID != "ds_T1" {
+		t.Errorf("expected 1 artifact with tag auth, got %+v", arts)
+	}
+
+	arts, _ = db.ListArtifacts(FilterParams{Tag: "nonexistent"})
+	if len(arts) != 0 {
+		t.Errorf("expected 0 artifacts for nonexistent tag, got %d", len(arts))
+	}
+}
+
+func TestListArtifacts_FilterByBranch(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec("INSERT INTO repos (id, root_path, git_current_branch, created_at, updated_at) VALUES ('r1', '/tmp', 'main', ?, ?)", now, now)
+	db.InsertArtifactDirect("ds_B1", "r1", "plan", "Main Plan", "draft", "rev_1", now)
+
+	arts, _ := db.ListArtifacts(FilterParams{Branch: "main"})
+	if len(arts) != 1 {
+		t.Errorf("expected 1 artifact on branch main, got %d", len(arts))
+	}
+
+	arts, _ = db.ListArtifacts(FilterParams{Branch: "feature"})
+	if len(arts) != 0 {
+		t.Errorf("expected 0 artifacts on branch feature, got %d", len(arts))
+	}
+}
+
+func TestListArtifacts_FilterByUser(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec("INSERT INTO repos (id, root_path, scanned_by, created_at, updated_at) VALUES ('r1', '/tmp', 'brenn', ?, ?)", now, now)
+	db.InsertArtifactDirect("ds_U1", "r1", "plan", "User Plan", "draft", "rev_1", now)
+
+	arts, _ := db.ListArtifacts(FilterParams{User: "brenn"})
+	if len(arts) != 1 {
+		t.Errorf("expected 1 artifact for user brenn, got %d", len(arts))
+	}
+
+	arts, _ = db.ListArtifacts(FilterParams{User: "other"})
+	if len(arts) != 0 {
+		t.Errorf("expected 0 artifacts for user other, got %d", len(arts))
+	}
+}
+
+func TestResumeArtifacts(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/tmp/repo', ?, ?)", now, now)
+	db.InsertArtifactDirect("ds_R1", "r1", "plan", "Resume Plan", "draft", "rev_1", now)
+	db.Exec("UPDATE artifacts SET short_id = 'abc12345' WHERE id = 'ds_R1'")
+	db.Exec("INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, created_at, updated_at) VALUES ('src_r1', 'ds_R1', 'r1', 'markdown', 'plans/x.md', 'plans/x.md|markdown', ?, ?)", now, now)
+
+	rows, err := db.ResumeArtifacts("/tmp/repo", FilterParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 resume row, got %d", len(rows))
+	}
+	if rows[0].ShortID != "abc12345" {
+		t.Errorf("short_id: want 'abc12345', got %q", rows[0].ShortID)
+	}
+	if rows[0].SourcePath != "plans/x.md" {
+		t.Errorf("source path: want 'plans/x.md', got %q", rows[0].SourcePath)
+	}
+}
+
+func TestUpdateArtifactShortID(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/tmp', ?, ?)", now, now)
+	db.InsertArtifactDirect("ds_SID1", "r1", "plan", "SID Test", "draft", "rev_1", now)
+
+	err := db.UpdateArtifactShortID("ds_SID1", "deadbeef")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	art, _ := db.GetArtifact("deadbeef")
+	if art == nil || art.ID != "ds_SID1" {
+		t.Error("UpdateArtifactShortID failed")
+	}
+}
+
+func TestUpdateScanMeta_WithUser(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/tmp/x', ?, ?)", now, now)
+
+	db.UpdateScanMeta("r1", "abc123", "brenn", now)
+
+	meta := db.GetRepoByRoot("/tmp/x")
+	if meta == nil {
+		t.Fatal("expected repo meta")
+	}
+	if meta.ScannedBy != "brenn" {
+		t.Errorf("scanned_by: want 'brenn', got %q", meta.ScannedBy)
+	}
+	if meta.LastScanCommit != "abc123" {
+		t.Errorf("last_scan_commit: want 'abc123', got %q", meta.LastScanCommit)
+	}
+}
