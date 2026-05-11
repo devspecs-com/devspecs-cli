@@ -45,6 +45,93 @@ sources:
 	}
 }
 
+func setupEmptyScanBareRepo(t *testing.T) {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
+	repoDir := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+}
+
+func TestScan_EmptyArtifacts_NoCandidates_HumanGenericPlans(t *testing.T) {
+	setupEmptyScanBareRepo(t)
+	initCmd := NewInitCmd()
+	initCmd.SetOut(&bytes.Buffer{})
+	if err := initCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	wd, _ := os.Getwd()
+	writeMisconfiguredSources(t, wd)
+
+	scanCmd := NewScanCmd()
+	var buf bytes.Buffer
+	scanCmd.SetOut(&buf)
+	if err := scanCmd.Execute(); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "No artifacts found in configured paths.") {
+		t.Fatalf("expected empty-scan header, got:\n%s", out)
+	}
+	if strings.Contains(out, "Possible candidates:") {
+		t.Fatalf("did not expect candidate list when none on disk, got:\n%s", out)
+	}
+	if !strings.Contains(out, "No on-disk candidate directories matched built-in heuristics.") {
+		t.Fatalf("expected no-candidates message, got:\n%s", out)
+	}
+	if !strings.Contains(out, "ds config add-source markdown plans") {
+		t.Fatalf("expected generic plans example, got:\n%s", out)
+	}
+}
+
+func TestScan_EmptyArtifacts_NoCandidates_JSONOmitsHintsKey(t *testing.T) {
+	setupEmptyScanBareRepo(t)
+	initCmd := NewInitCmd()
+	initCmd.SetOut(&bytes.Buffer{})
+	if err := initCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	wd, _ := os.Getwd()
+	writeMisconfiguredSources(t, wd)
+
+	scanCmd := NewScanCmd()
+	scanCmd.SetArgs([]string{"--json"})
+	var buf bytes.Buffer
+	scanCmd.SetOut(&buf)
+	if err := scanCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(buf.Bytes(), &top); err != nil {
+		t.Fatalf("json: %v\n%s", err, buf.String())
+	}
+	if _, ok := top["hints"]; ok {
+		t.Fatalf("expected hints key omitted when no candidates, got keys: %v", keysOfRawMap(top))
+	}
+	var found map[string]int
+	if err := json.Unmarshal(top["Found"], &found); err != nil {
+		t.Fatal(err)
+	}
+	if found["markdown"] != 0 || found["openspec"] != 0 || found["adr"] != 0 {
+		t.Fatalf("expected zero Found, got %#v", found)
+	}
+}
+
+func keysOfRawMap(m map[string]json.RawMessage) []string {
+	ks := make([]string, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
+	}
+	return ks
+}
+
 func TestScan_EmptyArtifacts_HumanHintsAndExit0(t *testing.T) {
 	setupEmptyScanRepo(t)
 	initCmd := NewInitCmd()

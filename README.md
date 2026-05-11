@@ -116,7 +116,7 @@ ds config show               # effective discovery paths
 
 ### Scan summaries (`ds scan`)
 
-Human **`ds scan`** lists **Planning docs**, **OpenSpec**, and **ADRs** — friendly labels for the internal pipelines **`markdown`**, **`openspec`**, and **`adr`** (same values in config and the database). Multiple markdown layouts (Cursor plans, Spec Kit, BMAD, generic plans) roll up under **Planning docs**; per-layout counts appear as **`formats`** (by **`format_profile`**). **`ds scan --json`** keeps the **`Found`** map and adds **`sources_breakdown`** with `source_type`, `label`, `count`, and `formats`. When **every adapter indexes zero artifacts**, human output switches to a short **recovery** message (bounded on-disk candidates + a sample **`ds config add-source …`** line); **`--json`** then includes a **`hints`** array (`path`, `source_type`, `suggest_command`). **`--quiet`** suppresses that human recovery block but still exits **0**; **`--json`** output is unchanged by **`--quiet`**.
+Human **`ds scan`** lists **Planning docs**, **OpenSpec**, and **ADRs** — friendly labels for the internal pipelines **`markdown`**, **`openspec`**, and **`adr`** (same values in config and the database). Multiple markdown layouts (Cursor plans, Spec Kit, BMAD, generic plans) roll up under **Planning docs**; per-layout counts appear as **`formats`** (by **`format_profile`**). **`ds scan --json`** keeps the **`Found`** map and adds **`sources_breakdown`** with `source_type`, `label`, `count`, and `formats`. When **every adapter indexes zero artifacts**, human output switches to a short **recovery** message (bounded on-disk candidates when any exist, otherwise a generic **`ds config add-source markdown plans`** example); **`--json`** may include a **`hints`** array (`path`, `source_type`, `suggest_command`) when at least one candidate directory exists — if there are **no** candidates, the **`hints`** field is **omitted** (`encoding/json` **`omitempty`** on an empty slice), not emitted as `"hints": []`. **`--quiet`** suppresses that human recovery block but still exits **0**; **`--json`** output is unchanged by **`--quiet`**.
 
 ```bash
 ds scan
@@ -208,7 +208,7 @@ ds scan --rebuild    # Delete global DB, then open & scan
 
 Use **`ds scan --rebuild`** when the on-disk schema no longer matches this CLI (there are no automatic migrations).
 
-If configured paths yield **no** artifacts, the CLI runs a **bounded** on-disk pass (respecting the same **`.gitignore` / exclude / `.aiignore`** rules as scanning) and prints up to a fixed number of candidate directories plus an example **`ds config add-source`** command — still **exit 0**.
+If configured paths yield **no** artifacts, the CLI runs a **bounded** on-disk pass (respecting the same **`.gitignore` / exclude / `.aiignore`** rules as scanning) and prints up to a fixed number of candidate directories plus an example **`ds config add-source`** command when candidates exist; otherwise it prints a generic **`ds config add-source markdown plans`** line — still **exit 0**. On **`ds scan --json`**, the **`hints`** field follows **`omitempty`**: present only when the candidate list is non-empty.
 
 ### `ds resume`
 

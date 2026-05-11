@@ -149,6 +149,10 @@ func scanTotalFound(r *scan.Result) int {
 
 func attachScanHints(result *scan.Result, repoRoot string, m *ignore.Matcher) {
 	cands := discover.ScanHintCandidates(repoRoot, m)
+	if len(cands) == 0 {
+		result.Hints = nil
+		return
+	}
 	result.Hints = make([]scan.ScanHint, 0, len(cands))
 	for _, c := range cands {
 		result.Hints = append(result.Hints, scan.ScanHint{

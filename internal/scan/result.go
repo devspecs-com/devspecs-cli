@@ -31,7 +31,8 @@ type sourceAgg struct {
 //   - "Found": map of adapter/source pipeline name → count of successfully indexed artifacts
 //   - "sources_breakdown": array of { source_type, label, count, formats }
 //   - "New", "Updated", "Unchanged": revision outcomes
-//   - "hints": only when all adapters indexed zero artifacts — bounded recovery suggestions
+//   - "hints": optional; only when all adapters indexed zero artifacts AND at least one hint
+//     candidate exists. Empty candidate list omits the key (encoding/json omitempty on []ScanHint).
 type Result struct {
 	Found            map[string]int       `json:"Found"`
 	SourcesBreakdown []SourceBreakdownRow `json:"sources_breakdown"`
