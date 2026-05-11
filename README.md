@@ -114,6 +114,10 @@ ds config show               # effective discovery paths
 5. **`ds todos`** / **`ds resume`** — Triage checklist items and lifecycle-oriented “where was I?” views.
 6. **`ds context <id>`** — Export a single artifact’s context for tools or agents.
 
+### Scan summaries (`ds scan`)
+
+Human **`ds scan`** lists **Planning docs**, **OpenSpec**, and **ADRs** — friendly labels for the internal pipelines **`markdown`**, **`openspec`**, and **`adr`** (same values in config and the database). Multiple markdown layouts (Cursor plans, Spec Kit, BMAD, generic plans) roll up under **Planning docs**; per-layout counts appear as **`formats`** (by **`format_profile`**). **`ds scan --json`** keeps the **`Found`** map and adds **`sources_breakdown`** with `source_type`, `label`, `count`, and `formats`.
+
 ```bash
 ds scan
 ds list
