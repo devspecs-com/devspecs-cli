@@ -107,6 +107,19 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 	}
 
 	tags := parseFrontmatterTags(fm)
+	tags = mergeStringSlicesUnique(tags, frontmatterToolTags(fm))
+
+	pathTags, pathGen := pathGeneratorHints(c.RelPath)
+	tags = mergeStringSlicesUnique(tags, pathTags)
+
+	extracted := make(map[string]any)
+	genExtract := pickGeneratorExtract(fm, pathGen)
+	if genExtract != "" {
+		extracted["generator"] = genExtract
+	}
+	if len(fm) > 0 {
+		extracted["frontmatter"] = fm
+	}
 
 	art := adapters.Artifact{
 		SourceIdentity: c.RelPath + "|markdown",
@@ -115,12 +128,8 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 		Status:         status,
 		PrimaryPath:    c.PrimaryPath,
 		Body:           body,
-		Extracted:      make(map[string]any),
+		Extracted:      extracted,
 		Tags:           tags,
-	}
-
-	if len(fm) > 0 {
-		art.Extracted["frontmatter"] = fm
 	}
 
 	src := adapters.Source{
@@ -135,7 +144,10 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 }
 
 func defaultPaths() []string {
-	return []string{"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans", "docs"}
+	return []string{
+		"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans", "docs",
+		"_bmad-output", ".specify/memory",
+	}
 }
 
 func rootGlobs() []string {
@@ -244,6 +256,77 @@ func inferKind(relPath string) string {
 	}
 }
 
+func mergeStringSlicesUnique(base []string, extra []string) []string {
+	seen := make(map[string]bool)
+	out := append([]string{}, base...)
+	for _, s := range out {
+		seen[s] = true
+	}
+	for _, s := range extra {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
+func slugFromToolName(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if s == "" {
+		return ""
+	}
+	s = strings.ReplaceAll(s, "_", "-")
+	s = strings.ReplaceAll(s, " ", "-")
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	return strings.Trim(s, "-")
+}
+
+func frontmatterToolTags(fm map[string]string) []string {
+	var tags []string
+	for _, key := range []string{"generator", "tool", "source"} {
+		if v := strings.TrimSpace(fm[key]); v != "" {
+			if slug := slugFromToolName(v); slug != "" {
+				tags = append(tags, slug)
+			}
+		}
+	}
+	return mergeStringSlicesUnique(nil, tags)
+}
+
+func pickGeneratorExtract(fm map[string]string, pathGen string) string {
+	for _, key := range []string{"generator", "tool", "source"} {
+		if v := strings.TrimSpace(fm[key]); v != "" {
+			return v
+		}
+	}
+	return pathGen
+}
+
+// pathGeneratorHints derives framework tags and Extracted["generator"] hint text from relPath.
+func pathGeneratorHints(relPath string) (tags []string, generator string) {
+	norm := filepath.ToSlash(relPath)
+
+	if strings.Contains(norm, "_bmad-output/") {
+		return []string{"bmad"}, "bmad-method"
+	}
+
+	dir := filepath.ToSlash(filepath.Dir(norm))
+	base := filepath.Base(norm)
+	if base == "spec.md" && strings.HasPrefix(dir, "specs/") && len(dir) > len("specs/") {
+		return []string{"speckit"}, "speckit"
+	}
+
+	if strings.Contains(norm, ".cursor/plans/") {
+		return []string{"cursor"}, "cursor-plan"
+	}
+
+	return nil, ""
+}
+
 // parseFrontmatterTags extracts tags from frontmatter "tags" and "labels" keys.
 // Supports: [auth, v2], auth, v2 (comma-separated), and single values.
 func parseFrontmatterTags(fm map[string]string) []string {
@@ -272,6 +355,9 @@ func InferDirectoryTag(relPath string) string {
 		"plans": true, "specs": true, "docs": true,
 		".cursor": true, "openspec": true, "changes": true,
 		"adr": true, "adrs": true,
+		"_bmad-output": true, "planning-artifacts": true, "implementation-artifacts": true,
+		"checklists": true, "contracts": true,
+		".specify": true,
 	}
 
 	normalized := filepath.ToSlash(relPath)
@@ -285,7 +371,22 @@ func InferDirectoryTag(relPath string) string {
 		if p == "" || genericDirs[p] {
 			continue
 		}
+		if isSpeckitFeatureSegment(p) {
+			continue
+		}
 		return p
 	}
 	return ""
+}
+
+func isSpeckitFeatureSegment(seg string) bool {
+	if len(seg) < 5 {
+		return false
+	}
+	for i := 0; i < 3 && i < len(seg); i++ {
+		if seg[i] < '0' || seg[i] > '9' {
+			return false
+		}
+	}
+	return seg[3] == '-'
 }

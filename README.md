@@ -141,9 +141,27 @@ ds todos --json      # JSON output
 |---------|---------------|------|
 | OpenSpec | `openspec/changes/<id>/proposal.md` | `openspec_change` |
 | ADR | `docs/adr/*.md`, `docs/adrs/*.md`, `adr/*.md`, `adrs/*.md`, `architecture/decisions/*.md` | `adr` |
-| Markdown | Recursive `.md` under repo-root dirs (defaults): `specs`, `docs/specs`, `plans`, `docs/plans`, `.cursor/plans`, `docs`; plus repo-root globs `*.spec.md`, `*.plan.md`, `*.prd.md`, `*.design.md`, `*.contract.md`, `*.requirements.md` | `plan`, `spec`, `prd`, `design`, `contract`, `requirements`, `markdown_artifact`, … (from path/filename + optional frontmatter `kind`) |
+| Markdown | Recursive `.md` under repo-root dirs (defaults): `specs`, `docs/specs`, `plans`, `docs/plans`, `.cursor/plans`, `docs`, **`_bmad-output`** (BMAD artifacts), **`.specify/memory`** (Spec Kit constitution/memory); plus repo-root globs `*.spec.md`, `*.plan.md`, `*.prd.md`, `*.design.md`, `*.contract.md`, `*.requirements.md` | `plan`, `spec`, `prd`, `design`, `contract`, `requirements`, `markdown_artifact`, … (from path/filename + optional frontmatter `kind`) |
 
-Tags may come from YAML frontmatter (`tags` / `labels`), directory segments outside generic folders (see adapter), or `ds tag`.
+Tags may come from YAML frontmatter (`tags` / `labels`), directory segments outside generic folders (see adapter), **`ds tag`**, or **framework hints**: paths under `_bmad-output/` add tag **`bmad`** and `extracted.generator` **`bmad-method`**; `specs/<feature>/spec.md` (GitHub Spec Kit layout) adds tag **`speckit`** and `extracted.generator` **`speckit`**; files under `.cursor/plans/` add tag **`cursor`** and `extracted.generator` **`cursor-plan`**. Optional frontmatter keys **`generator`**, **`tool`**, and **`source`** add a normalized slug tag and set `extracted.generator` to the first non-empty value among those keys (trimmed).
+
+Regression fixtures for these layouts live under [`testdata/samples/`](testdata/samples/) (`bmad`, `specify`, `cursor`, `claude`, `codex`).
+
+### Root glob vs `PLAN.md`
+
+Markdown discovery uses repo-root globs such as **`*.plan.md`**. On **case-sensitive** filesystems (typical Linux CI), that pattern does **not** match an all-caps filename **`PLAN.md`**. Prefer **`plans/PLAN.md`** (discovered via the `plans/` tree), **`*.plan.md`-style naming**, or an explicit markdown source path in config—rather than relying on a root-level `PLAN.md` glob.
+
+### Maintaining fixture samples
+
+To refresh committed previews under `testdata/samples/` after tooling changes:
+
+- **GitHub Spec Kit (Specify)**  
+  Install the Specify CLI per [spec-kit](https://github.com/github/spec-kit), then from an empty or scratch directory run `specify init <project-dir>` or `specify init --here` (see project docs for `--integration` flags). Copy the resulting tree (especially `specs/`, `.specify/` as needed) into `testdata/samples/specify/`. Agent workflows such as `/speckit.specify` and `/speckit.plan` regenerate feature markdown under `specs/<feature>/`.
+
+- **BMAD Method**  
+  Run `npx bmad-method install` in a disposable folder, complete workflows (for example `bmad-create-prd`, `bmad-create-architecture`), then copy **`_bmad-output/planning-artifacts/`** (and optionally other `_bmad-output` subtrees you want indexed) into `testdata/samples/bmad/`. Large **`_bmad/`** agent bundles are optional for CLI regression tests; indexing focuses on `_bmad-output`.
+
+After refreshing fixtures, run `go test ./internal/adapters/markdown/... -count=1` to satisfy sample-backed assertions.
 
 ## Configuration
 
@@ -167,6 +185,8 @@ sources:
       - docs/plans
       - .cursor/plans
       - docs
+      - _bmad-output
+      - .specify/memory
 ```
 
 ## Schema

@@ -28,7 +28,10 @@ func DefaultRepoConfig() *RepoConfig {
 		Sources: []SourceConfig{
 			{Type: "openspec", Path: "openspec"},
 			{Type: "adr", Paths: []string{"docs/adr", "docs/adrs", "adr", "adrs"}},
-			{Type: "markdown", Paths: []string{"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans", "docs"}},
+			{Type: "markdown", Paths: []string{
+				"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans", "docs",
+				"_bmad-output", ".specify/memory",
+			}},
 		},
 	}
 }
