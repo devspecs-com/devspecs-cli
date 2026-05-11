@@ -86,8 +86,8 @@ Example (illustrative — IDs and titles depend on your repo):
 
 ```text
 $ ds list
-  abcdef01  Resize hook rollout           plan    implementing  plans/resize-hook.md
-  23456789  Auth middleware ADR           adr     proposed      docs/adr/0003-auth.md
+  abcdef01  plan   -            implementing  Resize hook rollout
+  23456789  decision  adr      proposed      Auth middleware ADR
 
 $ ds show abcdef01
   Title: Resize hook rollout
@@ -108,7 +108,7 @@ ds config show               # effective discovery paths
 
 ## Core workflow
 
-1. **`ds init`** — Creates the global index location `~/.devspecs` (overridable) and repo **`.devspecs/config.yaml`**. In a Git worktree, config is written at the **repository root** (not necessarily your current working directory). By default, init runs **layout detection** and merges high-confidence paths into the YAML; use **`--no-detect`** for defaults only. **`--yes`** / **`--non-interactive`** are aliases for scripting (init never prompts in v0.1).
+1. **`ds init`** — Creates the global index location `~/.devspecs` (overridable) and repo **`.devspecs/config.yaml`**. In a Git worktree, config is written at the **repository root** (not necessarily your current working directory). In an interactive terminal (stdin and stdout are both TTYs), init runs a **workflow profile** picker first (merge paths and rules for common layouts), then **layout detection** merges additional paths into the YAML unless you pass **`--no-detect`**. Use **`--yes`** or **`--non-interactive`** to skip the profile picker (CI and scripts).
 2. **`ds scan`** — Walks adapters and upserts artifacts, revisions, sources, todos, criteria, and tags.
 3. **`ds list`** / **`ds find`** — Browse or search what was indexed.
 4. **`ds show <id>`** — Full detail; accepts full ID, **short ID**, or prefix.
@@ -183,6 +183,8 @@ These flags narrow results by repo basename, tag, git branch, or scanned-by user
 
 **`--repo`**, **`--tag`**, **`--branch`**, **`--user`**
 
+For **`list`** and **`find`**, you can also filter by **`--kind`** and **`--subtype`** on indexed artifacts.
+
 They apply to **`list`**, **`find`**, **`todos`**, **`criteria`**, and **`resume`**. For **`--repo`**, pass the directory **basename** (e.g. `my-app`), not a full path.
 
 ### `ds init`
@@ -190,11 +192,13 @@ They apply to **`list`**, **`find`**, **`todos`**, **`criteria`**, and **`resume
 Creates **`~/.devspecs/devspecs.db`** (global index) and **`.devspecs/config.yaml`** (repo config).
 
 ```bash
-ds init                      # First-time setup (with layout detection)
+ds init                      # Interactive profile picker + layout detection (TTY); non-TTY skips the picker
+ds init --yes                # Skip profile picker; layout detection still runs unless --no-detect
 ds init --no-detect          # Defaults-only YAML (no discovery merge)
 ds init --force              # Overwrite existing config
-ds init --yes                # Same as default; for CI scripts (alias: --non-interactive)
 ```
+
+Canonical **`kind`** values include **`plan`**, **`spec`**, **`requirements`**, **`design`**, **`contract`**, **`decision`**, **`markdown_artifact`**. Optional **`subtype`** distinguishes variants (for example **`openspec_change`**, **`adr`**, **`prd`**). **`ds list`** and **`ds find`** human output includes a **SUBTYPE** column; filter with **`--subtype`** (with **`--kind`**). Under **`sources`** → **`markdown`**, optional **`rules`** map path globs to **`kind`** / **`subtype`** (see `.devspecs/config.yaml`).
 
 **Ignore stack (scan + discovery):** from the repository root, patterns are read in order from **`.gitignore`**, **`.git/info/exclude`** (when `.git` exists), then repo-root **`.aiignore`** (gitignore-like syntax, including `!` negation where the matcher supports it). **`ds scan`** applies the same rules to configured markdown and ADR directory walks. **`ds scan --verbose`** prints a one-line reminder on stderr. **`.cursorignore`** is not read in v0.1.
 
@@ -257,9 +261,9 @@ Honors **`--repo`**, **`--tag`**, **`--branch`**, **`--user`** when listing acro
 
 | Adapter | Detected paths | Kind |
 |---------|---------------|------|
-| OpenSpec | `openspec/changes/<id>/proposal.md` | `openspec_change` |
-| ADR | `docs/adr/*.md`, `docs/adrs/*.md`, `adr/*.md`, `adrs/*.md`, `architecture/decisions/*.md` | `adr` |
-| Markdown | Recursive `.md` under defaults: `specs`, `docs/specs`, `plans`, `docs/plans`, `.cursor/plans`, `docs`, **`_bmad-output`**, **`.specify/memory`**; plus repo-root globs `*.spec.md`, `*.plan.md`, `*.prd.md`, `*.design.md`, `*.contract.md`, `*.requirements.md` | `plan`, `spec`, `prd`, `design`, `contract`, `requirements`, `markdown_artifact`, … |
+| OpenSpec | `openspec/changes/<id>/proposal.md` | `spec` (`subtype`: `openspec_change`) |
+| ADR | `docs/adr/*.md`, `docs/adrs/*.md`, `adr/*.md`, `adrs/*.md`, `architecture/decisions/*.md` | `decision` (`subtype`: `adr`) |
+| Markdown | Recursive `.md` under defaults: `specs`, `docs/specs`, `plans`, `docs/plans`, `.cursor/plans`, `docs`, **`_bmad-output`**, **`.specify/memory`**; plus repo-root globs `*.spec.md`, `*.plan.md`, `*.prd.md`, `*.design.md`, `*.contract.md`, `*.requirements.md` | `plan`, `spec`, `requirements`, `design`, `contract`, `markdown_artifact`, … (optional **`subtype`** e.g. **`prd`**) |
 
 Tags may come from YAML **`tags`** / **`labels`**, directory inference, **`ds tag`**, or **path hints**: **`bmad`** / **`bmad-method`** under `_bmad-output/`; **`speckit`** for `specs/<feature>/spec.md`; **`cursor`** / **`cursor-plan`** under `.cursor/plans/`. Optional frontmatter **`generator`**, **`tool`**, **`source`** add slug tags and **`extracted.generator`**.
 

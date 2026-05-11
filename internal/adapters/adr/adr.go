@@ -71,7 +71,8 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 
 	art := adapters.Artifact{
 		SourceIdentity: c.RelPath + "|adr",
-		Kind:           "adr",
+		Kind:           config.KindDecision,
+		Subtype:        config.SubtypeADR,
 		Title:          title,
 		Status:         status,
 		PrimaryPath:    c.PrimaryPath,

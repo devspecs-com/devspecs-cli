@@ -14,6 +14,7 @@ import (
 func NewListCmd() *cobra.Command {
 	var (
 		kind       string
+		subtype    string
 		status     string
 		sourceType string
 		tag        string
@@ -30,7 +31,7 @@ func NewListCmd() *cobra.Command {
 		Short:   "List indexed artifacts",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fp := store.FilterParams{
-				Kind: kind, Status: status, SourceType: sourceType,
+				Kind: kind, Subtype: subtype, Status: status, SourceType: sourceType,
 				Tag: tag, Branch: branch, User: user,
 			}
 			return runList(cmd, fp, repoName, asJSON, noRefresh)
@@ -38,6 +39,7 @@ func NewListCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&kind, "kind", "", "Filter by kind")
+	cmd.Flags().StringVar(&subtype, "subtype", "", "Filter by subtype")
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status")
 	cmd.Flags().StringVar(&sourceType, "source", "", "Filter by source type")
 	cmd.Flags().StringVar(&tag, "tag", "", "Filter by tag")
@@ -75,7 +77,7 @@ func runList(cmd *cobra.Command, fp store.FilterParams, repoName string, asJSON,
 
 	out := cmd.OutOrStdout()
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "ID\tKIND\tSTATUS\tTITLE\n")
+	fmt.Fprintf(w, "ID\tKIND\tSUBTYPE\tSTATUS\tTITLE\n")
 	for _, a := range artifacts {
 		displayID := a.ShortID
 		if displayID == "" {
@@ -84,7 +86,11 @@ func runList(cmd *cobra.Command, fp store.FilterParams, repoName string, asJSON,
 				displayID = displayID[:13] + "..."
 			}
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", displayID, a.Kind, a.Status, a.Title)
+		sub := a.Subtype
+		if sub == "" {
+			sub = "-"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", displayID, a.Kind, sub, a.Status, a.Title)
 	}
 	w.Flush()
 	return nil

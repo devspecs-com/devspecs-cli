@@ -40,6 +40,11 @@ func New(db *store.DB, ids *idgen.Factory, adpts []adapters.Adapter) *Scanner {
 
 // Run scans the repo at repoRoot, using config if available.
 func (s *Scanner) Run(ctx context.Context, repoRoot string, cfg *config.RepoConfig) (*Result, error) {
+	if cfg != nil {
+		if err := config.ValidateRepoConfig(cfg); err != nil {
+			return nil, fmt.Errorf("repo config: %w", err)
+		}
+	}
 	adapterNames := make([]string, 0, len(s.adapters))
 	for _, a := range s.adapters {
 		adapterNames = append(adapterNames, a.Name())
@@ -167,8 +172,8 @@ func (s *Scanner) upsertArtifact(repoRoot, repoID, adapterName string, art adapt
 	if err := s.insertRevision(revID, artifactID, contentHash, art.Body, art.Extracted, now); err != nil {
 		return err
 	}
-	s.db.Exec("UPDATE artifacts SET current_revision_id = ?, title = ?, status = ?, kind = ?, updated_at = ? WHERE id = ?",
-		revID, art.Title, art.Status, art.Kind, now, artifactID)
+	s.db.Exec("UPDATE artifacts SET current_revision_id = ?, title = ?, status = ?, kind = ?, subtype = ?, updated_at = ? WHERE id = ?",
+		revID, art.Title, art.Status, art.Kind, art.Subtype, now, artifactID)
 	if err := s.replaceTodos(artifactID, revID, pr.Todos, now); err != nil {
 		return err
 	}
@@ -193,9 +198,9 @@ func (s *Scanner) indexFTS(artifactID string, art adapters.Artifact) {
 func (s *Scanner) insertArtifact(id, repoRoot, repoID string, art adapters.Artifact, sources []adapters.Source, revID, now string) error {
 	authoredAt := resolveAuthoredAt(repoRoot, art, sources, now)
 	_, err := s.db.Exec(
-		`INSERT INTO artifacts (id, repo_id, kind, title, status, current_revision_id, created_at, updated_at, last_observed_at, authored_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, repoID, art.Kind, art.Title, art.Status, revID, now, now, now, authoredAt,
+		`INSERT INTO artifacts (id, repo_id, kind, subtype, title, status, current_revision_id, created_at, updated_at, last_observed_at, authored_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, repoID, art.Kind, art.Subtype, art.Title, art.Status, revID, now, now, now, authoredAt,
 	)
 	return err
 }

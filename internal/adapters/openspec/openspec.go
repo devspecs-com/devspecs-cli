@@ -90,7 +90,8 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 
 	art := adapters.Artifact{
 		SourceIdentity: filepath.ToSlash(c.RelPath[:strings.LastIndex(c.RelPath, "/")]) + "|openspec",
-		Kind:           "openspec_change",
+		Kind:           config.KindSpec,
+		Subtype:        config.SubtypeOpenspecChange,
 		Title:          title,
 		Status:         status,
 		PrimaryPath:    c.PrimaryPath,

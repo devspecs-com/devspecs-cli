@@ -62,8 +62,8 @@ func TestOpenSpec_ParseExtractsTitleAndCriteria(t *testing.T) {
 	if art.Title != "Add SSO Login" {
 		t.Errorf("title: want 'Add SSO Login', got %q", art.Title)
 	}
-	if art.Kind != "openspec_change" {
-		t.Errorf("kind: want 'openspec_change', got %q", art.Kind)
+	if art.Kind != "spec" || art.Subtype != "openspec_change" {
+		t.Errorf("kind/subtype: want spec/openspec_change, got %q/%q", art.Kind, art.Subtype)
 	}
 	if art.Status != "proposed" {
 		t.Errorf("status: want 'proposed', got %q", art.Status)

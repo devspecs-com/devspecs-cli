@@ -4,6 +4,7 @@ package markdown
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,19 +22,7 @@ type Adapter struct{}
 func (a *Adapter) Name() string { return "markdown" }
 
 func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.RepoConfig) ([]adapters.Candidate, error) {
-	paths := defaultPaths()
-	if cfg != nil {
-		for _, src := range cfg.Sources {
-			if src.Type == "markdown" {
-				if len(src.Paths) > 0 {
-					paths = src.Paths
-				} else if src.Path != "" {
-					paths = []string{src.Path}
-				}
-				break
-			}
-		}
-	}
+	paths, rules := markdownSource(cfg)
 
 	var candidates []adapters.Candidate
 	seen := make(map[string]bool)
@@ -52,9 +41,11 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 			}
 			seen[rel] = true
 			candidates = append(candidates, adapters.Candidate{
-				PrimaryPath: absPath,
-				RelPath:     rel,
-				AdapterName: "markdown",
+				PrimaryPath:   absPath,
+				RelPath:       rel,
+				AdapterName:   "markdown",
+				MarkdownPaths: paths,
+				MarkdownRules: rules,
 			})
 		}
 	}
@@ -73,14 +64,36 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 			}
 			seen[rel] = true
 			candidates = append(candidates, adapters.Candidate{
-				PrimaryPath: absPath,
-				RelPath:     rel,
-				AdapterName: "markdown",
+				PrimaryPath:   absPath,
+				RelPath:       rel,
+				AdapterName:   "markdown",
+				MarkdownPaths: paths,
+				MarkdownRules: rules,
 			})
 		}
 	}
 
 	return candidates, nil
+}
+
+func markdownSource(cfg *config.RepoConfig) (paths []string, rules []config.SourceRule) {
+	paths = defaultPaths()
+	if cfg == nil {
+		return paths, nil
+	}
+	for _, src := range cfg.Sources {
+		if src.Type != "markdown" {
+			continue
+		}
+		if len(src.Paths) > 0 {
+			return src.Paths, src.Rules
+		}
+		if src.Path != "" {
+			return []string{src.Path}, src.Rules
+		}
+		break
+	}
+	return paths, nil
 }
 
 func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Artifact, []adapters.Source, todoparse.ParseResult, error) {
@@ -101,9 +114,29 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 		title = filenameTitle(c.RelPath)
 	}
 
-	kind := fm["kind"]
+	kind := strings.TrimSpace(fm["kind"])
+	subtype := strings.TrimSpace(fm["subtype"])
+	if kind != "" {
+		if err := config.ValidateKind(kind); err != nil {
+			return adapters.Artifact{}, nil, todoparse.ParseResult{}, fmt.Errorf("%s: frontmatter kind: %w", c.RelPath, err)
+		}
+	}
+	if subtype != "" {
+		if kind == "" {
+			return adapters.Artifact{}, nil, todoparse.ParseResult{}, fmt.Errorf("%s: frontmatter subtype requires kind", c.RelPath)
+		}
+		if err := config.ValidateSubtype(kind, subtype); err != nil {
+			return adapters.Artifact{}, nil, todoparse.ParseResult{}, fmt.Errorf("%s: frontmatter subtype: %w", c.RelPath, err)
+		}
+	}
+
+	var ruleTags []string
 	if kind == "" {
-		kind = inferKind(c.RelPath)
+		if rk, rs, rt, ok := MatchSourceRules(c.RelPath, c.MarkdownPaths, c.MarkdownRules); ok {
+			kind, subtype, ruleTags = rk, rs, rt
+		} else {
+			kind, subtype = inferKindSubtype(c.RelPath)
+		}
 	}
 
 	status := fm["status"]
@@ -112,6 +145,7 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 	}
 
 	tags := parseFrontmatterTags(fm)
+	tags = append(tags, ruleTags...)
 
 	pathGen := pathGeneratorForExtract(c.RelPath)
 	extracted := make(map[string]any)
@@ -132,6 +166,7 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 	art := adapters.Artifact{
 		SourceIdentity: c.RelPath + "|markdown",
 		Kind:           kind,
+		Subtype:        subtype,
 		Title:          title,
 		Status:         status,
 		PrimaryPath:    c.PrimaryPath,
@@ -261,24 +296,29 @@ func filenameTitle(relPath string) string {
 	return strings.Join(words, " ")
 }
 
-func inferKind(relPath string) string {
+func inferKindSubtype(relPath string) (kind, subtype string) {
 	lower := strings.ToLower(relPath)
 	switch {
 	case strings.Contains(lower, "prd"):
-		return "prd"
+		return config.KindRequirements, config.SubtypePRD
 	case strings.Contains(lower, "plan"):
-		return "plan"
+		return config.KindPlan, ""
 	case strings.Contains(lower, "spec"):
-		return "spec"
+		return config.KindSpec, ""
 	case strings.Contains(lower, "requirement"):
-		return "requirements"
+		return config.KindRequirements, ""
 	case strings.Contains(lower, "design"):
-		return "design"
+		return config.KindDesign, ""
 	case strings.Contains(lower, "contract"):
-		return "contract"
+		return config.KindContract, ""
 	default:
-		return "markdown_artifact"
+		return config.KindMarkdownArtifact, ""
 	}
+}
+
+func inferKind(relPath string) string {
+	k, _ := inferKindSubtype(relPath)
+	return k
 }
 
 func pickGeneratorExtract(fm map[string]string, pathGen string) string {

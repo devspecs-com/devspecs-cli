@@ -266,7 +266,7 @@ func TestInferKind(t *testing.T) {
 		{"specs/api.md", "spec"},
 		{"docs/requirements/auth.md", "requirements"},
 		{"notes/random.md", "markdown_artifact"},
-		{"v0.prd.md", "prd"},
+		{"v0.prd.md", "requirements"},
 		{"api.design.md", "design"},
 		{"api.contract.md", "contract"},
 		{"reqs.requirements.md", "requirements"},
@@ -618,6 +618,100 @@ func TestDiscover_SampleFixture_ClaudePlan(t *testing.T) {
 	}
 	if len(candidates) != 1 || filepath.ToSlash(candidates[0].RelPath) != "plans/dreamy-orbiting-quokka.md" {
 		t.Fatalf("claude fixture: want plans/dreamy-orbiting-quokka.md, got %#v", candidates)
+	}
+}
+
+func TestDiscover_SampleFixture_Freetext(t *testing.T) {
+	root := filepath.Join(testSamplesRoot(t), "freetext")
+	cfgRules := &config.RepoConfig{
+		Version: 1,
+		Sources: []config.SourceConfig{
+			{
+				Type: "markdown",
+				Paths: []string{".", "v2/plans", "decisions"},
+				Rules: []config.SourceRule{
+					{Match: "ROADMAP.md", Kind: config.KindPlan},
+					{Match: "*/README.md", Kind: config.KindPlan},
+					{Match: "README.md", Kind: config.KindPlan},
+					{Match: "[0-9][0-9]_*.md", Kind: config.KindPlan},
+					{Match: "*/[0-9][0-9]-*.md", Kind: config.KindPlan},
+					{Match: "decisions/*.md", Kind: config.KindDecision},
+				},
+			},
+		},
+	}
+	if err := config.ValidateRepoConfig(cfgRules); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &Adapter{}
+	candidates, err := a.Discover(context.Background(), root, cfgRules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 20 {
+		t.Fatalf("freetext fixture: want 20 markdown candidates, got %d", len(candidates))
+	}
+
+	findCand := func(rel string) adapters.Candidate {
+		for _, c := range candidates {
+			if filepath.ToSlash(c.RelPath) == rel {
+				return c
+			}
+		}
+		t.Fatalf("missing candidate %s", rel)
+		return adapters.Candidate{}
+	}
+
+	for _, tc := range []struct {
+		rel  string
+		kind string
+		sub  string
+	}{
+		{"ROADMAP.md", config.KindPlan, ""},
+		{"v2/plans/README.md", config.KindPlan, ""},
+		{"v2/plans/01-ui-scraping-high-fidelity-collection/README.md", config.KindPlan, ""},
+		{"v2/plans/02_PROMPT_GROUPING.md", config.KindPlan, ""},
+		{"v2/plans/01-ui-scraping-high-fidelity-collection/03-browserbase-chatgpt-spike.md", config.KindPlan, ""},
+		{"decisions/001-scraping-approach.md", config.KindDecision, ""},
+	} {
+		art, _, _, err := a.Parse(context.Background(), findCand(tc.rel))
+		if err != nil {
+			t.Fatalf("parse %s: %v", tc.rel, err)
+		}
+		if art.Kind != tc.kind || art.Subtype != tc.sub {
+			t.Errorf("%s: want kind=%s subtype=%s got kind=%s subtype=%s", tc.rel, tc.kind, tc.sub, art.Kind, art.Subtype)
+		}
+	}
+
+	cfgPathsOnly := &config.RepoConfig{
+		Version: 1,
+		Sources: []config.SourceConfig{
+			{Type: "markdown", Paths: []string{".", "v2/plans", "decisions"}},
+		},
+	}
+	candidatesNoRules, err := a.Discover(context.Background(), root, cfgPathsOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidatesNoRules) != 20 {
+		t.Fatalf("paths-only discover: want 20 candidates, got %d", len(candidatesNoRules))
+	}
+	findNR := func(rel string) adapters.Candidate {
+		for _, c := range candidatesNoRules {
+			if filepath.ToSlash(c.RelPath) == rel {
+				return c
+			}
+		}
+		t.Fatalf("missing candidate %s", rel)
+		return adapters.Candidate{}
+	}
+	art, _, _, err := a.Parse(context.Background(), findNR("marketing.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art.Kind != config.KindMarkdownArtifact {
+		t.Errorf("marketing.md without rules: want kind markdown_artifact, got %q", art.Kind)
 	}
 }
 

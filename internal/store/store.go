@@ -17,7 +17,7 @@ import (
 var schemaDDL string
 
 // SchemaVersion is the current schema version. Bump when schema.sql changes.
-const SchemaVersion = 6
+const SchemaVersion = 7
 
 // DB wraps *sql.DB with DevSpecs-specific operations.
 type DB struct {
@@ -81,6 +81,11 @@ func (db *DB) migrate() error {
 				return err
 			}
 			maxVersion = 6
+		case 6:
+			if err := db.migrate6To7(now); err != nil {
+				return err
+			}
+			maxVersion = 7
 		default:
 			return fmt.Errorf(
 				"index was created with schema v%d but this CLI requires v%d. Run 'ds scan --rebuild' or delete ~/.devspecs/devspecs.db and run 'ds scan' to rebuild",
@@ -132,5 +137,25 @@ func (db *DB) migrate4To5(now string) error {
 
 func (db *DB) migrate5To6(now string) error {
 	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 6, now)
+	return err
+}
+
+func (db *DB) migrate6To7(now string) error {
+	if err := tryAlterTable(db.DB, `ALTER TABLE artifacts ADD COLUMN subtype TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("migrate v6→v7 subtype: %w", err)
+	}
+	_, err := db.Exec(`UPDATE artifacts SET kind = 'decision', subtype = 'adr' WHERE kind = 'adr'`)
+	if err != nil {
+		return fmt.Errorf("migrate v6→v7 remap adr: %w", err)
+	}
+	_, err = db.Exec(`UPDATE artifacts SET kind = 'spec', subtype = 'openspec_change' WHERE kind = 'openspec_change'`)
+	if err != nil {
+		return fmt.Errorf("migrate v6→v7 remap openspec: %w", err)
+	}
+	_, err = db.Exec(`UPDATE artifacts SET kind = 'requirements', subtype = 'prd' WHERE kind = 'prd'`)
+	if err != nil {
+		return fmt.Errorf("migrate v6→v7 remap prd: %w", err)
+	}
+	_, err = db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 7, now)
 	return err
 }

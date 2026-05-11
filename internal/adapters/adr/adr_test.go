@@ -138,8 +138,8 @@ func TestADR_TitleStatusExtraction(t *testing.T) {
 			if art.Status != tt.wantStatus {
 				t.Errorf("status: want %q, got %q", tt.wantStatus, art.Status)
 			}
-			if art.Kind != "adr" {
-				t.Errorf("kind: want 'adr', got %q", art.Kind)
+			if art.Kind != "decision" || art.Subtype != "adr" {
+				t.Errorf("kind/subtype: want decision/adr, got %q/%q", art.Kind, art.Subtype)
 			}
 			if art.FormatProfile != format.ProfileADR {
 				t.Errorf("format_profile: want %q, got %q", format.ProfileADR, art.FormatProfile)
