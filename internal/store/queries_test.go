@@ -26,8 +26,8 @@ func seedArtifact(t *testing.T, db *DB) (repoID, artifactID, revID string) {
 
 	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES (?, '/tmp/repo', ?, ?)", repoID, now, now)
 	db.InsertArtifactDirect(artifactID, repoID, "plan", "Test Plan", "draft", revID, now)
-	db.InsertRevisionDirect(revID, artifactID, "sha256:abc", "# Test Plan\n\nBody.", now)
-	db.InsertSourceDirect("src_001", artifactID, repoID, "markdown", "plans/test.md", "plans/test.md|markdown", now)
+	db.InsertRevisionDirect(revID, artifactID, "sha256:abc", "# Test Plan\n\nBody.", "", now)
+	db.InsertSourceDirect("src_001", artifactID, repoID, "markdown", "plans/test.md", "plans/test.md|markdown", "", "", now)
 	return
 }
 
@@ -371,7 +371,7 @@ func TestInsertRevisionDirect(t *testing.T) {
 	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/x', ?, ?)", now, now)
 	db.InsertArtifactDirect("ds_A", "r1", "plan", "P", "draft", "rev_1", now)
 
-	err := db.InsertRevisionDirect("rev_1", "ds_A", "sha256:xyz", "body content", now)
+	err := db.InsertRevisionDirect("rev_1", "ds_A", "sha256:xyz", "body content", "", now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,18 +381,34 @@ func TestInsertRevisionDirect(t *testing.T) {
 	}
 }
 
+func TestInsertRevisionDirect_ExtractedJSON(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/x', ?, ?)", now, now)
+	db.InsertArtifactDirect("ds_A", "r1", "plan", "P", "draft", "rev_1", now)
+	payload := `{"generator":"x"}`
+	err := db.InsertRevisionDirect("rev_1", "ds_A", "sha256:xyz", "body", payload, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev, _ := db.GetRevision("rev_1")
+	if rev.ExtractedJSON != payload {
+		t.Errorf("extracted_json: got %q want %q", rev.ExtractedJSON, payload)
+	}
+}
+
 func TestInsertSourceDirect(t *testing.T) {
 	db := openTestDB(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/x', ?, ?)", now, now)
 	db.InsertArtifactDirect("ds_A", "r1", "plan", "P", "draft", "rev_1", now)
 
-	err := db.InsertSourceDirect("src_x", "ds_A", "r1", "markdown", "plans/x.md", "plans/x.md|markdown", now)
+	err := db.InsertSourceDirect("src_x", "ds_A", "r1", "markdown", "plans/x.md", "plans/x.md|markdown", "", "", now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sources, _ := db.GetSourcesForArtifact("ds_A")
-	if len(sources) != 1 || sources[0].Path != "plans/x.md" {
+	if len(sources) != 1 || sources[0].Path != "plans/x.md" || sources[0].FormatProfile != "generic" {
 		t.Errorf("source mismatch: %+v", sources)
 	}
 }
@@ -418,7 +434,7 @@ func TestListAllTodos_FilterByRepoRoot(t *testing.T) {
 
 	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/repo/x', ?, ?)", now, now)
 	db.InsertArtifactDirect("ds_X1", "r1", "plan", "X Plan", "draft", "rev_x1", now)
-	db.InsertRevisionDirect("rev_x1", "ds_X1", "sha256:x", "body", now)
+	db.InsertRevisionDirect("rev_x1", "ds_X1", "sha256:x", "body", "", now)
 	db.Exec("INSERT INTO artifact_todos (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, created_at) VALUES ('td_x', 'ds_X1', 'rev_x1', 0, 'X Todo', 0, 'x.md', 1, ?)", now)
 
 	todos, _ := db.ListAllTodos(FilterParams{RepoRoot: "/repo/x"}, false, false)
@@ -450,7 +466,7 @@ func TestFindArtifacts_ByBodyContent(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/tmp', ?, ?)", now, now)
 	db.InsertArtifactDirect("ds_BODY1", "r1", "plan", "Simple Title", "draft", "rev_body1", now)
-	db.InsertRevisionDirect("rev_body1", "ds_BODY1", "sha256:b1", "This contains searchable-keyword in body.", now)
+	db.InsertRevisionDirect("rev_body1", "ds_BODY1", "sha256:b1", "This contains searchable-keyword in body.", "", now)
 
 	arts, _ := db.FindArtifacts("searchable-keyword", FilterParams{})
 	if len(arts) != 1 {
@@ -463,7 +479,7 @@ func TestFindArtifacts_BySourcePath(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/tmp', ?, ?)", now, now)
 	db.InsertArtifactDirect("ds_PATH1", "r1", "spec", "Spec", "draft", "rev_p1", now)
-	db.InsertSourceDirect("src_p1", "ds_PATH1", "r1", "markdown", "docs/unique-path.md", "docs/unique-path.md|markdown", now)
+	db.InsertSourceDirect("src_p1", "ds_PATH1", "r1", "markdown", "docs/unique-path.md", "docs/unique-path.md|markdown", "", "", now)
 
 	arts, _ := db.FindArtifacts("unique-path", FilterParams{})
 	if len(arts) != 1 {
@@ -477,8 +493,8 @@ func TestFTS5_FallbackParity(t *testing.T) {
 
 	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/tmp', ?, ?)", now, now)
 	db.InsertArtifactDirect("ds_FTS1", "r1", "plan", "Architecture Plan", "draft", "rev_fts1", now)
-	db.InsertRevisionDirect("rev_fts1", "ds_FTS1", "sha256:f1", "This is the body of our architecture plan.", now)
-	db.InsertSourceDirect("src_fts1", "ds_FTS1", "r1", "markdown", "plans/architecture.md", "plans/architecture.md|markdown", now)
+	db.InsertRevisionDirect("rev_fts1", "ds_FTS1", "sha256:f1", "This is the body of our architecture plan.", "", now)
+	db.InsertSourceDirect("src_fts1", "ds_FTS1", "r1", "markdown", "plans/architecture.md", "plans/architecture.md|markdown", "", "", now)
 
 	// Index in FTS
 	db.IndexArtifactFTS("ds_FTS1", "Architecture Plan", "This is the body of our architecture plan.", "plans/architecture.md")
@@ -698,7 +714,7 @@ func TestResumeArtifacts(t *testing.T) {
 	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/tmp/repo', ?, ?)", now, now)
 	db.InsertArtifactDirect("ds_R1", "r1", "plan", "Resume Plan", "draft", "rev_1", now)
 	db.Exec("UPDATE artifacts SET short_id = 'abc12345' WHERE id = 'ds_R1'")
-	db.Exec("INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, created_at, updated_at) VALUES ('src_r1', 'ds_R1', 'r1', 'markdown', 'plans/x.md', 'plans/x.md|markdown', ?, ?)", now, now)
+	db.Exec("INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, format_profile, layout_group, created_at, updated_at) VALUES ('src_r1', 'ds_R1', 'r1', 'markdown', 'plans/x.md', 'plans/x.md|markdown', 'generic', NULL, ?, ?)", now, now)
 	db.InsertTag("ds_R1", "beta", "manual", now)
 	db.InsertTag("ds_R1", "auth", "manual", now)
 
@@ -725,8 +741,8 @@ func TestResumeArtifacts_DeduplicatesMultipleSources(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/tmp/repo2', ?, ?)", now, now)
 	db.InsertArtifactDirect("ds_MDUP", "r1", "plan", "Dup Sources", "draft", "rev_md", now)
-	db.Exec("INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, created_at, updated_at) VALUES ('s1', 'ds_MDUP', 'r1', 'markdown', 'z-last.md', 'z|md', ?, ?)", now, now)
-	db.Exec("INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, created_at, updated_at) VALUES ('s2', 'ds_MDUP', 'r1', 'markdown', 'a-first.md', 'a|md', ?, ?)", now, now)
+	db.Exec("INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, format_profile, layout_group, created_at, updated_at) VALUES ('s1', 'ds_MDUP', 'r1', 'markdown', 'z-last.md', 'z|md', 'generic', NULL, ?, ?)", now, now)
+	db.Exec("INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, format_profile, layout_group, created_at, updated_at) VALUES ('s2', 'ds_MDUP', 'r1', 'markdown', 'a-first.md', 'a|md', 'generic', NULL, ?, ?)", now, now)
 
 	rows, err := db.ResumeArtifacts("/tmp/repo2", FilterParams{})
 	if err != nil {

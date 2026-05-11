@@ -37,6 +37,8 @@ type SourceRow struct {
 	SourceType     string
 	Path           string
 	SourceIdentity string
+	FormatProfile  string
+	LayoutGroup    string
 }
 
 // LinkRow represents a row from the links table.
@@ -214,7 +216,7 @@ func (db *DB) GetRevision(id string) (*RevisionRow, error) {
 // GetSourcesForArtifact returns all sources for an artifact.
 func (db *DB) GetSourcesForArtifact(artifactID string) ([]SourceRow, error) {
 	rows, err := db.Query(
-		"SELECT id, artifact_id, source_type, COALESCE(path,''), source_identity FROM sources WHERE artifact_id = ?",
+		"SELECT id, artifact_id, source_type, COALESCE(path,''), source_identity, COALESCE(format_profile,''), COALESCE(layout_group,'') FROM sources WHERE artifact_id = ?",
 		artifactID,
 	)
 	if err != nil {
@@ -225,7 +227,7 @@ func (db *DB) GetSourcesForArtifact(artifactID string) ([]SourceRow, error) {
 	var result []SourceRow
 	for rows.Next() {
 		var r SourceRow
-		if err := rows.Scan(&r.ID, &r.ArtifactID, &r.SourceType, &r.Path, &r.SourceIdentity); err != nil {
+		if err := rows.Scan(&r.ID, &r.ArtifactID, &r.SourceType, &r.Path, &r.SourceIdentity, &r.FormatProfile, &r.LayoutGroup); err != nil {
 			return nil, err
 		}
 		result = append(result, r)
@@ -494,20 +496,31 @@ func (db *DB) InsertArtifactDirect(id, repoID, kind, title, status, revID, now s
 	return err
 }
 
-// InsertRevisionDirect inserts a revision directly.
-func (db *DB) InsertRevisionDirect(id, artifactID, contentHash, body, now string) error {
+// InsertRevisionDirect inserts a revision directly. extractedJSON may be empty for NULL.
+func (db *DB) InsertRevisionDirect(id, artifactID, contentHash, body, extractedJSON, now string) error {
+	var extracted any
+	if extractedJSON != "" {
+		extracted = extractedJSON
+	}
 	_, err := db.Exec(
-		"INSERT INTO artifact_revisions (id, artifact_id, content_hash, body, observed_at) VALUES (?, ?, ?, ?, ?)",
-		id, artifactID, contentHash, body, now,
+		"INSERT INTO artifact_revisions (id, artifact_id, content_hash, body, extracted_json, observed_at) VALUES (?, ?, ?, ?, ?, ?)",
+		id, artifactID, contentHash, body, extracted, now,
 	)
 	return err
 }
 
 // InsertSourceDirect inserts a source directly.
-func (db *DB) InsertSourceDirect(id, artifactID, repoID, sourceType, path, sourceIdentity, now string) error {
+func (db *DB) InsertSourceDirect(id, artifactID, repoID, sourceType, path, sourceIdentity, formatProfile, layoutGroup, now string) error {
+	if formatProfile == "" {
+		formatProfile = "generic"
+	}
+	var layout any
+	if layoutGroup != "" {
+		layout = layoutGroup
+	}
 	_, err := db.Exec(
-		"INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		id, artifactID, repoID, sourceType, path, sourceIdentity, now, now,
+		"INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, format_profile, layout_group, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		id, artifactID, repoID, sourceType, path, sourceIdentity, formatProfile, layout, now, now,
 	)
 	return err
 }
