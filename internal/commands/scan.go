@@ -44,7 +44,7 @@ func NewScanCmd() *cobra.Command {
 	cmd.Flags().StringVar(&path, "path", ".", "Repository path to scan")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show detailed scan output")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
-	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress all output")
+	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress human scan summary (redundant when --json is set)")
 	cmd.Flags().BoolVar(&ifChanged, "if-changed", false, "Only scan if source paths were touched in the last commit")
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "Remove the global index database and create a fresh index (requires re-scan)")
 	return cmd
@@ -94,14 +94,16 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 		return fmt.Errorf("scan: %w", err)
 	}
 
-	if quiet {
-		return nil
-	}
-
 	if asJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
-		return enc.Encode(result)
+		if err := enc.Encode(result); err != nil {
+			return err
+		}
+		return nil
+	}
+	if quiet {
+		return nil
 	}
 
 	out := cmd.OutOrStdout()

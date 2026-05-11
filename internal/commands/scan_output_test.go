@@ -68,3 +68,28 @@ func runScanJSONBytes(t *testing.T) []byte {
 	}
 	return compact.Bytes()
 }
+
+func TestScan_QuietWithJSON_WritesJSONSuppressesHuman(t *testing.T) {
+	setupE2ERepo(t)
+	NewInitCmd().Execute()
+	warm := NewScanCmd()
+	warm.SetOut(&bytes.Buffer{})
+	if err := warm.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	scanCmd := NewScanCmd()
+	scanCmd.SetArgs([]string{"--json", "--quiet"})
+	buf := &bytes.Buffer{}
+	scanCmd.SetOut(buf)
+	if err := scanCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `"Found"`) {
+		t.Fatalf("expected JSON with Found, got: %q", out)
+	}
+	if strings.Contains(out, "Indexed by source") {
+		t.Fatalf("human summary should be suppressed with --quiet, got: %q", out)
+	}
+}

@@ -46,6 +46,8 @@ func newResult(adapters []string) *Result {
 }
 
 func (r *Result) finalizeSourcesBreakdown() {
+	// Fixed pipeline list for phase-2 UX and stable JSON. New adapters still
+	// increment Found[adapterName] but need an explicit row here + labels to appear in sources_breakdown.
 	order := []string{"markdown", "openspec", "adr"}
 	out := make([]SourceBreakdownRow, 0, len(order))
 	for _, st := range order {
@@ -69,6 +71,8 @@ func (r *Result) finalizeSourcesBreakdown() {
 func tallyIndexed(r *Result, adapterName string, sources []adapters.Source, art adapters.Artifact) {
 	r.Found[adapterName]++
 
+	// v0: each adapter returns one primary Source; breakdown uses that row.
+	// If multiple sources diverge in format_profile, only sources[0] drives this tally.
 	st := adapterName
 	if len(sources) > 0 {
 		st = sources[0].SourceType
