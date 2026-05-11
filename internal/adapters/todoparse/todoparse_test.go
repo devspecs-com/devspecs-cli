@@ -1,6 +1,8 @@
 package todoparse
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -159,5 +161,41 @@ func TestTodoParser(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestFalsePositive_supportedSyntaxExamples loads the corpus fixture under
+// testdata/samples/false-positives/. It asserts current parser output; if
+// heuristics later skip doc-only examples, lower the incomplete count here.
+func TestFalsePositive_supportedSyntaxExamples(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "testdata", "samples", "false-positives", "todoparse", "supported-syntax-examples.md")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	sourceFile := filepath.Base(path)
+	got := Parse(string(b), sourceFile)
+	if len(got) != 3 {
+		t.Fatalf("want 3 todos, got %d: %+v", len(got), got)
+	}
+	open := 0
+	for _, td := range got {
+		if !td.Done {
+			open++
+		}
+	}
+	if open != 1 {
+		t.Fatalf("want 1 incomplete todo, got %d", open)
+	}
+	want := []Todo{
+		{Ordinal: 0, Text: "Incomplete task", Done: false, SourceFile: sourceFile, SourceLine: 7},
+		{Ordinal: 1, Text: "Completed task", Done: true, SourceFile: sourceFile, SourceLine: 8},
+		{Ordinal: 2, Text: "Completed task", Done: true, SourceFile: sourceFile, SourceLine: 9},
+	}
+	for i := range want {
+		g, w := got[i], want[i]
+		if g.Ordinal != w.Ordinal || g.Text != w.Text || g.Done != w.Done || g.SourceFile != w.SourceFile || g.SourceLine != w.SourceLine {
+			t.Fatalf("[%d] got %+v want %+v", i, g, w)
+		}
 	}
 }
