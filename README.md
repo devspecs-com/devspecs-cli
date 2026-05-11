@@ -1,6 +1,34 @@
-# devspecs-cli
+# DevSpecs CLI
 
-Local-first CLI for indexing, identifying, and referencing software planning/specification artifacts.
+> Local-first CLI for indexing specs, plans, ADRs, and agent-ready engineering context.
+
+## Why DevSpecs?
+
+AI-assisted development makes it easy to create plans, specs, ADRs, task lists, and design notes — but hard to keep track of them later.
+
+A feature can quickly produce an OpenSpec proposal, a Cursor plan, a markdown checklist, a PR description, and a follow-up design note. Those artifacts are useful, but they often stay scattered across repo folders, editor state, and ad-hoc files. When you come back later, it is not always obvious what exists, which plan is still active, what todos remain, or what context to hand to the next coding session.
+
+DevSpecs is a local-first CLI that indexes the planning/specification artifacts you already have and gives them stable references.
+
+It is useful when you want to:
+
+- see what specs, plans, ADRs, and design docs exist in a repo
+- continue work from active or stale planning artifacts
+- resolve a short ID back to the original source file
+- extract todos from markdown checklists without creating a task board
+- export clean context for Cursor, Claude Code, Codex, or another coding agent
+- reference implementation intent from PRs, issues, commits, or future notes
+
+DevSpecs does **not** replace Git, markdown, OpenSpec, ADRs, GitHub, Linear, or your editor. Keep writing specs where they already belong. DevSpecs adds a lightweight local index over them so humans and agents can find, reference, and reuse the right context.
+
+## What it does
+
+- Scans **OpenSpec** changes, **ADR** paths, and **markdown** plans/specs (including common agent layouts such as `.cursor/plans`, BMAD `_bmad-output`, Spec Kit `specs/…/spec.md`).
+- Assigns **stable full IDs** and **short IDs** for everyday CLI use.
+- **Extracts markdown checklist todos** and stores them per artifact revision (source files stay authoritative).
+- Surfaces **in progress**, **recently settled**, and **stale** artifacts with **`ds resume`**.
+- Exports **agent-ready context** with **`ds context`**.
+- Keeps everything **local** in a SQLite index under your home directory (override with **`DEVSPECS_HOME`**).
 
 ## Install
 
@@ -24,6 +52,8 @@ irm https://raw.githubusercontent.com/devspecs-com/devspecs-cli/main/install.ps1
 brew install devspecs-com/tap/devspecs
 ```
 
+The Homebrew formula is named `devspecs`; the binary is **`ds`**.
+
 ### Scoop (Windows)
 
 ```powershell
@@ -43,97 +73,154 @@ Download the latest release from [GitHub Releases](https://github.com/devspecs-c
 
 ## Quick start
 
+From a repository root:
+
 ```bash
-ds init        # Initialize DevSpecs in your repo
-ds scan        # Scan for specs, plans, ADRs
-ds list        # List indexed artifacts
-ds show <id>   # Show artifact details (full id, short id, or prefix)
-ds resume      # Grouped “continue where you left off” view
-ds context <id> # Export agent-ready context
-ds config show # Inspect effective repo config and paths
+ds init
+ds scan
+ds resume
+ds list
+```
+
+Example (illustrative — IDs and titles depend on your repo):
+
+```text
+$ ds list
+  abcdef01  Resize hook rollout           plan    implementing  plans/resize-hook.md
+  23456789  Auth middleware ADR           adr     proposed      docs/adr/0003-auth.md
+
+$ ds show abcdef01
+  Title: Resize hook rollout
+  Kind: plan   Status: implementing
+  Short ID: abcdef01
+  ...
+```
+
+Fast paths after indexing:
+
+```bash
+ds find auth                 # search indexed text
+ds todos                     # checklist items across artifacts
+ds context abcdef01          # paste-ready context for an agent
+ds config show               # effective discovery paths
+```
+
+## Core workflow
+
+1. **`ds init`** — Creates the global index location `~/.devspecs` (overridable) and repo `.devspecs/config.yaml`.
+2. **`ds scan`** — Walks adapters and upserts artifacts, revisions, sources, todos, and tags.
+3. **`ds list`** / **`ds find`** — Browse or search what was indexed.
+4. **`ds show <id>`** — Full detail; accepts full ID, **short ID**, or prefix.
+5. **`ds todos`** / **`ds resume`** — Triage checklist items and lifecycle-oriented “where was I?” views.
+6. **`ds context <id>`** — Export a single artifact’s context for tools or agents.
+
+```bash
+ds scan
+ds list
+ds show <id>
+ds todos <id>
+ds context <id>
 ```
 
 ## Commands
 
+Summary (see subsections and `ds <cmd> --help` for flags):
+
+| Command | Purpose |
+|---------|---------|
+| `ds init` | Initialize global DB location and repo config |
+| `ds scan` | Scan repo for artifacts (`--rebuild` resets global DB) |
+| `ds resume` | In progress / recently settled / stale groupings |
+| `ds list` / `ds ls` | List indexed artifacts |
+| `ds find <query>` | Search indexed artifacts |
+| `ds show` / `ds get <id>` | Artifact details (tags, scanned-by when set) |
+| `ds resolve <id>` | Resolve ID to source path |
+| `ds context <id>` | Export agent-ready context |
+| `ds todos [id]` | Extracted checklist todos |
+| `ds config …` | `show`, `paths`, `add-source`, `set` |
+| `ds tag` / `ds untag` | Manual tags (`artifact_tags`) |
+| `ds capture <path>` | Capture a file as an artifact |
+| `ds status <id> <s>` | Update artifact status |
+| `ds link <id> <target>` | Add a link between artifacts |
+| `ds version` | Print version |
+
+Tree-style overview:
+
 ```
 ds
   init                Initialize DevSpecs
-  scan                Scan repository for artifacts (--rebuild resets global DB)
+  scan                Scan repository for artifacts
   list (ls)           List indexed artifacts
-  show (get) <id>     Show artifact details (tags, scanned-by when set)
+  show (get) <id>     Show artifact details
   find <query>        Search artifacts
   resolve <id>        Resolve ID to source path
   context <id>        Export agent-ready context
   todos [id]          List extracted todos
-  resume              Lifecycle-oriented resume (in progress / settled / stale)
+  resume              Lifecycle-oriented resume
   config              Show, paths, add-source, set
-  tag / untag         Manage artifact tags (manual + preserved auto-tags)
+  tag / untag         Manage artifact tags
   capture <path>      Capture a file as an artifact
   status <id> <s>     Update artifact status
   link <id> <target>  Add a link to an artifact
   version             Show version
 ```
 
-### Global flags
+### Scripting and `--json`
 
-Most read commands support `--json` for machine-readable output.
+Most read commands support **`--json`** for machine-readable output — useful for scripts and CI.
 
 ### Scoping filters
 
-These flags narrow results to a repo, tag, git branch, or “scanned by” user identity:
+These flags narrow results by repo basename, tag, git branch, or scanned-by user:
 
-`--repo`, `--tag`, `--branch`, `--user`
+**`--repo`**, **`--tag`**, **`--branch`**, **`--user`**
 
-Commands that accept them include **`list`**, **`find`**, **`todos`**, and **`resume`**. For `--repo`, pass the repository directory **basename** (for example `my-app`), not a full path.
+They apply to **`list`**, **`find`**, **`todos`**, and **`resume`**. For **`--repo`**, pass the directory **basename** (e.g. `my-app`), not a full path.
 
-### ds init
+### `ds init`
 
-Creates `~/.devspecs/devspecs.db` (global index) and `.devspecs/config.yaml` (repo config).
+Creates **`~/.devspecs/devspecs.db`** (global index) and **`.devspecs/config.yaml`** (repo config).
 
 ```bash
 ds init          # First-time setup
 ds init --force  # Overwrite existing config
 ```
 
-### ds scan
-
-Discovers artifacts using configured adapters (OpenSpec, ADR, generic markdown).
+### `ds scan`
 
 ```bash
 ds scan              # Scan current directory
 ds scan --path .     # Explicit path
 ds scan --verbose    # Detailed output
 ds scan --json       # JSON output
-ds scan --rebuild    # Delete global DB (~/.devspecs/devspecs.db), then open & scan
+ds scan --rebuild    # Delete global DB, then open & scan
 ```
 
-Use **`ds scan --rebuild`** when the on-disk schema no longer matches this CLI (there are no automatic migrations). The CLI error message will also mention this when `migrate()` rejects an older database version.
+Use **`ds scan --rebuild`** when the on-disk schema no longer matches this CLI (there are no automatic migrations).
 
-### ds resume
+### `ds resume`
 
-Shows artifacts grouped by lifecycle phase: **In Progress**, **Recently Settled** (within ~14 days by default), and **Stale** (non-terminal work idle ~30+ days). Supports `--limit`, `--all`, `--no-refresh`, relative “last observed” times, short-id hints, inline tags (matching `ds show`), and `--json` with `in_progress`, `recently_settled`, and `stale` arrays.
+Groups artifacts into **In Progress**, **Recently Settled** (~14 days by default), and **Stale** (non-terminal, idle ~30+ days). Supports **`--limit`**, **`--all`**, **`--no-refresh`**, short IDs, inline tags, and **`--json`** (`in_progress`, `recently_settled`, `stale`).
 
-### ds config
+### `ds config`
 
-Inspect or edit `.devspecs/config.yaml`: **`ds config show`**, **`paths`**, **`add-source`**, **`set`** (see `ds config --help`). When no YAML exists yet, defaults mirror built-in discovery paths.
+Inspect or edit **`.devspecs/config.yaml`**: **`ds config show`**, **`paths`**, **`add-source`**, **`set`**. With no YAML yet, defaults match built-in discovery paths.
 
-### ds tag / ds untag
+### `ds tag` / `ds untag`
 
-Attach or remove **manual** tags stored in `artifact_tags`. Automatic tags from frontmatter (`tags` / `labels`) and directory inference are refreshed on scan; manual tags are preserved across rescans.
+Manual tags live in **`artifact_tags`**. Auto tags from frontmatter / paths refresh on scan; manual tags are preserved unless removed.
 
-### ds todos
-
-Lists extracted checklist items from all indexed artifacts.
+### `ds todos`
 
 ```bash
 ds todos             # All todos (defaults to open)
-ds todos <id>        # Todos for a specific artifact
-ds todos --open      # Only incomplete
-ds todos --done      # Only completed
+ds todos <id>        # Todos for one artifact
+ds todos --open      # Incomplete only
+ds todos --done      # Completed only
 ds todos --json      # JSON output
 ```
 
-`ds todos` also honors **`--repo`**, **`--tag`**, **`--branch`**, and **`--user`** (see Scoping filters above).
+Honors the same **`--repo`**, **`--tag`**, **`--branch`**, **`--user`** filters as other read commands.
 
 ## Supported artifact types
 
@@ -141,27 +228,13 @@ ds todos --json      # JSON output
 |---------|---------------|------|
 | OpenSpec | `openspec/changes/<id>/proposal.md` | `openspec_change` |
 | ADR | `docs/adr/*.md`, `docs/adrs/*.md`, `adr/*.md`, `adrs/*.md`, `architecture/decisions/*.md` | `adr` |
-| Markdown | Recursive `.md` under repo-root dirs (defaults): `specs`, `docs/specs`, `plans`, `docs/plans`, `.cursor/plans`, `docs`, **`_bmad-output`** (BMAD artifacts), **`.specify/memory`** (Spec Kit constitution/memory); plus repo-root globs `*.spec.md`, `*.plan.md`, `*.prd.md`, `*.design.md`, `*.contract.md`, `*.requirements.md` | `plan`, `spec`, `prd`, `design`, `contract`, `requirements`, `markdown_artifact`, … (from path/filename + optional frontmatter `kind`) |
+| Markdown | Recursive `.md` under defaults: `specs`, `docs/specs`, `plans`, `docs/plans`, `.cursor/plans`, `docs`, **`_bmad-output`**, **`.specify/memory`**; plus repo-root globs `*.spec.md`, `*.plan.md`, `*.prd.md`, `*.design.md`, `*.contract.md`, `*.requirements.md` | `plan`, `spec`, `prd`, `design`, `contract`, `requirements`, `markdown_artifact`, … |
 
-Tags may come from YAML frontmatter (`tags` / `labels`), directory segments outside generic folders (see adapter), **`ds tag`**, or **framework hints**: paths under `_bmad-output/` add tag **`bmad`** and `extracted.generator` **`bmad-method`**; `specs/<feature>/spec.md` (GitHub Spec Kit layout) adds tag **`speckit`** and `extracted.generator` **`speckit`**; files under `.cursor/plans/` add tag **`cursor`** and `extracted.generator` **`cursor-plan`**. Optional frontmatter keys **`generator`**, **`tool`**, and **`source`** add a normalized slug tag and set `extracted.generator` to the first non-empty value among those keys (trimmed).
-
-Regression fixtures for these layouts live under [`testdata/samples/`](testdata/samples/) (`bmad`, `specify`, `cursor`, `claude`, `codex`).
+Tags may come from YAML **`tags`** / **`labels`**, directory inference, **`ds tag`**, or **path hints**: **`bmad`** / **`bmad-method`** under `_bmad-output/`; **`speckit`** for `specs/<feature>/spec.md`; **`cursor`** / **`cursor-plan`** under `.cursor/plans/`. Optional frontmatter **`generator`**, **`tool`**, **`source`** add slug tags and **`extracted.generator`**.
 
 ### Root glob vs `PLAN.md`
 
-Markdown discovery uses repo-root globs such as **`*.plan.md`**. On **case-sensitive** filesystems (typical Linux CI), that pattern does **not** match an all-caps filename **`PLAN.md`**. Prefer **`plans/PLAN.md`** (discovered via the `plans/` tree), **`*.plan.md`-style naming**, or an explicit markdown source path in config—rather than relying on a root-level `PLAN.md` glob.
-
-### Maintaining fixture samples
-
-To refresh committed previews under `testdata/samples/` after tooling changes:
-
-- **GitHub Spec Kit (Specify)**  
-  Install the Specify CLI per [spec-kit](https://github.com/github/spec-kit), then from an empty or scratch directory run `specify init <project-dir>` or `specify init --here` (see project docs for `--integration` flags). Copy the resulting tree (especially `specs/`, `.specify/` as needed) into `testdata/samples/specify/`. Agent workflows such as `/speckit.specify` and `/speckit.plan` regenerate feature markdown under `specs/<feature>/`.
-
-- **BMAD Method**  
-  Run `npx bmad-method install` in a disposable folder, complete workflows (for example `bmad-create-prd`, `bmad-create-architecture`), then copy **`_bmad-output/planning-artifacts/`** (and optionally other `_bmad-output` subtrees you want indexed) into `testdata/samples/bmad/`. Large **`_bmad/`** agent bundles are optional for CLI regression tests; indexing focuses on `_bmad-output`.
-
-After refreshing fixtures, run `go test ./internal/adapters/markdown/... -count=1` to satisfy sample-backed assertions.
+Repo-root globs use patterns like **`*.plan.md`**. On **case-sensitive** filesystems (typical Linux CI), that does **not** match **`PLAN.md`**. Prefer **`plans/PLAN.md`**, **`*.plan.md`-style names**, or an explicit markdown path in config.
 
 ## Configuration
 
@@ -189,17 +262,19 @@ sources:
       - .specify/memory
 ```
 
-## Schema
+## Local index and schema
 
-Global database: `~/.devspecs/devspecs.db`
+| Location | Role |
+|----------|------|
+| `~/.devspecs/devspecs.db` | Global SQLite index |
+| `.devspecs/config.yaml` | Per-repo discovery config |
+| `DEVSPECS_HOME` | Optional override for the global DevSpecs directory |
 
-Override location with `DEVSPECS_HOME` environment variable.
+Tables include **`repos`** (optional **`scanned_by`**), **`artifacts`** (deterministic **short_id**), **`artifact_revisions`**, **`sources`**, **`links`**, **`artifact_todos`**, **`artifact_tags`**.
 
-Tables include `repos` (with optional `scanned_by`), `artifacts` (deterministic **short_id** for display and CLI references), `artifact_revisions`, `sources`, `links`, `artifact_todos`, and **`artifact_tags`** for persisted tags.
+### Extracted todos (`artifact_todos`)
 
-### artifact_todos
-
-Extracted checklist items are stored per-artifact per-revision. The source file is authoritative in v0 — todos are re-extracted on every scan when content changes.
+Checklist lines are re-extracted when file content changes on scan.
 
 ```sql
 CREATE TABLE artifact_todos (
@@ -215,7 +290,7 @@ CREATE TABLE artifact_todos (
 );
 ```
 
-### Todo JSON contract
+Example **`--json`** shape:
 
 ```json
 {
@@ -229,14 +304,9 @@ CREATE TABLE artifact_todos (
 }
 ```
 
-### v0 todo model boundary
+## Reference
 
-v0 DevSpecs todo model = extracted checklist observability.
-Not task management. Not workflow state. Not a Linear replacement.
-
-v0 does NOT implement: owners, due dates, dependencies, comments, assignment, GitHub/Linear sync, or approval workflow.
-
-## Exit codes
+### Exit codes
 
 | Code | Meaning |
 |------|---------|
@@ -244,26 +314,65 @@ v0 does NOT implement: owners, due dates, dependencies, comments, assignment, Gi
 | 1 | Generic failure |
 | 2 | User input error (unknown ID, malformed config) |
 
-## Statuses
+### Statuses
 
-Supported artifact statuses: `draft`, `proposed`, `approved`, `implementing`, `implemented`, `superseded`, `rejected`, `unknown`.
+`draft`, `proposed`, `approved`, `implementing`, `implemented`, `superseded`, `rejected`, `unknown`.
 
-## Link types
+### Link types
 
-Supported link types: `related`, `implements`, `implemented_by`, `supersedes`, `superseded_by`, `blocks`, `blocked_by`, `references`, `referenced_by`.
+`related`, `implements`, `implemented_by`, `supersedes`, `superseded_by`, `blocks`, `blocked_by`, `references`, `referenced_by`.
 
-## Non-goals for v0
+## Non-goals
 
-- Cloud sync, user accounts, team workspaces
-- GitHub/Linear integration
-- CI/CD gating, approval workflows
-- Semantic search, embeddings
-- Automatic agent session mining
-- Incident tracing, drift detection
+DevSpecs is **not**:
+
+- A task manager, sprint board, or Linear/GitHub Issues replacement
+- Cloud sync, accounts, or team workspaces
+- Semantic search, embeddings, or automatic agent session mining
+- CI/CD gates, approval workflows, or drift detection
+- A docs hosting platform
+
+**Todo model:** v0 is **extracted checklist observability** only — not owners, due dates, dependencies, assignment, or external sync.
+
+## Troubleshooting
+
+| Symptom | What to try |
+|---------|-------------|
+| Schema / version errors from the CLI | **`ds scan --rebuild`** (or delete `DEVSPECS_HOME/devspecs.db` per error text); there are no automatic DB migrations |
+| No artifacts after scan | **`ds config show`** — confirm paths; add sources with **`ds config add-source`** or edit YAML |
+| Unknown ID | **`ds list`**, **`ds find <term>`**, or **`ds resolve`** |
+| Custom index location | Set **`DEVSPECS_HOME`** |
+| Wrong repo in multi-repo filters | **`--repo`** takes the repo directory **basename** |
+
+## Development
+
+```bash
+git clone https://github.com/devspecs-com/devspecs-cli.git
+cd devspecs-cli
+go test ./... -count=1
+go run ./cmd/ds --help
+```
+
+Format check (matches CI):
+
+```bash
+gofmt -l .
+go vet ./...
+staticcheck ./...
+```
+
+### Maintaining format fixtures
+
+Regression layouts under [`testdata/samples/`](testdata/samples/) (`bmad`, `specify`, `cursor`, `claude`, `codex`) support adapter tests.
+
+- **Spec Kit:** [spec-kit](https://github.com/github/spec-kit) — `specify init …`, then copy `specs/` (and `.specify/` if needed) into `testdata/samples/specify/`.
+- **BMAD:** `npx bmad-method install`, run workflows, copy **`_bmad-output/planning-artifacts/`** into `testdata/samples/bmad/`.
+
+After changes: **`go test ./internal/adapters/markdown/... -count=1`**.
 
 ## Releasing
 
-Releases are automated with [GoReleaser](https://goreleaser.com/) via GitHub Actions:
+Releases use [GoReleaser](https://goreleaser.com/) via GitHub Actions:
 
 ```bash
 git tag v0.1.0
