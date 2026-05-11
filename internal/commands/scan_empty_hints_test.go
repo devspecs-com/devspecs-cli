@@ -144,6 +144,28 @@ func TestScan_EmptyArtifacts_QuietSuppressesHumanHints(t *testing.T) {
 	}
 }
 
+func TestScan_EmptyArtifacts_JSON_QuietStillIncludesHints(t *testing.T) {
+	setupEmptyScanRepo(t)
+	initCmd := NewInitCmd()
+	initCmd.SetOut(&bytes.Buffer{})
+	if err := initCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	wd, _ := os.Getwd()
+	writeMisconfiguredSources(t, wd)
+
+	scanCmd := NewScanCmd()
+	scanCmd.SetArgs([]string{"--json", "--quiet"})
+	var buf bytes.Buffer
+	scanCmd.SetOut(&buf)
+	if err := scanCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `"hints"`) {
+		t.Fatalf("expected hints in JSON with --quiet, got %s", buf.String())
+	}
+}
+
 func TestScan_NonEmpty_NoHintBlock(t *testing.T) {
 	setupE2ERepo(t)
 	initCmd := NewInitCmd()
