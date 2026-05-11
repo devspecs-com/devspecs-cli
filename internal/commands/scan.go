@@ -89,6 +89,9 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	adpts := []adapters.Adapter{&openspec.Adapter{}, &adr.Adapter{}, &markdown.Adapter{}}
 
 	scanner := scan.New(db, ids, adpts)
+	if verbose && !quiet {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Respecting repo-root .gitignore, .git/info/exclude, and .aiignore during configured walks\n")
+	}
 	result, err := scanner.Run(context.Background(), repoRoot, cfg)
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)

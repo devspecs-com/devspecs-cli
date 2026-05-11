@@ -6,9 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/devspecs-com/devspecs-cli/internal/discover"
+	"github.com/devspecs-com/devspecs-cli/internal/ignore"
 	"github.com/devspecs-com/devspecs-cli/internal/repo"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/spf13/cobra"
@@ -17,8 +20,11 @@ import (
 // NewInitCmd creates the ds init command.
 func NewInitCmd() *cobra.Command {
 	var (
-		force bool
-		hooks bool
+		force          bool
+		hooks          bool
+		noDetect       bool
+		yes            bool
+		nonInteractive bool
 	)
 
 	cmd := &cobra.Command{
@@ -26,16 +32,21 @@ func NewInitCmd() *cobra.Command {
 		Short: "Initialize DevSpecs in the current repository",
 		Long:  "Creates the global DevSpecs directory and database, and optionally a repo-local .devspecs/config.yaml.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInit(cmd, force, hooks)
+			nonInter := yes || nonInteractive
+			return runInit(cmd, force, hooks, noDetect, nonInter)
 		},
 	}
 
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite existing config if present")
 	cmd.Flags().BoolVar(&hooks, "hooks", false, "Install git post-commit hook for auto-indexing")
+	cmd.Flags().BoolVar(&noDetect, "no-detect", false, "Skip repository layout detection (defaults-only config)")
+	cmd.Flags().BoolVar(&yes, "yes", false, "Non-interactive init (default behavior; same as --non-interactive)")
+	cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "Non-interactive init (alias for --yes)")
 	return cmd
 }
 
-func runInit(cmd *cobra.Command, force, hooks bool) error {
+func runInit(cmd *cobra.Command, force, hooks, noDetect, nonInteractive bool) error {
+	_ = nonInteractive // reserved for parity with scripting flags; v0.1 init is always non-interactive
 	homeDir, err := config.HomeDir()
 	if err != nil {
 		return fmt.Errorf("resolve home: %w", err)
@@ -56,8 +67,21 @@ func runInit(cmd *cobra.Command, force, hooks bool) error {
 	if err != nil {
 		return fmt.Errorf("get working directory: %w", err)
 	}
+	wd, err = filepath.Abs(wd)
+	if err != nil {
+		return fmt.Errorf("resolve working directory: %w", err)
+	}
 
-	configPath := config.RepoConfigPath(wd)
+	repoRoot := wd
+	if info := repo.Detect(wd); info.IsGit {
+		repoRoot = info.RootPath
+	}
+	repoRoot, err = filepath.Abs(repoRoot)
+	if err != nil {
+		return fmt.Errorf("resolve repository root: %w", err)
+	}
+
+	configPath := config.RepoConfigPath(repoRoot)
 	_, statErr := os.Stat(configPath)
 	configExists := statErr == nil
 
@@ -67,13 +91,21 @@ func runInit(cmd *cobra.Command, force, hooks bool) error {
 		fmt.Fprintln(cmd.OutOrStdout(), "\nUse --force to overwrite existing config.")
 
 		if hooks {
-			installHook(cmd, wd)
+			installHook(cmd, repoRoot)
 		}
 		return nil
 	}
 
 	cfg := config.DefaultRepoConfig()
-	if err := config.WriteRepoConfig(wd, cfg); err != nil {
+
+	var dres *discover.Result
+	if !noDetect {
+		matcher, _ := ignore.NewMatcher(repoRoot)
+		dres = discover.Run(repoRoot, matcher)
+		mergeDiscovery(cfg, dres)
+	}
+
+	if err := config.WriteRepoConfig(repoRoot, cfg); err != nil {
 		return fmt.Errorf("write repo config: %w", err)
 	}
 
@@ -81,12 +113,64 @@ func runInit(cmd *cobra.Command, force, hooks bool) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "\nGlobal index:\n  %s\n", homeDir)
 	fmt.Fprintf(cmd.OutOrStdout(), "\nRepo config:\n  %s\n", configPath)
 
+	if dres != nil {
+		if dres.SkippedIgnored > 0 {
+			fmt.Fprintf(cmd.OutOrStdout(), "\nDiscovery skipped %d ignored paths (.gitignore / .git/info/exclude / .aiignore).\n", dres.SkippedIgnored)
+		}
+		for _, s := range dres.Suggestions {
+			fmt.Fprintf(cmd.OutOrStdout(), "Suggestion: %s\n", s)
+		}
+	}
+
 	if hooks {
-		installHook(cmd, wd)
+		installHook(cmd, repoRoot)
 	}
 
 	fmt.Fprintln(cmd.OutOrStdout(), "\nNext:\n  ds scan")
 	return nil
+}
+
+func mergeDiscovery(cfg *config.RepoConfig, d *discover.Result) {
+	if d == nil {
+		return
+	}
+	for i := range cfg.Sources {
+		switch cfg.Sources[i].Type {
+		case "markdown":
+			cfg.Sources[i].Paths = mergeSortedUniquePaths(cfg.Sources[i].Path, cfg.Sources[i].Paths, d.MergeMarkdown)
+			cfg.Sources[i].Path = ""
+		case "adr":
+			cfg.Sources[i].Paths = mergeSortedUniquePaths(cfg.Sources[i].Path, cfg.Sources[i].Paths, d.MergeADR)
+			cfg.Sources[i].Path = ""
+		}
+	}
+}
+
+func mergeSortedUniquePaths(single string, base, extra []string) []string {
+	seen := make(map[string]bool)
+	var acc []string
+	if single != "" {
+		if !seen[single] {
+			seen[single] = true
+			acc = append(acc, single)
+		}
+	}
+	for _, p := range base {
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		acc = append(acc, p)
+	}
+	for _, p := range extra {
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		acc = append(acc, p)
+	}
+	sort.Strings(acc)
+	return acc
 }
 
 const hookMarker = "# DevSpecs auto-index"
@@ -111,8 +195,8 @@ func resolveDsBinary() string {
 	return "ds"
 }
 
-func installHook(cmd *cobra.Command, wd string) {
-	info := repo.Detect(wd)
+func installHook(cmd *cobra.Command, repoRoot string) {
+	info := repo.Detect(repoRoot)
 	if !info.IsGit {
 		fmt.Fprintln(cmd.ErrOrStderr(), "Not a git repository — skipping hook installation.")
 		return

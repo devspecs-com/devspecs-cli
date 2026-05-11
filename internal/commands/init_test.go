@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/devspecs-com/devspecs-cli/internal/config"
 )
 
 func TestInit_CreatesGlobalDB(t *testing.T) {
@@ -113,4 +115,123 @@ func TestInit_NoDestructiveRerun(t *testing.T) {
 	if !strings.Contains(output, "already initialized") {
 		t.Errorf("expected 'already initialized' message, got %q", output)
 	}
+}
+
+func TestInit_DiscoveryMergesDenseDocs(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
+	repoDir := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(filepath.Join(repoDir, "docs", "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "docs", "x", "a.plan.md"), []byte("#\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "docs", "x", "b.spec.md"), []byte("#\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewInitCmd()
+	cmd.SetIn(bytes.NewReader(nil))
+	cmd.SetOut(&bytes.Buffer{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadRepoConfig(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := markdownPathsFrom(t, cfg)
+	if !sliceContains(paths, "docs") {
+		t.Fatalf("expected bare docs/ merged when dense, got %v", paths)
+	}
+}
+
+func TestInit_NoDetect_SkipsDenseDocsMerge(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
+	repoDir := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(filepath.Join(repoDir, "docs", "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "docs", "x", "a.plan.md"), []byte("#\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "docs", "x", "b.spec.md"), []byte("#\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewInitCmd()
+	cmd.SetArgs([]string{"--no-detect"})
+	cmd.SetIn(bytes.NewReader(nil))
+	cmd.SetOut(&bytes.Buffer{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadRepoConfig(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := markdownPathsFrom(t, cfg)
+	if sliceContains(paths, "docs") {
+		t.Fatalf("did not expect bare docs/ with --no-detect, got %v", paths)
+	}
+}
+
+func TestInit_EmptyStdinNonBlocking(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
+	repoDir := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+	cmd := NewInitCmd()
+	cmd.SetIn(bytes.NewReader(nil))
+	cmd.SetOut(&bytes.Buffer{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func markdownPathsFrom(t *testing.T, cfg *config.RepoConfig) []string {
+	t.Helper()
+	if cfg == nil {
+		t.Fatal("nil config")
+	}
+	for _, s := range cfg.Sources {
+		if s.Type == "markdown" {
+			if s.Path != "" {
+				return append([]string{s.Path}, s.Paths...)
+			}
+			return append([]string(nil), s.Paths...)
+		}
+	}
+	t.Fatal("no markdown source")
+	return nil
+}
+
+func sliceContains(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
