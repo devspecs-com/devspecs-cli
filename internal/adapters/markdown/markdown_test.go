@@ -10,6 +10,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/format"
+	"github.com/devspecs-com/devspecs-cli/internal/ignore"
 )
 
 func TestDiscover_DefaultPaths(t *testing.T) {
@@ -278,9 +279,9 @@ func TestInferKind(t *testing.T) {
 	}
 }
 
-func TestDefaultPaths_IncludesDocs(t *testing.T) {
+func TestDefaultPaths_NarrowDocs(t *testing.T) {
 	paths := defaultPaths()
-	required := []string{"docs", "_bmad-output", ".specify/memory"}
+	required := []string{"docs/specs", "docs/plans", "docs/design", "docs/technical", "_bmad-output", ".specify/memory"}
 	for _, req := range required {
 		found := false
 		for _, p := range paths {
@@ -291,6 +292,11 @@ func TestDefaultPaths_IncludesDocs(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("defaultPaths() should include %q", req)
+		}
+	}
+	for _, p := range paths {
+		if p == "docs" {
+			t.Error("defaultPaths() should not include bare top-level docs/ (use docs/specs, docs/plans, …)")
 		}
 	}
 }
@@ -332,12 +338,18 @@ func TestDiscover_DocsDir(t *testing.T) {
 	os.WriteFile(filepath.Join(docsDir, "guide.md"), []byte("# Guide"), 0o644)
 
 	a := &Adapter{}
-	candidates, err := a.Discover(context.Background(), tmp, nil)
+	cfg := &config.RepoConfig{
+		Version: 1,
+		Sources: []config.SourceConfig{
+			{Type: "markdown", Paths: []string{"docs"}},
+		},
+	}
+	candidates, err := a.Discover(context.Background(), tmp, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(candidates) != 1 {
-		t.Fatalf("expected 1 candidate from docs/, got %d", len(candidates))
+		t.Fatalf("expected 1 candidate from configured docs/, got %d", len(candidates))
 	}
 	if candidates[0].RelPath != "docs/guide.md" {
 		t.Errorf("expected 'docs/guide.md', got %q", candidates[0].RelPath)
@@ -614,6 +626,35 @@ func stringSliceContains(ss []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestDiscover_IgnoredSubtreeExcluded(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, ".gitignore"), []byte("vendor-plans/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pdir := filepath.Join(tmp, "plans")
+	os.MkdirAll(pdir, 0o755)
+	os.WriteFile(filepath.Join(pdir, "a.md"), []byte("# A\n"), 0o644)
+	vdir := filepath.Join(tmp, "vendor-plans")
+	os.MkdirAll(vdir, 0o755)
+	os.WriteFile(filepath.Join(vdir, "b.md"), []byte("# B\n"), 0o644)
+
+	m, err := ignore.NewMatcher(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := ignore.WithContext(context.Background(), m)
+	a := &Adapter{}
+	cands, err := a.Discover(ctx, tmp, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cands {
+		if strings.HasPrefix(c.RelPath, "vendor-plans/") {
+			t.Fatalf("got ignored path %q", c.RelPath)
+		}
+	}
 }
 
 func TestInferDirectoryTag(t *testing.T) {

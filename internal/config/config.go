@@ -29,7 +29,8 @@ func DefaultRepoConfig() *RepoConfig {
 			{Type: "openspec", Path: "openspec"},
 			{Type: "adr", Paths: []string{"docs/adr", "docs/adrs", "adr", "adrs"}},
 			{Type: "markdown", Paths: []string{
-				"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans", "docs",
+				"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans",
+				"docs/design", "docs/technical",
 				"_bmad-output", ".specify/memory",
 			}},
 		},

@@ -9,6 +9,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/format"
+	"github.com/devspecs-com/devspecs-cli/internal/ignore"
 )
 
 func TestDiscover(t *testing.T) {
@@ -41,6 +42,33 @@ func TestDiscover_ConfigPaths(t *testing.T) {
 	}
 	if len(candidates) != 1 {
 		t.Fatalf("expected 1 candidate, got %d", len(candidates))
+	}
+}
+
+func TestDiscover_IgnoredADRDir(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, ".gitignore"), []byte("secret-adrs/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	good := filepath.Join(tmp, "adr")
+	os.MkdirAll(good, 0o755)
+	os.WriteFile(filepath.Join(good, "0001.md"), []byte("# A\n"), 0o644)
+	bad := filepath.Join(tmp, "secret-adrs")
+	os.MkdirAll(bad, 0o755)
+	os.WriteFile(filepath.Join(bad, "0002.md"), []byte("# B\n"), 0o644)
+
+	m, err := ignore.NewMatcher(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := ignore.WithContext(context.Background(), m)
+	a := &Adapter{}
+	cands, err := a.Discover(ctx, tmp, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cands) != 1 || cands[0].RelPath != "adr/0001.md" {
+		t.Fatalf("want 1 adr under adr/, got %#v", cands)
 	}
 }
 

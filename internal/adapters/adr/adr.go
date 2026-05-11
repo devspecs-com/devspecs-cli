@@ -13,6 +13,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/todoparse"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/format"
+	"github.com/devspecs-com/devspecs-cli/internal/ignore"
 )
 
 var statusLineRe = regexp.MustCompile(`(?i)^[*\-]?\s*status:\s*(.+)$`)
@@ -41,7 +42,7 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 	var candidates []adapters.Candidate
 	for _, p := range paths {
 		dir := filepath.Join(repoRoot, p)
-		entries, err := walkMD(dir)
+		entries, err := walkMD(ctx, repoRoot, dir)
 		if err != nil {
 			continue
 		}
@@ -94,11 +95,23 @@ func defaultADRPaths() []string {
 	return []string{"docs/adr", "docs/adrs", "adr", "adrs", "architecture/decisions"}
 }
 
-func walkMD(dir string) ([]string, error) {
+func walkMD(ctx context.Context, repoRoot, dir string) ([]string, error) {
+	m := ignore.FromContext(ctx)
 	var files []string
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+		rel, rerr := filepath.Rel(repoRoot, path)
+		if rerr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if m != nil && m.ShouldSkip(rel, info.IsDir()) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if !info.IsDir() && strings.HasSuffix(strings.ToLower(info.Name()), ".md") {
 			files = append(files, path)

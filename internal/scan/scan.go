@@ -17,6 +17,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/format"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
+	"github.com/devspecs-com/devspecs-cli/internal/ignore"
 	"github.com/devspecs-com/devspecs-cli/internal/repo"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/devspecs-com/devspecs-cli/internal/userident"
@@ -44,6 +45,9 @@ func (s *Scanner) Run(ctx context.Context, repoRoot string, cfg *config.RepoConf
 	}
 	result := newResult(adapterNames)
 	now := time.Now().UTC().Format(time.RFC3339)
+
+	matcher, _ := ignore.NewMatcher(repoRoot)
+	ctx = ignore.WithContext(ctx, matcher)
 
 	repoID, err := s.ensureRepo(repoRoot, now)
 	if err != nil {

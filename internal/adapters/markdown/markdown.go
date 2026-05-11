@@ -12,6 +12,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/todoparse"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/format"
+	"github.com/devspecs-com/devspecs-cli/internal/ignore"
 )
 
 // Adapter discovers and parses generic markdown plans/specs.
@@ -39,7 +40,7 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 
 	for _, p := range paths {
 		dir := filepath.Join(repoRoot, p)
-		entries, err := walkMarkdownFiles(dir)
+		entries, err := walkMarkdownFiles(ctx, repoRoot, dir)
 		if err != nil {
 			continue
 		}
@@ -64,6 +65,9 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 		for _, absPath := range matches {
 			rel, _ := filepath.Rel(repoRoot, absPath)
 			rel = filepath.ToSlash(rel)
+			if m := ignore.FromContext(ctx); m != nil && m.ShouldSkip(rel, false) {
+				continue
+			}
 			if seen[rel] {
 				continue
 			}
@@ -153,7 +157,8 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 
 func defaultPaths() []string {
 	return []string{
-		"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans", "docs",
+		"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans",
+		"docs/design", "docs/technical",
 		"_bmad-output", ".specify/memory",
 	}
 }
@@ -165,11 +170,23 @@ func rootGlobs() []string {
 	}
 }
 
-func walkMarkdownFiles(dir string) ([]string, error) {
+func walkMarkdownFiles(ctx context.Context, repoRoot, dir string) ([]string, error) {
+	m := ignore.FromContext(ctx)
 	var files []string
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+		rel, rerr := filepath.Rel(repoRoot, path)
+		if rerr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if m != nil && m.ShouldSkip(rel, info.IsDir()) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if info.IsDir() {
 			return nil

@@ -12,6 +12,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/todoparse"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/format"
+	"github.com/devspecs-com/devspecs-cli/internal/ignore"
 )
 
 // Adapter discovers and parses OpenSpec change proposals.
@@ -33,6 +34,12 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 	}
 
 	changesDir := filepath.Join(repoRoot, basePath, "changes")
+	if m := ignore.FromContext(ctx); m != nil {
+		relBase := filepath.ToSlash(filepath.Join(basePath, "changes"))
+		if m.ShouldSkip(relBase, true) {
+			return nil, nil
+		}
+	}
 	entries, err := os.ReadDir(changesDir)
 	if err != nil {
 		return nil, nil
@@ -49,6 +56,9 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 		}
 		rel, _ := filepath.Rel(repoRoot, proposalPath)
 		rel = filepath.ToSlash(rel)
+		if m := ignore.FromContext(ctx); m != nil && m.ShouldSkip(rel, false) {
+			continue
+		}
 		candidates = append(candidates, adapters.Candidate{
 			PrimaryPath: proposalPath,
 			RelPath:     rel,
