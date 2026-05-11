@@ -445,9 +445,9 @@ func testSamplesRoot(t *testing.T) string {
 
 func TestPathGeneratorHints(t *testing.T) {
 	tests := []struct {
-		relPath      string
-		wantTags     []string
-		wantGen      string
+		relPath  string
+		wantTags []string
+		wantGen  string
 	}{
 		{"_bmad-output/planning-artifacts/prd.md", []string{"bmad"}, "bmad-method"},
 		{"specs/001-x/spec.md", []string{"speckit"}, "speckit"},
