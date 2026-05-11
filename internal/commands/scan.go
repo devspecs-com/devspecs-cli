@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
@@ -98,14 +99,20 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	}
 
 	if asJSON {
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
 	}
 
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "Scanned repository: %s\n", repoRoot)
-	fmt.Fprintln(out, "\nFound:")
-	for adapter, count := range result.Found {
-		fmt.Fprintf(out, "  %d %s\n", count, adapter)
+	fmt.Fprintln(out, "\nIndexed by source:")
+	for _, row := range result.SourcesBreakdown {
+		fmt.Fprintf(out, "  %-16s %3d", row.Label, row.Count)
+		if s := formatScanFormatsHuman(row.Formats); s != "" {
+			fmt.Fprintf(out, "   formats: %s", s)
+		}
+		fmt.Fprintln(out)
 	}
 	fmt.Fprintln(out, "\nIndexed:")
 	fmt.Fprintf(out, "  %d new artifacts\n", result.New)
@@ -113,6 +120,26 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	fmt.Fprintf(out, "  %d unchanged artifacts\n", result.Unchanged)
 	fmt.Fprintln(out, "\nRun:\n  ds list")
 	return nil
+}
+
+// formatScanFormatsHuman renders format_profile counts sorted by profile name (stable output).
+func formatScanFormatsHuman(m map[string]int) string {
+	if len(m) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for i, k := range keys {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%s %d", k, m[k])
+	}
+	return b.String()
 }
 
 func sourcePathsChanged(repoRoot string, cfg *config.RepoConfig) bool {

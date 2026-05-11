@@ -115,11 +115,46 @@ func TestDOD_03_ScanArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var result map[string]any
-	json.Unmarshal(buf.Bytes(), &result)
-	found := result["Found"].(map[string]any)
-	if found["openspec"].(float64) != 1 {
+	var out struct {
+		Found            map[string]int `json:"Found"`
+		SourcesBreakdown []struct {
+			SourceType string         `json:"source_type"`
+			Label      string         `json:"label"`
+			Count      int            `json:"count"`
+			Formats    map[string]int `json:"formats"`
+		} `json:"sources_breakdown"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Found["openspec"] != 1 {
 		t.Error("expected 1 openspec found")
+	}
+	if out.Found["adr"] != 1 {
+		t.Error("expected 1 adr found")
+	}
+	if out.Found["markdown"] != 1 {
+		t.Error("expected 1 markdown found")
+	}
+	if len(out.SourcesBreakdown) != 3 {
+		t.Fatalf("sources_breakdown: want 3 rows, got %d", len(out.SourcesBreakdown))
+	}
+	var sumCount int
+	for _, row := range out.SourcesBreakdown {
+		if row.SourceType == "" || row.Label == "" {
+			t.Errorf("empty source_type or label: %#v", row)
+		}
+		sumCount += row.Count
+		sumFormats := 0
+		for _, c := range row.Formats {
+			sumFormats += c
+		}
+		if sumFormats != row.Count {
+			t.Errorf("formats sum %d != count %d for %s", sumFormats, row.Count, row.SourceType)
+		}
+	}
+	if sumCount != 3 {
+		t.Errorf("sources_breakdown count sum: want 3, got %d", sumCount)
 	}
 }
 
