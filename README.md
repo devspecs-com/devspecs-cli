@@ -25,7 +25,7 @@ DevSpecs does **not** replace Git, markdown, OpenSpec, ADRs, GitHub, Linear, or 
 
 - Scans **OpenSpec** changes, **ADR** paths, and **markdown** plans/specs (including common agent layouts such as `.cursor/plans`, BMAD `_bmad-output`, Spec Kit `specs/…/spec.md`).
 - Assigns **stable full IDs** and **short IDs** for everyday CLI use.
-- **Extracts markdown checklist todos** and stores them per artifact revision (source files stay authoritative).
+- **Extracts markdown checklist todos** and **acceptance / success / OKR criteria** (under matching headings), stored per artifact revision (source files stay authoritative).
 - Surfaces **in progress**, **recently settled**, and **stale** artifacts with **`ds resume`**.
 - Exports **agent-ready context** with **`ds context`**.
 - Keeps everything **local** in a SQLite index under your home directory (override with **`DEVSPECS_HOME`**).
@@ -101,6 +101,7 @@ Fast paths after indexing:
 ```bash
 ds find auth                 # search indexed text
 ds todos                     # checklist items across artifacts
+ds criteria                  # acceptance / success / OKR checklist criteria
 ds context abcdef01          # paste-ready context for an agent
 ds config show               # effective discovery paths
 ```
@@ -108,10 +109,10 @@ ds config show               # effective discovery paths
 ## Core workflow
 
 1. **`ds init`** — Creates the global index location `~/.devspecs` (overridable) and repo **`.devspecs/config.yaml`**. In a Git worktree, config is written at the **repository root** (not necessarily your current working directory). By default, init runs **layout detection** and merges high-confidence paths into the YAML; use **`--no-detect`** for defaults only. **`--yes`** / **`--non-interactive`** are aliases for scripting (init never prompts in v0.1).
-2. **`ds scan`** — Walks adapters and upserts artifacts, revisions, sources, todos, and tags.
+2. **`ds scan`** — Walks adapters and upserts artifacts, revisions, sources, todos, criteria, and tags.
 3. **`ds list`** / **`ds find`** — Browse or search what was indexed.
 4. **`ds show <id>`** — Full detail; accepts full ID, **short ID**, or prefix.
-5. **`ds todos`** / **`ds resume`** — Triage checklist items and lifecycle-oriented “where was I?” views.
+5. **`ds todos`** / **`ds criteria`** / **`ds resume`** — Triage checklist items, auditable criteria, and lifecycle-oriented “where was I?” views.
 6. **`ds context <id>`** — Export a single artifact’s context for tools or agents.
 
 ### Scan summaries (`ds scan`)
@@ -123,6 +124,7 @@ ds scan
 ds list
 ds show <id>
 ds todos <id>
+ds criteria <id>
 ds context <id>
 ```
 
@@ -141,6 +143,7 @@ Summary (see subsections and `ds <cmd> --help` for flags):
 | `ds resolve <id>` | Resolve ID to source path |
 | `ds context <id>` | Export agent-ready context |
 | `ds todos [id]` | Extracted checklist todos |
+| `ds criteria [id]` | Extracted acceptance / success / OKR criteria |
 | `ds config …` | `show`, `paths`, `add-source`, `set` |
 | `ds tag` / `ds untag` | Manual tags (`artifact_tags`) |
 | `ds capture <path>` | Capture a file as an artifact |
@@ -160,6 +163,7 @@ ds
   resolve <id>        Resolve ID to source path
   context <id>        Export agent-ready context
   todos [id]          List extracted todos
+  criteria [id]       List extracted criteria (acceptance / success / OKR)
   resume              Lifecycle-oriented resume
   config              Show, paths, add-source, set
   tag / untag         Manage artifact tags
@@ -179,7 +183,7 @@ These flags narrow results by repo basename, tag, git branch, or scanned-by user
 
 **`--repo`**, **`--tag`**, **`--branch`**, **`--user`**
 
-They apply to **`list`**, **`find`**, **`todos`**, and **`resume`**. For **`--repo`**, pass the directory **basename** (e.g. `my-app`), not a full path.
+They apply to **`list`**, **`find`**, **`todos`**, **`criteria`**, and **`resume`**. For **`--repo`**, pass the directory **basename** (e.g. `my-app`), not a full path.
 
 ### `ds init`
 
@@ -234,6 +238,21 @@ ds todos --json      # JSON output
 
 Honors the same **`--repo`**, **`--tag`**, **`--branch`**, **`--user`** filters as other read commands.
 
+### `ds criteria`
+
+Checklist lines under headings such as **Acceptance criteria**, **Success criteria** / **Success criterion**, **Auditable success** (and related phrases), **Definition of done**, or **OKR** / **Objectives and key results** are stored separately from actionable todos. Kinds in output and **`--kind`** are **`acceptance`**, **`success`**, and **`okr`**.
+
+```bash
+ds criteria              # All criteria (all repos in the index unless filtered)
+ds criteria <id>         # Criteria for one artifact
+ds criteria --open       # Incomplete only
+ds criteria --done       # Satisfied only
+ds criteria --kind success   # Only success-style criteria
+ds criteria --json     # JSON array rows
+```
+
+Honors **`--repo`**, **`--tag`**, **`--branch`**, **`--user`** when listing across artifacts (same semantics as **`ds todos`**). **`--no-refresh`** skips the auto-scan freshness check.
+
 ## Supported artifact types
 
 | Adapter | Detected paths | Kind |
@@ -282,7 +301,7 @@ sources:
 | `.devspecs/config.yaml` | Per-repo discovery config |
 | `DEVSPECS_HOME` | Optional override for the global DevSpecs directory |
 
-Tables include **`repos`** (optional **`scanned_by`**), **`artifacts`** (deterministic **short_id**), **`artifact_revisions`**, **`sources`**, **`links`**, **`artifact_todos`**, **`artifact_tags`**.
+Tables include **`repos`** (optional **`scanned_by`**), **`artifacts`** (deterministic **short_id**), **`artifact_revisions`**, **`sources`**, **`links`**, **`artifact_todos`**, **`artifact_criteria`**, **`artifact_tags`**.
 
 ### Extracted todos (`artifact_todos`)
 
