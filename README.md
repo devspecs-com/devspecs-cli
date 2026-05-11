@@ -107,7 +107,7 @@ ds config show               # effective discovery paths
 
 ## Core workflow
 
-1. **`ds init`** — Creates the global index location `~/.devspecs` (overridable) and repo `.devspecs/config.yaml`.
+1. **`ds init`** — Creates the global index location `~/.devspecs` (overridable) and repo **`.devspecs/config.yaml`**. In a Git worktree, config is written at the **repository root** (not necessarily your current working directory). By default, init runs **layout detection** and merges high-confidence paths into the YAML; use **`--no-detect`** for defaults only. **`--yes`** / **`--non-interactive`** are aliases for scripting (init never prompts in v0.1).
 2. **`ds scan`** — Walks adapters and upserts artifacts, revisions, sources, todos, and tags.
 3. **`ds list`** / **`ds find`** — Browse or search what was indexed.
 4. **`ds show <id>`** — Full detail; accepts full ID, **short ID**, or prefix.
@@ -186,9 +186,15 @@ They apply to **`list`**, **`find`**, **`todos`**, and **`resume`**. For **`--re
 Creates **`~/.devspecs/devspecs.db`** (global index) and **`.devspecs/config.yaml`** (repo config).
 
 ```bash
-ds init          # First-time setup
-ds init --force  # Overwrite existing config
+ds init                      # First-time setup (with layout detection)
+ds init --no-detect          # Defaults-only YAML (no discovery merge)
+ds init --force              # Overwrite existing config
+ds init --yes                # Same as default; for CI scripts (alias: --non-interactive)
 ```
+
+**Ignore stack (scan + discovery):** from the repository root, patterns are read in order from **`.gitignore`**, **`.git/info/exclude`** (when `.git` exists), then repo-root **`.aiignore`** (gitignore-like syntax, including `!` negation where the matcher supports it). **`ds scan`** applies the same rules to configured markdown and ADR directory walks. **`ds scan --verbose`** prints a one-line reminder on stderr. **`.cursorignore`** is not read in v0.1.
+
+Bare top-level **`docs/`** is not in the default markdown path list; init **merges** it only when discovery finds enough plan/spec-like files under `docs/`. Otherwise you get a short suggestion to add paths manually.
 
 ### `ds scan`
 
