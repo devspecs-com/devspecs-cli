@@ -22,17 +22,17 @@ func TestMatchSourceRules(t *testing.T) {
 		t.Fatalf("ROADMAP.md: got kind=%q subtype=%q ok=%v tags=%v", k, sub, ok, tags)
 	}
 
-	k, sub, _, ok = MatchSourceRules("decisions/001-x.md", paths, rules)
+	k, _, _, ok = MatchSourceRules("decisions/001-x.md", paths, rules)
 	if !ok || k != config.KindDecision {
 		t.Fatalf("decisions file: kind=%q ok=%v", k, ok)
 	}
 
-	k, sub, _, ok = MatchSourceRules("v2/plans/02_FOO.md", paths, rules)
+	k, _, _, ok = MatchSourceRules("v2/plans/02_FOO.md", paths, rules)
 	if !ok || k != config.KindPlan {
 		t.Fatalf("numbered root file: kind=%q ok=%v", k, ok)
 	}
 
-	k, sub, _, ok = MatchSourceRules("v2/plans/sub/README.md", paths, rules)
+	k, _, _, ok = MatchSourceRules("v2/plans/sub/README.md", paths, rules)
 	if !ok || k != config.KindPlan {
 		t.Fatalf("nested readme: kind=%q ok=%v", k, ok)
 	}
