@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -16,7 +17,7 @@ import (
 var schemaDDL string
 
 // SchemaVersion is the current schema version. Bump when schema.sql changes.
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 // DB wraps *sql.DB with DevSpecs-specific operations.
 type DB struct {
@@ -63,12 +64,47 @@ func (db *DB) migrate() error {
 		return err
 	}
 
-	if maxVersion < SchemaVersion {
-		return fmt.Errorf(
-			"index was created with schema v%d but this CLI requires v%d. Run 'ds scan --rebuild' or delete ~/.devspecs/devspecs.db and run 'ds scan' to rebuild",
-			maxVersion, SchemaVersion,
-		)
+	for maxVersion < SchemaVersion {
+		switch maxVersion {
+		case 3:
+			if err := db.migrate3To4(now); err != nil {
+				return err
+			}
+			maxVersion = 4
+		default:
+			return fmt.Errorf(
+				"index was created with schema v%d but this CLI requires v%d. Run 'ds scan --rebuild' or delete ~/.devspecs/devspecs.db and run 'ds scan' to rebuild",
+				maxVersion, SchemaVersion,
+			)
+		}
+	}
+
+	if maxVersion > SchemaVersion {
+		return fmt.Errorf("database schema v%d is newer than this CLI (v%d)", maxVersion, SchemaVersion)
 	}
 
 	return nil
+}
+
+func tryAlterTable(db *sql.DB, stmt string) error {
+	_, err := db.Exec(stmt)
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "duplicate column") {
+		return nil
+	}
+	return err
+}
+
+func (db *DB) migrate3To4(now string) error {
+	if err := tryAlterTable(db.DB, `ALTER TABLE sources ADD COLUMN format_profile TEXT NOT NULL DEFAULT 'generic'`); err != nil {
+		return fmt.Errorf("migrate v3→v4 format_profile: %w", err)
+	}
+	if err := tryAlterTable(db.DB, `ALTER TABLE sources ADD COLUMN layout_group TEXT`); err != nil {
+		return fmt.Errorf("migrate v3→v4 layout_group: %w", err)
+	}
+	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", SchemaVersion, now)
+	return err
 }

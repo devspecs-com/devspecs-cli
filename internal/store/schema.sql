@@ -1,4 +1,4 @@
--- DevSpecs v0.1 schema (version 3)
+-- DevSpecs v0.1 schema (version 4)
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version    INTEGER PRIMARY KEY,
@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS sources (
   path            TEXT,
   url             TEXT,
   source_identity TEXT NOT NULL,
+  format_profile  TEXT NOT NULL DEFAULT 'generic',
+  layout_group    TEXT,
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL,
   FOREIGN KEY (artifact_id) REFERENCES artifacts(id),

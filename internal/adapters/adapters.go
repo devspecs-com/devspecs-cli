@@ -20,6 +20,9 @@ type Candidate struct {
 	PrimaryPath string // absolute path to the primary file
 	RelPath     string // relative to repo root
 	AdapterName string
+	// FormatProfile and LayoutGroup may be set by adapters; scan persists them on Source rows.
+	FormatProfile string
+	LayoutGroup   string
 }
 
 // Artifact holds the parsed metadata for an artifact.
@@ -32,6 +35,8 @@ type Artifact struct {
 	Body           string
 	Extracted      map[string]any
 	Tags           []string
+	FormatProfile  string
+	LayoutGroup    string
 }
 
 // Source represents where an artifact came from.
@@ -39,4 +44,6 @@ type Source struct {
 	SourceType     string
 	Path           string
 	SourceIdentity string
+	FormatProfile  string
+	LayoutGroup    string
 }

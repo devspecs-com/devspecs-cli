@@ -1,8 +1,11 @@
 package store
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestOpen_CreatesDB(t *testing.T) {
@@ -44,7 +47,7 @@ func TestMigrate_Idempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if count != 1 {
-		t.Errorf("expected 1 migration row (version 3), got %d", count)
+		t.Errorf("expected 1 migration row (version %d), got %d", SchemaVersion, count)
 	}
 
 	var version int
@@ -54,6 +57,58 @@ func TestMigrate_Idempotent(t *testing.T) {
 	}
 
 	db.Close()
+}
+
+func TestMigrate_FromV3ToV4(t *testing.T) {
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "legacy.db")
+	raw, err := sql.Open("sqlite", dbPath+"?_pragma=foreign_keys(OFF)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE schema_migrations (
+		version INTEGER PRIMARY KEY,
+		applied_at TEXT NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (3, '2020-01-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE sources (
+		id TEXT PRIMARY KEY,
+		artifact_id TEXT NOT NULL,
+		repo_id TEXT,
+		source_type TEXT NOT NULL,
+		path TEXT,
+		url TEXT,
+		source_identity TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var v int
+	if err := db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	if v != SchemaVersion {
+		t.Fatalf("expected schema version %d after migrate, got %d", SchemaVersion, v)
+	}
+	var n int
+	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('sources') WHERE name IN ('format_profile', 'layout_group')").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("expected format_profile and layout_group columns on sources, got count %d", n)
+	}
 }
 
 func TestOpen_OldSchemaVersion(t *testing.T) {
