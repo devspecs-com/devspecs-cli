@@ -15,6 +15,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/todoparse"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/devspecs-com/devspecs-cli/internal/format"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
 	"github.com/devspecs-com/devspecs-cli/internal/repo"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
@@ -146,6 +147,8 @@ func (s *Scanner) upsertArtifact(repoID string, art adapters.Artifact, sources [
 	}
 
 	if existingHash == contentHash {
+		// Body hash unchanged: keep existing revision row (and extracted_json) until
+		// file content changes — CLI logic-only enrichments won't rewrite revisions alone.
 		s.replaceTags(artifactID, art, now)
 		result.Unchanged++
 		return nil
@@ -204,7 +207,7 @@ func (s *Scanner) insertSource(artifactID, repoID string, src adapters.Source, n
 	id := s.ids.NewWithPrefix("src_")
 	fp := src.FormatProfile
 	if fp == "" {
-		fp = "generic"
+		fp = format.ProfileGeneric
 	}
 	var layoutArg any
 	if src.LayoutGroup != "" {

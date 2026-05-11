@@ -2,14 +2,17 @@ package scan
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/devspecs-com/devspecs-cli/internal/format"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 )
@@ -207,5 +210,118 @@ func TestScan_PersistsExtractedJSONWithFrontmatter(t *testing.T) {
 	}
 	if !strings.Contains(ex, "frontmatter") {
 		t.Fatalf("expected frontmatter in extracted json: %s", ex)
+	}
+	// Same map the markdown adapter produces for this file (full parity through scan path).
+	md := &markdown.Adapter{}
+	repoRoot := filepath.Join(tmp, "repo")
+	abs := filepath.Join(repoRoot, "plans", "fm.md")
+	wantArt, _, _, err := md.Parse(context.Background(), adapters.Candidate{
+		PrimaryPath: abs,
+		RelPath:     "plans/fm.md",
+		AdapterName: "markdown",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(ex), &got); err != nil {
+		t.Fatalf("stored json: %v", err)
+	}
+	wantCanon, err := extractedJSONRoundTrip(wantArt.Extracted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, wantCanon) {
+		t.Fatalf("extracted_json != parsed Extracted (JSON semantics)\ngot:  %#v\nwant: %#v", got, wantCanon)
+	}
+}
+
+func extractedJSONRoundTrip(m map[string]any) (map[string]any, error) {
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func testdataSamplesRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "testdata", "samples"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+// TestScan_CursorPlanSample_NoPathToolTagInDB verifies plan § success: after scan,
+// artifact_tags must not gain path-derived tool slugs, and sources.format_profile is set.
+func TestScan_CursorPlanSample_NoPathToolTagInDB(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	t.Setenv("DEVSPECS_HOME", home)
+
+	srcRoot := filepath.Join(testdataSamplesRoot(t), "cursor")
+	planSrc := filepath.Join(srcRoot, ".cursor", "plans", "probabilistic_related_specs_481c4b3f.plan.md")
+	data, err := os.ReadFile(planSrc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	repoRoot := filepath.Join(tmp, "repo")
+	dstDir := filepath.Join(repoRoot, ".cursor", "plans")
+	os.MkdirAll(dstDir, 0o755)
+	dstPath := filepath.Join(dstDir, "probabilistic_related_specs_481c4b3f.plan.md")
+	if err := os.WriteFile(dstPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dbPath := filepath.Join(home, "devspecs.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	ids := idgen.NewFactory()
+	s := New(db, ids, []adapters.Adapter{&markdown.Adapter{}})
+	if _, err := s.Run(context.Background(), repoRoot, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	var artifactID string
+	err = db.QueryRow("SELECT id FROM artifacts LIMIT 1").Scan(&artifactID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := db.Query("SELECT tag FROM artifact_tags WHERE artifact_id = ?", artifactID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err != nil {
+			t.Fatal(err)
+		}
+		if tag == "cursor" {
+			t.Fatalf("path-derived tool slug must not appear in artifact_tags after scan, got tag %q", tag)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	var profile string
+	err = db.QueryRow("SELECT format_profile FROM sources WHERE artifact_id = ?", artifactID).Scan(&profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile != format.ProfileCursorPlan {
+		t.Fatalf("sources.format_profile: want %q, got %q", format.ProfileCursorPlan, profile)
 	}
 }
