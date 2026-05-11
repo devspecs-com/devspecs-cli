@@ -81,3 +81,84 @@ func TestFileFirstCommitDate(t *testing.T) {
 		t.Fatalf("want %v, got %v", wantT, parsed)
 	}
 }
+
+func TestHeadCommit_gitRepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available:", err)
+	}
+	tmp := t.TempDir()
+	if err := exec.Command("git", "init", "-b", "main", tmp).Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", tmp, "add", "f.txt").Run(); err != nil {
+		t.Fatal(err)
+	}
+	c := exec.Command("git", "-C", tmp, "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-m", "init")
+	if err := c.Run(); err != nil {
+		t.Fatal(err)
+	}
+	h := HeadCommit(tmp)
+	if len(h) < 8 {
+		t.Fatalf("short hash %q", h)
+	}
+}
+
+func TestHeadCommit_nonGit(t *testing.T) {
+	if HeadCommit(t.TempDir()) != "" {
+		t.Fatal("expected empty")
+	}
+}
+
+func TestChangedFiles_latestCommit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available:", err)
+	}
+	tmp := t.TempDir()
+	if err := exec.Command("git", "init", "-b", "main", tmp).Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", tmp, "add", "a.txt").Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", tmp, "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-m", "a").Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "b.txt"), []byte("b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", tmp, "add", "b.txt").Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", tmp, "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-m", "b").Run(); err != nil {
+		t.Fatal(err)
+	}
+	files := ChangedFiles(tmp)
+	found := false
+	for _, f := range files {
+		if f == "b.txt" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("%v", files)
+	}
+}
+
+func TestChangedFiles_nonGit(t *testing.T) {
+	if ChangedFiles(t.TempDir()) != nil {
+		t.Fatal()
+	}
+}
+
+func TestFileFirstCommitDate_emptyPath(t *testing.T) {
+	if FileFirstCommitDate(t.TempDir(), "") != "" {
+		t.Fatal()
+	}
+}

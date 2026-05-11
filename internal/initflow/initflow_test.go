@@ -65,6 +65,29 @@ func TestMergeSelectedProfiles_openspecSetsPath(t *testing.T) {
 	}
 }
 
+func TestMergeSelectedProfiles_openspecUpdatesExistingPath(t *testing.T) {
+	base := &config.RepoConfig{
+		Version: 1,
+		Sources: []config.SourceConfig{
+			{Type: "openspec", Path: "wrong"},
+		},
+	}
+	out, err := MergeSelectedProfiles(base, []string{"openspec"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var osrc *config.SourceConfig
+	for i := range out.Sources {
+		if out.Sources[i].Type == "openspec" {
+			osrc = &out.Sources[i]
+			break
+		}
+	}
+	if osrc == nil || osrc.Path != "openspec" {
+		t.Fatalf("openspec path: %+v", osrc)
+	}
+}
+
 func TestMergeSelectedProfiles_customPathsAndRules(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "plans", "01_step")
@@ -114,6 +137,124 @@ func TestMergeSelectedProfiles_emptySelectionPreservesBase(t *testing.T) {
 func TestProfilesOpenspecIDMergeIntegration(t *testing.T) {
 	if _, ok := profiles.ByID("openspec"); !ok {
 		t.Fatal("registry missing openspec")
+	}
+}
+
+func TestMergeSelectedProfiles_nilBaseUsesDefaults(t *testing.T) {
+	out, err := MergeSelectedProfiles(nil, []string{"cursor"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Version != 1 {
+		t.Fatalf("version %d", out.Version)
+	}
+	md := markdownSource(out)
+	if md == nil || len(md.Paths) == 0 {
+		t.Fatalf("markdown %+v", md)
+	}
+}
+
+func TestMergeSelectedProfiles_adrAddsPaths(t *testing.T) {
+	base := config.DefaultRepoConfig()
+	out, err := MergeSelectedProfiles(base, []string{"adr"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ad := adrSource(out)
+	if ad == nil {
+		t.Fatal("expected adr source")
+	}
+	found := false
+	for _, p := range ad.Paths {
+		if p == "docs/adr" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("paths %v", ad.Paths)
+	}
+}
+
+func TestMergeSelectedProfiles_invalidCustomRules(t *testing.T) {
+	base := config.DefaultRepoConfig()
+	_, err := MergeSelectedProfiles(base, nil, []string{"plans"}, []config.SourceRule{
+		{Match: "*.md", Kind: "invalid_kind"},
+	})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+}
+
+func TestMergeSelectedProfiles_unknownProfileIDSkipped(t *testing.T) {
+	base := config.DefaultRepoConfig()
+	out, err := MergeSelectedProfiles(base, []string{"cursor", "___unknown___"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	md := markdownSource(out)
+	if md == nil {
+		t.Fatal("expected markdown")
+	}
+	var sawCursor bool
+	for _, p := range md.Paths {
+		if p == ".cursor/plans" {
+			sawCursor = true
+			break
+		}
+	}
+	if !sawCursor {
+		t.Fatalf("paths %v", md.Paths)
+	}
+}
+
+func adrSource(cfg *config.RepoConfig) *config.SourceConfig {
+	for i := range cfg.Sources {
+		if cfg.Sources[i].Type == "adr" {
+			return &cfg.Sources[i]
+		}
+	}
+	return nil
+}
+
+func TestMergeSelectedProfiles_speckitRules(t *testing.T) {
+	base := config.DefaultRepoConfig()
+	out, err := MergeSelectedProfiles(base, []string{"speckit"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	md := markdownSource(out)
+	if md == nil {
+		t.Fatal("expected markdown")
+	}
+	var saw bool
+	for _, r := range md.Rules {
+		if r.Match == "*/spec.md" && r.Kind == config.KindSpec {
+			saw = true
+			break
+		}
+	}
+	if !saw {
+		t.Fatalf("rules %+v", md.Rules)
+	}
+}
+
+func TestMergeSelectedProfiles_bmadPRDRule(t *testing.T) {
+	base := config.DefaultRepoConfig()
+	out, err := MergeSelectedProfiles(base, []string{"bmad"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	md := markdownSource(out)
+	var saw bool
+	for _, r := range md.Rules {
+		if r.Kind == config.KindRequirements && r.Subtype == config.SubtypePRD {
+			saw = true
+			break
+		}
+	}
+	if !saw {
+		t.Fatalf("rules %+v", md.Rules)
 	}
 }
 
@@ -273,6 +414,13 @@ func TestDetectPatterns_emptyDir(t *testing.T) {
 	pats := DetectPatterns(root, "empty")
 	if len(pats) != 0 {
 		t.Errorf("expected nil, got %+v", pats)
+	}
+}
+
+func TestDetectPatterns_missingSourceDir(t *testing.T) {
+	root := t.TempDir()
+	if p := DetectPatterns(root, "no/such/dir"); len(p) != 0 {
+		t.Fatalf("got %+v", p)
 	}
 }
 
