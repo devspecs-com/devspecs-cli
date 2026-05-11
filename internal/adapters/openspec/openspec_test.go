@@ -8,6 +8,7 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/devspecs-com/devspecs-cli/internal/format"
 )
 
 func setupOpenSpecRepo(t *testing.T) string {
@@ -72,6 +73,13 @@ func TestOpenSpec_ParseExtractsTitleAndCriteria(t *testing.T) {
 	}
 	if len(sources) != 1 {
 		t.Errorf("expected 1 source, got %d", len(sources))
+	}
+	if art.FormatProfile != format.ProfileOpenspec || sources[0].FormatProfile != format.ProfileOpenspec {
+		t.Errorf("format_profile: want openspec, art=%q src=%q", art.FormatProfile, sources[0].FormatProfile)
+	}
+	wantLayout := filepath.ToSlash(filepath.Join("openspec", "changes", "add-sso"))
+	if art.LayoutGroup != wantLayout || sources[0].LayoutGroup != wantLayout {
+		t.Errorf("layout_group: want %q, art=%q src=%q", wantLayout, art.LayoutGroup, sources[0].LayoutGroup)
 	}
 }
 

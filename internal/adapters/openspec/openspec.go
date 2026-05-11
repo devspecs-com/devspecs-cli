@@ -11,6 +11,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/todoparse"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/devspecs-com/devspecs-cli/internal/format"
 )
 
 // Adapter discovers and parses OpenSpec change proposals.
@@ -68,6 +69,8 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 	changeID := filepath.Base(changeDir)
 	repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(changeDir)))
 
+	layoutGroup := filepath.ToSlash(filepath.Dir(c.RelPath))
+
 	title := extractH1(content)
 	if title == "" {
 		title = humanize(changeID)
@@ -83,6 +86,8 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 		PrimaryPath:    c.PrimaryPath,
 		Body:           content,
 		Extracted:      make(map[string]any),
+		FormatProfile:  format.ProfileOpenspec,
+		LayoutGroup:    layoutGroup,
 	}
 
 	// Extract acceptance criteria from proposal
@@ -95,6 +100,8 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 		SourceType:     "openspec",
 		Path:           c.RelPath,
 		SourceIdentity: art.SourceIdentity,
+		FormatProfile:  format.ProfileOpenspec,
+		LayoutGroup:    layoutGroup,
 	}
 
 	// Collect todos from proposal

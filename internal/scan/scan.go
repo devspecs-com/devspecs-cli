@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -111,7 +112,7 @@ func (s *Scanner) upsertArtifact(repoID string, art adapters.Artifact, sources [
 			return err
 		}
 		s.assignShortID(artifactID, art.SourceIdentity)
-		if err := s.insertRevision(revID, artifactID, contentHash, art.Body, now); err != nil {
+		if err := s.insertRevision(revID, artifactID, contentHash, art.Body, art.Extracted, now); err != nil {
 			return err
 		}
 		for _, src := range sources {
@@ -134,6 +135,10 @@ func (s *Scanner) upsertArtifact(repoID string, art adapters.Artifact, sources [
 	// Ensure short_id is set (covers artifacts created before v0.1)
 	s.assignShortID(artifactID, art.SourceIdentity)
 
+	if err := s.syncSources(artifactID, repoID, sources, now); err != nil {
+		return err
+	}
+
 	// Check if content changed
 	var existingHash string
 	if currentRevID != "" {
@@ -148,7 +153,7 @@ func (s *Scanner) upsertArtifact(repoID string, art adapters.Artifact, sources [
 
 	// New revision
 	revID := s.ids.NewWithPrefix("rev_")
-	if err := s.insertRevision(revID, artifactID, contentHash, art.Body, now); err != nil {
+	if err := s.insertRevision(revID, artifactID, contentHash, art.Body, art.Extracted, now); err != nil {
 		return err
 	}
 	s.db.Exec("UPDATE artifacts SET current_revision_id = ?, title = ?, status = ?, kind = ?, updated_at = ? WHERE id = ?",
@@ -179,21 +184,49 @@ func (s *Scanner) insertArtifact(id, repoID string, art adapters.Artifact, revID
 	return err
 }
 
-func (s *Scanner) insertRevision(id, artifactID, contentHash, body, now string) error {
+func (s *Scanner) insertRevision(id, artifactID, contentHash, body string, extracted map[string]any, now string) error {
+	var extractedArg any
+	if len(extracted) > 0 {
+		b, err := json.Marshal(extracted)
+		if err != nil {
+			return fmt.Errorf("marshal extracted: %w", err)
+		}
+		extractedArg = string(b)
+	}
 	_, err := s.db.Exec(
-		"INSERT INTO artifact_revisions (id, artifact_id, content_hash, body, observed_at) VALUES (?, ?, ?, ?, ?)",
-		id, artifactID, contentHash, body, now,
+		"INSERT INTO artifact_revisions (id, artifact_id, content_hash, body, extracted_json, observed_at) VALUES (?, ?, ?, ?, ?, ?)",
+		id, artifactID, contentHash, body, extractedArg, now,
 	)
 	return err
 }
 
 func (s *Scanner) insertSource(artifactID, repoID string, src adapters.Source, now string) error {
 	id := s.ids.NewWithPrefix("src_")
+	fp := src.FormatProfile
+	if fp == "" {
+		fp = "generic"
+	}
+	var layoutArg any
+	if src.LayoutGroup != "" {
+		layoutArg = src.LayoutGroup
+	}
 	_, err := s.db.Exec(
-		"INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		id, artifactID, repoID, src.SourceType, src.Path, src.SourceIdentity, now, now,
+		"INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, format_profile, layout_group, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		id, artifactID, repoID, src.SourceType, src.Path, src.SourceIdentity, fp, layoutArg, now, now,
 	)
 	return err
+}
+
+func (s *Scanner) syncSources(artifactID, repoID string, sources []adapters.Source, now string) error {
+	if _, err := s.db.Exec("DELETE FROM sources WHERE artifact_id = ?", artifactID); err != nil {
+		return err
+	}
+	for _, src := range sources {
+		if err := s.insertSource(artifactID, repoID, src, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Scanner) replaceTodos(artifactID, revID string, todos []todoparse.Todo, now string) error {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/devspecs-com/devspecs-cli/internal/format"
 )
 
 func TestDiscover_DefaultPaths(t *testing.T) {
@@ -411,7 +412,7 @@ func TestParse_ExtractsTags(t *testing.T) {
 	}
 }
 
-func TestParse_GeneratorFrontmatterAddsSlugTagAndExtracted(t *testing.T) {
+func TestParse_GeneratorFrontmatterSetsProfileWithoutToolTag(t *testing.T) {
 	tmp := t.TempDir()
 	content := "---\ngenerator: Claude Desktop\n---\n# Doc Title\n\nBody.\n"
 	path := filepath.Join(tmp, "x.md")
@@ -426,8 +427,11 @@ func TestParse_GeneratorFrontmatterAddsSlugTagAndExtracted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !stringSliceContains(art.Tags, "claude-desktop") {
-		t.Fatalf("expected slug tag claude-desktop, got %#v", art.Tags)
+	if stringSliceContains(art.Tags, "claude-desktop") {
+		t.Fatalf("did not expect generator slug as tag, got %#v", art.Tags)
+	}
+	if art.FormatProfile != format.ProfileClaude {
+		t.Fatalf("format_profile: want %q, got %q", format.ProfileClaude, art.FormatProfile)
 	}
 	if g, _ := art.Extracted["generator"].(string); g != "Claude Desktop" {
 		t.Fatalf("extracted generator: want Claude Desktop, got %q", g)
@@ -443,27 +447,18 @@ func testSamplesRoot(t *testing.T) string {
 	return root
 }
 
-func TestPathGeneratorHints(t *testing.T) {
+func TestPathGeneratorForExtract(t *testing.T) {
 	tests := []struct {
-		relPath  string
-		wantTags []string
-		wantGen  string
+		relPath string
+		wantGen string
 	}{
-		{"_bmad-output/planning-artifacts/prd.md", []string{"bmad"}, "bmad-method"},
-		{"specs/001-x/spec.md", []string{"speckit"}, "speckit"},
-		{".cursor/plans/foo.plan.md", []string{"cursor"}, "cursor-plan"},
-		{"plans/nested/spec.md", nil, ""},
+		{"_bmad-output/planning-artifacts/prd.md", "bmad-method"},
+		{"specs/001-x/spec.md", "speckit"},
+		{".cursor/plans/foo.plan.md", "cursor-plan"},
+		{"plans/nested/spec.md", ""},
 	}
 	for _, tt := range tests {
-		tags, gen := pathGeneratorHints(tt.relPath)
-		if len(tags) != len(tt.wantTags) {
-			t.Fatalf("%q: tags %#v want %#v", tt.relPath, tags, tt.wantTags)
-		}
-		for i := range tt.wantTags {
-			if tags[i] != tt.wantTags[i] {
-				t.Errorf("%q: tag[%d] got %q want %q", tt.relPath, i, tags[i], tt.wantTags[i])
-			}
-		}
+		gen := pathGeneratorForExtract(tt.relPath)
 		if gen != tt.wantGen {
 			t.Errorf("%q: generator got %q want %q", tt.relPath, gen, tt.wantGen)
 		}
@@ -494,8 +489,8 @@ func TestDiscover_SampleFixture_BMAD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !stringSliceContains(art.Tags, "bmad") {
-		t.Fatalf("expected tag bmad, got %#v", art.Tags)
+	if art.FormatProfile != format.ProfileBmad {
+		t.Fatalf("expected format_profile bmad, got %q", art.FormatProfile)
 	}
 	if g, _ := art.Extracted["generator"].(string); g != "bmad-method" {
 		t.Fatalf("extracted generator: want bmad-method, got %q", g)
@@ -527,8 +522,12 @@ func TestDiscover_SampleFixture_Specify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !stringSliceContains(art.Tags, "speckit") {
-		t.Fatalf("expected tag speckit, got %#v", art.Tags)
+	wantLayout := filepath.ToSlash(filepath.Join("specs", "001-discover-related-specs"))
+	if art.FormatProfile != format.ProfileSpeckit {
+		t.Fatalf("expected format_profile speckit, got %q", art.FormatProfile)
+	}
+	if art.LayoutGroup != wantLayout {
+		t.Fatalf("layout_group: want %q, got %q", wantLayout, art.LayoutGroup)
 	}
 	if g, _ := art.Extracted["generator"].(string); g != "speckit" {
 		t.Fatalf("extracted generator: want speckit, got %q", g)
@@ -579,8 +578,8 @@ func TestDiscover_SampleFixture_CursorPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !stringSliceContains(art.Tags, "cursor") {
-		t.Fatalf("expected tag cursor, got %#v", art.Tags)
+	if art.FormatProfile != format.ProfileCursorPlan {
+		t.Fatalf("expected format_profile cursor_plan, got %q", art.FormatProfile)
 	}
 }
 

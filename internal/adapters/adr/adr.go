@@ -12,6 +12,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/todoparse"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/devspecs-com/devspecs-cli/internal/format"
 )
 
 var statusLineRe = regexp.MustCompile(`(?i)^[*\-]?\s*status:\s*(.+)$`)
@@ -75,12 +76,14 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 		PrimaryPath:    c.PrimaryPath,
 		Body:           content,
 		Extracted:      make(map[string]any),
+		FormatProfile:  format.ProfileADR,
 	}
 
 	src := adapters.Source{
 		SourceType:     "adr",
 		Path:           c.RelPath,
 		SourceIdentity: art.SourceIdentity,
+		FormatProfile:  format.ProfileADR,
 	}
 
 	todos := todoparse.Parse(content, c.RelPath)

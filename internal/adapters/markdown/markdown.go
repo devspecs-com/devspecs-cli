@@ -11,6 +11,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/todoparse"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/devspecs-com/devspecs-cli/internal/format"
 )
 
 // Adapter discovers and parses generic markdown plans/specs.
@@ -107,11 +108,8 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 	}
 
 	tags := parseFrontmatterTags(fm)
-	tags = mergeStringSlicesUnique(tags, frontmatterToolTags(fm))
 
-	pathTags, pathGen := pathGeneratorHints(c.RelPath)
-	tags = mergeStringSlicesUnique(tags, pathTags)
-
+	pathGen := pathGeneratorForExtract(c.RelPath)
 	extracted := make(map[string]any)
 	genExtract := pickGeneratorExtract(fm, pathGen)
 	if genExtract != "" {
@@ -120,6 +118,12 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 	if len(fm) > 0 {
 		extracted["frontmatter"] = fm
 	}
+
+	prof := format.FromFrontmatterTool(fm["generator"], fm["tool"], fm["source"])
+	if prof == format.ProfileGeneric {
+		prof = format.FromPath(c.RelPath)
+	}
+	layout := format.LayoutGroup(c.RelPath)
 
 	art := adapters.Artifact{
 		SourceIdentity: c.RelPath + "|markdown",
@@ -130,12 +134,16 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 		Body:           body,
 		Extracted:      extracted,
 		Tags:           tags,
+		FormatProfile:  prof,
+		LayoutGroup:    layout,
 	}
 
 	src := adapters.Source{
 		SourceType:     "markdown",
 		Path:           c.RelPath,
 		SourceIdentity: art.SourceIdentity,
+		FormatProfile:  prof,
+		LayoutGroup:    layout,
 	}
 
 	todos := todoparse.Parse(content, c.RelPath)
@@ -272,31 +280,6 @@ func mergeStringSlicesUnique(base []string, extra []string) []string {
 	return out
 }
 
-func slugFromToolName(s string) string {
-	s = strings.TrimSpace(strings.ToLower(s))
-	if s == "" {
-		return ""
-	}
-	s = strings.ReplaceAll(s, "_", "-")
-	s = strings.ReplaceAll(s, " ", "-")
-	for strings.Contains(s, "--") {
-		s = strings.ReplaceAll(s, "--", "-")
-	}
-	return strings.Trim(s, "-")
-}
-
-func frontmatterToolTags(fm map[string]string) []string {
-	var tags []string
-	for _, key := range []string{"generator", "tool", "source"} {
-		if v := strings.TrimSpace(fm[key]); v != "" {
-			if slug := slugFromToolName(v); slug != "" {
-				tags = append(tags, slug)
-			}
-		}
-	}
-	return mergeStringSlicesUnique(nil, tags)
-}
-
 func pickGeneratorExtract(fm map[string]string, pathGen string) string {
 	for _, key := range []string{"generator", "tool", "source"} {
 		if v := strings.TrimSpace(fm[key]); v != "" {
@@ -306,25 +289,25 @@ func pickGeneratorExtract(fm map[string]string, pathGen string) string {
 	return pathGen
 }
 
-// pathGeneratorHints derives framework tags and Extracted["generator"] hint text from relPath.
-func pathGeneratorHints(relPath string) (tags []string, generator string) {
+// pathGeneratorForExtract supplies Extracted["generator"] hint text from relPath (not user tags).
+func pathGeneratorForExtract(relPath string) string {
 	norm := filepath.ToSlash(relPath)
 
 	if strings.Contains(norm, "_bmad-output/") {
-		return []string{"bmad"}, "bmad-method"
+		return "bmad-method"
 	}
 
 	dir := filepath.ToSlash(filepath.Dir(norm))
 	base := filepath.Base(norm)
 	if base == "spec.md" && strings.HasPrefix(dir, "specs/") && len(dir) > len("specs/") {
-		return []string{"speckit"}, "speckit"
+		return "speckit"
 	}
 
 	if strings.Contains(norm, ".cursor/plans/") {
-		return []string{"cursor"}, "cursor-plan"
+		return "cursor-plan"
 	}
 
-	return nil, ""
+	return ""
 }
 
 // parseFrontmatterTags extracts tags from frontmatter "tags" and "labels" keys.

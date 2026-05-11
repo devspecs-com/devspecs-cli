@@ -8,6 +8,7 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/devspecs-com/devspecs-cli/internal/format"
 )
 
 func TestDiscover(t *testing.T) {
@@ -111,6 +112,9 @@ func TestADR_TitleStatusExtraction(t *testing.T) {
 			}
 			if art.Kind != "adr" {
 				t.Errorf("kind: want 'adr', got %q", art.Kind)
+			}
+			if art.FormatProfile != format.ProfileADR {
+				t.Errorf("format_profile: want %q, got %q", format.ProfileADR, art.FormatProfile)
 			}
 		})
 	}

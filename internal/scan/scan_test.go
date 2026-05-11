@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
@@ -174,5 +175,37 @@ func TestScan_FrontmatterOverridesHeuristics(t *testing.T) {
 	}
 	if status != "approved" {
 		t.Errorf("expected 'approved', got %q", status)
+	}
+}
+
+func TestScan_PersistsExtractedJSONWithFrontmatter(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	plansDir := filepath.Join(tmp, "repo", "plans")
+	os.MkdirAll(plansDir, 0o755)
+	content := "---\ntitle: FM Title\n---\n# H1\n\nBody\n"
+	os.WriteFile(filepath.Join(plansDir, "fm.md"), []byte(content), 0o644)
+	dbPath := filepath.Join(home, "devspecs.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ids := idgen.NewFactory()
+	s := New(db, ids, []adapters.Adapter{&markdown.Adapter{}})
+	if _, err := s.Run(context.Background(), filepath.Join(tmp, "repo"), nil); err != nil {
+		t.Fatal(err)
+	}
+	var ex string
+	err = db.QueryRow(`SELECT COALESCE(rv.extracted_json, '') FROM artifact_revisions rv JOIN artifacts a ON a.current_revision_id = rv.id LIMIT 1`).Scan(&ex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ex == "" {
+		t.Fatal("expected non-empty extracted_json")
+	}
+	if !strings.Contains(ex, "frontmatter") {
+		t.Fatalf("expected frontmatter in extracted json: %s", ex)
 	}
 }
