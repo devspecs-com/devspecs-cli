@@ -325,3 +325,50 @@ func TestScan_CursorPlanSample_NoPathToolTagInDB(t *testing.T) {
 		t.Fatalf("sources.format_profile: want %q, got %q", format.ProfileCursorPlan, profile)
 	}
 }
+
+func TestScan_SourcesBreakdown_MultipleMarkdownFormats(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
+	repoRoot := filepath.Join(tmp, "repo")
+	plansDir := filepath.Join(repoRoot, "plans")
+	cursorDir := filepath.Join(repoRoot, ".cursor", "plans")
+	os.MkdirAll(plansDir, 0o755)
+	os.MkdirAll(cursorDir, 0o755)
+	os.WriteFile(filepath.Join(plansDir, "plain.md"), []byte("# Plain\n\nBody.\n"), 0o644)
+	os.WriteFile(filepath.Join(cursorDir, "c.md"), []byte("# Cursorish\n\nBody.\n"), 0o644)
+
+	dbPath := filepath.Join(tmp, "home", "devspecs.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	ids := idgen.NewFactory()
+	s := New(db, ids, []adapters.Adapter{&markdown.Adapter{}})
+	res, err := s.Run(context.Background(), repoRoot, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Found["markdown"] != 2 {
+		t.Fatalf("Found markdown: want 2, got %d", res.Found["markdown"])
+	}
+	var mdRow *SourceBreakdownRow
+	for i := range res.SourcesBreakdown {
+		if res.SourcesBreakdown[i].SourceType == "markdown" {
+			mdRow = &res.SourcesBreakdown[i]
+			break
+		}
+	}
+	if mdRow == nil {
+		t.Fatal("no markdown breakdown row")
+	}
+	if mdRow.Count != 2 {
+		t.Fatalf("markdown count: want 2, got %d", mdRow.Count)
+	}
+	g := mdRow.Formats[format.ProfileGeneric]
+	c := mdRow.Formats[format.ProfileCursorPlan]
+	if g != 1 || c != 1 {
+		t.Fatalf("expected generic=1 and cursor_plan=1, got formats %#v", mdRow.Formats)
+	}
+}

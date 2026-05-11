@@ -22,13 +22,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/userident"
 )
 
-// Result holds scan summary counts.
-type Result struct {
-	Found     map[string]int // adapter name -> count
-	New       int
-	Updated   int
-	Unchanged int
-}
+// Result type and tally helpers live in result.go and labels.go.
 
 // Scanner runs adapters against a repo and persists results.
 type Scanner struct {
@@ -44,7 +38,11 @@ func New(db *store.DB, ids *idgen.Factory, adpts []adapters.Adapter) *Scanner {
 
 // Run scans the repo at repoRoot, using config if available.
 func (s *Scanner) Run(ctx context.Context, repoRoot string, cfg *config.RepoConfig) (*Result, error) {
-	result := &Result{Found: make(map[string]int)}
+	adapterNames := make([]string, 0, len(s.adapters))
+	for _, a := range s.adapters {
+		adapterNames = append(adapterNames, a.Name())
+	}
+	result := newResult(adapterNames)
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	repoID, err := s.ensureRepo(repoRoot, now)
@@ -57,20 +55,20 @@ func (s *Scanner) Run(ctx context.Context, repoRoot string, cfg *config.RepoConf
 		if err != nil {
 			continue
 		}
-		result.Found[adapter.Name()] += len(candidates)
 
 		for _, c := range candidates {
 			art, sources, todos, err := adapter.Parse(ctx, c)
 			if err != nil {
 				continue
 			}
-			if err := s.upsertArtifact(repoID, art, sources, todos, now, result); err != nil {
+			if err := s.upsertArtifact(repoID, adapter.Name(), art, sources, todos, now, result); err != nil {
 				return nil, fmt.Errorf("upsert artifact %q: %w", art.SourceIdentity, err)
 			}
 		}
 	}
 
 	s.recordScanMeta(repoID, repoRoot, now)
+	result.finalizeSourcesBreakdown()
 	return result, nil
 }
 
@@ -95,7 +93,7 @@ func (s *Scanner) ensureRepo(rootPath, now string) (string, error) {
 	return id, err
 }
 
-func (s *Scanner) upsertArtifact(repoID string, art adapters.Artifact, sources []adapters.Source, todos []todoparse.Todo, now string, result *Result) error {
+func (s *Scanner) upsertArtifact(repoID, adapterName string, art adapters.Artifact, sources []adapters.Source, todos []todoparse.Todo, now string, result *Result) error {
 	// Check if artifact exists by source_identity
 	var artifactID, currentRevID string
 	err := s.db.QueryRow(
@@ -127,6 +125,7 @@ func (s *Scanner) upsertArtifact(repoID string, art adapters.Artifact, sources [
 		s.replaceTags(artifactID, art, now)
 		s.indexFTS(artifactID, art)
 		result.New++
+		tallyIndexed(result, adapterName, sources, art)
 		return nil
 	}
 
@@ -151,6 +150,7 @@ func (s *Scanner) upsertArtifact(repoID string, art adapters.Artifact, sources [
 		// file content changes — CLI logic-only enrichments won't rewrite revisions alone.
 		s.replaceTags(artifactID, art, now)
 		result.Unchanged++
+		tallyIndexed(result, adapterName, sources, art)
 		return nil
 	}
 
@@ -167,6 +167,7 @@ func (s *Scanner) upsertArtifact(repoID string, art adapters.Artifact, sources [
 	s.replaceTags(artifactID, art, now)
 	s.indexFTS(artifactID, art)
 	result.Updated++
+	tallyIndexed(result, adapterName, sources, art)
 	return nil
 }
 
