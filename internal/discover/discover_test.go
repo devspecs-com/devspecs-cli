@@ -3,6 +3,7 @@ package discover_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/discover"
@@ -43,6 +44,27 @@ func TestRun_sparse_docs_not_merged(t *testing.T) {
 		if p == "docs" {
 			t.Fatalf("sparse docs/ should not merge bare docs, got %#v", res.MergeMarkdown)
 		}
+	}
+}
+
+func TestRun_sparse_docs_emitsSuggestion(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmp, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "docs", "README.md"), []byte("# hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := discover.Run(tmp, nil)
+	var got string
+	for _, s := range res.Suggestions {
+		if strings.Contains(strings.ToLower(s), "sparse") || strings.Contains(s, "docs/") {
+			got = s
+			break
+		}
+	}
+	if got == "" {
+		t.Fatalf("expected a sparse docs suggestion line, got %#v", res.Suggestions)
 	}
 }
 

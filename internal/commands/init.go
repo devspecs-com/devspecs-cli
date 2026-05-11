@@ -30,10 +30,12 @@ func NewInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize DevSpecs in the current repository",
-		Long:  "Creates the global DevSpecs directory and database, and optionally a repo-local .devspecs/config.yaml.",
+		Long: `Creates the global DevSpecs directory and database, and optionally a repo-local .devspecs/config.yaml.
+
+Layout detection runs by default (unless --no-detect). Init never opens an interactive prompt in v0.1; --yes and --non-interactive are accepted for CI and script parity with other tools but do not change behavior today.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			nonInter := yes || nonInteractive
-			return runInit(cmd, force, hooks, noDetect, nonInter)
+			_, _ = yes, nonInteractive
+			return runInit(cmd, force, hooks, noDetect)
 		},
 	}
 
@@ -45,8 +47,7 @@ func NewInitCmd() *cobra.Command {
 	return cmd
 }
 
-func runInit(cmd *cobra.Command, force, hooks, noDetect, nonInteractive bool) error {
-	_ = nonInteractive // reserved for parity with scripting flags; v0.1 init is always non-interactive
+func runInit(cmd *cobra.Command, force, hooks, noDetect bool) error {
 	homeDir, err := config.HomeDir()
 	if err != nil {
 		return fmt.Errorf("resolve home: %w", err)

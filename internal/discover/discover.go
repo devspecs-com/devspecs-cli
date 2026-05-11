@@ -12,7 +12,11 @@ import (
 
 // Limits keep discovery bounded on large trees.
 const (
-	MaxWalkDirs  = 4096
+	// MaxDiscoveryDirs caps how many directories plainDocsWorthIndexing will visit under docs/
+	// (including the docs/ root). Separate from MaxDocsFiles, which limits regular files scanned
+	// for *.spec.md / *.plan.md / *.prd.md density.
+	MaxDiscoveryDirs = 4096
+	// MaxDocsFiles caps regular files inspected under docs/ for density heuristics.
 	MaxDocsFiles = 400
 )
 
@@ -85,7 +89,7 @@ func Run(repoRoot string, m *ignore.Matcher) *Result {
 		tryMarkdown("specs")
 	}
 
-	if plainDocsWorthIndexing(repoRoot, m, out) {
+	if plainDocsWorthIndexing(repoRoot, m, out, MaxDiscoveryDirs, MaxDocsFiles) {
 		tryMarkdown("docs")
 	} else if dirExists(repoRoot, "docs") && !m.ShouldSkip("docs", true) {
 		out.Suggestions = append(out.Suggestions,
@@ -101,7 +105,6 @@ func Run(repoRoot string, m *ignore.Matcher) *Result {
 			"openspec/ exists but no change proposals found under openspec/changes/*/proposal.md — confirm OpenSpec layout or adjust the openspec path in config.")
 	}
 
-	_ = MaxWalkDirs
 	return out
 }
 
@@ -116,7 +119,10 @@ func hasSpeckitSpec(repoRoot string, m *ignore.Matcher) bool {
 	if err != nil {
 		return false
 	}
-	for _, e := range ents {
+	for i, e := range ents {
+		if i >= MaxDiscoveryDirs {
+			break
+		}
 		if !e.IsDir() {
 			continue
 		}
@@ -140,7 +146,10 @@ func openspecChangesPresent(repoRoot string, m *ignore.Matcher) bool {
 	if err != nil {
 		return false
 	}
-	for _, e := range ents {
+	for i, e := range ents {
+		if i >= MaxDiscoveryDirs {
+			break
+		}
 		if !e.IsDir() {
 			continue
 		}
@@ -155,7 +164,7 @@ func openspecChangesPresent(repoRoot string, m *ignore.Matcher) bool {
 	return false
 }
 
-func plainDocsWorthIndexing(repoRoot string, m *ignore.Matcher, out *Result) bool {
+func plainDocsWorthIndexing(repoRoot string, m *ignore.Matcher, out *Result, maxDirs, maxFiles int) bool {
 	base := filepath.Join(repoRoot, "docs")
 	st, err := os.Stat(base)
 	if err != nil || !st.IsDir() {
@@ -168,6 +177,7 @@ func plainDocsWorthIndexing(repoRoot string, m *ignore.Matcher, out *Result) boo
 
 	hits := 0
 	n := 0
+	dirsVisited := 0
 	_ = filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -184,10 +194,14 @@ func plainDocsWorthIndexing(repoRoot string, m *ignore.Matcher, out *Result) boo
 			return nil
 		}
 		if d.IsDir() {
+			dirsVisited++
+			if dirsVisited > maxDirs {
+				return filepath.SkipAll
+			}
 			return nil
 		}
 		n++
-		if n > MaxDocsFiles {
+		if n > maxFiles {
 			return filepath.SkipAll
 		}
 		name := strings.ToLower(d.Name())

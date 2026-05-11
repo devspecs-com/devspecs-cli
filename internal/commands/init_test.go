@@ -153,6 +153,39 @@ func TestInit_DiscoveryMergesDenseDocs(t *testing.T) {
 	}
 }
 
+func TestInit_SparseDocsPrintsSuggestion(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
+	repoDir := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(filepath.Join(repoDir, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "docs", "README.md"), []byte("#\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	cmd := NewInitCmd()
+	cmd.SetIn(bytes.NewReader(nil))
+	cmd.SetOut(&buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Suggestion:") {
+		t.Fatalf("expected Suggestion: in init output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "docs/") {
+		t.Fatalf("expected docs/ hint in init output, got:\n%s", out)
+	}
+}
+
 func TestInit_NoDetect_SkipsDenseDocsMerge(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))

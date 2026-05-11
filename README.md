@@ -194,7 +194,7 @@ ds init --yes                # Same as default; for CI scripts (alias: --non-int
 
 **Ignore stack (scan + discovery):** from the repository root, patterns are read in order from **`.gitignore`**, **`.git/info/exclude`** (when `.git` exists), then repo-root **`.aiignore`** (gitignore-like syntax, including `!` negation where the matcher supports it). **`ds scan`** applies the same rules to configured markdown and ADR directory walks. **`ds scan --verbose`** prints a one-line reminder on stderr. **`.cursorignore`** is not read in v0.1.
 
-Bare top-level **`docs/`** is not in the default markdown path list; init **merges** it only when discovery finds enough plan/spec-like files under `docs/`. Otherwise you get a short suggestion to add paths manually.
+Bare top-level **`docs/`** is not in the default markdown path list; init **merges** it only when discovery finds enough plan/spec-like files under `docs/`. Otherwise you get a short suggestion to add paths manually. Discovery caps work under `docs/` (directory and file visit limits) and caps how many sibling folders are considered under `specs/` and `openspec/changes/`.
 
 ### `ds scan`
 
