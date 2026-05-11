@@ -15,7 +15,9 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/devspecs-com/devspecs-cli/internal/discover"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
+	"github.com/devspecs-com/devspecs-cli/internal/ignore"
 	"github.com/devspecs-com/devspecs-cli/internal/repo"
 	"github.com/devspecs-com/devspecs-cli/internal/scan"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
@@ -44,7 +46,7 @@ func NewScanCmd() *cobra.Command {
 	cmd.Flags().StringVar(&path, "path", ".", "Repository path to scan")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show detailed scan output")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
-	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress human scan summary (redundant when --json is set)")
+	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress human scan summary and empty-scan hints (redundant when --json is set)")
 	cmd.Flags().BoolVar(&ifChanged, "if-changed", false, "Only scan if source paths were touched in the last commit")
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "Remove the global index database and create a fresh index (requires re-scan)")
 	return cmd
@@ -97,6 +99,11 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 		return fmt.Errorf("scan: %w", err)
 	}
 
+	if scanTotalFound(result) == 0 {
+		matcher, _ := ignore.NewMatcher(repoRoot)
+		attachScanHints(result, repoRoot, matcher)
+	}
+
 	if asJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
@@ -110,6 +117,11 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	}
 
 	out := cmd.OutOrStdout()
+	if scanTotalFound(result) == 0 {
+		printEmptyScanHints(cmd, repoRoot, result.Hints)
+		return nil
+	}
+
 	fmt.Fprintf(out, "Scanned repository: %s\n", repoRoot)
 	fmt.Fprintln(out, "\nIndexed by source:")
 	for _, row := range result.SourcesBreakdown {
@@ -125,6 +137,46 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	fmt.Fprintf(out, "  %d unchanged artifacts\n", result.Unchanged)
 	fmt.Fprintln(out, "\nRun:\n  ds list")
 	return nil
+}
+
+func scanTotalFound(r *scan.Result) int {
+	n := 0
+	for _, c := range r.Found {
+		n += c
+	}
+	return n
+}
+
+func attachScanHints(result *scan.Result, repoRoot string, m *ignore.Matcher) {
+	cands := discover.ScanHintCandidates(repoRoot, m)
+	result.Hints = make([]scan.ScanHint, 0, len(cands))
+	for _, c := range cands {
+		result.Hints = append(result.Hints, scan.ScanHint{
+			Path:           c.RelPath,
+			SourceType:     c.SourceType,
+			SuggestCommand: discover.FormatSuggestCommand(c),
+		})
+	}
+}
+
+func printEmptyScanHints(cmd *cobra.Command, repoRoot string, hints []scan.ScanHint) {
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "Scanned repository: %s\n\n", repoRoot)
+	fmt.Fprintln(out, "No artifacts found in configured paths.")
+	fmt.Fprintln(out)
+	if len(hints) == 0 {
+		fmt.Fprintln(out, "No on-disk candidate directories matched built-in heuristics.")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Add a markdown source, for example:")
+		fmt.Fprintln(out, "  ds config add-source markdown plans")
+		return
+	}
+	fmt.Fprintln(out, "Possible candidates:")
+	for _, h := range hints {
+		fmt.Fprintf(out, "  %s\n", discover.HintDisplayPath(h.Path))
+	}
+	fmt.Fprintln(out, "Add one:")
+	fmt.Fprintf(out, "  %s\n", hints[0].SuggestCommand)
 }
 
 // formatScanFormatsHuman renders format_profile counts sorted by profile name (stable output).
