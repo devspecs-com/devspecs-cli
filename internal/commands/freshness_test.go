@@ -481,7 +481,7 @@ func TestSchemaVersion(t *testing.T) {
 
 	// Verify artifact_tags table exists by inserting with a valid artifact_id
 	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r2', '/tags', ?, ?)", now, now)
-	db.Exec("INSERT INTO artifacts (id, repo_id, kind, title, status, created_at, updated_at, last_observed_at) VALUES ('ds_TAG', 'r2', 'plan', 'Tag Test', 'draft', ?, ?, ?)", now, now, now)
+	db.Exec("INSERT INTO artifacts (id, repo_id, kind, title, status, created_at, updated_at, last_observed_at, authored_at) VALUES ('ds_TAG', 'r2', 'plan', 'Tag Test', 'draft', ?, ?, ?, ?)", now, now, now, now)
 	_, err = db.Exec("INSERT INTO artifact_tags (artifact_id, tag, source, created_at) VALUES ('ds_TAG', 'test', 'manual', ?)", now)
 	if err != nil {
 		t.Fatalf("artifact_tags table missing or broken: %v", err)

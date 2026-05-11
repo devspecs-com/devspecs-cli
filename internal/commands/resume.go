@@ -86,11 +86,12 @@ func runResume(cmd *cobra.Command, fp store.FilterParams, repoName string, asJSO
 
 	for _, r := range rows {
 		observed, _ := time.Parse(time.RFC3339, r.LastObservedAt)
+		updated, _ := time.Parse(time.RFC3339, r.UpdatedAt)
 		terminal := settledStatuses[r.Status]
 		old := !observed.IsZero() && observed.Before(thirtyDays)
 
 		if terminal {
-			if all || observed.After(fourteenDays) {
+			if all || (!updated.IsZero() && updated.After(fourteenDays)) {
 				settled = append(settled, r)
 			}
 		} else if old {
@@ -156,7 +157,8 @@ func runResume(cmd *cobra.Command, fp store.FilterParams, repoName string, asJSO
 }
 
 func writeInProgressItem(w io.Writer, idx *int, r store.ResumeRow, now time.Time) {
-	observed, _ := time.Parse(time.RFC3339, r.LastObservedAt)
+	authored, _ := time.Parse(time.RFC3339, r.AuthoredAt)
+	updated, _ := time.Parse(time.RFC3339, r.UpdatedAt)
 	sid := shortOrTruncated(r)
 
 	fmt.Fprintf(w, "\n%2d. %s  %s\n", *idx, sid, r.Title)
@@ -170,13 +172,14 @@ func writeInProgressItem(w io.Writer, idx *int, r store.ResumeRow, now time.Time
 	if r.TotalTodos > 0 {
 		fmt.Fprintf(w, "    Todos:  %d open / %d total\n", r.OpenTodos, r.TotalTodos)
 	}
-	fmt.Fprintf(w, "    Last observed: %s (%s)\n", relativeTime(observed, now), r.LastObservedAt)
+	fmt.Fprintf(w, "    Authored: %s (%s)\n", relativeTime(authored, now), r.AuthoredAt)
+	fmt.Fprintf(w, "    Last updated: %s (%s)\n", relativeTime(updated, now), r.UpdatedAt)
 	fmt.Fprintf(w, "    Continue: ds context %s\n", sid)
 	*idx++
 }
 
 func writeSettledItem(w io.Writer, idx *int, r store.ResumeRow, now time.Time) {
-	observed, _ := time.Parse(time.RFC3339, r.LastObservedAt)
+	updated, _ := time.Parse(time.RFC3339, r.UpdatedAt)
 	sid := shortOrTruncated(r)
 
 	fmt.Fprintf(w, "\n%2d. %s  %s\n", *idx, sid, r.Title)
@@ -187,7 +190,7 @@ func writeSettledItem(w io.Writer, idx *int, r store.ResumeRow, now time.Time) {
 	if line := formatResumeTagsLine(r.TagsJoined); line != "" {
 		fmt.Fprint(w, line)
 	}
-	fmt.Fprintf(w, "    Settled: %s (%s)\n", relativeTime(observed, now), r.LastObservedAt)
+	fmt.Fprintf(w, "    Settled: %s (%s)\n", relativeTime(updated, now), r.UpdatedAt)
 	fmt.Fprintf(w, "    Next: verify manually, or ds context %s for downstream work\n", sid)
 	*idx++
 }
@@ -263,6 +266,8 @@ func resumeRowsToJSON(rows []store.ResumeRow) []map[string]any {
 			"kind":             r.Kind,
 			"title":            r.Title,
 			"status":           r.Status,
+			"authored_at":      r.AuthoredAt,
+			"updated_at":       r.UpdatedAt,
 			"last_observed_at": r.LastObservedAt,
 			"source_path":      r.SourcePath,
 			"tags":             splitResumeTagsCSV(r.TagsJoined),

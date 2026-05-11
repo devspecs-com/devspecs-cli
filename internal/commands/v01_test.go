@@ -52,9 +52,9 @@ func seedV01Artifacts(t *testing.T, db *store.DB, repoDir string) {
 	// In-progress artifacts
 	a1 := ids.New()
 	rev1 := ids.NewWithPrefix("rev_")
-	db.Exec(`INSERT INTO artifacts (id, repo_id, short_id, kind, title, status, current_revision_id, created_at, updated_at, last_observed_at)
-		VALUES (?, 'r1', ?, 'plan', 'Auth Middleware', 'implementing', ?, ?, ?, ?)`,
-		a1, idgen.ShortID("plans/auth.md|markdown"), rev1, now, now, now)
+	db.Exec(`INSERT INTO artifacts (id, repo_id, short_id, kind, title, status, current_revision_id, created_at, updated_at, last_observed_at, authored_at)
+		VALUES (?, 'r1', ?, 'plan', 'Auth Middleware', 'implementing', ?, ?, ?, ?, ?)`,
+		a1, idgen.ShortID("plans/auth.md|markdown"), rev1, now, now, now, now)
 	db.Exec(`INSERT INTO artifact_revisions (id, artifact_id, content_hash, body, observed_at)
 		VALUES (?, ?, 'sha256:a1', '# Auth\n', ?)`, rev1, a1, now)
 	db.Exec(`INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, format_profile, layout_group, created_at, updated_at)
@@ -70,36 +70,36 @@ func seedV01Artifacts(t *testing.T, db *store.DB, repoDir string) {
 	db.InsertTag(a1, "security", "manual", now)
 
 	a2 := ids.New()
-	db.Exec(`INSERT INTO artifacts (id, repo_id, short_id, kind, title, status, created_at, updated_at, last_observed_at)
-		VALUES (?, 'r1', ?, 'spec', 'API Spec', 'draft', ?, ?, ?)`,
-		a2, idgen.ShortID("specs/api.md|markdown"), now, now, now)
+	db.Exec(`INSERT INTO artifacts (id, repo_id, short_id, kind, title, status, created_at, updated_at, last_observed_at, authored_at)
+		VALUES (?, 'r1', ?, 'spec', 'API Spec', 'draft', ?, ?, ?, ?)`,
+		a2, idgen.ShortID("specs/api.md|markdown"), now, now, now, now)
 	db.Exec(`INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, format_profile, layout_group, created_at, updated_at)
 		VALUES (?, ?, 'r1', 'markdown', 'specs/api.md', 'specs/api.md|markdown', 'generic', NULL, ?, ?)`,
 		ids.NewWithPrefix("src_"), a2, now, now)
 
 	// Recently settled
 	a3 := ids.New()
-	db.Exec(`INSERT INTO artifacts (id, repo_id, short_id, kind, title, status, created_at, updated_at, last_observed_at)
-		VALUES (?, 'r1', ?, 'plan', 'UX Audit', 'completed', ?, ?, ?)`,
-		a3, idgen.ShortID("plans/ux.md|markdown"), now, now, recentSettled)
+	db.Exec(`INSERT INTO artifacts (id, repo_id, short_id, kind, title, status, created_at, updated_at, last_observed_at, authored_at)
+		VALUES (?, 'r1', ?, 'plan', 'UX Audit', 'completed', ?, ?, ?, ?)`,
+		a3, idgen.ShortID("plans/ux.md|markdown"), now, now, recentSettled, now)
 	db.Exec(`INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, format_profile, layout_group, created_at, updated_at)
 		VALUES (?, ?, 'r1', 'markdown', 'plans/ux.md', 'plans/ux.md|markdown', 'generic', NULL, ?, ?)`,
 		ids.NewWithPrefix("src_"), a3, now, now)
 
 	// Old settled (>14 days, should NOT show in settled without --all)
 	a4 := ids.New()
-	db.Exec(`INSERT INTO artifacts (id, repo_id, short_id, kind, title, status, created_at, updated_at, last_observed_at)
-		VALUES (?, 'r1', ?, 'adr', 'Old ADR', 'rejected', ?, ?, ?)`,
-		a4, idgen.ShortID("docs/adr/old.md|adr"), now, now, oldSettled)
+	db.Exec(`INSERT INTO artifacts (id, repo_id, short_id, kind, title, status, created_at, updated_at, last_observed_at, authored_at)
+		VALUES (?, 'r1', ?, 'adr', 'Old ADR', 'rejected', ?, ?, ?, ?)`,
+		a4, idgen.ShortID("docs/adr/old.md|adr"), now, oldSettled, now, now)
 	db.Exec(`INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, format_profile, layout_group, created_at, updated_at)
 		VALUES (?, ?, 'r1', 'adr', 'docs/adr/old.md', 'docs/adr/old.md|adr', 'adr', NULL, ?, ?)`,
 		ids.NewWithPrefix("src_"), a4, now, now)
 
 	// Stale (non-terminal, >30 days)
 	a5 := ids.New()
-	db.Exec(`INSERT INTO artifacts (id, repo_id, short_id, kind, title, status, created_at, updated_at, last_observed_at)
-		VALUES (?, 'r1', ?, 'plan', 'Billing Sketch', 'draft', ?, ?, ?)`,
-		a5, idgen.ShortID("plans/billing.md|markdown"), now, now, staleTime)
+	db.Exec(`INSERT INTO artifacts (id, repo_id, short_id, kind, title, status, created_at, updated_at, last_observed_at, authored_at)
+		VALUES (?, 'r1', ?, 'plan', 'Billing Sketch', 'draft', ?, ?, ?, ?)`,
+		a5, idgen.ShortID("plans/billing.md|markdown"), now, now, staleTime, now)
 	db.Exec(`INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, format_profile, layout_group, created_at, updated_at)
 		VALUES (?, ?, 'r1', 'markdown', 'plans/billing.md', 'plans/billing.md|markdown', 'generic', NULL, ?, ?)`,
 		ids.NewWithPrefix("src_"), a5, now, now)
@@ -146,6 +146,9 @@ func TestResume_GroupedOutput(t *testing.T) {
 	if !containsStr(output, "Tags:") || !containsStr(output, "auth") {
 		t.Error("resume output should include Tags line for tagged artifacts")
 	}
+	if !containsStr(output, "Authored:") || !containsStr(output, "Last updated:") {
+		t.Error("resume output should include Authored and Last updated lines")
+	}
 }
 
 func TestResume_OddNonTerminalStatus_GoesToStaleWhenOld(t *testing.T) {
@@ -155,8 +158,8 @@ func TestResume_OddNonTerminalStatus_GoesToStaleWhenOld(t *testing.T) {
 	db.Exec("INSERT INTO repos (id, root_path, scanned_by, git_current_branch, created_at, updated_at) VALUES ('r1', ?, 'x', 'main', ?, ?)", repoDir, now, now)
 	ids := idgen.NewFactory()
 	aid := ids.New()
-	db.Exec(`INSERT INTO artifacts (id, repo_id, short_id, kind, title, status, created_at, updated_at, last_observed_at)
-		VALUES (?, 'r1', 'abcdef01', 'plan', 'Odd Status Plan', 'reviewing', ?, ?, ?)`, aid, now, now, old)
+	db.Exec(`INSERT INTO artifacts (id, repo_id, short_id, kind, title, status, created_at, updated_at, last_observed_at, authored_at)
+		VALUES (?, 'r1', 'abcdef01', 'plan', 'Odd Status Plan', 'reviewing', ?, ?, ?, ?)`, aid, now, now, old, now)
 	db.Exec(`INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, format_profile, layout_group, created_at, updated_at)
 		VALUES (?, ?, 'r1', 'markdown', 'plans/odd.md', 'plans/odd.md|markdown', 'generic', NULL, ?, ?)`, ids.NewWithPrefix("src_"), aid, now, now)
 	db.Close()
@@ -269,6 +272,22 @@ func TestResume_JSON(t *testing.T) {
 	for _, key := range []string{"in_progress", "recently_settled", "stale"} {
 		if _, ok := result[key]; !ok {
 			t.Errorf("missing key %q in JSON output", key)
+		}
+	}
+	inProg, _ := result["in_progress"].([]any)
+	if len(inProg) == 0 {
+		t.Fatal("expected non-empty in_progress")
+	}
+	row, _ := inProg[0].(map[string]any)
+	for _, k := range []string{"authored_at", "updated_at", "last_observed_at"} {
+		if _, ok := row[k]; !ok {
+			t.Errorf("in_progress row missing %q", k)
+		}
+		s, _ := row[k].(string)
+		if s != "" {
+			if _, err := time.Parse(time.RFC3339, s); err != nil {
+				t.Errorf("%s not RFC3339: %q: %v", k, s, err)
+			}
 		}
 	}
 }

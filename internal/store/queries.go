@@ -487,11 +487,11 @@ func (db *DB) UpdateArtifactStatus(artifactID, status, now string) error {
 }
 
 // InsertArtifactDirect allows inserting an artifact directly (for capture).
-func (db *DB) InsertArtifactDirect(id, repoID, kind, title, status, revID, now string) error {
+func (db *DB) InsertArtifactDirect(id, repoID, kind, title, status, revID, authoredAt, now string) error {
 	_, err := db.Exec(
-		`INSERT INTO artifacts (id, repo_id, kind, title, status, current_revision_id, created_at, updated_at, last_observed_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, repoID, kind, title, status, revID, now, now, now,
+		`INSERT INTO artifacts (id, repo_id, kind, title, status, current_revision_id, created_at, updated_at, last_observed_at, authored_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, repoID, kind, title, status, revID, now, now, now, authoredAt,
 	)
 	return err
 }
@@ -616,9 +616,9 @@ func (db *DB) DeleteAutoTags(artifactID string) error {
 	return err
 }
 
-// ResumeArtifacts returns all artifacts for a repo, with todo counts, sorted by last_observed_at DESC.
+// ResumeArtifacts returns all artifacts for a repo, with todo counts, sorted by updated_at DESC.
 func (db *DB) ResumeArtifacts(repoRoot string, fp FilterParams) ([]ResumeRow, error) {
-	query := `SELECT a.id, COALESCE(a.short_id,''), a.kind, a.title, a.status, a.last_observed_at,
+	query := `SELECT a.id, COALESCE(a.short_id,''), a.kind, a.title, a.status, a.authored_at, a.updated_at, a.last_observed_at,
 		COALESCE((SELECT MIN(s.path) FROM sources s WHERE s.artifact_id = a.id), ''),
 		(SELECT COUNT(*) FROM artifact_todos t WHERE t.artifact_id = a.id) as total_todos,
 		(SELECT COUNT(*) FROM artifact_todos t WHERE t.artifact_id = a.id AND t.done = 0) as open_todos,
@@ -649,7 +649,7 @@ func (db *DB) ResumeArtifacts(repoRoot string, fp FilterParams) ([]ResumeRow, er
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	query += " ORDER BY a.last_observed_at DESC"
+	query += " ORDER BY a.updated_at DESC"
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -660,7 +660,7 @@ func (db *DB) ResumeArtifacts(repoRoot string, fp FilterParams) ([]ResumeRow, er
 	var result []ResumeRow
 	for rows.Next() {
 		var r ResumeRow
-		if err := rows.Scan(&r.ID, &r.ShortID, &r.Kind, &r.Title, &r.Status, &r.LastObservedAt, &r.SourcePath, &r.TotalTodos, &r.OpenTodos, &r.TagsJoined); err != nil {
+		if err := rows.Scan(&r.ID, &r.ShortID, &r.Kind, &r.Title, &r.Status, &r.AuthoredAt, &r.UpdatedAt, &r.LastObservedAt, &r.SourcePath, &r.TotalTodos, &r.OpenTodos, &r.TagsJoined); err != nil {
 			return nil, err
 		}
 		result = append(result, r)
@@ -675,6 +675,8 @@ type ResumeRow struct {
 	Kind           string
 	Title          string
 	Status         string
+	AuthoredAt     string
+	UpdatedAt      string
 	LastObservedAt string
 	SourcePath     string
 	TotalTodos     int

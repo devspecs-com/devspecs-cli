@@ -15,6 +15,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
+	"github.com/devspecs-com/devspecs-cli/internal/repo"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -153,7 +154,11 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 		return err
 	}
 
-	db.InsertArtifactDirect(artifactID, repoID, art.Kind, art.Title, art.Status, revID, now)
+	authoredAt := repo.FileFirstCommitDate(wd, filepath.ToSlash(relPath))
+	if authoredAt == "" {
+		authoredAt = now
+	}
+	db.InsertArtifactDirect(artifactID, repoID, art.Kind, art.Title, art.Status, revID, authoredAt, now)
 	db.InsertRevisionDirect(revID, artifactID, contentHash, art.Body, exStr, now)
 	db.InsertSourceDirect(ids.NewWithPrefix("src_"), artifactID, repoID, "capture", relPath, sourceIdentity, art.FormatProfile, art.LayoutGroup, now)
 

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -65,7 +66,7 @@ func (s *Scanner) Run(ctx context.Context, repoRoot string, cfg *config.RepoConf
 			if err != nil {
 				continue
 			}
-			if err := s.upsertArtifact(repoID, adapter.Name(), art, sources, todos, now, result); err != nil {
+			if err := s.upsertArtifact(repoRoot, repoID, adapter.Name(), art, sources, todos, now, result); err != nil {
 				return nil, fmt.Errorf("upsert artifact %q: %w", art.SourceIdentity, err)
 			}
 		}
@@ -97,7 +98,7 @@ func (s *Scanner) ensureRepo(rootPath, now string) (string, error) {
 	return id, err
 }
 
-func (s *Scanner) upsertArtifact(repoID, adapterName string, art adapters.Artifact, sources []adapters.Source, todos []todoparse.Todo, now string, result *Result) error {
+func (s *Scanner) upsertArtifact(repoRoot, repoID, adapterName string, art adapters.Artifact, sources []adapters.Source, todos []todoparse.Todo, now string, result *Result) error {
 	// Check if artifact exists by source_identity
 	var artifactID, currentRevID string
 	err := s.db.QueryRow(
@@ -111,7 +112,7 @@ func (s *Scanner) upsertArtifact(repoID, adapterName string, art adapters.Artifa
 		// New artifact
 		artifactID = s.ids.New()
 		revID := s.ids.NewWithPrefix("rev_")
-		if err := s.insertArtifact(artifactID, repoID, art, revID, now); err != nil {
+		if err := s.insertArtifact(artifactID, repoRoot, repoID, art, sources, revID, now); err != nil {
 			return err
 		}
 		s.assignShortID(artifactID, art.SourceIdentity)
@@ -133,8 +134,8 @@ func (s *Scanner) upsertArtifact(repoID, adapterName string, art adapters.Artifa
 		return nil
 	}
 
-	// Update last_observed_at
-	s.db.Exec("UPDATE artifacts SET last_observed_at = ?, updated_at = ? WHERE id = ?", now, now, artifactID)
+	// Refresh last_observed_at only; updated_at moves on new revision or capture/status updates.
+	s.db.Exec("UPDATE artifacts SET last_observed_at = ? WHERE id = ?", now, artifactID)
 
 	// Ensure short_id is set (covers artifacts created before v0.1)
 	s.assignShortID(artifactID, art.SourceIdentity)
@@ -183,13 +184,33 @@ func (s *Scanner) indexFTS(artifactID string, art adapters.Artifact) {
 	s.db.IndexArtifactFTS(artifactID, art.Title, art.Body, sourcePath)
 }
 
-func (s *Scanner) insertArtifact(id, repoID string, art adapters.Artifact, revID, now string) error {
+func (s *Scanner) insertArtifact(id, repoRoot, repoID string, art adapters.Artifact, sources []adapters.Source, revID, now string) error {
+	authoredAt := resolveAuthoredAt(repoRoot, art, sources, now)
 	_, err := s.db.Exec(
-		`INSERT INTO artifacts (id, repo_id, kind, title, status, current_revision_id, created_at, updated_at, last_observed_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, repoID, art.Kind, art.Title, art.Status, revID, now, now, now,
+		`INSERT INTO artifacts (id, repo_id, kind, title, status, current_revision_id, created_at, updated_at, last_observed_at, authored_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, repoID, art.Kind, art.Title, art.Status, revID, now, now, now, authoredAt,
 	)
 	return err
+}
+
+func resolveAuthoredAt(repoRoot string, art adapters.Artifact, sources []adapters.Source, now string) string {
+	var rel string
+	if art.PrimaryPath != "" {
+		if rel2, err := filepath.Rel(repoRoot, art.PrimaryPath); err == nil {
+			rel = filepath.ToSlash(rel2)
+		}
+	}
+	if rel == "" && len(sources) > 0 && sources[0].Path != "" {
+		rel = filepath.ToSlash(sources[0].Path)
+	}
+	if rel == "" {
+		return now
+	}
+	if d := repo.FileFirstCommitDate(repoRoot, rel); d != "" {
+		return d
+	}
+	return now
 }
 
 func (s *Scanner) insertRevision(id, artifactID, contentHash, body string, extracted map[string]any, now string) error {

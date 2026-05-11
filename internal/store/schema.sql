@@ -1,4 +1,4 @@
--- DevSpecs v0.1 schema (version 4)
+-- DevSpecs v0.1 schema (version 5)
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version    INTEGER PRIMARY KEY,
@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
   created_at          TEXT NOT NULL,
   updated_at          TEXT NOT NULL,
   last_observed_at    TEXT NOT NULL,
+  authored_at         TEXT NOT NULL DEFAULT '',
   FOREIGN KEY (repo_id) REFERENCES repos(id)
 );
 

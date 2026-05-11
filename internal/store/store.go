@@ -17,7 +17,7 @@ import (
 var schemaDDL string
 
 // SchemaVersion is the current schema version. Bump when schema.sql changes.
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 // DB wraps *sql.DB with DevSpecs-specific operations.
 type DB struct {
@@ -71,6 +71,11 @@ func (db *DB) migrate() error {
 				return err
 			}
 			maxVersion = 4
+		case 4:
+			if err := db.migrate4To5(now); err != nil {
+				return err
+			}
+			maxVersion = 5
 		default:
 			return fmt.Errorf(
 				"index was created with schema v%d but this CLI requires v%d. Run 'ds scan --rebuild' or delete ~/.devspecs/devspecs.db and run 'ds scan' to rebuild",
@@ -105,6 +110,17 @@ func (db *DB) migrate3To4(now string) error {
 	if err := tryAlterTable(db.DB, `ALTER TABLE sources ADD COLUMN layout_group TEXT`); err != nil {
 		return fmt.Errorf("migrate v3→v4 layout_group: %w", err)
 	}
-	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", SchemaVersion, now)
+	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 4, now)
+	return err
+}
+
+func (db *DB) migrate4To5(now string) error {
+	if err := tryAlterTable(db.DB, `ALTER TABLE artifacts ADD COLUMN authored_at TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("migrate v4→v5 authored_at: %w", err)
+	}
+	if _, err := db.Exec(`UPDATE artifacts SET authored_at = created_at WHERE authored_at = ''`); err != nil {
+		return fmt.Errorf("migrate v4→v5 backfill authored_at: %w", err)
+	}
+	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 5, now)
 	return err
 }

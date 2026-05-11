@@ -99,3 +99,28 @@ func ChangedFiles(repoRoot string) []string {
 	}
 	return strings.Split(raw, "\n")
 }
+
+// FileFirstCommitDate returns the author date (RFC3339) of the oldest commit
+// that added path, following renames. Empty string if git is unavailable or
+// the path has no history in the repo.
+func FileFirstCommitDate(repoRoot, relPath string) string {
+	if relPath == "" {
+		return ""
+	}
+	cmd := exec.Command("git", "log", "--diff-filter=A", "--follow", "--format=%aI", "--", relPath)
+	cmd.Dir = repoRoot
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		return ""
+	}
+	lines := strings.Split(raw, "\n")
+	last := lines[len(lines)-1]
+	if last == "" {
+		return ""
+	}
+	return last
+}
