@@ -70,8 +70,8 @@ func cloneRepoConfig(base *config.RepoConfig) *config.RepoConfig {
 	out := &config.RepoConfig{Version: base.Version}
 	for _, s := range base.Sources {
 		ns := config.SourceConfig{
-			Type: s.Type,
-			Path: s.Path,
+			Type:  s.Type,
+			Path:  s.Path,
 			Paths: append([]string(nil), s.Paths...),
 			Rules: append([]config.SourceRule(nil), s.Rules...),
 		}

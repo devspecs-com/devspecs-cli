@@ -627,7 +627,7 @@ func TestDiscover_SampleFixture_Freetext(t *testing.T) {
 		Version: 1,
 		Sources: []config.SourceConfig{
 			{
-				Type: "markdown",
+				Type:  "markdown",
 				Paths: []string{".", "v2/plans", "decisions"},
 				Rules: []config.SourceRule{
 					{Match: "ROADMAP.md", Kind: config.KindPlan},

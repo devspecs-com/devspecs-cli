@@ -7,20 +7,20 @@ import (
 
 // Canonical artifact kinds (closed vocabulary).
 const (
-	KindPlan               = "plan"
-	KindSpec               = "spec"
-	KindRequirements       = "requirements"
-	KindDesign             = "design"
-	KindContract           = "contract"
-	KindDecision           = "decision"
-	KindMarkdownArtifact   = "markdown_artifact"
+	KindPlan             = "plan"
+	KindSpec             = "spec"
+	KindRequirements     = "requirements"
+	KindDesign           = "design"
+	KindContract         = "contract"
+	KindDecision         = "decision"
+	KindMarkdownArtifact = "markdown_artifact"
 )
 
 // Known subtypes per kind (empty subtype is always allowed).
 const (
-	SubtypeADR             = "adr"
-	SubtypeOpenspecChange  = "openspec_change"
-	SubtypePRD             = "prd"
+	SubtypeADR            = "adr"
+	SubtypeOpenspecChange = "openspec_change"
+	SubtypePRD            = "prd"
 )
 
 var validKinds = map[string]struct{}{
