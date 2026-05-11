@@ -13,6 +13,13 @@ type SourceBreakdownRow struct {
 	Formats    map[string]int `json:"formats"`
 }
 
+// ScanHint is one recovery hint when a scan finds zero artifacts (`hints` in ds scan --json).
+type ScanHint struct {
+	Path           string `json:"path"`
+	SourceType     string `json:"source_type,omitempty"`
+	SuggestCommand string `json:"suggest_command,omitempty"`
+}
+
 type sourceAgg struct {
 	count   int
 	formats map[string]int
@@ -24,12 +31,14 @@ type sourceAgg struct {
 //   - "Found": map of adapter/source pipeline name → count of successfully indexed artifacts
 //   - "sources_breakdown": array of { source_type, label, count, formats }
 //   - "New", "Updated", "Unchanged": revision outcomes
+//   - "hints": only when all adapters indexed zero artifacts — bounded recovery suggestions
 type Result struct {
 	Found            map[string]int       `json:"Found"`
 	SourcesBreakdown []SourceBreakdownRow `json:"sources_breakdown"`
 	New              int                  `json:"New"`
 	Updated          int                  `json:"Updated"`
 	Unchanged        int                  `json:"Unchanged"`
+	Hints            []ScanHint           `json:"hints,omitempty"`
 
 	sourcesAgg map[string]*sourceAgg `json:"-"`
 }
