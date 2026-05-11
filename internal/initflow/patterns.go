@@ -8,43 +8,95 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 )
 
-// DetectedPattern describes a filesystem shape match relative to a markdown source directory.
+// DetectedPattern describes a filesystem-derived glob→kind proposal for one source directory.
 type DetectedPattern struct {
 	Label       string
-	Match       string // glob relative to sourcePath
+	Match       string
 	DefaultKind string
-	SkipRule    bool // if true, do not emit a config rule
+	FileCount   int
 }
 
-// DetectPatterns scans one markdown source directory (repo-relative) up to two levels
-// and suggests glob rules for common numbered-plan layouts.
+// DetectPatterns scans a markdown source directory (repo-relative) up to two levels
+// and returns proposed glob→kind mappings based on common naming conventions.
+// The default kind is inferred from the directory name (e.g. "decisions" → decision).
 func DetectPatterns(repoRoot, sourcePath string) []DetectedPattern {
 	sourcePath = filepath.ToSlash(strings.TrimSpace(sourcePath))
 	base := filepath.Join(repoRoot, filepath.FromSlash(sourcePath))
-	var out []DetectedPattern
 
 	if st, err := os.Stat(base); err != nil || !st.IsDir() {
 		return nil
 	}
 
+	files := collectMDFiles(base)
+	if len(files) == 0 {
+		return nil
+	}
+
+	dirKind := inferDirKind(sourcePath)
+
+	// Candidate globs in priority order. All use the directory-inferred kind.
+	candidateGlobs := []string{
+		"README.md",
+		"[0-9][0-9][0-9]-*.md",
+		"[0-9][0-9][0-9]_*.md",
+		"[0-9][0-9]_*.md",
+		"[0-9][0-9]-*.md",
+		"*/README.md",
+		"*/[0-9][0-9][0-9]-*.md",
+		"*/[0-9][0-9]-*.md",
+		"*/[0-9][0-9]_*.md",
+	}
+
+	var out []DetectedPattern
+	matched := make(map[string]bool)
+
+	for _, glob := range candidateGlobs {
+		count := 0
+		for _, f := range files {
+			if patternMatch(glob, f) {
+				count++
+				matched[f] = true
+			}
+		}
+		if count > 0 {
+			out = append(out, DetectedPattern{
+				Label:       glob,
+				Match:       glob,
+				DefaultKind: dirKind,
+				FileCount:   count,
+			})
+		}
+	}
+
+	// Propose individual root-level .md files not matched by any pattern above.
+	for _, f := range files {
+		if matched[f] || strings.Contains(f, "/") {
+			continue
+		}
+		kind := inferSingleFileKind(f)
+		out = append(out, DetectedPattern{
+			Label:       f,
+			Match:       f,
+			DefaultKind: kind,
+			FileCount:   1,
+		})
+	}
+
+	return out
+}
+
+// collectMDFiles returns .md file paths relative to base, up to two directory levels.
+func collectMDFiles(base string) []string {
+	var files []string
 	ents, err := os.ReadDir(base)
 	if err != nil {
 		return nil
 	}
-
-	var hasRootREADME, hasNumUnderscore, hasNumDash bool
-	var subdirREADME, subdirNum bool
 	for _, e := range ents {
 		name := e.Name()
 		if !e.IsDir() {
-			if strings.EqualFold(name, "readme.md") {
-				hasRootREADME = true
-			}
-			if matchedNumRoot(name, "_") {
-				hasNumUnderscore = true
-			}
-			if matchedNumRoot(name, "-") {
-				hasNumDash = true
+			if strings.HasSuffix(strings.ToLower(name), ".md") {
+				files = append(files, name)
 			}
 			continue
 		}
@@ -58,52 +110,51 @@ func DetectPatterns(repoRoot, sourcePath string) []DetectedPattern {
 				continue
 			}
 			sn := se.Name()
-			if strings.EqualFold(sn, "readme.md") {
-				subdirREADME = true
-			}
-			if matchedNumNested(sn) {
-				subdirNum = true
+			if strings.HasSuffix(strings.ToLower(sn), ".md") {
+				files = append(files, name+"/"+sn)
 			}
 		}
 	}
-
-	if hasRootREADME {
-		out = append(out, DetectedPattern{Label: "Root README.md", Match: "README.md", DefaultKind: config.KindPlan})
-	}
-	if hasNumUnderscore {
-		out = append(out, DetectedPattern{Label: "Numbered root files (NN_TITLE.md)", Match: "[0-9][0-9]_*.md", DefaultKind: config.KindPlan})
-	}
-	if hasNumDash {
-		out = append(out, DetectedPattern{Label: "Numbered root files (NN-title.md)", Match: "[0-9][0-9]-*.md", DefaultKind: config.KindPlan})
-	}
-	if subdirREADME {
-		out = append(out, DetectedPattern{Label: "Subfolder README.md", Match: "*/README.md", DefaultKind: config.KindPlan})
-	}
-	if subdirNum {
-		out = append(out, DetectedPattern{Label: "Nested numbered steps", Match: "*/[0-9][0-9]-*.md", DefaultKind: config.KindPlan})
-	}
-
-	return out
+	return files
 }
 
-func matchedNumRoot(name, sep string) bool {
-	base := strings.TrimSuffix(strings.ToLower(name), ".md")
-	if len(base) < 4 {
-		return false
-	}
-	if base[0] < '0' || base[0] > '9' || base[1] < '0' || base[1] > '9' {
-		return false
-	}
-	return strings.Contains(base[2:], sep)
+func patternMatch(pattern, path string) bool {
+	ok, err := filepath.Match(pattern, path)
+	return err == nil && ok
 }
 
-func matchedNumNested(name string) bool {
-	base := strings.TrimSuffix(strings.ToLower(name), ".md")
-	if len(base) < 4 {
-		return false
+// inferDirKind guesses the dominant artifact kind from the directory basename.
+func inferDirKind(dirPath string) string {
+	lower := strings.ToLower(filepath.Base(filepath.ToSlash(dirPath)))
+	switch {
+	case strings.Contains(lower, "decision"), strings.Contains(lower, "adr"):
+		return config.KindDecision
+	case strings.Contains(lower, "spec"):
+		return config.KindSpec
+	case strings.Contains(lower, "design"):
+		return config.KindDesign
+	case strings.Contains(lower, "requirement"), strings.Contains(lower, "prd"):
+		return config.KindRequirements
+	default:
+		return config.KindPlan
 	}
-	if base[0] < '0' || base[0] > '9' || base[1] < '0' || base[1] > '9' {
-		return false
+}
+
+// inferSingleFileKind guesses a kind from a standalone filename.
+func inferSingleFileKind(name string) string {
+	lower := strings.ToLower(strings.TrimSuffix(name, filepath.Ext(name)))
+	switch {
+	case strings.HasPrefix(lower, "roadmap"), strings.HasPrefix(lower, "plan"):
+		return config.KindPlan
+	case strings.HasPrefix(lower, "spec"):
+		return config.KindSpec
+	case strings.HasPrefix(lower, "design"):
+		return config.KindDesign
+	case strings.HasPrefix(lower, "decision"), strings.HasPrefix(lower, "adr"):
+		return config.KindDecision
+	case strings.HasPrefix(lower, "requirement"), strings.HasPrefix(lower, "prd"):
+		return config.KindRequirements
+	default:
+		return config.KindMarkdownArtifact
 	}
-	return base[2] == '-'
 }

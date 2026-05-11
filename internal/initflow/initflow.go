@@ -89,29 +89,90 @@ func runCustomMarkdownWizard(repoRoot string) (paths []string, rules []config.So
 		return nil, nil, nil
 	}
 
-	var configureRules bool
-	introForm := huh.NewForm(
-		huh.NewGroup(
-			huh.NewConfirm().
-				Title("Configure kind rules for these folders?").
-				Description("Map path patterns to artifact kinds. Each pattern is matched relative to every folder you listed (not from the repo root). Uses glob syntax: *, ?, and []. Example: ROADMAP.md or */README.md or [0-9][0-9]-*.md. You can skip and edit .devspecs/config.yaml later.").
-				Value(&configureRules),
-		),
-	)
-	if err := introForm.Run(); err != nil {
-		return nil, nil, err
-	}
-	if !configureRules {
-		return paths, nil, nil
+	for _, dir := range paths {
+		dirRules, err := configureDirRules(repoRoot, dir)
+		if err != nil {
+			return nil, nil, err
+		}
+		rules = append(rules, dirRules...)
 	}
 
+	return paths, rules, nil
+}
+
+// configureDirRules walks one directory: shows detected pattern proposals as a
+// multi-select, then offers a manual rule-entry loop for anything the user
+// wants to add beyond what was detected.
+func configureDirRules(repoRoot, dir string) ([]config.SourceRule, error) {
+	patterns := DetectPatterns(repoRoot, dir)
+	var rules []config.SourceRule
+
+	if len(patterns) > 0 {
+		opts := make([]huh.Option[string], 0, len(patterns))
+		kindForMatch := make(map[string]string)
+		var preSelected []string
+
+		for _, p := range patterns {
+			label := fmt.Sprintf("%s \u2192 %s (%d file", p.Match, p.DefaultKind, p.FileCount)
+			if p.FileCount != 1 {
+				label += "s"
+			}
+			label += ")"
+			opts = append(opts, huh.NewOption(label, p.Match))
+			kindForMatch[p.Match] = p.DefaultKind
+			preSelected = append(preSelected, p.Match)
+		}
+
+		selected := append([]string(nil), preSelected...)
+		selectForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewMultiSelect[string]().
+					Title(fmt.Sprintf("Rules for %s", dir)).
+					Description("Detected patterns. Space to toggle, enter to confirm.").
+					Options(opts...).
+					Value(&selected),
+			),
+		)
+		if err := selectForm.Run(); err != nil {
+			return nil, err
+		}
+
+		for _, match := range selected {
+			rules = append(rules, config.SourceRule{
+				Match: match,
+				Kind:  kindForMatch[match],
+			})
+		}
+	}
+
+	// Manual rule loop
 	for {
+		var addCustom bool
+		prompt := fmt.Sprintf("Add a custom rule for %s?", dir)
+		if len(patterns) == 0 {
+			prompt = fmt.Sprintf("Add a rule for %s?", dir)
+		}
+		customForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewConfirm().
+					Title(prompt).
+					Description("Enter a glob pattern and artifact kind.").
+					Value(&addCustom),
+			),
+		)
+		if err := customForm.Run(); err != nil {
+			return nil, err
+		}
+		if !addCustom {
+			break
+		}
+
 		var match, kindStr, subStr string
 		ruleForm := huh.NewForm(
 			huh.NewGroup(
 				huh.NewInput().
 					Title("Path pattern").
-					Description("Relative to each custom folder (use /). Examples: ROADMAP.md, */README.md, */[0-9][0-9]-*.md").
+					Description("Relative to "+dir+" (glob syntax: *, ?, []). Examples: ROADMAP.md, */README.md").
 					Value(&match),
 				huh.NewSelect[string]().
 					Title("Artifact kind").
@@ -119,54 +180,39 @@ func runCustomMarkdownWizard(repoRoot string) (paths []string, rules []config.So
 					Value(&kindStr),
 				huh.NewInput().
 					Title("Subtype (optional)").
-					Description("Usually leave blank. If needed: adr (with decision), openspec_change (with spec), prd (with requirements).").
+					Description("Usually blank. If needed: adr, openspec_change, or prd.").
 					Value(&subStr),
 			),
 		)
 		if err := ruleForm.Run(); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		match = strings.TrimSpace(match)
 		subStr = strings.TrimSpace(subStr)
 		if match == "" {
 			fmt.Fprintln(os.Stderr, "Skipping empty pattern.")
-		} else {
-			match = filepath.ToSlash(match)
-			rule := config.SourceRule{Match: match, Kind: kindStr, Subtype: subStr}
-			if err := config.ValidateSubtype(rule.Kind, rule.Subtype); err != nil {
-				fmt.Fprintf(os.Stderr, "Invalid rule (%s → %s / %s): %v\n", match, kindStr, subStr, err)
-			} else {
-				rules = append(rules, rule)
-			}
+			continue
 		}
-
-		var more bool
-		moreForm := huh.NewForm(
-			huh.NewGroup(
-				huh.NewConfirm().
-					Title("Add another rule?").
-					Value(&more),
-			),
-		)
-		if err := moreForm.Run(); err != nil {
-			return nil, nil, err
+		match = filepath.ToSlash(match)
+		rule := config.SourceRule{Match: match, Kind: kindStr, Subtype: subStr}
+		if err := config.ValidateSubtype(rule.Kind, rule.Subtype); err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid rule: %v\n", err)
+			continue
 		}
-		if !more {
-			break
-		}
+		rules = append(rules, rule)
 	}
 
-	return paths, rules, nil
+	return rules, nil
 }
 
 func kindPickOptions() []huh.Option[string] {
 	return []huh.Option[string]{
-		huh.NewOption("plan — plans, roadmaps, checklists", config.KindPlan),
-		huh.NewOption("spec — specifications, proposals", config.KindSpec),
-		huh.NewOption("requirements — PRDs, needs", config.KindRequirements),
-		huh.NewOption("design — design notes", config.KindDesign),
-		huh.NewOption("contract — APIs, interfaces", config.KindContract),
-		huh.NewOption("decision — ADRs, decisions", config.KindDecision),
-		huh.NewOption("markdown_artifact — generic markdown", config.KindMarkdownArtifact),
+		huh.NewOption("plan \u2014 plans, roadmaps, checklists", config.KindPlan),
+		huh.NewOption("spec \u2014 specifications, proposals", config.KindSpec),
+		huh.NewOption("requirements \u2014 PRDs, needs", config.KindRequirements),
+		huh.NewOption("design \u2014 design notes", config.KindDesign),
+		huh.NewOption("contract \u2014 APIs, interfaces", config.KindContract),
+		huh.NewOption("decision \u2014 ADRs, decisions", config.KindDecision),
+		huh.NewOption("markdown_artifact \u2014 generic markdown", config.KindMarkdownArtifact),
 	}
 }
