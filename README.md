@@ -108,7 +108,7 @@ ds config show               # effective discovery paths
 
 ## Core workflow
 
-1. **`ds init`** — Creates the global index location `~/.devspecs` (overridable) and repo **`.devspecs/config.yaml`**. In a Git worktree, config is written at the **repository root** (not necessarily your current working directory). In an interactive terminal (stdin and stdout are both TTYs), init runs a **workflow profile** picker first (merge paths and rules for common layouts), then **layout detection** merges additional paths into the YAML unless you pass **`--no-detect`**. Use **`--yes`** or **`--non-interactive`** to skip the profile picker (CI and scripts).
+1. **`ds init`** — Creates the global index location `~/.devspecs` (overridable) and repo **`.devspecs/config.yaml`**. In a Git worktree, config is written at the **repository root** (not necessarily your current working directory). In an interactive terminal (stdin and stdout are both TTYs), init runs a **workflow profile** picker first (merge paths and rules for common layouts; **Custom markdown paths** lets you list folders and then **map glob patterns to kinds** interactively), then **layout detection** merges additional paths into the YAML unless you pass **`--no-detect`**. Use **`--yes`** or **`--non-interactive`** to skip the profile picker (CI and scripts).
 2. **`ds scan`** — Walks adapters and upserts artifacts, revisions, sources, todos, criteria, and tags.
 3. **`ds list`** / **`ds find`** — Browse or search what was indexed.
 4. **`ds show <id>`** — Full detail; accepts full ID, **short ID**, or prefix.

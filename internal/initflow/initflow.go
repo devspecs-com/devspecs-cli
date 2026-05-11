@@ -89,32 +89,84 @@ func runCustomMarkdownWizard(repoRoot string) (paths []string, rules []config.So
 		return nil, nil, nil
 	}
 
-	var confirm bool
-	confirmForm := huh.NewForm(
+	var configureRules bool
+	introForm := huh.NewForm(
 		huh.NewGroup(
 			huh.NewConfirm().
-				Title("Add default planning rules for these folders?").
-				Description("Maps README.md, numbered *.md files, and nested steps to kind \"plan\" (editable later in .devspecs/config.yaml).").
-				Value(&confirm),
+				Title("Configure kind rules for these folders?").
+				Description("Map path patterns to artifact kinds. Each pattern is matched relative to every folder you listed (not from the repo root). Uses glob syntax: *, ?, and []. Example: ROADMAP.md or */README.md or [0-9][0-9]-*.md. You can skip and edit .devspecs/config.yaml later.").
+				Value(&configureRules),
 		),
 	)
-	if err := confirmForm.Run(); err != nil {
+	if err := introForm.Run(); err != nil {
 		return nil, nil, err
 	}
-	if !confirm {
+	if !configureRules {
 		return paths, nil, nil
 	}
 
-	for _, p := range paths {
-		for _, pat := range DetectPatterns(repoRoot, p) {
-			if pat.Match == "" || pat.SkipRule {
-				continue
+	for {
+		var match, kindStr, subStr string
+		ruleForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Path pattern").
+					Description("Relative to each custom folder (use /). Examples: ROADMAP.md, */README.md, */[0-9][0-9]-*.md").
+					Value(&match),
+				huh.NewSelect[string]().
+					Title("Artifact kind").
+					Options(kindPickOptions()...).
+					Value(&kindStr),
+				huh.NewInput().
+					Title("Subtype (optional)").
+					Description("Usually leave blank. If needed: adr (with decision), openspec_change (with spec), prd (with requirements).").
+					Value(&subStr),
+			),
+		)
+		if err := ruleForm.Run(); err != nil {
+			return nil, nil, err
+		}
+		match = strings.TrimSpace(match)
+		subStr = strings.TrimSpace(subStr)
+		if match == "" {
+			fmt.Fprintln(os.Stderr, "Skipping empty pattern.")
+		} else {
+			match = filepath.ToSlash(match)
+			rule := config.SourceRule{Match: match, Kind: kindStr, Subtype: subStr}
+			if err := config.ValidateSubtype(rule.Kind, rule.Subtype); err != nil {
+				fmt.Fprintf(os.Stderr, "Invalid rule (%s → %s / %s): %v\n", match, kindStr, subStr, err)
+			} else {
+				rules = append(rules, rule)
 			}
-			rules = append(rules, config.SourceRule{
-				Match: pat.Match,
-				Kind:  pat.DefaultKind,
-			})
+		}
+
+		var more bool
+		moreForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewConfirm().
+					Title("Add another rule?").
+					Value(&more),
+			),
+		)
+		if err := moreForm.Run(); err != nil {
+			return nil, nil, err
+		}
+		if !more {
+			break
 		}
 	}
+
 	return paths, rules, nil
+}
+
+func kindPickOptions() []huh.Option[string] {
+	return []huh.Option[string]{
+		huh.NewOption("plan — plans, roadmaps, checklists", config.KindPlan),
+		huh.NewOption("spec — specifications, proposals", config.KindSpec),
+		huh.NewOption("requirements — PRDs, needs", config.KindRequirements),
+		huh.NewOption("design — design notes", config.KindDesign),
+		huh.NewOption("contract — APIs, interfaces", config.KindContract),
+		huh.NewOption("decision — ADRs, decisions", config.KindDecision),
+		huh.NewOption("markdown_artifact — generic markdown", config.KindMarkdownArtifact),
+	}
 }
