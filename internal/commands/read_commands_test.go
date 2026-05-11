@@ -16,7 +16,7 @@ func setupReadEnv(t *testing.T) (repoDir string, artifactID string) {
 
 	repoDir = filepath.Join(tmp, "repo")
 	os.MkdirAll(repoDir, 0o755)
-	os.WriteFile(filepath.Join(repoDir, "plan.md"), []byte("# My Plan\n\n- [ ] Open task\n- [x] Done task\n- [ ] Another open\n"), 0o644)
+	os.WriteFile(filepath.Join(repoDir, "plan.md"), []byte("# My Plan\n\n## Tasks\n\n- [ ] Open task\n- [x] Done task\n- [ ] Another open\n\n## Auditable success criteria\n\n- [ ] Gate criterion open\n- [x] Gate criterion done\n"), 0o644)
 
 	origWd, _ := os.Getwd()
 	os.Chdir(repoDir)
@@ -266,6 +266,83 @@ func TestTodos_JSONSchema(t *testing.T) {
 		if _, ok := todos[0][field]; !ok {
 			t.Errorf("JSON todo missing required field %q", field)
 		}
+	}
+}
+
+func TestCriteria_AllArtifacts(t *testing.T) {
+	setupReadEnv(t)
+
+	cmd := NewCriteriaCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Gate criterion open") {
+		t.Errorf("criteria output missing open criterion: %s", out)
+	}
+	if !strings.Contains(out, "Gate criterion done") {
+		t.Errorf("criteria output missing done criterion: %s", out)
+	}
+	if !strings.Contains(out, "success") {
+		t.Errorf("criteria output missing kind column success: %s", out)
+	}
+}
+
+func TestCriteria_JSONSchema(t *testing.T) {
+	setupReadEnv(t)
+
+	cmd := NewCriteriaCmd()
+	cmd.SetArgs([]string{"--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var rows []map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &rows); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, buf.String())
+	}
+	if len(rows) != 2 {
+		t.Fatalf("want 2 criteria, got %d", len(rows))
+	}
+	requiredFields := []string{"artifact_id", "revision_id", "ordinal", "text", "done", "source_file", "source_line", "criteria_kind"}
+	for _, field := range requiredFields {
+		if _, ok := rows[0][field]; !ok {
+			t.Errorf("JSON criterion missing required field %q", field)
+		}
+	}
+}
+
+func TestCriteria_FiltersOpenDoneKind(t *testing.T) {
+	setupReadEnv(t)
+
+	openCmd := NewCriteriaCmd()
+	openCmd.SetArgs([]string{"--open"})
+	openBuf := &bytes.Buffer{}
+	openCmd.SetOut(openBuf)
+	if err := openCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	openOut := openBuf.String()
+	if !strings.Contains(openOut, "Gate criterion open") {
+		t.Errorf("--open missing open criterion: %s", openOut)
+	}
+	if strings.Contains(openOut, "Gate criterion done") {
+		t.Errorf("--open should not include done criterion: %s", openOut)
+	}
+
+	kindCmd := NewCriteriaCmd()
+	kindCmd.SetArgs([]string{"--kind", "success"})
+	kindBuf := &bytes.Buffer{}
+	kindCmd.SetOut(kindBuf)
+	if err := kindCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(kindBuf.String(), "Gate criterion") {
+		t.Errorf("--kind success: %s", kindBuf.String())
 	}
 }
 

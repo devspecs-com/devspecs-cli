@@ -542,6 +542,19 @@ func TestJSONStability(t *testing.T) {
 		}
 	})
 
+	t.Run("criteria_json", func(t *testing.T) {
+		cmd := NewCriteriaCmd()
+		cmd.SetArgs([]string{"--json"})
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		if !json.Valid(buf.Bytes()) {
+			t.Errorf("criteria --json invalid: %s", buf.String())
+		}
+	})
+
 	t.Run("show_json", func(t *testing.T) {
 		cmd := NewShowCmd()
 		cmd.SetArgs([]string{artID, "--json"})
@@ -614,5 +627,25 @@ func TestPRD_TodosBoundary(t *testing.T) {
 	// Verify no subcommands exist (todos is read-only observability)
 	if len(todosCmd.Commands()) > 0 {
 		t.Errorf("todos command has subcommands (should be read-only): %v", todosCmd.Commands())
+	}
+}
+
+// TestPRD_CriteriaBoundary verifies the criteria command stays within PRD scope.
+func TestPRD_CriteriaBoundary(t *testing.T) {
+	criteriaCmd := NewCriteriaCmd()
+
+	forbidden := []string{
+		"owner", "assignee", "due-date", "due_date", "priority",
+		"label", "sprint", "create", "update", "delete",
+		"assign", "milestone", "epic", "estimate",
+	}
+	for _, flag := range forbidden {
+		if criteriaCmd.Flags().Lookup(flag) != nil {
+			t.Errorf("criteria command has forbidden flag --%s (out of PRD scope)", flag)
+		}
+	}
+
+	if len(criteriaCmd.Commands()) > 0 {
+		t.Errorf("criteria command has subcommands (should be read-only): %v", criteriaCmd.Commands())
 	}
 }

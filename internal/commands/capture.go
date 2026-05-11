@@ -82,7 +82,7 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 		RelPath:     relPath,
 		AdapterName: "markdown",
 	}
-	art, _, todos, err := mdAdapter.Parse(context.Background(), candidate)
+	art, _, pr, err := mdAdapter.Parse(context.Background(), candidate)
 	if err != nil {
 		return fmt.Errorf("parse file: %w", err)
 	}
@@ -121,9 +121,9 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 		db.Exec("UPDATE artifacts SET title = ?, kind = ?, current_revision_id = ?, updated_at = ?, last_observed_at = ? WHERE id = ?",
 			art.Title, art.Kind, revID, now, now, existingArtID)
 
-		// Replace todos
+		// Replace todos and criteria
 		db.Exec("DELETE FROM artifact_todos WHERE artifact_id = ?", existingArtID)
-		for _, td := range todos {
+		for _, td := range pr.Todos {
 			todoID := ids.NewWithPrefix("todo_")
 			done := 0
 			if td.Done {
@@ -131,6 +131,16 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 			}
 			db.Exec("INSERT INTO artifact_todos (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
 				todoID, existingArtID, revID, td.Ordinal, td.Text, done, td.SourceFile, td.SourceLine, now)
+		}
+		db.Exec("DELETE FROM artifact_criteria WHERE artifact_id = ?", existingArtID)
+		for _, cr := range pr.Criteria {
+			critID := ids.NewWithPrefix("crit_")
+			done := 0
+			if cr.Done {
+				done = 1
+			}
+			db.Exec("INSERT INTO artifact_criteria (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, criteria_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+				critID, existingArtID, revID, cr.Ordinal, cr.Text, done, cr.SourceFile, cr.SourceLine, cr.CriteriaKind, now)
 		}
 
 		db.IndexArtifactFTS(existingArtID, art.Title, art.Body, relPath)
@@ -162,7 +172,7 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 	db.InsertRevisionDirect(revID, artifactID, contentHash, art.Body, exStr, now)
 	db.InsertSourceDirect(ids.NewWithPrefix("src_"), artifactID, repoID, "capture", relPath, sourceIdentity, art.FormatProfile, art.LayoutGroup, now)
 
-	for _, td := range todos {
+	for _, td := range pr.Todos {
 		todoID := ids.NewWithPrefix("todo_")
 		done := 0
 		if td.Done {
@@ -170,6 +180,15 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 		}
 		db.Exec("INSERT INTO artifact_todos (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
 			todoID, artifactID, revID, td.Ordinal, td.Text, done, td.SourceFile, td.SourceLine, now)
+	}
+	for _, cr := range pr.Criteria {
+		critID := ids.NewWithPrefix("crit_")
+		done := 0
+		if cr.Done {
+			done = 1
+		}
+		db.Exec("INSERT INTO artifact_criteria (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, criteria_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			critID, artifactID, revID, cr.Ordinal, cr.Text, done, cr.SourceFile, cr.SourceLine, cr.CriteriaKind, now)
 	}
 
 	db.IndexArtifactFTS(artifactID, art.Title, art.Body, relPath)

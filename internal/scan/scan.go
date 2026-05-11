@@ -1,5 +1,5 @@
 // Package scan orchestrates artifact discovery: walks the repo, dispatches
-// adapters, and upserts artifacts/revisions/todos into the store.
+// adapters, and upserts artifacts/revisions/todos/criteria into the store.
 package scan
 
 import (
@@ -62,11 +62,11 @@ func (s *Scanner) Run(ctx context.Context, repoRoot string, cfg *config.RepoConf
 		}
 
 		for _, c := range candidates {
-			art, sources, todos, err := adapter.Parse(ctx, c)
+			art, sources, pr, err := adapter.Parse(ctx, c)
 			if err != nil {
 				continue
 			}
-			if err := s.upsertArtifact(repoRoot, repoID, adapter.Name(), art, sources, todos, now, result); err != nil {
+			if err := s.upsertArtifact(repoRoot, repoID, adapter.Name(), art, sources, pr, now, result); err != nil {
 				return nil, fmt.Errorf("upsert artifact %q: %w", art.SourceIdentity, err)
 			}
 		}
@@ -98,7 +98,7 @@ func (s *Scanner) ensureRepo(rootPath, now string) (string, error) {
 	return id, err
 }
 
-func (s *Scanner) upsertArtifact(repoRoot, repoID, adapterName string, art adapters.Artifact, sources []adapters.Source, todos []todoparse.Todo, now string, result *Result) error {
+func (s *Scanner) upsertArtifact(repoRoot, repoID, adapterName string, art adapters.Artifact, sources []adapters.Source, pr todoparse.ParseResult, now string, result *Result) error {
 	// Check if artifact exists by source_identity
 	var artifactID, currentRevID string
 	err := s.db.QueryRow(
@@ -124,7 +124,10 @@ func (s *Scanner) upsertArtifact(repoRoot, repoID, adapterName string, art adapt
 				return err
 			}
 		}
-		if err := s.replaceTodos(artifactID, revID, todos, now); err != nil {
+		if err := s.replaceTodos(artifactID, revID, pr.Todos, now); err != nil {
+			return err
+		}
+		if err := s.replaceCriteria(artifactID, revID, pr.Criteria, now); err != nil {
 			return err
 		}
 		s.replaceTags(artifactID, art, now)
@@ -166,7 +169,10 @@ func (s *Scanner) upsertArtifact(repoRoot, repoID, adapterName string, art adapt
 	}
 	s.db.Exec("UPDATE artifacts SET current_revision_id = ?, title = ?, status = ?, kind = ?, updated_at = ? WHERE id = ?",
 		revID, art.Title, art.Status, art.Kind, now, artifactID)
-	if err := s.replaceTodos(artifactID, revID, todos, now); err != nil {
+	if err := s.replaceTodos(artifactID, revID, pr.Todos, now); err != nil {
+		return err
+	}
+	if err := s.replaceCriteria(artifactID, revID, pr.Criteria, now); err != nil {
 		return err
 	}
 	s.replaceTags(artifactID, art, now)
@@ -272,6 +278,26 @@ func (s *Scanner) replaceTodos(artifactID, revID string, todos []todoparse.Todo,
 		if _, err := s.db.Exec(
 			"INSERT INTO artifact_todos (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
 			id, artifactID, revID, todo.Ordinal, todo.Text, done, todo.SourceFile, todo.SourceLine, now,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Scanner) replaceCriteria(artifactID, revID string, criteria []todoparse.Criterion, now string) error {
+	if _, err := s.db.Exec("DELETE FROM artifact_criteria WHERE artifact_id = ?", artifactID); err != nil {
+		return err
+	}
+	for _, c := range criteria {
+		id := s.ids.NewWithPrefix("crit_")
+		done := 0
+		if c.Done {
+			done = 1
+		}
+		if _, err := s.db.Exec(
+			"INSERT INTO artifact_criteria (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, criteria_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			id, artifactID, revID, c.Ordinal, c.Text, done, c.SourceFile, c.SourceLine, c.CriteriaKind, now,
 		); err != nil {
 			return err
 		}

@@ -1,4 +1,4 @@
--- DevSpecs v0.1 schema (version 5)
+-- DevSpecs v0.1 schema (version 6)
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version    INTEGER PRIMARY KEY,
@@ -83,6 +83,21 @@ CREATE TABLE IF NOT EXISTS artifact_todos (
   FOREIGN KEY (revision_id) REFERENCES artifact_revisions(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS artifact_criteria (
+  id             TEXT PRIMARY KEY,
+  artifact_id    TEXT NOT NULL,
+  revision_id    TEXT NOT NULL,
+  ordinal        INTEGER NOT NULL,
+  text           TEXT NOT NULL,
+  done           INTEGER NOT NULL CHECK (done IN (0, 1)),
+  source_file    TEXT NOT NULL,
+  source_line    INTEGER NOT NULL,
+  criteria_kind  TEXT NOT NULL,
+  created_at     TEXT NOT NULL,
+  FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE,
+  FOREIGN KEY (revision_id) REFERENCES artifact_revisions(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS artifact_tags (
   artifact_id TEXT NOT NULL,
   tag         TEXT NOT NULL,
@@ -94,6 +109,8 @@ CREATE TABLE IF NOT EXISTS artifact_tags (
 
 CREATE INDEX IF NOT EXISTS idx_todos_artifact ON artifact_todos(artifact_id);
 CREATE INDEX IF NOT EXISTS idx_todos_revision ON artifact_todos(revision_id);
+CREATE INDEX IF NOT EXISTS idx_criteria_artifact ON artifact_criteria(artifact_id);
+CREATE INDEX IF NOT EXISTS idx_criteria_revision ON artifact_criteria(revision_id);
 CREATE INDEX IF NOT EXISTS idx_sources_identity ON sources(source_identity);
 CREATE INDEX IF NOT EXISTS idx_artifacts_repo ON artifacts(repo_id);
 CREATE INDEX IF NOT EXISTS idx_revisions_artifact ON artifact_revisions(artifact_id);

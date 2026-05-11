@@ -68,10 +68,10 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 	return candidates, nil
 }
 
-func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Artifact, []adapters.Source, []todoparse.Todo, error) {
+func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Artifact, []adapters.Source, todoparse.ParseResult, error) {
 	data, err := os.ReadFile(c.PrimaryPath)
 	if err != nil {
-		return adapters.Artifact{}, nil, nil, err
+		return adapters.Artifact{}, nil, todoparse.ParseResult{}, err
 	}
 	content := string(data)
 
@@ -86,7 +86,7 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 		title = humanize(changeID)
 	}
 
-	status := inferStatus(content, changeDir)
+	status := inferStatus(content)
 
 	art := adapters.Artifact{
 		SourceIdentity: filepath.ToSlash(c.RelPath[:strings.LastIndex(c.RelPath, "/")]) + "|openspec",
@@ -100,12 +100,6 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 		LayoutGroup:    layoutGroup,
 	}
 
-	// Extract acceptance criteria from proposal
-	criteria := extractCriteria(content)
-	if len(criteria) > 0 {
-		art.Extracted["acceptance_criteria"] = criteria
-	}
-
 	src := adapters.Source{
 		SourceType:     "openspec",
 		Path:           c.RelPath,
@@ -114,24 +108,26 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 		LayoutGroup:    layoutGroup,
 	}
 
-	// Collect todos from proposal
-	todos := todoparse.Parse(content, c.RelPath)
+	pr := todoparse.Parse(content, c.RelPath)
 
-	// Also parse tasks.md if it exists
 	tasksPath := filepath.Join(changeDir, "tasks.md")
 	if tasksData, err := os.ReadFile(tasksPath); err == nil {
 		tasksRel, _ := filepath.Rel(repoRoot, tasksPath)
 		tasksRel = filepath.ToSlash(tasksRel)
-		taskTodos := todoparse.Parse(string(tasksData), tasksRel)
-		// Re-ordinal relative to existing todos
-		offset := len(todos)
-		for i := range taskTodos {
-			taskTodos[i].Ordinal = offset + i
+		taskPR := todoparse.Parse(string(tasksData), tasksRel)
+		off := len(pr.Todos)
+		for i := range taskPR.Todos {
+			taskPR.Todos[i].Ordinal = off + i
 		}
-		todos = append(todos, taskTodos...)
+		pr.Todos = append(pr.Todos, taskPR.Todos...)
+		offC := len(pr.Criteria)
+		for i := range taskPR.Criteria {
+			taskPR.Criteria[i].Ordinal = offC + i
+		}
+		pr.Criteria = append(pr.Criteria, taskPR.Criteria...)
 	}
 
-	return art, []adapters.Source{src}, todos, nil
+	return art, []adapters.Source{src}, pr, nil
 }
 
 func extractH1(content string) string {
@@ -157,7 +153,7 @@ func humanize(s string) string {
 	return strings.Join(words, " ")
 }
 
-func inferStatus(content, changeDir string) string {
+func inferStatus(content string) string {
 	// Check for status in frontmatter or body
 	lower := strings.ToLower(content)
 	switch {
@@ -172,46 +168,4 @@ func inferStatus(content, changeDir string) string {
 	default:
 		return "proposed"
 	}
-}
-
-var criteriaHeadings = []string{
-	"acceptance criteria",
-	"requirements",
-	"scenarios",
-	"success criteria",
-}
-
-func extractCriteria(content string) []string {
-	var criteria []string
-	scanner := bufio.NewScanner(strings.NewReader(content))
-	inCriteriaSection := false
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		trimmed := strings.TrimSpace(line)
-		lower := strings.ToLower(trimmed)
-
-		if strings.HasPrefix(lower, "#") {
-			heading := strings.TrimLeft(lower, "# ")
-			isCriteria := false
-			for _, h := range criteriaHeadings {
-				if strings.Contains(heading, h) {
-					isCriteria = true
-					break
-				}
-			}
-			if isCriteria {
-				inCriteriaSection = true
-				continue
-			}
-			if inCriteriaSection {
-				break
-			}
-		}
-
-		if inCriteriaSection && strings.HasPrefix(trimmed, "- ") {
-			criteria = append(criteria, strings.TrimPrefix(trimmed, "- "))
-		}
-	}
-	return criteria
 }

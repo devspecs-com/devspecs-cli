@@ -62,6 +62,19 @@ type TodoRow struct {
 	SourceLine int
 }
 
+// CriterionRow represents a row from the artifact_criteria table.
+type CriterionRow struct {
+	ID           string
+	ArtifactID   string
+	RevisionID   string
+	Ordinal      int
+	Text         string
+	Done         bool
+	SourceFile   string
+	SourceLine   int
+	CriteriaKind string
+}
+
 // FilterParams groups all query filters.
 type FilterParams struct {
 	RepoRoot   string
@@ -334,6 +347,95 @@ func (db *DB) ListAllTodos(fp FilterParams, openOnly, doneOnly bool) ([]TodoRow,
 	for rows.Next() {
 		var r TodoRow
 		if err := rows.Scan(&r.ID, &r.ArtifactID, &r.RevisionID, &r.Ordinal, &r.Text, &r.Done, &r.SourceFile, &r.SourceLine); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// GetCriteriaForArtifact returns extracted criteria for a specific artifact.
+func (db *DB) GetCriteriaForArtifact(artifactID string) ([]CriterionRow, error) {
+	rows, err := db.Query(
+		"SELECT id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, criteria_kind FROM artifact_criteria WHERE artifact_id = ? ORDER BY ordinal",
+		artifactID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []CriterionRow
+	for rows.Next() {
+		var r CriterionRow
+		if err := rows.Scan(&r.ID, &r.ArtifactID, &r.RevisionID, &r.Ordinal, &r.Text, &r.Done, &r.SourceFile, &r.SourceLine, &r.CriteriaKind); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// ListAllCriteria returns criteria across all artifacts, optionally filtered.
+// criteriaKind filters by criteria_kind when non-empty (acceptance, success, okr).
+func (db *DB) ListAllCriteria(fp FilterParams, openOnly, doneOnly bool, criteriaKind string) ([]CriterionRow, error) {
+	query := `SELECT c.id, c.artifact_id, c.revision_id, c.ordinal, c.text, c.done, c.source_file, c.source_line, c.criteria_kind
+		FROM artifact_criteria c
+		JOIN artifacts a ON a.id = c.artifact_id`
+	var joins []string
+	var conditions []string
+	var args []any
+
+	needsRepoJoin := fp.RepoRoot != "" || fp.Branch != "" || fp.User != ""
+	if needsRepoJoin {
+		joins = append(joins, "JOIN repos r ON a.repo_id = r.id")
+	}
+	if fp.RepoRoot != "" {
+		conditions = append(conditions, "r.root_path = ?")
+		args = append(args, fp.RepoRoot)
+	}
+	if fp.Branch != "" {
+		conditions = append(conditions, "r.git_current_branch = ?")
+		args = append(args, fp.Branch)
+	}
+	if fp.User != "" {
+		conditions = append(conditions, "r.scanned_by = ?")
+		args = append(args, fp.User)
+	}
+	if fp.Tag != "" {
+		joins = append(joins, "JOIN artifact_tags at ON at.artifact_id = a.id")
+		conditions = append(conditions, "at.tag = ?")
+		args = append(args, fp.Tag)
+	}
+	if openOnly {
+		conditions = append(conditions, "c.done = 0")
+	}
+	if doneOnly {
+		conditions = append(conditions, "c.done = 1")
+	}
+	if criteriaKind != "" {
+		conditions = append(conditions, "c.criteria_kind = ?")
+		args = append(args, criteriaKind)
+	}
+
+	for _, j := range joins {
+		query += " " + j
+	}
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += " ORDER BY a.title, c.ordinal"
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []CriterionRow
+	for rows.Next() {
+		var r CriterionRow
+		if err := rows.Scan(&r.ID, &r.ArtifactID, &r.RevisionID, &r.Ordinal, &r.Text, &r.Done, &r.SourceFile, &r.SourceLine, &r.CriteriaKind); err != nil {
 			return nil, err
 		}
 		result = append(result, r)

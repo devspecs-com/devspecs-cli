@@ -114,7 +114,7 @@ func TestParse_ExtractsTodos(t *testing.T) {
 	os.WriteFile(path, []byte(content), 0o644)
 
 	a := &Adapter{}
-	_, _, todos, err := a.Parse(context.Background(), adapters.Candidate{
+	_, _, pr, err := a.Parse(context.Background(), adapters.Candidate{
 		PrimaryPath: path,
 		RelPath:     "plans/plan.md",
 		AdapterName: "markdown",
@@ -122,6 +122,7 @@ func TestParse_ExtractsTodos(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	todos := pr.Todos
 	if len(todos) != 2 {
 		t.Fatalf("expected 2 todos, got %d", len(todos))
 	}
@@ -564,10 +565,11 @@ func TestDiscover_SampleFixture_SpecifyTasksTodos(t *testing.T) {
 	if tasksCand.PrimaryPath == "" {
 		t.Fatal("tasks.md not discovered")
 	}
-	_, _, todos, err := a.Parse(context.Background(), tasksCand)
+	_, _, pr, err := a.Parse(context.Background(), tasksCand)
 	if err != nil {
 		t.Fatal(err)
 	}
+	todos := pr.Todos
 	if len(todos) < 8 {
 		t.Fatalf("specify tasks fixture: want >= 8 checklist todos, got %d", len(todos))
 	}

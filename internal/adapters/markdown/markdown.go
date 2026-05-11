@@ -83,10 +83,10 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 	return candidates, nil
 }
 
-func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Artifact, []adapters.Source, []todoparse.Todo, error) {
+func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Artifact, []adapters.Source, todoparse.ParseResult, error) {
 	data, err := os.ReadFile(c.PrimaryPath)
 	if err != nil {
-		return adapters.Artifact{}, nil, nil, err
+		return adapters.Artifact{}, nil, todoparse.ParseResult{}, err
 	}
 	content := string(data)
 
@@ -150,9 +150,9 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 		LayoutGroup:    layout,
 	}
 
-	todos := todoparse.Parse(content, c.RelPath)
+	pr := todoparse.Parse(content, c.RelPath)
 
-	return art, []adapters.Source{src}, todos, nil
+	return art, []adapters.Source{src}, pr, nil
 }
 
 func defaultPaths() []string {
@@ -279,22 +279,6 @@ func inferKind(relPath string) string {
 	default:
 		return "markdown_artifact"
 	}
-}
-
-func mergeStringSlicesUnique(base []string, extra []string) []string {
-	seen := make(map[string]bool)
-	out := append([]string{}, base...)
-	for _, s := range out {
-		seen[s] = true
-	}
-	for _, s := range extra {
-		if s == "" || seen[s] {
-			continue
-		}
-		seen[s] = true
-		out = append(out, s)
-	}
-	return out
 }
 
 func pickGeneratorExtract(fm map[string]string, pathGen string) string {

@@ -59,10 +59,10 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 	return candidates, nil
 }
 
-func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Artifact, []adapters.Source, []todoparse.Todo, error) {
+func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Artifact, []adapters.Source, todoparse.ParseResult, error) {
 	data, err := os.ReadFile(c.PrimaryPath)
 	if err != nil {
-		return adapters.Artifact{}, nil, nil, err
+		return adapters.Artifact{}, nil, todoparse.ParseResult{}, err
 	}
 	content := string(data)
 
@@ -87,8 +87,8 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 		FormatProfile:  format.ProfileADR,
 	}
 
-	todos := todoparse.Parse(content, c.RelPath)
-	return art, []adapters.Source{src}, todos, nil
+	pr := todoparse.Parse(content, c.RelPath)
+	return art, []adapters.Source{src}, pr, nil
 }
 
 func defaultADRPaths() []string {

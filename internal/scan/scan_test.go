@@ -148,6 +148,34 @@ func TestScan_RefreshesTodosOnRevision(t *testing.T) {
 	}
 }
 
+func TestScan_SeparatesCriteriaFromTodos(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
+	plansDir := filepath.Join(tmp, "repo", "plans")
+	os.MkdirAll(plansDir, 0o755)
+	content := "# Plan\n\n## Tasks\n\n- [ ] Do work\n\n## Auditable success criteria\n\n- [ ] Integration passes\n"
+	os.WriteFile(filepath.Join(plansDir, "mixed.md"), []byte(content), 0o644)
+
+	dbPath := filepath.Join(tmp, "home", "devspecs.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	ids := idgen.NewFactory()
+	s := New(db, ids, []adapters.Adapter{&markdown.Adapter{}})
+	if _, err := s.Run(context.Background(), filepath.Join(tmp, "repo"), nil); err != nil {
+		t.Fatal(err)
+	}
+	var nTodos, nCrit int
+	db.QueryRow("SELECT COUNT(*) FROM artifact_todos").Scan(&nTodos)
+	db.QueryRow("SELECT COUNT(*) FROM artifact_criteria").Scan(&nCrit)
+	if nTodos != 1 || nCrit != 1 {
+		t.Fatalf("want 1 todo and 1 criterion, got todos=%d criteria=%d", nTodos, nCrit)
+	}
+}
+
 func TestScan_FrontmatterOverridesHeuristics(t *testing.T) {
 	tmp := t.TempDir()
 	plansDir := filepath.Join(tmp, "repo", "plans")

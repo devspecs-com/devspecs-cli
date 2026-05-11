@@ -12,7 +12,7 @@ import (
 type Adapter interface {
 	Name() string
 	Discover(ctx context.Context, repoRoot string, cfg *config.RepoConfig) ([]Candidate, error)
-	Parse(ctx context.Context, c Candidate) (Artifact, []Source, []todoparse.Todo, error)
+	Parse(ctx context.Context, c Candidate) (Artifact, []Source, todoparse.ParseResult, error)
 }
 
 // Candidate is a file or directory discovered by an adapter for further parsing.

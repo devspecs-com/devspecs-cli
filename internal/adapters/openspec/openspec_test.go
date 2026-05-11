@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/todoparse"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/format"
 )
@@ -18,7 +19,7 @@ func setupOpenSpecRepo(t *testing.T) string {
 	changeDir := filepath.Join(tmp, "openspec", "changes", "add-sso")
 	os.MkdirAll(changeDir, 0o755)
 
-	proposal := "# Add SSO Login\n\n## Acceptance Criteria\n\n- Users can login with Google\n- Users can login with GitHub\n\n## Design\n\nUse OAuth2 flow.\n"
+	proposal := "# Add SSO Login\n\n## Acceptance Criteria\n\n- [ ] Users can login with Google\n- [ ] Users can login with GitHub\n\n## Design\n\nUse OAuth2 flow.\n"
 	os.WriteFile(filepath.Join(changeDir, "proposal.md"), []byte(proposal), 0o644)
 
 	tasks := "# Tasks\n\n- [ ] Implement OAuth2 flow\n- [ ] Add Google provider\n- [x] Design database schema\n"
@@ -50,7 +51,7 @@ func TestOpenSpec_ParseExtractsTitleAndCriteria(t *testing.T) {
 	relPath := "openspec/changes/add-sso/proposal.md"
 
 	a := &Adapter{}
-	art, sources, _, err := a.Parse(context.Background(), adapters.Candidate{
+	art, sources, pr, err := a.Parse(context.Background(), adapters.Candidate{
 		PrimaryPath: proposalPath,
 		RelPath:     relPath,
 		AdapterName: "openspec",
@@ -67,9 +68,16 @@ func TestOpenSpec_ParseExtractsTitleAndCriteria(t *testing.T) {
 	if art.Status != "proposed" {
 		t.Errorf("status: want 'proposed', got %q", art.Status)
 	}
-	criteria, ok := art.Extracted["acceptance_criteria"].([]string)
-	if !ok || len(criteria) != 2 {
-		t.Errorf("expected 2 acceptance criteria, got %v", art.Extracted["acceptance_criteria"])
+	if len(pr.Criteria) != 2 {
+		t.Errorf("expected 2 criteria checklists, got %d", len(pr.Criteria))
+	}
+	for _, c := range pr.Criteria {
+		if c.CriteriaKind != todoparse.KindAcceptance {
+			t.Errorf("criteria kind: want %q, got %q", todoparse.KindAcceptance, c.CriteriaKind)
+		}
+	}
+	if len(pr.Todos) != 3 {
+		t.Errorf("expected 3 todos from tasks.md, got %d", len(pr.Todos))
 	}
 	if len(sources) != 1 {
 		t.Errorf("expected 1 source, got %d", len(sources))
@@ -89,7 +97,7 @@ func TestOpenSpec_TasksFeedTodoTable(t *testing.T) {
 	relPath := "openspec/changes/add-sso/proposal.md"
 
 	a := &Adapter{}
-	_, _, todos, err := a.Parse(context.Background(), adapters.Candidate{
+	_, _, pr, err := a.Parse(context.Background(), adapters.Candidate{
 		PrimaryPath: proposalPath,
 		RelPath:     relPath,
 		AdapterName: "openspec",
@@ -97,10 +105,13 @@ func TestOpenSpec_TasksFeedTodoTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// tasks.md has 3 items
-	if len(todos) != 3 {
-		t.Fatalf("expected 3 todos from tasks.md, got %d", len(todos))
+	if len(pr.Todos) != 3 {
+		t.Fatalf("expected 3 todos from tasks.md, got %d", len(pr.Todos))
 	}
+	if len(pr.Criteria) != 2 {
+		t.Fatalf("expected 2 criteria from proposal, got %d", len(pr.Criteria))
+	}
+	todos := pr.Todos
 	if todos[0].Text != "Implement OAuth2 flow" || todos[0].Done {
 		t.Errorf("todo 0 wrong: %+v", todos[0])
 	}
