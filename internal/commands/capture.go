@@ -111,7 +111,11 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 		// Update existing artifact
 		contentHash := hashBody(art.Body)
 		revID := ids.NewWithPrefix("rev_")
-		db.InsertRevisionDirect(revID, existingArtID, contentHash, art.Body, now)
+		exStr, err := extractedJSONString(art.Extracted)
+		if err != nil {
+			return err
+		}
+		db.InsertRevisionDirect(revID, existingArtID, contentHash, art.Body, exStr, now)
 		db.UpdateArtifactStatus(existingArtID, art.Status, now)
 		db.Exec("UPDATE artifacts SET title = ?, kind = ?, current_revision_id = ?, updated_at = ?, last_observed_at = ? WHERE id = ?",
 			art.Title, art.Kind, revID, now, now, existingArtID)
@@ -144,10 +148,14 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 	artifactID := ids.New()
 	revID := ids.NewWithPrefix("rev_")
 	contentHash := hashBody(art.Body)
+	exStr, err := extractedJSONString(art.Extracted)
+	if err != nil {
+		return err
+	}
 
 	db.InsertArtifactDirect(artifactID, repoID, art.Kind, art.Title, art.Status, revID, now)
-	db.InsertRevisionDirect(revID, artifactID, contentHash, art.Body, now)
-	db.InsertSourceDirect(ids.NewWithPrefix("src_"), artifactID, repoID, "capture", relPath, sourceIdentity, now)
+	db.InsertRevisionDirect(revID, artifactID, contentHash, art.Body, exStr, now)
+	db.InsertSourceDirect(ids.NewWithPrefix("src_"), artifactID, repoID, "capture", relPath, sourceIdentity, art.FormatProfile, art.LayoutGroup, now)
 
 	for _, td := range todos {
 		todoID := ids.NewWithPrefix("todo_")
@@ -161,6 +169,17 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 
 	db.IndexArtifactFTS(artifactID, art.Title, art.Body, relPath)
 	return outputCapture(cmd, artifactID, relPath, asJSON)
+}
+
+func extractedJSONString(m map[string]any) (string, error) {
+	if len(m) == 0 {
+		return "", nil
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return "", fmt.Errorf("marshal extracted: %w", err)
+	}
+	return string(b), nil
 }
 
 func outputCapture(cmd *cobra.Command, id, path string, asJSON bool) error {
