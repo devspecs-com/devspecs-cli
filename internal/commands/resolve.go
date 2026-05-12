@@ -54,6 +54,7 @@ func runResolve(cmd *cobra.Command, idOrPrefix string, asJSON, noRefresh bool) e
 		obj := map[string]string{
 			"id":                    art.ID,
 			"kind":                  art.Kind,
+			"subtype":               art.Subtype,
 			"title":                 art.Title,
 			"source_path":           sourcePath,
 			"current_revision_hash": "",

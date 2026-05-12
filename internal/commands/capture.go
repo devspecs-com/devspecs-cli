@@ -89,6 +89,9 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 
 	// Apply overrides
 	if kind != "" {
+		if err := config.ValidateKind(kind); err != nil {
+			return fmt.Errorf("--kind: %w", err)
+		}
 		art.Kind = kind
 	}
 	if title != "" {
@@ -118,8 +121,8 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 		}
 		db.InsertRevisionDirect(revID, existingArtID, contentHash, art.Body, exStr, now)
 		db.UpdateArtifactStatus(existingArtID, art.Status, now)
-		db.Exec("UPDATE artifacts SET title = ?, kind = ?, current_revision_id = ?, updated_at = ?, last_observed_at = ? WHERE id = ?",
-			art.Title, art.Kind, revID, now, now, existingArtID)
+		db.Exec("UPDATE artifacts SET title = ?, kind = ?, subtype = ?, current_revision_id = ?, updated_at = ?, last_observed_at = ? WHERE id = ?",
+			art.Title, art.Kind, art.Subtype, revID, now, now, existingArtID)
 
 		// Replace todos and criteria
 		db.Exec("DELETE FROM artifact_todos WHERE artifact_id = ?", existingArtID)
@@ -168,7 +171,7 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 	if authoredAt == "" {
 		authoredAt = now
 	}
-	db.InsertArtifactDirect(artifactID, repoID, art.Kind, art.Title, art.Status, revID, authoredAt, now)
+	db.InsertArtifactDirect(artifactID, repoID, art.Kind, art.Subtype, art.Title, art.Status, revID, authoredAt, now)
 	db.InsertRevisionDirect(revID, artifactID, contentHash, art.Body, exStr, now)
 	db.InsertSourceDirect(ids.NewWithPrefix("src_"), artifactID, repoID, "capture", relPath, sourceIdentity, art.FormatProfile, art.LayoutGroup, now)
 

@@ -23,12 +23,16 @@ type Candidate struct {
 	// FormatProfile and LayoutGroup may be set by adapters; scan persists them on Source rows.
 	FormatProfile string
 	LayoutGroup   string
+	// MarkdownPaths and MarkdownRules apply when AdapterName is "markdown".
+	MarkdownPaths []string
+	MarkdownRules []config.SourceRule
 }
 
 // Artifact holds the parsed metadata for an artifact.
 type Artifact struct {
 	SourceIdentity string
 	Kind           string
+	Subtype        string
 	Title          string
 	Status         string
 	PrimaryPath    string

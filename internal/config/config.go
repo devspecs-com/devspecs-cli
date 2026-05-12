@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -16,9 +17,18 @@ type RepoConfig struct {
 
 // SourceConfig defines a source type and its discovery paths.
 type SourceConfig struct {
-	Type  string   `yaml:"type"`
-	Path  string   `yaml:"path,omitempty"`
-	Paths []string `yaml:"paths,omitempty"`
+	Type  string       `yaml:"type"`
+	Path  string       `yaml:"path,omitempty"`
+	Paths []string     `yaml:"paths,omitempty"`
+	Rules []SourceRule `yaml:"rules,omitempty"`
+}
+
+// SourceRule maps a glob (relative to configured markdown paths) to kind/subtype/tags.
+type SourceRule struct {
+	Match   string   `yaml:"match"`
+	Kind    string   `yaml:"kind"`
+	Subtype string   `yaml:"subtype,omitempty"`
+	Tags    []string `yaml:"tags,omitempty"`
 }
 
 // DefaultRepoConfig returns sensible defaults per spec §10.
@@ -56,6 +66,9 @@ func LoadRepoConfig(repoRoot string) (*RepoConfig, error) {
 	var cfg RepoConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
+	}
+	if err := ValidateRepoConfig(&cfg); err != nil {
+		return nil, fmt.Errorf("invalid repo config: %w", err)
 	}
 	return &cfg, nil
 }

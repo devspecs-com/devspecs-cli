@@ -83,6 +83,9 @@ func buildContextMarkdown(art *store.ArtifactRow, rev *store.RevisionRow, source
 		s += fmt.Sprintf("Short ID: %s\n", art.ShortID)
 	}
 	s += fmt.Sprintf("Kind: %s\n", art.Kind)
+	if art.Subtype != "" {
+		s += fmt.Sprintf("Subtype: %s\n", art.Subtype)
+	}
 	s += fmt.Sprintf("Status: %s\n", art.Status)
 	s += fmt.Sprintf("Source: %s\n", sourcePath)
 	if len(tags) > 0 {
@@ -126,6 +129,7 @@ func buildContextJSON(art *store.ArtifactRow, rev *store.RevisionRow, sourcePath
 		"id":          art.ID,
 		"short_id":    art.ShortID,
 		"kind":        art.Kind,
+		"subtype":     art.Subtype,
 		"title":       art.Title,
 		"status":      art.Status,
 		"source_path": sourcePath,

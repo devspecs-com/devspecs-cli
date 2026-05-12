@@ -13,6 +13,7 @@ import (
 func NewFindCmd() *cobra.Command {
 	var (
 		kind      string
+		subtype   string
 		tag       string
 		branch    string
 		user      string
@@ -26,12 +27,13 @@ func NewFindCmd() *cobra.Command {
 		Short: "Search artifacts by title, path, or body",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fp := store.FilterParams{Kind: kind, Tag: tag, Branch: branch, User: user}
+			fp := store.FilterParams{Kind: kind, Subtype: subtype, Tag: tag, Branch: branch, User: user}
 			return runFind(cmd, args[0], fp, repoName, asJSON, noRefresh)
 		},
 	}
 
 	cmd.Flags().StringVar(&kind, "kind", "", "Filter by kind")
+	cmd.Flags().StringVar(&subtype, "subtype", "", "Filter by subtype")
 	cmd.Flags().StringVar(&tag, "tag", "", "Filter by tag")
 	cmd.Flags().StringVar(&branch, "branch", "", "Filter by git branch")
 	cmd.Flags().StringVar(&user, "user", "", "Filter by scanned-by user")
@@ -67,7 +69,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 
 	out := cmd.OutOrStdout()
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "ID\tKIND\tTITLE\n")
+	fmt.Fprintf(w, "ID\tKIND\tSUBTYPE\tTITLE\n")
 	for _, a := range artifacts {
 		displayID := a.ShortID
 		if displayID == "" {
@@ -76,7 +78,11 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 				displayID = displayID[:13] + "..."
 			}
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\n", displayID, a.Kind, a.Title)
+		sub := a.Subtype
+		if sub == "" {
+			sub = "-"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", displayID, a.Kind, sub, a.Title)
 	}
 	w.Flush()
 	return nil

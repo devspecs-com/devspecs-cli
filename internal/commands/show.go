@@ -85,6 +85,9 @@ func runShow(cmd *cobra.Command, idOrPrefix string, asJSON, showContent, noConte
 	}
 	fmt.Fprintf(out, "\nTitle:\n  %s\n", art.Title)
 	fmt.Fprintf(out, "\nKind:\n  %s\n", art.Kind)
+	if art.Subtype != "" {
+		fmt.Fprintf(out, "\nSubtype:\n  %s\n", art.Subtype)
+	}
 	fmt.Fprintf(out, "\nStatus:\n  %s\n", art.Status)
 
 	if len(sources) > 0 {
@@ -136,6 +139,7 @@ func buildShowJSON(art *store.ArtifactRow, rev *store.RevisionRow, sources []sto
 		"id":       art.ID,
 		"short_id": art.ShortID,
 		"kind":     art.Kind,
+		"subtype":  art.Subtype,
 		"title":    art.Title,
 		"status":   art.Status,
 	}

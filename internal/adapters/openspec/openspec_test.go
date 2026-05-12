@@ -62,8 +62,8 @@ func TestOpenSpec_ParseExtractsTitleAndCriteria(t *testing.T) {
 	if art.Title != "Add SSO Login" {
 		t.Errorf("title: want 'Add SSO Login', got %q", art.Title)
 	}
-	if art.Kind != "openspec_change" {
-		t.Errorf("kind: want 'openspec_change', got %q", art.Kind)
+	if art.Kind != "spec" || art.Subtype != "openspec_change" {
+		t.Errorf("kind/subtype: want spec/openspec_change, got %q/%q", art.Kind, art.Subtype)
 	}
 	if art.Status != "proposed" {
 		t.Errorf("status: want 'proposed', got %q", art.Status)
@@ -161,5 +161,65 @@ func TestOpenSpec_ConfigCustomPath(t *testing.T) {
 	}
 	if len(candidates) != 1 {
 		t.Fatalf("expected 1 candidate, got %d", len(candidates))
+	}
+}
+
+func TestOpenSpec_Parse_inferStatusVariants(t *testing.T) {
+	tmp := t.TempDir()
+	changeDir := filepath.Join(tmp, "openspec", "changes", "status-test")
+	if err := os.MkdirAll(changeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	prop := filepath.Join(changeDir, "proposal.md")
+	a := &Adapter{}
+	cases := []struct {
+		content string
+		want    string
+	}{
+		{"# Title\n\nstatus: accepted\n", "approved"},
+		{"# Title\n\nstatus: approved\n", "approved"},
+		{"# Title\n\nstatus: rejected\n", "rejected"},
+		{"# Title\n\nstatus: implementing\n", "implementing"},
+		{"# Title\n\nstatus: implemented\n", "implemented"},
+		{"# Title\n\nPlain body.\n", "proposed"},
+	}
+	for _, tc := range cases {
+		if err := os.WriteFile(prop, []byte(tc.content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		art, _, _, err := a.Parse(context.Background(), adapters.Candidate{
+			PrimaryPath: prop,
+			RelPath:     "openspec/changes/status-test/proposal.md",
+			AdapterName: "openspec",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if art.Status != tc.want {
+			t.Fatalf("status want %q got %q for %q", tc.want, art.Status, tc.content)
+		}
+	}
+}
+
+func TestOpenSpec_Parse_titleHumanizeFallback(t *testing.T) {
+	tmp := t.TempDir()
+	changeDir := filepath.Join(tmp, "openspec", "changes", "my-change-id")
+	if err := os.MkdirAll(changeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(changeDir, "proposal.md"), []byte("No heading at top.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := &Adapter{}
+	art, _, _, err := a.Parse(context.Background(), adapters.Candidate{
+		PrimaryPath: filepath.Join(changeDir, "proposal.md"),
+		RelPath:     "openspec/changes/my-change-id/proposal.md",
+		AdapterName: "openspec",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art.Title == "" {
+		t.Fatal("expected humanized title from change id")
 	}
 }

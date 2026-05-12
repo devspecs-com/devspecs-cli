@@ -214,3 +214,24 @@ func TestWriteRepoConfig_Roundtrip(t *testing.T) {
 		t.Errorf("paths: want 2, got %d", len(loaded.Sources[1].Paths))
 	}
 }
+
+func TestLoadRepoConfig_InvalidMarkdownRuleKind(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, ".devspecs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	yaml := `version: 1
+sources:
+  - type: markdown
+    rules:
+      - match: "*.md"
+        kind: not_a_kind
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadRepoConfig(tmp); err == nil {
+		t.Fatal("expected validation error for invalid kind in rules")
+	}
+}

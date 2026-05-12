@@ -60,11 +60,11 @@ func TestE2E_SpecExample(t *testing.T) {
 	for _, a := range arts {
 		kinds[a.Kind]++
 	}
-	if kinds["openspec_change"] != 1 {
-		t.Errorf("expected 1 openspec_change, got %d", kinds["openspec_change"])
+	if kinds["spec"] != 1 {
+		t.Errorf("expected 1 spec, got %d", kinds["spec"])
 	}
-	if kinds["adr"] != 1 {
-		t.Errorf("expected 1 adr, got %d", kinds["adr"])
+	if kinds["decision"] != 1 {
+		t.Errorf("expected 1 decision, got %d", kinds["decision"])
 	}
 	if kinds["plan"] != 1 {
 		t.Errorf("expected 1 plan, got %d", kinds["plan"])
@@ -72,10 +72,10 @@ func TestE2E_SpecExample(t *testing.T) {
 
 	// Verify ADR status
 	for _, a := range arts {
-		if a.Kind == "adr" && a.Status != "accepted" {
+		if a.Kind == "decision" && a.Subtype == "adr" && a.Status != "accepted" {
 			t.Errorf("ADR status: want 'accepted', got %q", a.Status)
 		}
-		if a.Kind == "openspec_change" && a.Status != "proposed" {
+		if a.Kind == "spec" && a.Subtype == "openspec_change" && a.Status != "proposed" {
 			t.Errorf("OpenSpec status: want 'proposed', got %q", a.Status)
 		}
 	}

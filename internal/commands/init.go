@@ -12,8 +12,10 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/discover"
 	"github.com/devspecs-com/devspecs-cli/internal/ignore"
+	"github.com/devspecs-com/devspecs-cli/internal/initflow"
 	"github.com/devspecs-com/devspecs-cli/internal/repo"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
@@ -32,22 +34,21 @@ func NewInitCmd() *cobra.Command {
 		Short: "Initialize DevSpecs in the current repository",
 		Long: `Creates the global DevSpecs directory and database, and optionally a repo-local .devspecs/config.yaml.
 
-Layout detection runs by default (unless --no-detect). Init never opens an interactive prompt in v0.1; --yes and --non-interactive are accepted for CI and script parity with other tools but do not change behavior today.`,
+Layout detection runs by default (unless --no-detect). In an interactive terminal, a workflow profile picker runs first to merge common source paths and rules; use --yes or --non-interactive to skip it (CI and scripts).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, _ = yes, nonInteractive
-			return runInit(cmd, force, hooks, noDetect)
+			return runInit(cmd, force, hooks, noDetect, yes, nonInteractive)
 		},
 	}
 
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite existing config if present")
 	cmd.Flags().BoolVar(&hooks, "hooks", false, "Install git post-commit hook for auto-indexing")
 	cmd.Flags().BoolVar(&noDetect, "no-detect", false, "Skip repository layout detection (defaults-only config)")
-	cmd.Flags().BoolVar(&yes, "yes", false, "Non-interactive init (default behavior; same as --non-interactive)")
-	cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "Non-interactive init (alias for --yes)")
+	cmd.Flags().BoolVar(&yes, "yes", false, "Skip interactive workflow profile picker (same as --non-interactive)")
+	cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "Skip interactive workflow profile picker (alias for --yes)")
 	return cmd
 }
 
-func runInit(cmd *cobra.Command, force, hooks, noDetect bool) error {
+func runInit(cmd *cobra.Command, force, hooks, noDetect, yes, nonInteractive bool) error {
 	homeDir, err := config.HomeDir()
 	if err != nil {
 		return fmt.Errorf("resolve home: %w", err)
@@ -98,6 +99,21 @@ func runInit(cmd *cobra.Command, force, hooks, noDetect bool) error {
 	}
 
 	cfg := config.DefaultRepoConfig()
+
+	stdinTTY := isatty.IsTerminal(os.Stdin.Fd())
+	stdoutTTY := isatty.IsTerminal(os.Stdout.Fd())
+	interactive := stdinTTY && stdoutTTY && !yes && !nonInteractive && !noDetect
+	if interactive {
+		selected, customPaths, customRules, err := initflow.RunProfilePick(repoRoot)
+		if err != nil {
+			return err
+		}
+		merged, err := initflow.MergeSelectedProfiles(cfg, selected, customPaths, customRules)
+		if err != nil {
+			return fmt.Errorf("workflow profiles: %w", err)
+		}
+		cfg = merged
+	}
 
 	var dres *discover.Result
 	if !noDetect {

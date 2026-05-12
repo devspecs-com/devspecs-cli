@@ -12,6 +12,7 @@ type ArtifactRow struct {
 	RepoID         string
 	ShortID        string
 	Kind           string
+	Subtype        string
 	Title          string
 	Status         string
 	CurrentRevID   string
@@ -79,6 +80,7 @@ type CriterionRow struct {
 type FilterParams struct {
 	RepoRoot   string
 	Kind       string
+	Subtype    string
 	Status     string
 	SourceType string
 	Tag        string
@@ -96,7 +98,7 @@ type TagRow struct {
 
 // ListArtifacts returns artifacts filtered by the given parameters.
 func (db *DB) ListArtifacts(fp FilterParams) ([]ArtifactRow, error) {
-	query := `SELECT a.id, a.repo_id, COALESCE(a.short_id,''), a.kind, a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at FROM artifacts a`
+	query := `SELECT a.id, a.repo_id, COALESCE(a.short_id,''), a.kind, COALESCE(a.subtype,''), a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at FROM artifacts a`
 	var joins []string
 	var conditions []string
 	var args []any
@@ -120,6 +122,10 @@ func (db *DB) ListArtifacts(fp FilterParams) ([]ArtifactRow, error) {
 	if fp.Kind != "" {
 		conditions = append(conditions, "a.kind = ?")
 		args = append(args, fp.Kind)
+	}
+	if fp.Subtype != "" {
+		conditions = append(conditions, "a.subtype = ?")
+		args = append(args, fp.Subtype)
 	}
 	if fp.Status != "" {
 		conditions = append(conditions, "a.status = ?")
@@ -153,7 +159,7 @@ func (db *DB) ListArtifacts(fp FilterParams) ([]ArtifactRow, error) {
 	var result []ArtifactRow
 	for rows.Next() {
 		var r ArtifactRow
-		if err := rows.Scan(&r.ID, &r.RepoID, &r.ShortID, &r.Kind, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.RepoID, &r.ShortID, &r.Kind, &r.Subtype, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, r)
@@ -163,13 +169,13 @@ func (db *DB) ListArtifacts(fp FilterParams) ([]ArtifactRow, error) {
 
 // GetArtifact retrieves a single artifact by full ID, short_id, or prefix.
 func (db *DB) GetArtifact(idOrPrefix string) (*ArtifactRow, error) {
-	const cols = `id, repo_id, COALESCE(short_id,''), kind, title, status, COALESCE(current_revision_id,''), created_at, updated_at, last_observed_at`
+	const cols = `id, repo_id, COALESCE(short_id,''), kind, COALESCE(subtype,''), title, status, COALESCE(current_revision_id,''), created_at, updated_at, last_observed_at`
 
 	// 1. Exact full ID match
 	var r ArtifactRow
 	err := db.QueryRow(
 		"SELECT "+cols+" FROM artifacts WHERE id = ?", idOrPrefix,
-	).Scan(&r.ID, &r.RepoID, &r.ShortID, &r.Kind, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt)
+	).Scan(&r.ID, &r.RepoID, &r.ShortID, &r.Kind, &r.Subtype, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt)
 	if err == nil {
 		return &r, nil
 	}
@@ -177,7 +183,7 @@ func (db *DB) GetArtifact(idOrPrefix string) (*ArtifactRow, error) {
 	// 2. Exact short_id match
 	err = db.QueryRow(
 		"SELECT "+cols+" FROM artifacts WHERE short_id = ?", idOrPrefix,
-	).Scan(&r.ID, &r.RepoID, &r.ShortID, &r.Kind, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt)
+	).Scan(&r.ID, &r.RepoID, &r.ShortID, &r.Kind, &r.Subtype, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt)
 	if err == nil {
 		return &r, nil
 	}
@@ -194,7 +200,7 @@ func (db *DB) GetArtifact(idOrPrefix string) (*ArtifactRow, error) {
 	var matches []ArtifactRow
 	for rows.Next() {
 		var m ArtifactRow
-		if err := rows.Scan(&m.ID, &m.RepoID, &m.ShortID, &m.Kind, &m.Title, &m.Status, &m.CurrentRevID, &m.CreatedAt, &m.UpdatedAt, &m.LastObservedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.RepoID, &m.ShortID, &m.Kind, &m.Subtype, &m.Title, &m.Status, &m.CurrentRevID, &m.CreatedAt, &m.UpdatedAt, &m.LastObservedAt); err != nil {
 			return nil, err
 		}
 		matches = append(matches, m)
@@ -454,7 +460,7 @@ func (db *DB) FindArtifacts(query string, fp FilterParams) ([]ArtifactRow, error
 }
 
 func (db *DB) findArtifactsFTS(query string, fp FilterParams) ([]ArtifactRow, error) {
-	sqlQuery := `SELECT DISTINCT a.id, a.repo_id, COALESCE(a.short_id,''), a.kind, a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at
+	sqlQuery := `SELECT DISTINCT a.id, a.repo_id, COALESCE(a.short_id,''), a.kind, COALESCE(a.subtype,''), a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at
 		FROM artifacts_fts f
 		JOIN artifacts a ON a.id = f.artifact_id`
 	var conditions []string
@@ -464,6 +470,10 @@ func (db *DB) findArtifactsFTS(query string, fp FilterParams) ([]ArtifactRow, er
 	if fp.Kind != "" {
 		conditions = append(conditions, "a.kind = ?")
 		args = append(args, fp.Kind)
+	}
+	if fp.Subtype != "" {
+		conditions = append(conditions, "a.subtype = ?")
+		args = append(args, fp.Subtype)
 	}
 	if fp.Tag != "" {
 		sqlQuery += " JOIN artifact_tags at ON at.artifact_id = a.id"
@@ -500,7 +510,7 @@ func (db *DB) findArtifactsFTS(query string, fp FilterParams) ([]ArtifactRow, er
 	var result []ArtifactRow
 	for rows.Next() {
 		var r ArtifactRow
-		if err := rows.Scan(&r.ID, &r.RepoID, &r.ShortID, &r.Kind, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.RepoID, &r.ShortID, &r.Kind, &r.Subtype, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, r)
@@ -510,7 +520,7 @@ func (db *DB) findArtifactsFTS(query string, fp FilterParams) ([]ArtifactRow, er
 
 func (db *DB) findArtifactsLIKE(query string, fp FilterParams) ([]ArtifactRow, error) {
 	likePattern := "%" + query + "%"
-	sqlQuery := `SELECT DISTINCT a.id, a.repo_id, COALESCE(a.short_id,''), a.kind, a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at
+	sqlQuery := `SELECT DISTINCT a.id, a.repo_id, COALESCE(a.short_id,''), a.kind, COALESCE(a.subtype,''), a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at
 		FROM artifacts a
 		LEFT JOIN sources src ON src.artifact_id = a.id
 		LEFT JOIN artifact_revisions rv ON rv.id = a.current_revision_id`
@@ -522,6 +532,10 @@ func (db *DB) findArtifactsLIKE(query string, fp FilterParams) ([]ArtifactRow, e
 		conditions = append(conditions, "a.kind = ?")
 		args = append(args, fp.Kind)
 	}
+	if fp.Subtype != "" {
+		conditions = append(conditions, "a.subtype = ?")
+		args = append(args, fp.Subtype)
+	}
 	if fp.Tag != "" {
 		sqlQuery += " JOIN artifact_tags at ON at.artifact_id = a.id"
 		conditions = append(conditions, "at.tag = ?")
@@ -557,7 +571,7 @@ func (db *DB) findArtifactsLIKE(query string, fp FilterParams) ([]ArtifactRow, e
 	var result []ArtifactRow
 	for rows.Next() {
 		var r ArtifactRow
-		if err := rows.Scan(&r.ID, &r.RepoID, &r.ShortID, &r.Kind, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.RepoID, &r.ShortID, &r.Kind, &r.Subtype, &r.Title, &r.Status, &r.CurrentRevID, &r.CreatedAt, &r.UpdatedAt, &r.LastObservedAt); err != nil {
 			return nil, err
 		}
 		result = append(result, r)
@@ -589,11 +603,11 @@ func (db *DB) UpdateArtifactStatus(artifactID, status, now string) error {
 }
 
 // InsertArtifactDirect allows inserting an artifact directly (for capture).
-func (db *DB) InsertArtifactDirect(id, repoID, kind, title, status, revID, authoredAt, now string) error {
+func (db *DB) InsertArtifactDirect(id, repoID, kind, subtype, title, status, revID, authoredAt, now string) error {
 	_, err := db.Exec(
-		`INSERT INTO artifacts (id, repo_id, kind, title, status, current_revision_id, created_at, updated_at, last_observed_at, authored_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, repoID, kind, title, status, revID, now, now, now, authoredAt,
+		`INSERT INTO artifacts (id, repo_id, kind, subtype, title, status, current_revision_id, created_at, updated_at, last_observed_at, authored_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, repoID, kind, subtype, title, status, revID, now, now, now, authoredAt,
 	)
 	return err
 }
@@ -720,7 +734,7 @@ func (db *DB) DeleteAutoTags(artifactID string) error {
 
 // ResumeArtifacts returns all artifacts for a repo, with todo counts, sorted by updated_at DESC.
 func (db *DB) ResumeArtifacts(repoRoot string, fp FilterParams) ([]ResumeRow, error) {
-	query := `SELECT a.id, COALESCE(a.short_id,''), a.kind, a.title, a.status, a.authored_at, a.updated_at, a.last_observed_at,
+	query := `SELECT a.id, COALESCE(a.short_id,''), a.kind, COALESCE(a.subtype,''), a.title, a.status, a.authored_at, a.updated_at, a.last_observed_at,
 		COALESCE((SELECT MIN(s.path) FROM sources s WHERE s.artifact_id = a.id), ''),
 		(SELECT COUNT(*) FROM artifact_todos t WHERE t.artifact_id = a.id) as total_todos,
 		(SELECT COUNT(*) FROM artifact_todos t WHERE t.artifact_id = a.id AND t.done = 0) as open_todos,
@@ -762,7 +776,7 @@ func (db *DB) ResumeArtifacts(repoRoot string, fp FilterParams) ([]ResumeRow, er
 	var result []ResumeRow
 	for rows.Next() {
 		var r ResumeRow
-		if err := rows.Scan(&r.ID, &r.ShortID, &r.Kind, &r.Title, &r.Status, &r.AuthoredAt, &r.UpdatedAt, &r.LastObservedAt, &r.SourcePath, &r.TotalTodos, &r.OpenTodos, &r.TagsJoined); err != nil {
+		if err := rows.Scan(&r.ID, &r.ShortID, &r.Kind, &r.Subtype, &r.Title, &r.Status, &r.AuthoredAt, &r.UpdatedAt, &r.LastObservedAt, &r.SourcePath, &r.TotalTodos, &r.OpenTodos, &r.TagsJoined); err != nil {
 			return nil, err
 		}
 		result = append(result, r)
@@ -775,6 +789,7 @@ type ResumeRow struct {
 	ID             string
 	ShortID        string
 	Kind           string
+	Subtype        string
 	Title          string
 	Status         string
 	AuthoredAt     string
