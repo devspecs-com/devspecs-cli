@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,11 +96,11 @@ func seedV01Artifacts(t *testing.T, db *store.DB, repoDir string) {
 		VALUES (?, ?, 'r1', 'adr', 'docs/adr/old.md', 'docs/adr/old.md|adr', 'adr', NULL, ?, ?)`,
 		ids.NewWithPrefix("src_"), a4, now, now)
 
-	// Stale (non-terminal, >30 days)
+	// Stale (non-terminal, >30 days by authored_at; last_observed may be fresh after a scan)
 	a5 := ids.New()
 	db.Exec(`INSERT INTO artifacts (id, repo_id, short_id, kind, title, status, created_at, updated_at, last_observed_at, authored_at)
 		VALUES (?, 'r1', ?, 'plan', 'Billing Sketch', 'draft', ?, ?, ?, ?)`,
-		a5, idgen.ShortID("plans/billing.md|markdown"), now, now, staleTime, now)
+		a5, idgen.ShortID("plans/billing.md|markdown"), now, now, now, staleTime)
 	db.Exec(`INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, format_profile, layout_group, created_at, updated_at)
 		VALUES (?, ?, 'r1', 'markdown', 'plans/billing.md', 'plans/billing.md|markdown', 'generic', NULL, ?, ?)`,
 		ids.NewWithPrefix("src_"), a5, now, now)
@@ -149,6 +150,9 @@ func TestResume_GroupedOutput(t *testing.T) {
 	if !containsStr(output, "Authored:") || !containsStr(output, "Last updated:") {
 		t.Error("resume output should include Authored and Last updated lines")
 	}
+	if !containsStr(output, "Idle (stale) since:") {
+		t.Error("stale items should include idle clock line")
+	}
 }
 
 func TestResume_OddNonTerminalStatus_GoesToStaleWhenOld(t *testing.T) {
@@ -159,7 +163,7 @@ func TestResume_OddNonTerminalStatus_GoesToStaleWhenOld(t *testing.T) {
 	ids := idgen.NewFactory()
 	aid := ids.New()
 	db.Exec(`INSERT INTO artifacts (id, repo_id, short_id, kind, title, status, created_at, updated_at, last_observed_at, authored_at)
-		VALUES (?, 'r1', 'abcdef01', 'plan', 'Odd Status Plan', 'reviewing', ?, ?, ?, ?)`, aid, now, now, old, now)
+		VALUES (?, 'r1', 'abcdef01', 'plan', 'Odd Status Plan', 'reviewing', ?, ?, ?, ?)`, aid, now, now, now, old)
 	db.Exec(`INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, format_profile, layout_group, created_at, updated_at)
 		VALUES (?, ?, 'r1', 'markdown', 'plans/odd.md', 'plans/odd.md|markdown', 'generic', NULL, ?, ?)`, ids.NewWithPrefix("src_"), aid, now, now)
 	db.Close()
@@ -329,7 +333,40 @@ func TestResume_LimitFlag(t *testing.T) {
 	}
 }
 
-// --- Short ID Tests ---
+func TestResume_DefaultLimit_FivePerGroup(t *testing.T) {
+	repoDir, db := setupV01Env(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec("INSERT INTO repos (id, root_path, scanned_by, git_current_branch, created_at, updated_at) VALUES ('r1', ?, 'x', 'main', ?, ?)", repoDir, now, now)
+	ids := idgen.NewFactory()
+	for i := 0; i < 6; i++ {
+		aid := ids.New()
+		path := fmt.Sprintf("plans/p%d.md", i)
+		sid := fmt.Sprintf("%s|markdown", path)
+		db.Exec(`INSERT INTO artifacts (id, repo_id, short_id, kind, title, status, created_at, updated_at, last_observed_at, authored_at)
+			VALUES (?, 'r1', ?, 'plan', ?, 'draft', ?, ?, ?, ?)`,
+			aid, idgen.ShortID(sid), fmt.Sprintf("Plan %d", i), now, now, now, now)
+		db.Exec(`INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, format_profile, layout_group, created_at, updated_at)
+			VALUES (?, ?, 'r1', 'markdown', ?, ?, 'generic', NULL, ?, ?)`,
+			ids.NewWithPrefix("src_"), aid, path, sid, now, now)
+	}
+	db.Close()
+
+	cmd := NewResumeCmd()
+	cmd.SetArgs([]string{"--no-refresh", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var result map[string][]any
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(result["in_progress"]); n != 5 {
+		t.Fatalf("default limit: want 5 in_progress, got %d", n)
+	}
+}
+
 
 func TestShortID_DisplayInList(t *testing.T) {
 	repoDir, db := setupV01Env(t)

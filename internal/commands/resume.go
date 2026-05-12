@@ -36,8 +36,8 @@ func NewResumeCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
-	cmd.Flags().IntVar(&limit, "limit", 0, "Max items per group (0 = unlimited)")
-	cmd.Flags().BoolVar(&all, "all", false, "Remove recency/count caps on settled group")
+	cmd.Flags().IntVar(&limit, "limit", 5, "Max items per group (0 = unlimited)")
+	cmd.Flags().BoolVar(&all, "all", false, "Include settled artifacts older than 14 days (recency filter only)")
 	cmd.Flags().StringVar(&tag, "tag", "", "Filter by tag")
 	cmd.Flags().StringVar(&branch, "branch", "", "Filter by git branch")
 	cmd.Flags().StringVar(&user, "user", "", "Filter by scanned-by user")
@@ -85,10 +85,12 @@ func runResume(cmd *cobra.Command, fp store.FilterParams, repoName string, asJSO
 	var inProgress, settled, stale []store.ResumeRow
 
 	for _, r := range rows {
-		observed, _ := time.Parse(time.RFC3339, r.LastObservedAt)
 		updated, _ := time.Parse(time.RFC3339, r.UpdatedAt)
 		terminal := settledStatuses[r.Status]
-		old := !observed.IsZero() && observed.Before(thirtyDays)
+		// Idle clock for non-terminal work: authored_at when present, else updated_at.
+		// Do not use last_observed_at — it refreshes on every scan and would flood "In Progress".
+		idle := resumeStaleIdleTime(r)
+		old := !idle.IsZero() && idle.Before(thirtyDays)
 
 		if terminal {
 			if all || (!updated.IsZero() && updated.After(fourteenDays)) {
@@ -105,9 +107,6 @@ func runResume(cmd *cobra.Command, fp store.FilterParams, repoName string, asJSO
 		inProgress = capSlice(inProgress, limit)
 		settled = capSlice(settled, limit)
 		stale = capSlice(stale, limit)
-	}
-	if !all && len(settled) > 10 {
-		settled = settled[:10]
 	}
 
 	if asJSON {
@@ -196,7 +195,10 @@ func writeSettledItem(w io.Writer, idx *int, r store.ResumeRow, now time.Time) {
 }
 
 func writeStaleItem(w io.Writer, idx *int, r store.ResumeRow, now time.Time) {
+	authored, _ := time.Parse(time.RFC3339, r.AuthoredAt)
+	updated, _ := time.Parse(time.RFC3339, r.UpdatedAt)
 	observed, _ := time.Parse(time.RFC3339, r.LastObservedAt)
+	idle := resumeStaleIdleTime(r)
 	sid := shortOrTruncated(r)
 
 	fmt.Fprintf(w, "\n%2d. %s  %s\n", *idx, sid, r.Title)
@@ -207,7 +209,14 @@ func writeStaleItem(w io.Writer, idx *int, r store.ResumeRow, now time.Time) {
 	if line := formatResumeTagsLine(r.TagsJoined); line != "" {
 		fmt.Fprint(w, line)
 	}
-	fmt.Fprintf(w, "    Last observed: %s — consider archiving or updating\n", relativeTime(observed, now))
+	fmt.Fprintf(w, "    Authored: %s (%s)\n", relativeTime(authored, now), r.AuthoredAt)
+	fmt.Fprintf(w, "    Last updated: %s (%s)\n", relativeTime(updated, now), r.UpdatedAt)
+	if !idle.IsZero() {
+		fmt.Fprintf(w, "    Idle (stale) since: %s — consider archiving or updating\n", relativeTime(idle, now))
+	}
+	if !observed.IsZero() {
+		fmt.Fprintf(w, "    Last observed: %s (%s)\n", relativeTime(observed, now), r.LastObservedAt)
+	}
 	*idx++
 }
 
@@ -276,6 +285,16 @@ func resumeRowsToJSON(rows []store.ResumeRow) []map[string]any {
 		}
 	}
 	return result
+}
+
+// resumeStaleIdleTime returns the clock used to decide whether a non-terminal artifact
+// is stale (>30d idle). Prefers authored_at; falls back to updated_at when authored is missing.
+func resumeStaleIdleTime(r store.ResumeRow) time.Time {
+	if a, err := time.Parse(time.RFC3339, strings.TrimSpace(r.AuthoredAt)); err == nil && !a.IsZero() {
+		return a
+	}
+	u, _ := time.Parse(time.RFC3339, strings.TrimSpace(r.UpdatedAt))
+	return u
 }
 
 func capSlice(rows []store.ResumeRow, limit int) []store.ResumeRow {
