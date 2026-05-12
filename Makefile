@@ -1,4 +1,4 @@
-.PHONY: build test lint cover cover-check snapshot clean
+.PHONY: build test lint cover cover-check snapshot clean hooks
 
 BINARY := ds
 MODULE := github.com/devspecs-com/devspecs-cli
@@ -21,6 +21,11 @@ lint:
 	go vet ./...
 	@if command -v staticcheck >/dev/null 2>&1; then staticcheck ./...; fi
 	@UNFORMATTED=$$(gofmt -l .); if [ -n "$$UNFORMATTED" ]; then echo "unformatted files:"; echo "$$UNFORMATTED"; exit 1; fi
+
+# One-time per clone: run Git hooks from .githooks/ (pre-commit mirrors CI lint + optional tests).
+hooks:
+	git config core.hooksPath .githooks
+	@echo "Configured core.hooksPath=.githooks for this repository clone."
 
 cover:
 	go test $(RACE) -coverprofile=coverage.out ./...

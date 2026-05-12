@@ -401,6 +401,29 @@ go vet ./...
 staticcheck ./...
 ```
 
+Or run the same checks as the Makefile lint target:
+
+```bash
+make lint
+```
+
+### Git pre-commit hook (optional)
+
+To catch **`gofmt` / `go vet` / `staticcheck`** (and by default a quick **`go test`**) before a failed push, enable the repo’s hooks once per clone:
+
+```bash
+make hooks
+```
+
+Then commits run [`.githooks/pre-commit`](.githooks/pre-commit) → [`scripts/pre-commit.sh`](scripts/pre-commit.sh).
+
+Repository [`.gitattributes`](.gitattributes) forces **LF** for `*.go` (and `go.mod` / `go.sum`) so **`gofmt -l .`** matches CI on Windows. After pulling that file for the first time, re-normalize once if needed: `git add --renormalize '*.go' go.mod go.sum`.
+
+- **`DEVSPECS_PRECOMMIT_TESTS=skip`** — lint only, no tests (fastest).
+- **`DEVSPECS_PRECOMMIT_TESTS=ci`** — `go test -race` like the GitHub Actions job (slowest; needs a working race detector / CGO where applicable).
+
+Full CI parity (including coverage floor) remains in [`.github/workflows/go.yml`](.github/workflows/go.yml); use **`go test -v -race -coverprofile=coverage.out ./...`** locally before a risky change if you skipped tests in the hook.
+
 ### Maintaining format fixtures
 
 Regression layouts under [`testdata/samples/`](testdata/samples/) (`bmad`, `specify`, `cursor`, `claude`, `codex`) support adapter tests.

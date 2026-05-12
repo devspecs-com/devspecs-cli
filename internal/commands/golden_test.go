@@ -43,6 +43,8 @@ func assertGolden(t *testing.T, name string, got []byte) {
 	if err != nil {
 		t.Fatalf("golden file missing (run with -update to create): %v", err)
 	}
+	// Git on Windows may materialize tracked JSON with CRLF; json.MarshalIndent uses LF only.
+	expected = bytes.ReplaceAll(expected, []byte("\r\n"), []byte("\n"))
 	if !bytes.Equal(normalized, expected) {
 		t.Errorf("output differs from golden file %s\n--- got ---\n%s\n--- want ---\n%s", path, normalized, expected)
 	}

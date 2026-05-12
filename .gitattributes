@@ -1,0 +1,4 @@
+# Go sources and module files use LF so `gofmt -l .` matches Linux CI on all platforms.
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf

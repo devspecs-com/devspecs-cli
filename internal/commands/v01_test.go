@@ -367,7 +367,6 @@ func TestResume_DefaultLimit_FivePerGroup(t *testing.T) {
 	}
 }
 
-
 func TestShortID_DisplayInList(t *testing.T) {
 	repoDir, db := setupV01Env(t)
 	seedV01Artifacts(t, db, repoDir)
