@@ -44,6 +44,7 @@ issues, and future workflows.`,
 	rootCmd.AddCommand(commands.NewConfigCmd())
 	rootCmd.AddCommand(commands.NewTagCmd())
 	rootCmd.AddCommand(commands.NewUntagCmd())
+	rootCmd.AddCommand(commands.NewEvalCmd())
 
 	return rootCmd
 }

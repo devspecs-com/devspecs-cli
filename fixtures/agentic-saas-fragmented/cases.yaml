@@ -1,0 +1,112 @@
+fixture_version: agentic-saas-fragmented-v1
+eval_stage: seed_smoke
+
+cases:
+  - id: resume-entitlement-sync
+    query: "resume entitlement sync hardening"
+    expected_relevant:
+      - openspec/changes/harden-entitlement-sync/proposal.md
+      - openspec/changes/harden-entitlement-sync/design.md
+      - openspec/changes/harden-entitlement-sync/tasks.md
+      - docs/adr/0002-webhook-idempotency-boundary.md
+      - .cursor/plans/entitlement-sync-implementation.md
+      - .claude/notes/webhook-idempotency-followup.md
+    expected_excluded:
+      - openspec/changes/add-admin-overrides/proposal.md
+      - scratch/old-billing-plan.md
+    expected_status:
+      state: active
+
+  - id: find-stripe-event-id
+    query: "stripe_event_id idempotency"
+    expected_relevant:
+      - openspec/changes/harden-entitlement-sync/design.md
+      - docs/adr/0002-webhook-idempotency-boundary.md
+      - services/api/src/billing/webhooks.ts
+      - services/api/migrations/20260501090000_add_stripe_event_id.sql
+    expected_excluded:
+      - docs/adr/0003-superseded-local-entitlements.md
+
+  - id: avoid-superseded-local-entitlements
+    query: "continue local entitlement caching plan"
+    expected_relevant:
+      - docs/adr/0003-superseded-local-entitlements.md
+    expected_excluded:
+      - scratch/old-billing-plan.md
+      - openspec/changes/harden-entitlement-sync/proposal.md
+    expected_status:
+      state: superseded_or_stale
+
+  - id: pack-agent-context-webhook-replay
+    query: "give agent context to implement webhook replay protection"
+    expected_relevant:
+      - openspec/changes/harden-entitlement-sync/design.md
+      - openspec/changes/harden-entitlement-sync/tasks.md
+      - docs/adr/0002-webhook-idempotency-boundary.md
+      - services/api/src/billing/webhooks.ts
+    expected_excluded:
+      - docs/prd/billing-entitlements-v1.md
+      - openspec/changes/add-admin-overrides/proposal.md
+
+  - id: stripe-entitlement-not-portal
+    query: "stripe customer entitlement sync"
+    expected_relevant:
+      - openspec/changes/harden-entitlement-sync/proposal.md
+      - openspec/changes/harden-entitlement-sync/design.md
+      - docs/adr/0001-use-stripe-as-billing-source.md
+      - services/api/src/billing/entitlements.ts
+    expected_excluded:
+      - openspec/changes/add-customer-portal/proposal.md
+      - docs/prd/customer-portal-v2.md
+      - docs/plans/2026-04-customer-portal-billing-notes.md
+
+  - id: auth-token-session-boundary
+    query: "auth token session cookie boundary"
+    expected_relevant:
+      - docs/adr/0005-auth-session-cookie-boundary.md
+      - openspec/changes/refactor-auth-session/design.md
+      - services/api/src/auth/session.ts
+      - services/api/src/auth/tokens.ts
+    expected_excluded:
+      - services/api/src/billing/webhooks.ts
+      - scratch/token-refresh-brainstorm.md
+
+  - id: authorization-details-identifier
+    query: "authorization_details customer_id source file"
+    expected_relevant:
+      - services/api/src/billing/entitlements.ts
+      - services/api/src/auth/session.ts
+      - docs/prd/billing-entitlements-v1.md
+    expected_excluded:
+      - docs/prd/customer-portal-v2.md
+      - openspec/changes/add-admin-overrides/proposal.md
+
+  - id: prd-background-entitlements
+    query: "product background for billing entitlements and customer access"
+    expected_relevant:
+      - docs/prd/billing-entitlements-v1.md
+      - docs/adr/0001-use-stripe-as-billing-source.md
+      - docs/adr/0002-webhook-idempotency-boundary.md
+    expected_excluded:
+      - services/api/src/billing/webhooks.ts
+      - scratch/old-billing-plan.md
+
+  - id: dated-pnpm-plan-slug
+    query: "pnpm migration desktop dated plan"
+    expected_relevant:
+      - apps/desktop/docs/plans/260219-pnpm-migration.md
+    expected_excluded:
+      - scratch/token-refresh-brainstorm.md
+      - docs/adr/0005-auth-session-cookie-boundary.md
+
+  - id: openspec-auth-session-design-context
+    query: "agent context for refactor auth session token handoff design"
+    expected_relevant:
+      - openspec/changes/refactor-auth-session/proposal.md
+      - openspec/changes/refactor-auth-session/design.md
+      - openspec/changes/refactor-auth-session/tasks.md
+      - openspec/changes/refactor-auth-session/specs/auth/spec.md
+      - docs/adr/0005-auth-session-cookie-boundary.md
+    expected_excluded:
+      - docs/adr/0002-webhook-idempotency-boundary.md
+      - openspec/changes/harden-entitlement-sync/design.md

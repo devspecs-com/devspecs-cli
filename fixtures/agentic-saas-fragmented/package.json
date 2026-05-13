@@ -1,0 +1,17 @@
+{
+  "name": "agentic-saas-fragmented",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@stripe/stripe-js": "^7.0.0",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  }
+}
+

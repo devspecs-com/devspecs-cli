@@ -1,0 +1,971 @@
+package evalharness
+
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"unicode"
+
+	"gopkg.in/yaml.v3"
+)
+
+type TokenCounter interface {
+	Count(text string) int
+	Name() string
+}
+
+type PricingProfile struct {
+	Name              string  `json:"name"`
+	InputUSDPer1MTok  float64 `json:"input_usd_per_1m_tokens,omitempty"`
+	OutputUSDPer1MTok float64 `json:"output_usd_per_1m_tokens,omitempty"`
+}
+
+type TokenizerProfile struct {
+	Name          string         `json:"name"`
+	Provider      string         `json:"provider"`
+	Model         string         `json:"model,omitempty"`
+	Approximation string         `json:"approximation,omitempty"`
+	Pricing       PricingProfile `json:"pricing,omitempty"`
+}
+
+type ProfiledTokenCounter interface {
+	TokenCounter
+	Profile() TokenizerProfile
+}
+
+type ApproxTokenCounter struct{}
+
+func (ApproxTokenCounter) Count(text string) int {
+	if text == "" {
+		return 0
+	}
+	return int(math.Ceil(float64(len(text)) / 4.0))
+}
+
+func (ApproxTokenCounter) Name() string { return "approx_chars_div_4" }
+
+func (ApproxTokenCounter) Profile() TokenizerProfile {
+	return TokenizerProfile{
+		Name:          "approx_chars_div_4",
+		Provider:      "deterministic",
+		Approximation: "ceil(chars / 4.0)",
+		Pricing: PricingProfile{
+			Name: "none",
+		},
+	}
+}
+
+type Retriever interface {
+	Name() string
+	Retrieve(files []File, query string) []File
+}
+
+type WeightedFilesRetrieverV0 struct{}
+
+func (WeightedFilesRetrieverV0) Name() string { return "eval_weighted_files_v0" }
+
+func (WeightedFilesRetrieverV0) Retrieve(files []File, query string) []File {
+	return retrieveDevSpecs(files, query)
+}
+
+type Options struct {
+	JSON             bool
+	MinRecall        *float64
+	MinMeanRecall    *float64
+	MinReductionFull *float64
+	TokenCounter     TokenCounter
+	Retriever        Retriever
+}
+
+type CaseFile struct {
+	FixtureVersion string     `yaml:"fixture_version"`
+	EvalStage      string     `yaml:"eval_stage"`
+	Cases          []CaseSpec `yaml:"cases"`
+}
+
+type CaseSpec struct {
+	ID               string            `yaml:"id" json:"id"`
+	Query            string            `yaml:"query" json:"query"`
+	ExpectedRelevant []string          `yaml:"expected_relevant" json:"expected_relevant"`
+	ExpectedExcluded []string          `yaml:"expected_excluded" json:"expected_excluded"`
+	ExpectedStatus   map[string]string `yaml:"expected_status" json:"expected_status,omitempty"`
+}
+
+type BaselineMetrics struct {
+	Name                     string   `json:"name"`
+	FileScope                string   `json:"file_scope"`
+	IncludesSourceCandidates bool     `json:"includes_source_candidates"`
+	Tokens                   int      `json:"tokens"`
+	ArtifactCount            int      `json:"artifact_count"`
+	Artifacts                []string `json:"artifacts"`
+	RelevantIncluded         int      `json:"relevant_included"`
+	IrrelevantCount          int      `json:"irrelevant_count"`
+}
+
+type CaseResult struct {
+	ID                            string            `json:"id"`
+	Query                         string            `json:"query"`
+	DevSpecsTokens                int               `json:"devspecs_tokens"`
+	FullPlanningTokens            int               `json:"full_planning_tokens"`
+	AllMarkdownTokens             int               `json:"all_markdown_tokens"`
+	FullCandidateCorpusTokens     int               `json:"full_candidate_corpus_tokens"`
+	QueryFileBaselineTokens       int               `json:"query_file_baseline_tokens"`
+	TokenReductionVsFullPlanning  float64           `json:"token_reduction_vs_full_planning"`
+	TokenReductionVsAllMarkdown   float64           `json:"token_reduction_vs_all_markdown"`
+	TokenReductionVsFullCandidate float64           `json:"token_reduction_vs_full_candidate_corpus"`
+	TokenReductionVsQueryFile     float64           `json:"token_reduction_vs_query_file_baseline"`
+	ExpectedRelevantCount         int               `json:"expected_relevant_count"`
+	RelevantRetrieved             int               `json:"relevant_retrieved"`
+	ArtifactRecall                float64           `json:"artifact_recall"`
+	ArtifactsIncluded             []string          `json:"artifacts_included"`
+	RelevantIncluded              []string          `json:"relevant_included"`
+	IrrelevantIncluded            []string          `json:"irrelevant_included"`
+	ArtifactPrecision             float64           `json:"artifact_precision"`
+	MissedExpectedRelevant        []string          `json:"missed_expected_relevant"`
+	UnexpectedExcludedHits        []string          `json:"unexpected_excluded_hits"`
+	Baselines                     []BaselineMetrics `json:"baselines"`
+	ThresholdFailures             []string          `json:"threshold_failures,omitempty"`
+}
+
+type Summary struct {
+	Cases                                   int     `json:"cases"`
+	MedianTokenReductionVsFullPlanning      float64 `json:"median_token_reduction_vs_full_planning"`
+	MeanTokenReductionVsFullPlanning        float64 `json:"mean_token_reduction_vs_full_planning"`
+	MedianTokenReductionVsQueryFileBaseline float64 `json:"median_token_reduction_vs_query_file_baseline"`
+	MeanArtifactRecall                      float64 `json:"mean_artifact_recall"`
+	MeanArtifactPrecision                   float64 `json:"mean_artifact_precision"`
+	WorstRecallCase                         string  `json:"worst_recall_case"`
+	LargestTokenContextCase                 string  `json:"largest_token_context_case"`
+	FailedThresholdCount                    int     `json:"failed_threshold_count,omitempty"`
+}
+
+type Result struct {
+	Fixture          string           `json:"fixture"`
+	FixtureVersion   string           `json:"fixture_version"`
+	EvalStage        string           `json:"eval_stage"`
+	Retriever        string           `json:"retriever"`
+	TokenCounter     string           `json:"token_counter"`
+	TokenizerProfile TokenizerProfile `json:"tokenizer_profile"`
+	PricingProfile   PricingProfile   `json:"pricing_profile"`
+	Corpus           CorpusSummary    `json:"corpus"`
+	Summary          Summary          `json:"summary"`
+	Cases            []CaseResult     `json:"cases"`
+}
+
+type CorpusSummary struct {
+	PlanningArtifacts       CorpusSlice `json:"planning_artifacts"`
+	MarkdownFiles           CorpusSlice `json:"markdown_files"`
+	SourceContextCandidates CorpusSlice `json:"source_context_candidates"`
+	FullCandidateCorpus     CorpusSlice `json:"full_candidate_corpus"`
+}
+
+type CorpusSlice struct {
+	FileScope                string   `json:"file_scope"`
+	IncludesSourceCandidates bool     `json:"includes_source_candidates"`
+	Files                    int      `json:"files"`
+	Tokens                   int      `json:"tokens"`
+	Artifacts                []string `json:"artifacts,omitempty"`
+}
+
+func Run(fixture string, opts Options) (*Result, error) {
+	counter := opts.TokenCounter
+	if counter == nil {
+		counter = ApproxTokenCounter{}
+	}
+	retriever := opts.Retriever
+	if retriever == nil {
+		retriever = WeightedFilesRetrieverV0{}
+	}
+	tokenizerProfile := tokenizerProfile(counter)
+	fixtureAbs, err := filepath.Abs(fixture)
+	if err != nil {
+		return nil, err
+	}
+	caseFile, err := loadCaseFile(fixtureAbs)
+	if err != nil {
+		return nil, err
+	}
+	files, err := collectFiles(fixtureAbs)
+	if err != nil {
+		return nil, err
+	}
+
+	fullPlanning := fullPlanningCorpus(files)
+	allMarkdown := filterFiles(files, func(f File) bool {
+		return strings.EqualFold(filepath.Ext(f.Rel), ".md")
+	})
+	sourceCandidates := sourceContextCandidates(files)
+	fullCandidate := mergeFiles(fullPlanning, sourceCandidates)
+
+	fullContext := renderContext("full planning corpus", fullPlanning)
+	allMarkdownContext := renderContext("all markdown", allMarkdown)
+	sourceContext := renderContext("source/context candidates", sourceCandidates)
+	fullCandidateContext := renderContext("full candidate corpus", fullCandidate)
+
+	result := &Result{
+		Fixture:          filepath.ToSlash(fixture),
+		FixtureVersion:   defaultString(caseFile.FixtureVersion, "agentic-saas-fragmented-v0"),
+		EvalStage:        defaultString(caseFile.EvalStage, "seed_smoke"),
+		Retriever:        retriever.Name(),
+		TokenCounter:     counter.Name(),
+		TokenizerProfile: tokenizerProfile,
+		PricingProfile:   tokenizerProfile.Pricing,
+		Corpus: CorpusSummary{
+			PlanningArtifacts:       corpusSlice("planning/intent docs only: openspec/**/*.md, docs/**/*.md, .cursor/**/*.md, .claude/**/*.md, plans/**/*.md, scratch/**/*.md", false, fullPlanning, counter.Count(fullContext)),
+			MarkdownFiles:           corpusSlice("all *.md files, excluding ignored dirs and cases.yaml", false, allMarkdown, counter.Count(allMarkdownContext)),
+			SourceContextCandidates: corpusSlice("non-markdown text/code candidates considered by filesystem retrieval", true, sourceCandidates, counter.Count(sourceContext)),
+			FullCandidateCorpus:     corpusSlice("planning/intent docs plus non-markdown source/context candidates", true, fullCandidate, counter.Count(fullCandidateContext)),
+		},
+	}
+	for _, c := range caseFile.Cases {
+		devspecsFiles := retriever.Retrieve(files, c.Query)
+		queryFiles := queryBaseline(files, c.Query)
+
+		devContext := renderContext(c.Query, devspecsFiles)
+		queryContext := renderContext(c.Query, queryFiles)
+
+		cr := CaseResult{
+			ID:                        c.ID,
+			Query:                     c.Query,
+			DevSpecsTokens:            counter.Count(devContext),
+			FullPlanningTokens:        counter.Count(fullContext),
+			AllMarkdownTokens:         counter.Count(allMarkdownContext),
+			FullCandidateCorpusTokens: counter.Count(fullCandidateContext),
+			QueryFileBaselineTokens:   counter.Count(queryContext),
+			ArtifactsIncluded:         rels(devspecsFiles),
+			Baselines: []BaselineMetrics{
+				baselineMetrics("full_planning_corpus", "planning/intent docs only: openspec/**/*.md, docs/**/*.md, .cursor/**/*.md, .claude/**/*.md, plans/**/*.md, scratch/**/*.md", false, fullPlanning, c.ExpectedRelevant, counter.Count(fullContext)),
+				baselineMetrics("all_markdown", "all *.md files, excluding ignored dirs and cases.yaml", false, allMarkdown, c.ExpectedRelevant, counter.Count(allMarkdownContext)),
+				baselineMetrics("full_candidate_corpus", "planning/intent docs plus non-markdown source/context candidates", true, fullCandidate, c.ExpectedRelevant, counter.Count(fullCandidateContext)),
+				baselineMetrics("query_file_baseline", "deterministic query term matches across all text/code candidates, including source files", true, queryFiles, c.ExpectedRelevant, counter.Count(queryContext)),
+			},
+		}
+		cr.TokenReductionVsFullPlanning = tokenReduction(cr.DevSpecsTokens, cr.FullPlanningTokens)
+		cr.TokenReductionVsAllMarkdown = tokenReduction(cr.DevSpecsTokens, cr.AllMarkdownTokens)
+		cr.TokenReductionVsFullCandidate = tokenReduction(cr.DevSpecsTokens, cr.FullCandidateCorpusTokens)
+		cr.TokenReductionVsQueryFile = tokenReduction(cr.DevSpecsTokens, cr.QueryFileBaselineTokens)
+		applyArtifactMetrics(&cr, c)
+		applyThresholds(&cr, opts)
+		result.Cases = append(result.Cases, cr)
+	}
+	result.Summary = summarize(result.Cases)
+	result.Summary.FailedThresholdCount += len(CheckSummaryThresholds(result, opts))
+	return result, nil
+}
+
+func tokenizerProfile(counter TokenCounter) TokenizerProfile {
+	if profiled, ok := counter.(ProfiledTokenCounter); ok {
+		return profiled.Profile()
+	}
+	return TokenizerProfile{
+		Name:     counter.Name(),
+		Provider: "custom",
+		Pricing: PricingProfile{
+			Name: "none",
+		},
+	}
+}
+
+func loadCaseFile(fixtureAbs string) (*CaseFile, error) {
+	data, err := os.ReadFile(filepath.Join(fixtureAbs, "cases.yaml"))
+	if err != nil {
+		return nil, fmt.Errorf("load cases.yaml: %w", err)
+	}
+	var cf CaseFile
+	if err := yaml.Unmarshal(data, &cf); err != nil {
+		return nil, fmt.Errorf("parse cases.yaml: %w", err)
+	}
+	if len(cf.Cases) == 0 {
+		return nil, fmt.Errorf("cases.yaml has no cases")
+	}
+	for i, c := range cf.Cases {
+		if strings.TrimSpace(c.ID) == "" {
+			return nil, fmt.Errorf("cases[%d]: id is required", i)
+		}
+		if strings.TrimSpace(c.Query) == "" {
+			return nil, fmt.Errorf("cases[%d]: query is required", i)
+		}
+		if len(c.ExpectedRelevant) == 0 {
+			return nil, fmt.Errorf("cases[%d]: expected_relevant is required", i)
+		}
+	}
+	return &cf, nil
+}
+
+type File struct {
+	Rel     string
+	Content string
+}
+
+func collectFiles(root string) ([]File, error) {
+	var files []File
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+		if shouldIgnore(rel, d.IsDir()) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if rel == "cases.yaml" {
+			return nil
+		}
+		if d.IsDir() || !isTextArtifact(rel) {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		files = append(files, File{Rel: rel, Content: string(data)})
+		return nil
+	})
+	sort.Slice(files, func(i, j int) bool { return files[i].Rel < files[j].Rel })
+	return files, err
+}
+
+func shouldIgnore(rel string, isDir bool) bool {
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	ignoredDirs := map[string]bool{
+		".git": true, "node_modules": true, "dist": true, "build": true,
+		".next": true, "coverage": true, "tmp": true, "vendor": true,
+	}
+	if isDir {
+		if ignoredDirs[parts[len(parts)-1]] {
+			return true
+		}
+	}
+	base := strings.ToLower(filepath.Base(rel))
+	return strings.HasSuffix(base, ".lock") || base == "package-lock.json" || base == "pnpm-lock.yaml" || base == "yarn.lock"
+}
+
+func isTextArtifact(rel string) bool {
+	switch strings.ToLower(filepath.Ext(rel)) {
+	case ".md", ".mdx", ".ts", ".tsx", ".js", ".jsx", ".sql", ".yaml", ".yml", ".json":
+		return true
+	default:
+		return false
+	}
+}
+
+func fullPlanningCorpus(files []File) []File {
+	return filterFiles(files, func(f File) bool {
+		rel := f.Rel
+		if !strings.EqualFold(filepath.Ext(rel), ".md") {
+			return false
+		}
+		for _, prefix := range []string{"openspec/", "docs/", ".cursor/", ".claude/", "plans/", "scratch/"} {
+			if strings.HasPrefix(rel, prefix) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func sourceContextCandidates(files []File) []File {
+	return filterFiles(files, func(f File) bool {
+		if strings.EqualFold(filepath.Ext(f.Rel), ".md") {
+			return false
+		}
+		if isPlanningIntentPath(f.Rel) {
+			return false
+		}
+		return true
+	})
+}
+
+func mergeFiles(groups ...[]File) []File {
+	seen := map[string]bool{}
+	var out []File
+	for _, group := range groups {
+		for _, f := range group {
+			if seen[f.Rel] {
+				continue
+			}
+			seen[f.Rel] = true
+			out = append(out, f)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Rel < out[j].Rel })
+	return out
+}
+
+func filterFiles(files []File, keep func(File) bool) []File {
+	var out []File
+	for _, f := range files {
+		if keep(f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func corpusSlice(scope string, includesSource bool, files []File, tokens int) CorpusSlice {
+	return CorpusSlice{
+		FileScope:                scope,
+		IncludesSourceCandidates: includesSource,
+		Files:                    len(files),
+		Tokens:                   tokens,
+		Artifacts:                rels(files),
+	}
+}
+
+func retrieveDevSpecs(files []File, query string) []File {
+	terms := expandedTerms(query)
+	queryLower := strings.ToLower(query)
+	type scored struct {
+		file  File
+		score float64
+	}
+	var scoredFiles []scored
+	for _, f := range files {
+		score := scoreFile(f, terms, queryLower)
+		if score >= 4.0 {
+			scoredFiles = append(scoredFiles, scored{file: f, score: score})
+		}
+	}
+	sort.Slice(scoredFiles, func(i, j int) bool {
+		if scoredFiles[i].score == scoredFiles[j].score {
+			return scoredFiles[i].file.Rel < scoredFiles[j].file.Rel
+		}
+		return scoredFiles[i].score > scoredFiles[j].score
+	})
+	limit := retrievalLimit(queryLower, terms)
+	if len(scoredFiles) > limit {
+		scoredFiles = scoredFiles[:limit]
+	}
+	out := make([]File, 0, len(scoredFiles))
+	for _, sf := range scoredFiles {
+		out = append(out, sf.file)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Rel < out[j].Rel })
+	return out
+}
+
+func retrievalLimit(queryLower string, terms map[string]float64) int {
+	limit := 8
+	switch {
+	case strings.Contains(queryLower, "implementation context") || strings.Contains(queryLower, "agent context") || strings.Contains(queryLower, "implement"):
+		limit = 6
+	case strings.Contains(queryLower, "resume") || strings.Contains(queryLower, "continue"):
+		limit = 7
+	case strings.Contains(queryLower, "why") || strings.Contains(queryLower, "decision") || strings.Contains(queryLower, "adr"):
+		limit = 5
+	case strings.Contains(queryLower, "prd") || strings.Contains(queryLower, "product") || strings.Contains(queryLower, "background"):
+		limit = 7
+	case strings.Contains(queryLower, "stale") || strings.Contains(queryLower, "superseded"):
+		limit = 5
+	}
+	if hasIdentifierTerm(terms) && limit > 6 {
+		limit = 6
+	}
+	return limit
+}
+
+func scoreFile(f File, terms map[string]float64, queryLower string) float64 {
+	relLower := strings.ToLower(f.Rel)
+	bodyLower := strings.ToLower(f.Content)
+	score := 0.0
+	sourceFile := isSourceContextCandidate(f)
+	role := fileRole(f.Rel)
+	for term, weight := range terms {
+		if term == "" {
+			continue
+		}
+		if strings.Contains(relLower, term) {
+			score += 6.0 * weight
+		}
+		hits := strings.Count(bodyLower, term)
+		if hits > 8 {
+			hits = 8
+		}
+		score += float64(hits) * weight
+	}
+
+	if isPlanningIntentPath(f.Rel) {
+		score += 1.0
+	}
+	switch role {
+	case "adr":
+		if containsAny(queryLower, "adr", "decision", "boundary", "why", "architecture", "rationale", "superseded", "stale") {
+			score += 3.0
+		}
+	case "prd":
+		if containsAny(queryLower, "prd", "product", "background", "requirements", "user") {
+			score += 4.0
+		} else if containsAny(queryLower, "implement", "implementation", "agent context", "source file") {
+			score -= 3.0
+		}
+	case "openspec_design":
+		if containsAny(queryLower, "design", "rationale", "why", "context", "implement", "implementation", "agent context") {
+			score += 3.0
+		}
+	case "openspec_tasks":
+		if containsAny(queryLower, "task", "todo", "implement", "implementation", "resume", "continue", "agent context") {
+			score += 3.0
+		}
+	case "openspec_spec":
+		if containsAny(queryLower, "spec", "delta", "requirement", "acceptance") {
+			score += 2.0
+		}
+	case "plan":
+		if containsAny(queryLower, "plan", "resume", "continue", "migration", "notes") {
+			score += 2.0
+		}
+	case "agent_note":
+		if containsAny(queryLower, "resume", "continue", "followup", "follow-up", "agent", "notes") {
+			score += 2.0
+		}
+	}
+	if sourceFile {
+		if containsAny(queryLower, "source", "file", "code", "implement", "implementation", "handler", "migration") || hasIdentifierTerm(terms) {
+			score += 2.0
+		} else {
+			score -= 2.0
+		}
+	}
+	if strings.Contains(relLower, "scratch/") || strings.Contains(relLower, "old-") || strings.Contains(relLower, "legacy") {
+		score -= 4.0
+	}
+	if strings.Contains(relLower, "superseded") || strings.Contains(bodyLower, "status: superseded") || strings.Contains(bodyLower, "status: stale") {
+		if containsAny(queryLower, "stale", "superseded", "old", "local", "caching", "history", "why") {
+			score += 4.0
+		} else {
+			score -= 5.0
+		}
+	}
+	return score
+}
+
+func fileRole(rel string) string {
+	rel = filepath.ToSlash(rel)
+	switch {
+	case strings.Contains(rel, "/specs/") && strings.HasSuffix(rel, "/spec.md"):
+		return "openspec_spec"
+	case strings.HasPrefix(rel, "openspec/") && strings.HasSuffix(rel, "/design.md"):
+		return "openspec_design"
+	case strings.HasPrefix(rel, "openspec/") && strings.HasSuffix(rel, "/tasks.md"):
+		return "openspec_tasks"
+	case strings.HasPrefix(rel, "openspec/") && strings.HasSuffix(rel, "/proposal.md"):
+		return "openspec_proposal"
+	case strings.HasPrefix(rel, "docs/adr/") || strings.HasPrefix(rel, "docs/adrs/"):
+		return "adr"
+	case strings.HasPrefix(rel, "docs/prd/") || strings.Contains(rel, "/prd/"):
+		return "prd"
+	case strings.Contains(rel, "/plans/") || strings.HasPrefix(rel, "plans/"):
+		return "plan"
+	case strings.HasPrefix(rel, ".cursor/") || strings.HasPrefix(rel, ".claude/"):
+		return "agent_note"
+	default:
+		return ""
+	}
+}
+
+func isSourceContextCandidate(f File) bool {
+	return !strings.EqualFold(filepath.Ext(f.Rel), ".md") && !isPlanningIntentPath(f.Rel)
+}
+
+func containsAny(s string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasIdentifierTerm(terms map[string]float64) bool {
+	for term := range terms {
+		if strings.ContainsAny(term, "_.-") {
+			return true
+		}
+	}
+	return false
+}
+
+func isPlanningIntentPath(rel string) bool {
+	for _, prefix := range []string{"openspec/", "docs/adr/", "docs/plans/", "docs/prd/", ".cursor/", ".claude/"} {
+		if strings.HasPrefix(rel, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func queryBaseline(files []File, query string) []File {
+	terms := meaningfulTerms(query)
+	var out []File
+	for _, f := range files {
+		haystack := strings.ToLower(f.Rel + "\n" + f.Content)
+		for _, term := range terms {
+			if strings.Contains(haystack, term) {
+				out = append(out, f)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func expandedTerms(query string) map[string]float64 {
+	terms := map[string]float64{}
+	for _, term := range meaningfulTerms(query) {
+		terms[term] = 1.0
+	}
+	has := func(term string) bool {
+		_, ok := terms[term]
+		return ok
+	}
+	add := func(term string, weight float64) {
+		if current, ok := terms[term]; !ok || current < weight {
+			terms[term] = weight
+		}
+	}
+	if has("entitlement") && has("sync") {
+		add("entitlement_sync", 2.0)
+		add("harden-entitlement-sync", 2.0)
+		add("billing-webhook-hardening", 1.5)
+		add("entitlements", 1.2)
+	}
+	if has("webhook") && (has("replay") || has("protection")) {
+		add("webhook_replay_protection", 2.0)
+		add("stripe_event_id", 1.5)
+		add("idempotency", 1.5)
+		add("billing-webhook-hardening", 1.2)
+	}
+	if has("stripe_event_id") || (has("stripe") && has("event")) {
+		add("stripe_event_id", 2.0)
+		add("idempotency", 2.0)
+		add("webhook", 1.2)
+	}
+	if has("local") && (has("entitlement") || has("entitlements")) {
+		add("local entitlements", 2.0)
+		add("local entitlement", 2.0)
+		add("caching", 1.5)
+		add("cache", 1.2)
+		add("superseded", 1.8)
+	}
+	if has("harden") || has("hardening") {
+		add("harden-entitlement-sync", 2.0)
+		add("billing-webhook-hardening", 1.8)
+	}
+	return terms
+}
+
+func meaningfulTerms(query string) []string {
+	raw := tokenizePreservingIdentifiers(query)
+	stop := map[string]bool{
+		"a": true, "an": true, "and": true, "all": true, "for": true, "give": true,
+		"to": true, "the": true, "of": true, "in": true, "on": true, "with": true,
+		"agent": true, "context": true, "resume": true, "continue": true, "find": true,
+	}
+	seen := map[string]bool{}
+	var terms []string
+	for _, t := range raw {
+		if len(t) < 3 || stop[t] || seen[t] {
+			continue
+		}
+		seen[t] = true
+		terms = append(terms, t)
+		for _, part := range splitIdentifier(t) {
+			if len(part) >= 3 && !stop[part] && !seen[part] {
+				seen[part] = true
+				terms = append(terms, part)
+			}
+		}
+	}
+	return terms
+}
+
+func tokenizePreservingIdentifiers(s string) []string {
+	var terms []string
+	var b strings.Builder
+	flush := func() {
+		if b.Len() == 0 {
+			return
+		}
+		terms = append(terms, strings.ToLower(b.String()))
+		b.Reset()
+	}
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' || r == '.' {
+			b.WriteRune(unicode.ToLower(r))
+			continue
+		}
+		flush()
+	}
+	flush()
+	return terms
+}
+
+func splitIdentifier(s string) []string {
+	fields := strings.FieldsFunc(s, func(r rune) bool {
+		return r == '_' || r == '-' || r == '.'
+	})
+	if len(fields) <= 1 {
+		return nil
+	}
+	return fields
+}
+
+func renderContext(label string, files []File) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# DevSpecs Eval Context\n\nQuery: %s\n\n", label)
+	for _, f := range files {
+		fmt.Fprintf(&b, "## %s\n\n```text\n%s\n```\n\n", f.Rel, strings.TrimRight(f.Content, "\r\n"))
+	}
+	return b.String()
+}
+
+func rels(files []File) []string {
+	out := make([]string, len(files))
+	for i, f := range files {
+		out[i] = f.Rel
+	}
+	return out
+}
+
+func baselineMetrics(name, scope string, includesSource bool, files []File, expected []string, tokens int) BaselineMetrics {
+	rel := rels(files)
+	expectedSet := stringSet(expected)
+	relevant := 0
+	for _, path := range rel {
+		if expectedSet[path] {
+			relevant++
+		}
+	}
+	return BaselineMetrics{
+		Name:                     name,
+		FileScope:                scope,
+		IncludesSourceCandidates: includesSource,
+		Tokens:                   tokens,
+		ArtifactCount:            len(rel),
+		Artifacts:                rel,
+		RelevantIncluded:         relevant,
+		IrrelevantCount:          len(rel) - relevant,
+	}
+}
+
+func applyArtifactMetrics(cr *CaseResult, spec CaseSpec) {
+	expected := stringSet(spec.ExpectedRelevant)
+	excluded := stringSet(spec.ExpectedExcluded)
+	included := stringSet(cr.ArtifactsIncluded)
+
+	cr.RelevantIncluded = []string{}
+	cr.IrrelevantIncluded = []string{}
+	cr.MissedExpectedRelevant = []string{}
+	cr.UnexpectedExcludedHits = []string{}
+	cr.ExpectedRelevantCount = len(spec.ExpectedRelevant)
+	for _, rel := range cr.ArtifactsIncluded {
+		if expected[rel] {
+			cr.RelevantIncluded = append(cr.RelevantIncluded, rel)
+		} else {
+			cr.IrrelevantIncluded = append(cr.IrrelevantIncluded, rel)
+		}
+		if excluded[rel] {
+			cr.UnexpectedExcludedHits = append(cr.UnexpectedExcludedHits, rel)
+		}
+	}
+	for _, rel := range spec.ExpectedRelevant {
+		if !included[rel] {
+			cr.MissedExpectedRelevant = append(cr.MissedExpectedRelevant, rel)
+		}
+	}
+	cr.RelevantRetrieved = len(cr.RelevantIncluded)
+	if cr.ExpectedRelevantCount > 0 {
+		cr.ArtifactRecall = float64(cr.RelevantRetrieved) / float64(cr.ExpectedRelevantCount)
+	}
+	if len(cr.ArtifactsIncluded) > 0 {
+		cr.ArtifactPrecision = float64(len(cr.RelevantIncluded)) / float64(len(cr.ArtifactsIncluded))
+	}
+}
+
+func applyThresholds(cr *CaseResult, opts Options) {
+	if opts.MinRecall != nil && cr.ArtifactRecall < *opts.MinRecall {
+		cr.ThresholdFailures = append(cr.ThresholdFailures,
+			fmt.Sprintf("recall %.1f%% below minimum %.1f%%", cr.ArtifactRecall*100, *opts.MinRecall*100))
+	}
+	if opts.MinReductionFull != nil && cr.TokenReductionVsFullPlanning < *opts.MinReductionFull {
+		cr.ThresholdFailures = append(cr.ThresholdFailures,
+			fmt.Sprintf("token reduction vs full planning %.1f%% below minimum %.1f%%", cr.TokenReductionVsFullPlanning*100, *opts.MinReductionFull*100))
+	}
+}
+
+func summarize(cases []CaseResult) Summary {
+	s := Summary{Cases: len(cases)}
+	if len(cases) == 0 {
+		return s
+	}
+	var reductionsFull, reductionsQueryFile []float64
+	worstRecall := math.MaxFloat64
+	largestTokens := -1
+	for _, c := range cases {
+		reductionsFull = append(reductionsFull, c.TokenReductionVsFullPlanning)
+		reductionsQueryFile = append(reductionsQueryFile, c.TokenReductionVsQueryFile)
+		s.MeanTokenReductionVsFullPlanning += c.TokenReductionVsFullPlanning
+		s.MeanArtifactRecall += c.ArtifactRecall
+		s.MeanArtifactPrecision += c.ArtifactPrecision
+		s.FailedThresholdCount += len(c.ThresholdFailures)
+		if c.ArtifactRecall < worstRecall {
+			worstRecall = c.ArtifactRecall
+			s.WorstRecallCase = c.ID
+		}
+		if c.DevSpecsTokens > largestTokens {
+			largestTokens = c.DevSpecsTokens
+			s.LargestTokenContextCase = c.ID
+		}
+	}
+	n := float64(len(cases))
+	s.MeanTokenReductionVsFullPlanning /= n
+	s.MeanArtifactRecall /= n
+	s.MeanArtifactPrecision /= n
+	s.MedianTokenReductionVsFullPlanning = median(reductionsFull)
+	s.MedianTokenReductionVsQueryFileBaseline = median(reductionsQueryFile)
+	return s
+}
+
+func CheckSummaryThresholds(r *Result, opts Options) []string {
+	var failures []string
+	if opts.MinMeanRecall != nil && r.Summary.MeanArtifactRecall < *opts.MinMeanRecall {
+		failures = append(failures,
+			fmt.Sprintf("mean recall %.1f%% below minimum %.1f%%", r.Summary.MeanArtifactRecall*100, *opts.MinMeanRecall*100))
+	}
+	return failures
+}
+
+func tokenReduction(devspecs, baseline int) float64 {
+	if baseline <= 0 {
+		return 0
+	}
+	return 1.0 - (float64(devspecs) / float64(baseline))
+}
+
+func median(vals []float64) float64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	cp := append([]float64(nil), vals...)
+	sort.Float64s(cp)
+	mid := len(cp) / 2
+	if len(cp)%2 == 1 {
+		return cp[mid]
+	}
+	return (cp[mid-1] + cp[mid]) / 2
+}
+
+func stringSet(items []string) map[string]bool {
+	out := make(map[string]bool, len(items))
+	for _, item := range items {
+		out[filepath.ToSlash(item)] = true
+	}
+	return out
+}
+
+func defaultString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(value)
+}
+
+func FormatText(r *Result) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "DevSpecs Eval: %s\n\n", r.Fixture)
+	fmt.Fprintf(&b, "Cases: %d\n", r.Summary.Cases)
+	fmt.Fprintf(&b, "Fixture version: %s\n", r.FixtureVersion)
+	fmt.Fprintf(&b, "Eval stage: %s\n", r.EvalStage)
+	fmt.Fprintf(&b, "Retriever: %s\n", r.Retriever)
+	fmt.Fprintf(&b, "Token counter: %s\n", r.TokenCounter)
+	if r.TokenizerProfile.Approximation != "" {
+		fmt.Fprintf(&b, "Token counter detail: %s\n", r.TokenizerProfile.Approximation)
+	}
+	if r.PricingProfile.Name != "" {
+		fmt.Fprintf(&b, "Pricing profile: %s\n", r.PricingProfile.Name)
+	}
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "Corpus")
+	fmt.Fprintf(&b, "- Planning artifacts: %d files / %s tokens\n", r.Corpus.PlanningArtifacts.Files, comma(r.Corpus.PlanningArtifacts.Tokens))
+	fmt.Fprintf(&b, "- Markdown files: %d files / %s tokens\n", r.Corpus.MarkdownFiles.Files, comma(r.Corpus.MarkdownFiles.Tokens))
+	fmt.Fprintf(&b, "- Source/context candidates: %d files / %s tokens\n", r.Corpus.SourceContextCandidates.Files, comma(r.Corpus.SourceContextCandidates.Tokens))
+	fmt.Fprintf(&b, "- Full candidate corpus: %d files / %s tokens\n\n", r.Corpus.FullCandidateCorpus.Files, comma(r.Corpus.FullCandidateCorpus.Tokens))
+
+	fmt.Fprintln(&b, "Summary")
+	fmt.Fprintf(&b, "- Median token reduction vs full planning corpus: %s\n", pct(r.Summary.MedianTokenReductionVsFullPlanning))
+	fmt.Fprintf(&b, "- Mean token reduction vs full planning corpus: %s\n", pct(r.Summary.MeanTokenReductionVsFullPlanning))
+	fmt.Fprintf(&b, "- Median token reduction vs query file baseline: %s\n", pct(r.Summary.MedianTokenReductionVsQueryFileBaseline))
+	fmt.Fprintf(&b, "- Mean artifact recall: %s\n", pct(r.Summary.MeanArtifactRecall))
+	fmt.Fprintf(&b, "- Mean artifact precision: %s\n", pct(r.Summary.MeanArtifactPrecision))
+	if r.Summary.FailedThresholdCount > 0 {
+		fmt.Fprintf(&b, "- Failed thresholds: %d\n", r.Summary.FailedThresholdCount)
+	}
+	fmt.Fprintln(&b)
+
+	for _, c := range r.Cases {
+		fmt.Fprintf(&b, "Case: %s\n", c.ID)
+		fmt.Fprintf(&b, "- DevSpecs context: %s tokens\n", comma(c.DevSpecsTokens))
+		fmt.Fprintf(&b, "- Full planning corpus: %s tokens\n", comma(c.FullPlanningTokens))
+		fmt.Fprintf(&b, "- All markdown: %s tokens\n", comma(c.AllMarkdownTokens))
+		fmt.Fprintf(&b, "- Full candidate corpus: %s tokens\n", comma(c.FullCandidateCorpusTokens))
+		fmt.Fprintf(&b, "- Query file baseline: %s tokens\n", comma(c.QueryFileBaselineTokens))
+		fmt.Fprintf(&b, "- Reduction vs full planning corpus: %s\n", pct(c.TokenReductionVsFullPlanning))
+		fmt.Fprintf(&b, "- Reduction vs all markdown: %s\n", pct(c.TokenReductionVsAllMarkdown))
+		fmt.Fprintf(&b, "- Reduction vs full candidate corpus: %s\n", pct(c.TokenReductionVsFullCandidate))
+		fmt.Fprintf(&b, "- Reduction vs query file baseline: %s\n", pct(c.TokenReductionVsQueryFile))
+		fmt.Fprintf(&b, "- Recall: %d/%d = %s\n", c.RelevantRetrieved, c.ExpectedRelevantCount, pct(c.ArtifactRecall))
+		fmt.Fprintf(&b, "- Precision: %d/%d = %s\n", len(c.RelevantIncluded), len(c.ArtifactsIncluded), pct(c.ArtifactPrecision))
+		fmt.Fprintf(&b, "- Artifacts included: %s\n", listOrNone(c.ArtifactsIncluded))
+		fmt.Fprintf(&b, "- Relevant included: %s\n", listOrNone(c.RelevantIncluded))
+		fmt.Fprintf(&b, "- Irrelevant included: %s\n", listOrNone(c.IrrelevantIncluded))
+		fmt.Fprintf(&b, "- Missed: %s\n", listOrNone(c.MissedExpectedRelevant))
+		fmt.Fprintf(&b, "- Unexpected excluded hits: %s\n", listOrNone(c.UnexpectedExcludedHits))
+		if len(c.ThresholdFailures) > 0 {
+			fmt.Fprintf(&b, "- Threshold failures: %s\n", strings.Join(c.ThresholdFailures, "; "))
+		}
+		fmt.Fprintln(&b)
+	}
+	return b.String()
+}
+
+func FormatJSON(r *Result) ([]byte, error) {
+	return json.MarshalIndent(r, "", "  ")
+}
+
+func pct(v float64) string {
+	return fmt.Sprintf("%.1f%%", v*100)
+}
+
+func comma(n int) string {
+	s := fmt.Sprintf("%d", n)
+	if len(s) <= 3 {
+		return s
+	}
+	var parts []string
+	for len(s) > 3 {
+		parts = append([]string{s[len(s)-3:]}, parts...)
+		s = s[:len(s)-3]
+	}
+	parts = append([]string{s}, parts...)
+	return strings.Join(parts, ",")
+}
+
+func listOrNone(items []string) string {
+	if len(items) == 0 {
+		return "none"
+	}
+	return strings.Join(items, ", ")
+}
