@@ -3,7 +3,9 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
-	"text/tabwriter"
+	"io"
+	"os"
+	"path/filepath"
 
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/spf13/cobra"
@@ -68,6 +70,7 @@ func runTodos(cmd *cobra.Command, artifactID string, fp store.FilterParams, repo
 			return fmt.Errorf("get todos: %w", err)
 		}
 		todos = filterTodoRows(todos, openOnly, doneOnly)
+		enrichTodosWithArtifact(todos, art)
 		return outputTodos(cmd, todos, asJSON)
 	}
 
@@ -82,27 +85,41 @@ func runTodos(cmd *cobra.Command, artifactID string, fp store.FilterParams, repo
 	return outputTodos(cmd, todos, asJSON)
 }
 
+func enrichTodosWithArtifact(todos []store.TodoRow, art *store.ArtifactRow) {
+	for i := range todos {
+		todos[i].ArtifactTitle = art.Title
+		todos[i].ArtifactKind = art.Kind
+		todos[i].ArtifactShortID = art.ShortID
+	}
+}
+
 func outputTodos(cmd *cobra.Command, todos []store.TodoRow, asJSON bool) error {
 	if asJSON {
 		type jsonTodo struct {
-			ArtifactID string `json:"artifact_id"`
-			RevisionID string `json:"revision_id"`
-			Ordinal    int    `json:"ordinal"`
-			Text       string `json:"text"`
-			Done       bool   `json:"done"`
-			SourceFile string `json:"source_file"`
-			SourceLine int    `json:"source_line"`
+			ArtifactID      string `json:"artifact_id"`
+			ArtifactTitle   string `json:"artifact_title"`
+			ArtifactKind    string `json:"artifact_kind"`
+			ArtifactShortID string `json:"artifact_short_id"`
+			RevisionID      string `json:"revision_id"`
+			Ordinal         int    `json:"ordinal"`
+			Text            string `json:"text"`
+			Done            bool   `json:"done"`
+			SourceFile      string `json:"source_file"`
+			SourceLine      int    `json:"source_line"`
 		}
 		out := make([]jsonTodo, len(todos))
 		for i, t := range todos {
 			out[i] = jsonTodo{
-				ArtifactID: t.ArtifactID,
-				RevisionID: t.RevisionID,
-				Ordinal:    t.Ordinal,
-				Text:       t.Text,
-				Done:       t.Done,
-				SourceFile: t.SourceFile,
-				SourceLine: t.SourceLine,
+				ArtifactID:      t.ArtifactID,
+				ArtifactTitle:   t.ArtifactTitle,
+				ArtifactKind:    t.ArtifactKind,
+				ArtifactShortID: t.ArtifactShortID,
+				RevisionID:      t.RevisionID,
+				Ordinal:         t.Ordinal,
+				Text:            t.Text,
+				Done:            t.Done,
+				SourceFile:      t.SourceFile,
+				SourceLine:      t.SourceLine,
 			}
 		}
 		enc := json.NewEncoder(cmd.OutOrStdout())
@@ -110,19 +127,56 @@ func outputTodos(cmd *cobra.Command, todos []store.TodoRow, asJSON bool) error {
 		return enc.Encode(out)
 	}
 
-	out := cmd.OutOrStdout()
-	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "STATUS\tTEXT\tSOURCE\n")
-	for _, t := range todos {
-		marker := "[ ]"
-		if t.Done {
-			marker = "[x]"
-		}
-		source := fmt.Sprintf("%s:%d", t.SourceFile, t.SourceLine)
-		fmt.Fprintf(w, "%s\t%s\t%s\n", marker, t.Text, source)
-	}
-	w.Flush()
+	writeTodosHuman(cmd.OutOrStdout(), todos)
 	return nil
+}
+
+func writeTodosHuman(out io.Writer, todos []store.TodoRow) {
+	wd, _ := os.Getwd()
+	repoLabel := filepath.Base(resolveRepoRootFromWd(wd))
+	fmt.Fprintf(out, "DevSpecs Todos (%s)\n", repoLabel)
+	open, total := countTodoOpenTotal(todos)
+	fmt.Fprintf(out, "%d open / %d total\n\n", open, total)
+
+	for _, g := range groupTodosByArtifact(todos) {
+		head := g[0]
+		title := head.ArtifactTitle
+		if title == "" {
+			title = head.ArtifactID
+		}
+		gOpen, gTot := countTodoOpenTotal(g)
+		fmt.Fprintf(out, "  %s (%s)  [%d open / %d total]\n", title, head.ArtifactKind, gOpen, gTot)
+		for _, t := range g {
+			marker := "[ ]"
+			if t.Done {
+				marker = "[x]"
+			}
+			fmt.Fprintf(out, "    %s %s\n", marker, t.Text)
+		}
+		fmt.Fprintln(out)
+	}
+}
+
+func groupTodosByArtifact(todos []store.TodoRow) [][]store.TodoRow {
+	var out [][]store.TodoRow
+	for _, t := range todos {
+		if len(out) == 0 || out[len(out)-1][0].ArtifactID != t.ArtifactID {
+			out = append(out, []store.TodoRow{t})
+		} else {
+			out[len(out)-1] = append(out[len(out)-1], t)
+		}
+	}
+	return out
+}
+
+func countTodoOpenTotal(todos []store.TodoRow) (open, total int) {
+	for _, t := range todos {
+		total++
+		if !t.Done {
+			open++
+		}
+	}
+	return
 }
 
 func filterTodoRows(todos []store.TodoRow, openOnly, doneOnly bool) []store.TodoRow {

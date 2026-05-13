@@ -18,6 +18,7 @@ func NewFindCmd() *cobra.Command {
 		branch    string
 		user      string
 		repoName  string
+		allRepos  bool
 		asJSON    bool
 		noRefresh bool
 	)
@@ -28,7 +29,7 @@ func NewFindCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fp := store.FilterParams{Kind: kind, Subtype: subtype, Tag: tag, Branch: branch, User: user}
-			return runFind(cmd, args[0], fp, repoName, asJSON, noRefresh)
+			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh)
 		},
 	}
 
@@ -38,12 +39,13 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().StringVar(&branch, "branch", "", "Filter by git branch")
 	cmd.Flags().StringVar(&user, "user", "", "Filter by scanned-by user")
 	cmd.Flags().StringVar(&repoName, "repo", "", "Filter by repo name")
+	cmd.Flags().BoolVar(&allRepos, "all", false, "Search artifacts in all indexed repos (ignore cwd scope)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	return cmd
 }
 
-func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, asJSON, noRefresh bool) error {
+func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh bool) error {
 	db, err := openDB()
 	if err != nil {
 		return err
@@ -54,9 +56,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 		ensureFresh(cmd, db)
 	}
 
-	if repoName != "" {
-		fp.RepoRoot = resolveRepoRootByName(db, repoName)
-	}
+	fp.RepoRoot = resolveRepoScope(db, repoName, allRepos)
 
 	artifacts, err := db.FindArtifacts(query, fp)
 	if err != nil {

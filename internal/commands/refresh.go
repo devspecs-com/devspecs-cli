@@ -29,7 +29,10 @@ func ensureFresh(cmd *cobra.Command, db *store.DB) {
 		return
 	}
 
-	repoRoot := resolveRepoRootFromWd(wd)
+	repoRoot := resolveIndexedRepoRoot(db, wd)
+	if repoRoot == "" {
+		repoRoot = canonicalRepoRoot(resolveRepoRootFromWd(wd))
+	}
 	debugLog("ensureFresh: wd=%s resolved_root=%s", wd, repoRoot)
 
 	status := freshness.Check(db, repoRoot)
@@ -99,6 +102,52 @@ func debugLog(format string, args ...any) {
 	if os.Getenv("DS_DEBUG") == "1" {
 		fmt.Fprintf(os.Stderr, "[ds:debug] "+format+"\n", args...)
 	}
+}
+
+// canonicalRepoRoot returns an absolute, cleaned path suitable for comparing
+// against repos.root_path (which scan stores via filepath.Abs).
+func canonicalRepoRoot(p string) string {
+	if p == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return filepath.Clean(p)
+	}
+	return filepath.Clean(abs)
+}
+
+// resolveIndexedRepoRoot picks the repo row to scope to: prefer the canonical
+// cwd when it is indexed, otherwise the git/.devspecs walk-up root if indexed.
+// This avoids mis-binding to a parent directory's .devspecs when cwd is an
+// unrelated tree that was scanned as its own root (e.g. tests under /tmp).
+func resolveIndexedRepoRoot(db *store.DB, wd string) string {
+	cwdRoot := canonicalRepoRoot(wd)
+	if meta := db.GetRepoByRoot(cwdRoot); meta != nil {
+		return meta.RootPath
+	}
+	resolved := canonicalRepoRoot(resolveRepoRootFromWd(wd))
+	if meta := db.GetRepoByRoot(resolved); meta != nil {
+		return meta.RootPath
+	}
+	return ""
+}
+
+// resolveRepoScope returns the absolute repo root to filter by, or empty string
+// when allRepos is true (no repo filter). When repoName is non-empty it overrides
+// the root detected from the current working directory.
+func resolveRepoScope(db *store.DB, repoName string, allRepos bool) string {
+	if allRepos {
+		return ""
+	}
+	if repoName != "" {
+		return resolveRepoRootByName(db, repoName)
+	}
+	wd, _ := os.Getwd()
+	if root := resolveIndexedRepoRoot(db, wd); root != "" {
+		return root
+	}
+	return canonicalRepoRoot(resolveRepoRootFromWd(wd))
 }
 
 // resolveRepoRootByName finds the repo root_path whose basename matches name.

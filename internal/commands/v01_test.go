@@ -583,6 +583,281 @@ func TestList_EmptyResult(t *testing.T) {
 	}
 }
 
+func setupTwoIndexedRepos(t *testing.T) (repoA, repoB string) {
+	t.Helper()
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	repoA = filepath.Join(tmp, "project-a")
+	repoB = filepath.Join(tmp, "project-b")
+	os.MkdirAll(filepath.Join(repoA, ".devspecs"), 0o755)
+	os.MkdirAll(filepath.Join(repoB, ".devspecs"), 0o755)
+
+	dbPath := filepath.Join(home, "devspecs.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	ids := idgen.NewFactory()
+	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('rA', ?, ?, ?)", repoA, now, now)
+	db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('rB', ?, ?, ?)", repoB, now, now)
+
+	aidA := ids.New()
+	revA := ids.NewWithPrefix("rev_")
+	if err := db.InsertArtifactDirect(aidA, "rA", "plan", "", "ScopeAlphaOnlyInA", "draft", revA, now, now); err != nil {
+		t.Fatal(err)
+	}
+	db.InsertRevisionDirect(revA, aidA, "sha256:a", "# body\n", "", now)
+
+	aidB := ids.New()
+	revB := ids.NewWithPrefix("rev_")
+	if err := db.InsertArtifactDirect(aidB, "rB", "plan", "", "ScopeBetaOnlyInB", "draft", revB, now, now); err != nil {
+		t.Fatal(err)
+	}
+	db.InsertRevisionDirect(revB, aidB, "sha256:b", "# body\n", "", now)
+
+	db.IndexArtifactFTS(aidA, "ScopeAlphaOnlyInA", "# body\n", "p.md")
+	db.IndexArtifactFTS(aidB, "ScopeBetaOnlyInB", "# body\n", "p.md")
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return repoA, repoB
+}
+
+func TestList_ScopesToCurrentRepoOnly(t *testing.T) {
+	repoA, _ := setupTwoIndexedRepos(t)
+
+	origWd, _ := os.Getwd()
+	os.Chdir(repoA)
+	t.Cleanup(func() { os.Chdir(origWd) })
+
+	cmd := NewListCmd()
+	cmd.SetArgs([]string{"--no-refresh", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var arts []map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &arts); err != nil {
+		t.Fatal(err)
+	}
+	if len(arts) != 1 {
+		t.Fatalf("list scoped to cwd: want 1 artifact, got %d: %s", len(arts), buf.String())
+	}
+	title, _ := arts[0]["Title"].(string)
+	if title != "ScopeAlphaOnlyInA" {
+		t.Fatalf("want ScopeAlphaOnlyInA title, got %q", title)
+	}
+
+	cmd2 := NewListCmd()
+	cmd2.SetArgs([]string{"--no-refresh", "--json", "--all"})
+	buf2 := &bytes.Buffer{}
+	cmd2.SetOut(buf2)
+	if err := cmd2.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var all []map[string]any
+	if err := json.Unmarshal(buf2.Bytes(), &all); err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("list --all: want 2 artifacts, got %d: %s", len(all), buf2.String())
+	}
+}
+
+func TestList_RepoFlagOverridesCwd(t *testing.T) {
+	repoA, repoB := setupTwoIndexedRepos(t)
+
+	origWd, _ := os.Getwd()
+	os.Chdir(repoA)
+	t.Cleanup(func() { os.Chdir(origWd) })
+
+	cmd := NewListCmd()
+	cmd.SetArgs([]string{"--no-refresh", "--json", "--repo", filepath.Base(repoB)})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var arts []map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &arts); err != nil {
+		t.Fatal(err)
+	}
+	if len(arts) != 1 {
+		t.Fatalf("list --repo while cwd in other tree: want 1 artifact, got %d: %s", len(arts), buf.String())
+	}
+	title, _ := arts[0]["Title"].(string)
+	if title != "ScopeBetaOnlyInB" {
+		t.Fatalf("want artifact from named repo B, got title %q", title)
+	}
+}
+
+func TestFind_ScopesToCurrentRepoByDefault(t *testing.T) {
+	repoA, _ := setupTwoIndexedRepos(t)
+
+	origWd, _ := os.Getwd()
+	os.Chdir(repoA)
+	t.Cleanup(func() { os.Chdir(origWd) })
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"ScopeBetaOnlyInB", "--no-refresh"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "ScopeBetaOnlyInB") {
+		t.Error("find should not match other-repo artifact when scoped to cwd")
+	}
+
+	cmd2 := NewFindCmd()
+	cmd2.SetArgs([]string{"ScopeBetaOnlyInB", "--no-refresh", "--all"})
+	buf2 := &bytes.Buffer{}
+	cmd2.SetOut(buf2)
+	if err := cmd2.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !containsStr(buf2.String(), "ScopeBetaOnlyInB") {
+		t.Errorf("find --all should match other repo: %s", buf2.String())
+	}
+
+	cmd3 := NewFindCmd()
+	cmd3.SetArgs([]string{"ScopeAlphaOnlyInA", "--no-refresh"})
+	buf3 := &bytes.Buffer{}
+	cmd3.SetOut(buf3)
+	if err := cmd3.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !containsStr(buf3.String(), "ScopeAlphaOnlyInA") {
+		t.Errorf("find current repo: %s", buf3.String())
+	}
+}
+
+func TestTodos_HumanOutput_GroupedByArtifact(t *testing.T) {
+	repoDir, db := setupV01Env(t)
+	seedV01Artifacts(t, db, repoDir)
+	db.Close()
+
+	cmd := NewTodosCmd()
+	cmd.SetArgs([]string{"--no-refresh", "--tag", "auth"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !containsStr(out, "DevSpecs Todos") {
+		t.Errorf("expected header, got: %s", out)
+	}
+	if !containsStr(out, "Auth Middleware (plan)") {
+		t.Errorf("expected grouped artifact header, got: %s", out)
+	}
+	if !containsStr(out, "Implement JWT") {
+		t.Errorf("expected todo line, got: %s", out)
+	}
+	if strings.Contains(out, "plans/auth.md:") {
+		t.Error("human output should not include source_file:line")
+	}
+}
+
+func TestCriteria_HumanOutput_GroupedByArtifact(t *testing.T) {
+	repoDir, db := setupV01Env(t)
+	seedV01Artifacts(t, db, repoDir)
+	now := time.Now().UTC().Format(time.RFC3339)
+	ids := idgen.NewFactory()
+	var aid, rev string
+	if err := db.QueryRow("SELECT a.id, a.current_revision_id FROM artifacts a WHERE a.title = ?", "Auth Middleware").Scan(&aid, &rev); err != nil {
+		t.Fatal(err)
+	}
+	db.Exec(`INSERT INTO artifact_criteria (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, criteria_kind, created_at) VALUES (?, ?, ?, 0, 'Gate criterion one', 0, 'auth.md', 10, 'acceptance', ?)`,
+		ids.NewWithPrefix("crit_"), aid, rev, now)
+	db.Close()
+
+	cmd := NewCriteriaCmd()
+	cmd.SetArgs([]string{"--no-refresh", "--tag", "auth"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !containsStr(out, "DevSpecs Criteria") {
+		t.Errorf("expected header: %s", out)
+	}
+	if !containsStr(out, "Auth Middleware (plan)") {
+		t.Errorf("expected grouped header: %s", out)
+	}
+	if !containsStr(out, "acceptance") || !containsStr(out, "Gate criterion one") {
+		t.Errorf("expected criterion line: %s", out)
+	}
+	if strings.Contains(out, "auth.md:10") {
+		t.Error("human output should not include source_file:line")
+	}
+}
+
+func TestTodos_SingleArtifactHumanGrouped(t *testing.T) {
+	repoDir, db := setupV01Env(t)
+	seedV01Artifacts(t, db, repoDir)
+	var aid string
+	if err := db.QueryRow("SELECT id FROM artifacts WHERE title = ?", "Auth Middleware").Scan(&aid); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	cmd := NewTodosCmd()
+	cmd.SetArgs([]string{aid, "--no-refresh"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Count(out, "Auth Middleware (plan)") != 1 {
+		t.Fatalf("want exactly one grouped artifact header, got %d in: %s", strings.Count(out, "Auth Middleware (plan)"), out)
+	}
+	if !containsStr(out, "Implement JWT") {
+		t.Errorf("expected todo line: %s", out)
+	}
+	if strings.Contains(out, "auth.md:") {
+		t.Error("human output should not include source_file:line")
+	}
+}
+
+func TestCriteria_SingleArtifactHumanGrouped(t *testing.T) {
+	repoDir, db := setupV01Env(t)
+	seedV01Artifacts(t, db, repoDir)
+	now := time.Now().UTC().Format(time.RFC3339)
+	ids := idgen.NewFactory()
+	var aid, rev string
+	if err := db.QueryRow("SELECT a.id, a.current_revision_id FROM artifacts a WHERE a.title = ?", "Auth Middleware").Scan(&aid, &rev); err != nil {
+		t.Fatal(err)
+	}
+	db.Exec(`INSERT INTO artifact_criteria (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, criteria_kind, created_at) VALUES (?, ?, ?, 0, 'Single-ID criterion', 0, 'auth.md', 10, 'acceptance', ?)`,
+		ids.NewWithPrefix("crit_"), aid, rev, now)
+	db.Close()
+
+	cmd := NewCriteriaCmd()
+	cmd.SetArgs([]string{aid, "--no-refresh"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Count(out, "Auth Middleware (plan)") != 1 {
+		t.Fatalf("want exactly one grouped artifact header, got %d in: %s", strings.Count(out, "Auth Middleware (plan)"), out)
+	}
+	if !containsStr(out, "acceptance") || !containsStr(out, "Single-ID criterion") {
+		t.Errorf("expected criterion line: %s", out)
+	}
+	if strings.Contains(out, "auth.md:10") {
+		t.Error("human output should not include source_file:line")
+	}
+}
+
 func TestFind_WithTagFilter(t *testing.T) {
 	repoDir, db := setupV01Env(t)
 	seedV01Artifacts(t, db, repoDir)

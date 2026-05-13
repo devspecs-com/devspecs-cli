@@ -1,6 +1,9 @@
 [
   {
     "artifact_id": "\u003cMASKED\u003e",
+    "artifact_kind": "plan",
+    "artifact_short_id": "",
+    "artifact_title": "Golden Plan",
     "done": false,
     "ordinal": 0,
     "revision_id": "\u003cMASKED\u003e",
@@ -10,6 +13,9 @@
   },
   {
     "artifact_id": "\u003cMASKED\u003e",
+    "artifact_kind": "plan",
+    "artifact_short_id": "",
+    "artifact_title": "Golden Plan",
     "done": true,
     "ordinal": 1,
     "revision_id": "\u003cMASKED\u003e",

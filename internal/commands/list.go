@@ -21,6 +21,7 @@ func NewListCmd() *cobra.Command {
 		branch     string
 		user       string
 		repoName   string
+		allRepos   bool
 		asJSON     bool
 		noRefresh  bool
 	)
@@ -34,7 +35,7 @@ func NewListCmd() *cobra.Command {
 				Kind: kind, Subtype: subtype, Status: status, SourceType: sourceType,
 				Tag: tag, Branch: branch, User: user,
 			}
-			return runList(cmd, fp, repoName, asJSON, noRefresh)
+			return runList(cmd, fp, repoName, allRepos, asJSON, noRefresh)
 		},
 	}
 
@@ -46,12 +47,13 @@ func NewListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&branch, "branch", "", "Filter by git branch")
 	cmd.Flags().StringVar(&user, "user", "", "Filter by scanned-by user")
 	cmd.Flags().StringVar(&repoName, "repo", "", "Filter by repo name (basename of root_path)")
+	cmd.Flags().BoolVar(&allRepos, "all", false, "List artifacts from all indexed repos (ignore cwd scope)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	return cmd
 }
 
-func runList(cmd *cobra.Command, fp store.FilterParams, repoName string, asJSON, noRefresh bool) error {
+func runList(cmd *cobra.Command, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh bool) error {
 	db, err := openDB()
 	if err != nil {
 		return err
@@ -62,9 +64,7 @@ func runList(cmd *cobra.Command, fp store.FilterParams, repoName string, asJSON,
 		ensureFresh(cmd, db)
 	}
 
-	if repoName != "" {
-		fp.RepoRoot = resolveRepoRootByName(db, repoName)
-	}
+	fp.RepoRoot = resolveRepoScope(db, repoName, allRepos)
 
 	artifacts, err := db.ListArtifacts(fp)
 	if err != nil {

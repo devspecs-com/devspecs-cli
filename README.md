@@ -185,7 +185,13 @@ These flags narrow results by repo basename, tag, git branch, or scanned-by user
 
 For **`list`** and **`find`**, you can also filter by **`--kind`** and **`--subtype`** on indexed artifacts.
 
-They apply to **`list`**, **`find`**, **`todos`**, **`criteria`**, and **`resume`**. For **`--repo`**, pass the directory **basename** (e.g. `my-app`), not a full path.
+**`list`** and **`find`** default to the **current repository** (resolved from the working directory the same way as **`ds resume`** — Git root or nearest **`.devspecs/`**). Use **`--all`** to include artifacts from **every** indexed repo in the global database. **`--repo <basename>`** still overrides and targets a single repo by name.
+
+**`todos`** and **`criteria`** stay **cross-repo** by default (high-level triage); use **`--repo`** when you want to narrow them. Human output groups rows **by artifact** (title, kind, open/total counts); use **`--json`** for flat rows including **`artifact_title`**, **`artifact_kind`**, **`artifact_short_id`**, and source locations.
+
+**`resume`** is always scoped to the current repo unless **`--repo`** is set; its **`--all`** flag only widens the **settled** recency window, not repo scope.
+
+These flags apply to **`list`**, **`find`**, **`todos`**, **`criteria`**, and **`resume`**. For **`--repo`**, pass the directory **basename** (e.g. `my-app`), not a full path.
 
 ### `ds init`
 

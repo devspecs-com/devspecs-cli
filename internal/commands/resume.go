@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -61,12 +60,7 @@ func runResume(cmd *cobra.Command, fp store.FilterParams, repoName string, asJSO
 		ensureFresh(cmd, db)
 	}
 
-	wd, _ := os.Getwd()
-	repoRoot := resolveRepoRootFromWd(wd)
-
-	if repoName != "" {
-		repoRoot = resolveRepoRootByName(db, repoName)
-	}
+	repoRoot := resolveRepoScope(db, repoName, false)
 
 	rows, err := db.ResumeArtifacts(repoRoot, fp)
 	if err != nil {

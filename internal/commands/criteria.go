@@ -3,7 +3,9 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
-	"text/tabwriter"
+	"io"
+	"os"
+	"path/filepath"
 
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/spf13/cobra"
@@ -70,6 +72,7 @@ func runCriteria(cmd *cobra.Command, artifactID string, fp store.FilterParams, r
 			return fmt.Errorf("get criteria: %w", err)
 		}
 		rows = filterCriterionRows(rows, criteriaKind, openOnly, doneOnly)
+		enrichCriteriaWithArtifact(rows, art)
 		return outputCriteria(cmd, rows, asJSON)
 	}
 
@@ -84,29 +87,43 @@ func runCriteria(cmd *cobra.Command, artifactID string, fp store.FilterParams, r
 	return outputCriteria(cmd, rows, asJSON)
 }
 
+func enrichCriteriaWithArtifact(rows []store.CriterionRow, art *store.ArtifactRow) {
+	for i := range rows {
+		rows[i].ArtifactTitle = art.Title
+		rows[i].ArtifactKind = art.Kind
+		rows[i].ArtifactShortID = art.ShortID
+	}
+}
+
 func outputCriteria(cmd *cobra.Command, rows []store.CriterionRow, asJSON bool) error {
 	if asJSON {
 		type jsonCriterion struct {
-			ArtifactID   string `json:"artifact_id"`
-			RevisionID   string `json:"revision_id"`
-			Ordinal      int    `json:"ordinal"`
-			Text         string `json:"text"`
-			Done         bool   `json:"done"`
-			SourceFile   string `json:"source_file"`
-			SourceLine   int    `json:"source_line"`
-			CriteriaKind string `json:"criteria_kind"`
+			ArtifactID      string `json:"artifact_id"`
+			ArtifactTitle   string `json:"artifact_title"`
+			ArtifactKind    string `json:"artifact_kind"`
+			ArtifactShortID string `json:"artifact_short_id"`
+			RevisionID      string `json:"revision_id"`
+			Ordinal         int    `json:"ordinal"`
+			Text            string `json:"text"`
+			Done            bool   `json:"done"`
+			SourceFile      string `json:"source_file"`
+			SourceLine      int    `json:"source_line"`
+			CriteriaKind    string `json:"criteria_kind"`
 		}
 		out := make([]jsonCriterion, len(rows))
 		for i, c := range rows {
 			out[i] = jsonCriterion{
-				ArtifactID:   c.ArtifactID,
-				RevisionID:   c.RevisionID,
-				Ordinal:      c.Ordinal,
-				Text:         c.Text,
-				Done:         c.Done,
-				SourceFile:   c.SourceFile,
-				SourceLine:   c.SourceLine,
-				CriteriaKind: c.CriteriaKind,
+				ArtifactID:      c.ArtifactID,
+				ArtifactTitle:   c.ArtifactTitle,
+				ArtifactKind:    c.ArtifactKind,
+				ArtifactShortID: c.ArtifactShortID,
+				RevisionID:      c.RevisionID,
+				Ordinal:         c.Ordinal,
+				Text:            c.Text,
+				Done:            c.Done,
+				SourceFile:      c.SourceFile,
+				SourceLine:      c.SourceLine,
+				CriteriaKind:    c.CriteriaKind,
 			}
 		}
 		enc := json.NewEncoder(cmd.OutOrStdout())
@@ -114,19 +131,56 @@ func outputCriteria(cmd *cobra.Command, rows []store.CriterionRow, asJSON bool) 
 		return enc.Encode(out)
 	}
 
-	out := cmd.OutOrStdout()
-	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "STATUS\tKIND\tTEXT\tSOURCE\n")
-	for _, c := range rows {
-		marker := "[ ]"
-		if c.Done {
-			marker = "[x]"
-		}
-		source := fmt.Sprintf("%s:%d", c.SourceFile, c.SourceLine)
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", marker, c.CriteriaKind, c.Text, source)
-	}
-	w.Flush()
+	writeCriteriaHuman(cmd.OutOrStdout(), rows)
 	return nil
+}
+
+func writeCriteriaHuman(out io.Writer, rows []store.CriterionRow) {
+	wd, _ := os.Getwd()
+	repoLabel := filepath.Base(resolveRepoRootFromWd(wd))
+	fmt.Fprintf(out, "DevSpecs Criteria (%s)\n", repoLabel)
+	open, total := countCriterionOpenTotal(rows)
+	fmt.Fprintf(out, "%d open / %d total\n\n", open, total)
+
+	for _, g := range groupCriteriaByArtifact(rows) {
+		head := g[0]
+		title := head.ArtifactTitle
+		if title == "" {
+			title = head.ArtifactID
+		}
+		gOpen, gTot := countCriterionOpenTotal(g)
+		fmt.Fprintf(out, "  %s (%s)  [%d open / %d total]\n", title, head.ArtifactKind, gOpen, gTot)
+		for _, c := range g {
+			marker := "[ ]"
+			if c.Done {
+				marker = "[x]"
+			}
+			fmt.Fprintf(out, "    %s %s  %s\n", marker, c.CriteriaKind, c.Text)
+		}
+		fmt.Fprintln(out)
+	}
+}
+
+func groupCriteriaByArtifact(rows []store.CriterionRow) [][]store.CriterionRow {
+	var out [][]store.CriterionRow
+	for _, c := range rows {
+		if len(out) == 0 || out[len(out)-1][0].ArtifactID != c.ArtifactID {
+			out = append(out, []store.CriterionRow{c})
+		} else {
+			out[len(out)-1] = append(out[len(out)-1], c)
+		}
+	}
+	return out
+}
+
+func countCriterionOpenTotal(rows []store.CriterionRow) (open, total int) {
+	for _, c := range rows {
+		total++
+		if !c.Done {
+			open++
+		}
+	}
+	return
 }
 
 func filterCriterionRows(rows []store.CriterionRow, criteriaKind string, openOnly, doneOnly bool) []store.CriterionRow {

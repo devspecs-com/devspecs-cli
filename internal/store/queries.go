@@ -53,27 +53,33 @@ type LinkRow struct {
 
 // TodoRow represents a row from the artifact_todos table.
 type TodoRow struct {
-	ID         string
-	ArtifactID string
-	RevisionID string
-	Ordinal    int
-	Text       string
-	Done       bool
-	SourceFile string
-	SourceLine int
+	ID              string
+	ArtifactID      string
+	RevisionID      string
+	Ordinal         int
+	Text            string
+	Done            bool
+	SourceFile      string
+	SourceLine      int
+	ArtifactTitle   string
+	ArtifactKind    string
+	ArtifactShortID string
 }
 
 // CriterionRow represents a row from the artifact_criteria table.
 type CriterionRow struct {
-	ID           string
-	ArtifactID   string
-	RevisionID   string
-	Ordinal      int
-	Text         string
-	Done         bool
-	SourceFile   string
-	SourceLine   int
-	CriteriaKind string
+	ID              string
+	ArtifactID      string
+	RevisionID      string
+	Ordinal         int
+	Text            string
+	Done            bool
+	SourceFile      string
+	SourceLine      int
+	CriteriaKind    string
+	ArtifactTitle   string
+	ArtifactKind    string
+	ArtifactShortID string
 }
 
 // FilterParams groups all query filters.
@@ -300,7 +306,8 @@ func (db *DB) GetTodosForArtifact(artifactID string) ([]TodoRow, error) {
 
 // ListAllTodos returns todos across all artifacts, optionally filtered.
 func (db *DB) ListAllTodos(fp FilterParams, openOnly, doneOnly bool) ([]TodoRow, error) {
-	query := `SELECT t.id, t.artifact_id, t.revision_id, t.ordinal, t.text, t.done, t.source_file, t.source_line
+	query := `SELECT t.id, t.artifact_id, t.revision_id, t.ordinal, t.text, t.done, t.source_file, t.source_line,
+		a.title, a.kind, COALESCE(a.short_id,'')
 		FROM artifact_todos t
 		JOIN artifacts a ON a.id = t.artifact_id`
 	var joins []string
@@ -341,7 +348,7 @@ func (db *DB) ListAllTodos(fp FilterParams, openOnly, doneOnly bool) ([]TodoRow,
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	query += " ORDER BY a.title, t.ordinal"
+	query += " ORDER BY a.title, a.id, t.ordinal"
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -352,7 +359,8 @@ func (db *DB) ListAllTodos(fp FilterParams, openOnly, doneOnly bool) ([]TodoRow,
 	var result []TodoRow
 	for rows.Next() {
 		var r TodoRow
-		if err := rows.Scan(&r.ID, &r.ArtifactID, &r.RevisionID, &r.Ordinal, &r.Text, &r.Done, &r.SourceFile, &r.SourceLine); err != nil {
+		if err := rows.Scan(&r.ID, &r.ArtifactID, &r.RevisionID, &r.Ordinal, &r.Text, &r.Done, &r.SourceFile, &r.SourceLine,
+			&r.ArtifactTitle, &r.ArtifactKind, &r.ArtifactShortID); err != nil {
 			return nil, err
 		}
 		result = append(result, r)
@@ -385,7 +393,8 @@ func (db *DB) GetCriteriaForArtifact(artifactID string) ([]CriterionRow, error) 
 // ListAllCriteria returns criteria across all artifacts, optionally filtered.
 // criteriaKind filters by criteria_kind when non-empty (acceptance, success, okr).
 func (db *DB) ListAllCriteria(fp FilterParams, openOnly, doneOnly bool, criteriaKind string) ([]CriterionRow, error) {
-	query := `SELECT c.id, c.artifact_id, c.revision_id, c.ordinal, c.text, c.done, c.source_file, c.source_line, c.criteria_kind
+	query := `SELECT c.id, c.artifact_id, c.revision_id, c.ordinal, c.text, c.done, c.source_file, c.source_line, c.criteria_kind,
+		a.title, a.kind, COALESCE(a.short_id,'')
 		FROM artifact_criteria c
 		JOIN artifacts a ON a.id = c.artifact_id`
 	var joins []string
@@ -430,7 +439,7 @@ func (db *DB) ListAllCriteria(fp FilterParams, openOnly, doneOnly bool, criteria
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	query += " ORDER BY a.title, c.ordinal"
+	query += " ORDER BY a.title, a.id, c.ordinal"
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -441,7 +450,8 @@ func (db *DB) ListAllCriteria(fp FilterParams, openOnly, doneOnly bool, criteria
 	var result []CriterionRow
 	for rows.Next() {
 		var r CriterionRow
-		if err := rows.Scan(&r.ID, &r.ArtifactID, &r.RevisionID, &r.Ordinal, &r.Text, &r.Done, &r.SourceFile, &r.SourceLine, &r.CriteriaKind); err != nil {
+		if err := rows.Scan(&r.ID, &r.ArtifactID, &r.RevisionID, &r.Ordinal, &r.Text, &r.Done, &r.SourceFile, &r.SourceLine, &r.CriteriaKind,
+			&r.ArtifactTitle, &r.ArtifactKind, &r.ArtifactShortID); err != nil {
 			return nil, err
 		}
 		result = append(result, r)
