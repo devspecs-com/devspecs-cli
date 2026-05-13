@@ -3,14 +3,16 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEvalCommand_TextOutputLabelsRetrieverAndTokenCounter(t *testing.T) {
 	cmd := NewEvalCmd()
-	cmd.SetArgs([]string{filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented")})
+	cmd.SetArgs([]string{filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"), "--no-save"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	if err := cmd.Execute(); err != nil {
@@ -24,6 +26,9 @@ func TestEvalCommand_TextOutputLabelsRetrieverAndTokenCounter(t *testing.T) {
 		"Token counter: approx_chars_div_4",
 		"Pricing profile: none",
 		"Corpus",
+		"Mean must-have recall:",
+		"Context sufficiency pass rate:",
+		"Pareto:",
 		"Case: resume-entitlement-sync",
 	} {
 		if !strings.Contains(out, want) {
@@ -34,7 +39,7 @@ func TestEvalCommand_TextOutputLabelsRetrieverAndTokenCounter(t *testing.T) {
 
 func TestEvalCommand_JSONOutput(t *testing.T) {
 	cmd := NewEvalCmd()
-	cmd.SetArgs([]string{filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"), "--json"})
+	cmd.SetArgs([]string{filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"), "--json", "--no-save"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	if err := cmd.Execute(); err != nil {
@@ -55,5 +60,61 @@ func TestEvalCommand_JSONOutput(t *testing.T) {
 	}
 	if _, ok := got["corpus"].(map[string]any); !ok {
 		t.Fatalf("missing corpus summary: %#v", got["corpus"])
+	}
+	summary, ok := got["summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing summary: %#v", got["summary"])
+	}
+	if _, ok := summary["pareto"].(map[string]any); !ok {
+		t.Fatalf("missing pareto summary: %#v", summary["pareto"])
+	}
+	if _, ok := summary["context_sufficiency_pass_rate"].(float64); !ok {
+		t.Fatalf("missing sufficiency pass rate: %#v", summary["context_sufficiency_pass_rate"])
+	}
+}
+
+func TestEvalCommand_SavesTimestampedResultFile(t *testing.T) {
+	oldNow := nowUTC
+	nowUTC = func() time.Time {
+		return time.Date(2026, 5, 13, 12, 34, 56, 0, time.UTC)
+	}
+	defer func() { nowUTC = oldNow }()
+
+	resultsDir := t.TempDir()
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{
+		filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"),
+		"--results-dir", resultsDir,
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Results file:") {
+		t.Fatalf("missing results file in output:\n%s", out)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(resultsDir, "agentic-saas-fragmented", "20260513T123456Z_agentic-saas-fragmented_seed_smoke_eval_weighted_files_v0.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected one timestamped result file, got %d", len(matches))
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["results_file"] == "" {
+		t.Fatalf("saved result missing results_file: %#v", got["results_file"])
+	}
+	if got["eval_stage"] != "seed_smoke" {
+		t.Fatalf("eval_stage = %#v", got["eval_stage"])
 	}
 }

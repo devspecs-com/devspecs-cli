@@ -24,3 +24,6 @@ Thumbs.db
 devspecs.db
 devspecs.db-journal
 devspecs.db-wal
+.devspecs/eval-runs/
+
+.gocache*/

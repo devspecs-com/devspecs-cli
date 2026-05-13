@@ -49,6 +49,15 @@ func TestRun_AgenticSaaSFixture(t *testing.T) {
 	if result.Summary.MeanArtifactRecall < 0.5 {
 		t.Fatalf("mean recall too low: %.3f", result.Summary.MeanArtifactRecall)
 	}
+	if result.Summary.MeanMustHaveRecall == 0 {
+		t.Fatal("expected must-have recall to be reported")
+	}
+	if result.Summary.ContextSufficiencyCases == 0 {
+		t.Fatal("expected context sufficiency cases")
+	}
+	if result.Summary.Pareto.MeanMustHaveRecall != result.Summary.MeanMustHaveRecall {
+		t.Fatalf("pareto must-have recall mismatch: %#v", result.Summary.Pareto)
+	}
 	if result.Summary.MeanArtifactPrecision >= 0.95 {
 		t.Fatalf("seed eval should expose distractor precision gaps, got %.3f", result.Summary.MeanArtifactPrecision)
 	}
@@ -56,6 +65,9 @@ func TestRun_AgenticSaaSFixture(t *testing.T) {
 		t.Fatalf("expected positive full-planning reduction, got %.3f", result.Summary.MedianTokenReductionVsFullPlanning)
 	}
 
+	sufficiencyPasses := 0
+	sufficiencyFailures := 0
+	weightedCaseSeen := false
 	for _, c := range result.Cases {
 		if c.DevSpecsTokens <= 0 {
 			t.Fatalf("%s: expected devspecs tokens", c.ID)
@@ -66,6 +78,30 @@ func TestRun_AgenticSaaSFixture(t *testing.T) {
 		if len(c.MissedExpectedRelevant) == 0 && c.ArtifactRecall != 1 {
 			t.Fatalf("%s: recall/missed mismatch", c.ID)
 		}
+		if c.MustExpectedCount > 0 && c.MustExpectedCount != c.ExpectedRelevantCount {
+			weightedCaseSeen = true
+		}
+		if c.ContextSufficiency.Configured {
+			if c.ContextSufficiency.Passed {
+				sufficiencyPasses++
+			} else {
+				sufficiencyFailures++
+			}
+		}
+		if len(c.ArtifactReasons) != len(c.ArtifactsIncluded) {
+			t.Fatalf("%s: artifact reason count mismatch", c.ID)
+		}
+		for _, reason := range c.ArtifactReasons {
+			if reason.Path == "" || len(reason.Reasons) == 0 {
+				t.Fatalf("%s: missing artifact reason: %#v", c.ID, reason)
+			}
+		}
+	}
+	if !weightedCaseSeen {
+		t.Fatal("expected at least one case with helpful/background relevance")
+	}
+	if sufficiencyPasses == 0 || sufficiencyFailures == 0 {
+		t.Fatalf("expected sufficiency passes and failures, got pass=%d fail=%d", sufficiencyPasses, sufficiencyFailures)
 	}
 }
 

@@ -76,6 +76,8 @@ type Options struct {
 	JSON             bool
 	MinRecall        *float64
 	MinMeanRecall    *float64
+	MinMustRecall    *float64
+	MinSufficiency   *float64
 	MinReductionFull *float64
 	TokenCounter     TokenCounter
 	Retriever        Retriever
@@ -88,11 +90,55 @@ type CaseFile struct {
 }
 
 type CaseSpec struct {
-	ID               string            `yaml:"id" json:"id"`
-	Query            string            `yaml:"query" json:"query"`
-	ExpectedRelevant []string          `yaml:"expected_relevant" json:"expected_relevant"`
-	ExpectedExcluded []string          `yaml:"expected_excluded" json:"expected_excluded"`
-	ExpectedStatus   map[string]string `yaml:"expected_status" json:"expected_status,omitempty"`
+	ID               string             `yaml:"id" json:"id"`
+	Query            string             `yaml:"query" json:"query"`
+	ExpectedRelevant []ExpectedArtifact `yaml:"expected_relevant" json:"expected_relevant"`
+	ExpectedExcluded []string           `yaml:"expected_excluded" json:"expected_excluded"`
+	ExpectedStatus   map[string]string  `yaml:"expected_status" json:"expected_status,omitempty"`
+	SuccessCriteria  SuccessCriteria    `yaml:"success_criteria" json:"success_criteria,omitempty"`
+}
+
+type ExpectedArtifact struct {
+	Path       string `yaml:"path" json:"path"`
+	Importance string `yaml:"importance" json:"importance"`
+}
+
+func (a *ExpectedArtifact) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		a.Path = filepath.ToSlash(strings.TrimSpace(value.Value))
+		a.Importance = "must"
+		return nil
+	case yaml.MappingNode:
+		var aux struct {
+			Path       string `yaml:"path"`
+			Importance string `yaml:"importance"`
+		}
+		if err := value.Decode(&aux); err != nil {
+			return err
+		}
+		a.Path = filepath.ToSlash(strings.TrimSpace(aux.Path))
+		a.Importance = defaultString(aux.Importance, "must")
+		return nil
+	default:
+		return fmt.Errorf("expected_relevant entry must be a path string or mapping")
+	}
+}
+
+type SuccessCriteria struct {
+	MustContainTerms        []string `yaml:"must_contain_terms" json:"must_contain_terms,omitempty"`
+	MustContainArtifacts    []string `yaml:"must_contain_artifacts" json:"must_contain_artifacts,omitempty"`
+	MustNotContainTerms     []string `yaml:"must_not_contain_terms" json:"must_not_contain_terms,omitempty"`
+	MustNotContainArtifacts []string `yaml:"must_not_contain_artifacts" json:"must_not_contain_artifacts,omitempty"`
+	LegacyMustNotContain    []string `yaml:"must_not_contain" json:"must_not_contain,omitempty"`
+}
+
+func (c SuccessCriteria) Configured() bool {
+	return len(c.MustContainTerms) > 0 ||
+		len(c.MustContainArtifacts) > 0 ||
+		len(c.MustNotContainTerms) > 0 ||
+		len(c.MustNotContainArtifacts) > 0 ||
+		len(c.LegacyMustNotContain) > 0
 }
 
 type BaselineMetrics struct {
@@ -121,26 +167,67 @@ type CaseResult struct {
 	ExpectedRelevantCount         int               `json:"expected_relevant_count"`
 	RelevantRetrieved             int               `json:"relevant_retrieved"`
 	ArtifactRecall                float64           `json:"artifact_recall"`
+	MustExpectedCount             int               `json:"must_expected_count"`
+	MustRelevantRetrieved         int               `json:"must_relevant_retrieved"`
+	MustHaveRecall                float64           `json:"must_have_recall"`
+	HelpfulExpectedCount          int               `json:"helpful_expected_count"`
+	HelpfulRelevantRetrieved      int               `json:"helpful_relevant_retrieved"`
+	HelpfulRecall                 float64           `json:"helpful_recall"`
+	BackgroundExpectedCount       int               `json:"background_expected_count"`
+	BackgroundRelevantRetrieved   int               `json:"background_relevant_retrieved"`
+	BackgroundRecall              float64           `json:"background_recall"`
 	ArtifactsIncluded             []string          `json:"artifacts_included"`
+	ArtifactReasons               []ArtifactReason  `json:"artifact_reasons"`
 	RelevantIncluded              []string          `json:"relevant_included"`
 	IrrelevantIncluded            []string          `json:"irrelevant_included"`
 	ArtifactPrecision             float64           `json:"artifact_precision"`
 	MissedExpectedRelevant        []string          `json:"missed_expected_relevant"`
 	UnexpectedExcludedHits        []string          `json:"unexpected_excluded_hits"`
+	ContextSufficiency            SufficiencyResult `json:"context_sufficiency"`
 	Baselines                     []BaselineMetrics `json:"baselines"`
 	ThresholdFailures             []string          `json:"threshold_failures,omitempty"`
 }
 
 type Summary struct {
-	Cases                                   int     `json:"cases"`
-	MedianTokenReductionVsFullPlanning      float64 `json:"median_token_reduction_vs_full_planning"`
-	MeanTokenReductionVsFullPlanning        float64 `json:"mean_token_reduction_vs_full_planning"`
-	MedianTokenReductionVsQueryFileBaseline float64 `json:"median_token_reduction_vs_query_file_baseline"`
-	MeanArtifactRecall                      float64 `json:"mean_artifact_recall"`
-	MeanArtifactPrecision                   float64 `json:"mean_artifact_precision"`
-	WorstRecallCase                         string  `json:"worst_recall_case"`
-	LargestTokenContextCase                 string  `json:"largest_token_context_case"`
-	FailedThresholdCount                    int     `json:"failed_threshold_count,omitempty"`
+	Cases                                   int           `json:"cases"`
+	MedianTokenReductionVsFullPlanning      float64       `json:"median_token_reduction_vs_full_planning"`
+	MeanTokenReductionVsFullPlanning        float64       `json:"mean_token_reduction_vs_full_planning"`
+	MedianTokenReductionVsQueryFileBaseline float64       `json:"median_token_reduction_vs_query_file_baseline"`
+	MeanArtifactRecall                      float64       `json:"mean_artifact_recall"`
+	MeanMustHaveRecall                      float64       `json:"mean_must_have_recall"`
+	MeanHelpfulRecall                       float64       `json:"mean_helpful_recall"`
+	MeanBackgroundRecall                    float64       `json:"mean_background_recall"`
+	MeanArtifactPrecision                   float64       `json:"mean_artifact_precision"`
+	ContextSufficiencyCases                 int           `json:"context_sufficiency_cases"`
+	ContextSufficiencyPassed                int           `json:"context_sufficiency_passed"`
+	ContextSufficiencyPassRate              float64       `json:"context_sufficiency_pass_rate"`
+	Pareto                                  ParetoSummary `json:"pareto"`
+	WorstRecallCase                         string        `json:"worst_recall_case"`
+	LargestTokenContextCase                 string        `json:"largest_token_context_case"`
+	FailedThresholdCount                    int           `json:"failed_threshold_count,omitempty"`
+}
+
+type ParetoSummary struct {
+	MeanTokenReductionVsFullPlanning float64 `json:"mean_token_reduction_vs_full_planning"`
+	MeanArtifactRecall               float64 `json:"mean_artifact_recall"`
+	MeanMustHaveRecall               float64 `json:"mean_must_have_recall"`
+	MeanArtifactPrecision            float64 `json:"mean_artifact_precision"`
+	ContextSufficiencyPassRate       float64 `json:"context_sufficiency_pass_rate"`
+}
+
+type ArtifactReason struct {
+	Path    string   `json:"path"`
+	Reasons []string `json:"reasons"`
+}
+
+type SufficiencyResult struct {
+	Configured                bool     `json:"configured"`
+	Passed                    bool     `json:"passed"`
+	MissingTerms              []string `json:"missing_terms"`
+	MissingArtifacts          []string `json:"missing_artifacts"`
+	ForbiddenTermsPresent     []string `json:"forbidden_terms_present"`
+	ForbiddenArtifactsPresent []string `json:"forbidden_artifacts_present"`
+	Failures                  []string `json:"failures"`
 }
 
 type Result struct {
@@ -151,6 +238,7 @@ type Result struct {
 	TokenCounter     string           `json:"token_counter"`
 	TokenizerProfile TokenizerProfile `json:"tokenizer_profile"`
 	PricingProfile   PricingProfile   `json:"pricing_profile"`
+	ResultsFile      string           `json:"results_file,omitempty"`
 	Corpus           CorpusSummary    `json:"corpus"`
 	Summary          Summary          `json:"summary"`
 	Cases            []CaseResult     `json:"cases"`
@@ -237,11 +325,12 @@ func Run(fixture string, opts Options) (*Result, error) {
 			FullCandidateCorpusTokens: counter.Count(fullCandidateContext),
 			QueryFileBaselineTokens:   counter.Count(queryContext),
 			ArtifactsIncluded:         rels(devspecsFiles),
+			ArtifactReasons:           explainArtifacts(devspecsFiles, c.Query),
 			Baselines: []BaselineMetrics{
-				baselineMetrics("full_planning_corpus", "planning/intent docs only: openspec/**/*.md, docs/**/*.md, .cursor/**/*.md, .claude/**/*.md, plans/**/*.md, scratch/**/*.md", false, fullPlanning, c.ExpectedRelevant, counter.Count(fullContext)),
-				baselineMetrics("all_markdown", "all *.md files, excluding ignored dirs and cases.yaml", false, allMarkdown, c.ExpectedRelevant, counter.Count(allMarkdownContext)),
-				baselineMetrics("full_candidate_corpus", "planning/intent docs plus non-markdown source/context candidates", true, fullCandidate, c.ExpectedRelevant, counter.Count(fullCandidateContext)),
-				baselineMetrics("query_file_baseline", "deterministic query term matches across all text/code candidates, including source files", true, queryFiles, c.ExpectedRelevant, counter.Count(queryContext)),
+				baselineMetrics("full_planning_corpus", "planning/intent docs only: openspec/**/*.md, docs/**/*.md, .cursor/**/*.md, .claude/**/*.md, plans/**/*.md, scratch/**/*.md", false, fullPlanning, expectedPaths(c.ExpectedRelevant), counter.Count(fullContext)),
+				baselineMetrics("all_markdown", "all *.md files, excluding ignored dirs and cases.yaml", false, allMarkdown, expectedPaths(c.ExpectedRelevant), counter.Count(allMarkdownContext)),
+				baselineMetrics("full_candidate_corpus", "planning/intent docs plus non-markdown source/context candidates", true, fullCandidate, expectedPaths(c.ExpectedRelevant), counter.Count(fullCandidateContext)),
+				baselineMetrics("query_file_baseline", "deterministic query term matches across all text/code candidates, including source files", true, queryFiles, expectedPaths(c.ExpectedRelevant), counter.Count(queryContext)),
 			},
 		}
 		cr.TokenReductionVsFullPlanning = tokenReduction(cr.DevSpecsTokens, cr.FullPlanningTokens)
@@ -249,6 +338,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 		cr.TokenReductionVsFullCandidate = tokenReduction(cr.DevSpecsTokens, cr.FullCandidateCorpusTokens)
 		cr.TokenReductionVsQueryFile = tokenReduction(cr.DevSpecsTokens, cr.QueryFileBaselineTokens)
 		applyArtifactMetrics(&cr, c)
+		cr.ContextSufficiency = evaluateSufficiency(c.SuccessCriteria, devContext, cr.ArtifactsIncluded)
 		applyThresholds(&cr, opts)
 		result.Cases = append(result.Cases, cr)
 	}
@@ -282,7 +372,8 @@ func loadCaseFile(fixtureAbs string) (*CaseFile, error) {
 	if len(cf.Cases) == 0 {
 		return nil, fmt.Errorf("cases.yaml has no cases")
 	}
-	for i, c := range cf.Cases {
+	for i := range cf.Cases {
+		c := &cf.Cases[i]
 		if strings.TrimSpace(c.ID) == "" {
 			return nil, fmt.Errorf("cases[%d]: id is required", i)
 		}
@@ -292,8 +383,54 @@ func loadCaseFile(fixtureAbs string) (*CaseFile, error) {
 		if len(c.ExpectedRelevant) == 0 {
 			return nil, fmt.Errorf("cases[%d]: expected_relevant is required", i)
 		}
+		for j := range c.ExpectedRelevant {
+			c.ExpectedRelevant[j].Path = filepath.ToSlash(strings.TrimSpace(c.ExpectedRelevant[j].Path))
+			if c.ExpectedRelevant[j].Path == "" {
+				return nil, fmt.Errorf("cases[%d].expected_relevant[%d]: path is required", i, j)
+			}
+			importance, err := normalizeImportance(c.ExpectedRelevant[j].Importance)
+			if err != nil {
+				return nil, fmt.Errorf("cases[%d].expected_relevant[%d]: %w", i, j, err)
+			}
+			c.ExpectedRelevant[j].Importance = importance
+		}
+		for j := range c.ExpectedExcluded {
+			c.ExpectedExcluded[j] = filepath.ToSlash(strings.TrimSpace(c.ExpectedExcluded[j]))
+		}
+		normalizeCriteriaPaths(&c.SuccessCriteria)
 	}
 	return &cf, nil
+}
+
+func normalizeImportance(value string) (string, error) {
+	importance := strings.ToLower(strings.TrimSpace(value))
+	if importance == "" {
+		importance = "must"
+	}
+	switch importance {
+	case "must", "helpful", "background":
+		return importance, nil
+	default:
+		return "", fmt.Errorf("importance must be must, helpful, or background, got %q", value)
+	}
+}
+
+func normalizeCriteriaPaths(c *SuccessCriteria) {
+	for i := range c.MustContainArtifacts {
+		c.MustContainArtifacts[i] = filepath.ToSlash(strings.TrimSpace(c.MustContainArtifacts[i]))
+	}
+	for i := range c.MustNotContainArtifacts {
+		c.MustNotContainArtifacts[i] = filepath.ToSlash(strings.TrimSpace(c.MustNotContainArtifacts[i]))
+	}
+	for i := range c.MustContainTerms {
+		c.MustContainTerms[i] = strings.TrimSpace(c.MustContainTerms[i])
+	}
+	for i := range c.MustNotContainTerms {
+		c.MustNotContainTerms[i] = strings.TrimSpace(c.MustNotContainTerms[i])
+	}
+	for i := range c.LegacyMustNotContain {
+		c.LegacyMustNotContain[i] = strings.TrimSpace(c.LegacyMustNotContain[i])
+	}
 }
 
 type File struct {
@@ -740,6 +877,164 @@ func rels(files []File) []string {
 	return out
 }
 
+func expectedPaths(items []ExpectedArtifact) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, filepath.ToSlash(item.Path))
+	}
+	return out
+}
+
+func expectedImportanceSet(items []ExpectedArtifact) map[string]string {
+	out := make(map[string]string, len(items))
+	for _, item := range items {
+		importance, err := normalizeImportance(item.Importance)
+		if err != nil {
+			importance = "must"
+		}
+		out[filepath.ToSlash(item.Path)] = importance
+	}
+	return out
+}
+
+func explainArtifacts(files []File, query string) []ArtifactReason {
+	out := make([]ArtifactReason, 0, len(files))
+	terms := expandedTerms(query)
+	queryLower := strings.ToLower(query)
+	for _, f := range files {
+		out = append(out, ArtifactReason{
+			Path:    f.Rel,
+			Reasons: reasonsForFile(f, terms, queryLower),
+		})
+	}
+	return out
+}
+
+func reasonsForFile(f File, terms map[string]float64, queryLower string) []string {
+	relLower := strings.ToLower(f.Rel)
+	bodyLower := strings.ToLower(f.Content)
+	var reasons []string
+	for term := range terms {
+		if term == "" {
+			continue
+		}
+		switch {
+		case strings.Contains(relLower, term):
+			reasons = append(reasons, "query term match in path: "+term)
+		case strings.Contains(bodyLower, term):
+			if strings.ContainsAny(term, "_.-") {
+				reasons = append(reasons, "identifier/body match: "+term)
+			} else {
+				reasons = append(reasons, "query term match in body: "+term)
+			}
+		}
+		if len(reasons) >= 3 {
+			break
+		}
+	}
+	role := fileRole(f.Rel)
+	switch role {
+	case "adr":
+		if containsAny(queryLower, "adr", "decision", "boundary", "why", "architecture", "rationale", "superseded", "stale") {
+			reasons = append(reasons, "authority/query-intent signal: ADR")
+		}
+	case "prd":
+		if containsAny(queryLower, "prd", "product", "background", "requirements", "user") {
+			reasons = append(reasons, "authority/query-intent signal: PRD")
+		}
+	case "openspec_design", "openspec_tasks", "openspec_spec", "openspec_proposal":
+		if containsAny(queryLower, "design", "context", "implement", "implementation", "agent context", "resume", "continue", "spec") {
+			reasons = append(reasons, "OpenSpec change artifact candidate")
+		}
+	case "plan", "agent_note":
+		if containsAny(queryLower, "plan", "resume", "continue", "notes", "followup", "follow-up", "agent") {
+			reasons = append(reasons, "planning/query-intent signal")
+		}
+	}
+	if strings.Contains(bodyLower, "status: superseded") || strings.Contains(bodyLower, "status: stale") || strings.Contains(relLower, "superseded") {
+		reasons = append(reasons, "lifecycle signal: superseded-or-stale")
+	}
+	if len(reasons) == 0 {
+		reasons = append(reasons, "selected by retriever score")
+	}
+	return uniqueStrings(reasons)
+}
+
+func evaluateSufficiency(criteria SuccessCriteria, context string, included []string) SufficiencyResult {
+	result := SufficiencyResult{
+		Configured:                criteria.Configured(),
+		MissingTerms:              []string{},
+		MissingArtifacts:          []string{},
+		ForbiddenTermsPresent:     []string{},
+		ForbiddenArtifactsPresent: []string{},
+		Failures:                  []string{},
+	}
+	if !result.Configured {
+		return result
+	}
+	contextLower := strings.ToLower(context)
+	includedSet := stringSet(included)
+	for _, term := range criteria.MustContainTerms {
+		term = strings.TrimSpace(term)
+		if term == "" {
+			continue
+		}
+		if !strings.Contains(contextLower, strings.ToLower(term)) {
+			result.MissingTerms = append(result.MissingTerms, term)
+		}
+	}
+	for _, artifact := range criteria.MustContainArtifacts {
+		artifact = filepath.ToSlash(strings.TrimSpace(artifact))
+		if artifact == "" {
+			continue
+		}
+		if !includedSet[artifact] {
+			result.MissingArtifacts = append(result.MissingArtifacts, artifact)
+		}
+	}
+	for _, term := range append([]string{}, criteria.MustNotContainTerms...) {
+		term = strings.TrimSpace(term)
+		if term == "" {
+			continue
+		}
+		if strings.Contains(contextLower, strings.ToLower(term)) {
+			result.ForbiddenTermsPresent = append(result.ForbiddenTermsPresent, term)
+		}
+	}
+	for _, term := range criteria.LegacyMustNotContain {
+		term = strings.TrimSpace(term)
+		if term == "" {
+			continue
+		}
+		if strings.Contains(contextLower, strings.ToLower(term)) {
+			result.ForbiddenTermsPresent = append(result.ForbiddenTermsPresent, term)
+		}
+	}
+	for _, artifact := range criteria.MustNotContainArtifacts {
+		artifact = filepath.ToSlash(strings.TrimSpace(artifact))
+		if artifact == "" {
+			continue
+		}
+		if includedSet[artifact] {
+			result.ForbiddenArtifactsPresent = append(result.ForbiddenArtifactsPresent, artifact)
+		}
+	}
+	if len(result.MissingTerms) > 0 {
+		result.Failures = append(result.Failures, "missing required terms: "+strings.Join(result.MissingTerms, ", "))
+	}
+	if len(result.MissingArtifacts) > 0 {
+		result.Failures = append(result.Failures, "missing required artifacts: "+strings.Join(result.MissingArtifacts, ", "))
+	}
+	if len(result.ForbiddenTermsPresent) > 0 {
+		result.Failures = append(result.Failures, "forbidden terms present: "+strings.Join(result.ForbiddenTermsPresent, ", "))
+	}
+	if len(result.ForbiddenArtifactsPresent) > 0 {
+		result.Failures = append(result.Failures, "forbidden artifacts present: "+strings.Join(result.ForbiddenArtifactsPresent, ", "))
+	}
+	result.Passed = len(result.Failures) == 0
+	return result
+}
+
 func baselineMetrics(name, scope string, includesSource bool, files []File, expected []string, tokens int) BaselineMetrics {
 	rel := rels(files)
 	expectedSet := stringSet(expected)
@@ -762,7 +1057,7 @@ func baselineMetrics(name, scope string, includesSource bool, files []File, expe
 }
 
 func applyArtifactMetrics(cr *CaseResult, spec CaseSpec) {
-	expected := stringSet(spec.ExpectedRelevant)
+	expected := expectedImportanceSet(spec.ExpectedRelevant)
 	excluded := stringSet(spec.ExpectedExcluded)
 	included := stringSet(cr.ArtifactsIncluded)
 
@@ -771,9 +1066,27 @@ func applyArtifactMetrics(cr *CaseResult, spec CaseSpec) {
 	cr.MissedExpectedRelevant = []string{}
 	cr.UnexpectedExcludedHits = []string{}
 	cr.ExpectedRelevantCount = len(spec.ExpectedRelevant)
+	for _, artifact := range spec.ExpectedRelevant {
+		switch artifact.Importance {
+		case "must":
+			cr.MustExpectedCount++
+		case "helpful":
+			cr.HelpfulExpectedCount++
+		case "background":
+			cr.BackgroundExpectedCount++
+		}
+	}
 	for _, rel := range cr.ArtifactsIncluded {
-		if expected[rel] {
+		if importance, ok := expected[rel]; ok {
 			cr.RelevantIncluded = append(cr.RelevantIncluded, rel)
+			switch importance {
+			case "must":
+				cr.MustRelevantRetrieved++
+			case "helpful":
+				cr.HelpfulRelevantRetrieved++
+			case "background":
+				cr.BackgroundRelevantRetrieved++
+			}
 		} else {
 			cr.IrrelevantIncluded = append(cr.IrrelevantIncluded, rel)
 		}
@@ -781,14 +1094,23 @@ func applyArtifactMetrics(cr *CaseResult, spec CaseSpec) {
 			cr.UnexpectedExcludedHits = append(cr.UnexpectedExcludedHits, rel)
 		}
 	}
-	for _, rel := range spec.ExpectedRelevant {
-		if !included[rel] {
-			cr.MissedExpectedRelevant = append(cr.MissedExpectedRelevant, rel)
+	for _, artifact := range spec.ExpectedRelevant {
+		if !included[artifact.Path] {
+			cr.MissedExpectedRelevant = append(cr.MissedExpectedRelevant, artifact.Path)
 		}
 	}
 	cr.RelevantRetrieved = len(cr.RelevantIncluded)
 	if cr.ExpectedRelevantCount > 0 {
 		cr.ArtifactRecall = float64(cr.RelevantRetrieved) / float64(cr.ExpectedRelevantCount)
+	}
+	if cr.MustExpectedCount > 0 {
+		cr.MustHaveRecall = float64(cr.MustRelevantRetrieved) / float64(cr.MustExpectedCount)
+	}
+	if cr.HelpfulExpectedCount > 0 {
+		cr.HelpfulRecall = float64(cr.HelpfulRelevantRetrieved) / float64(cr.HelpfulExpectedCount)
+	}
+	if cr.BackgroundExpectedCount > 0 {
+		cr.BackgroundRecall = float64(cr.BackgroundRelevantRetrieved) / float64(cr.BackgroundExpectedCount)
 	}
 	if len(cr.ArtifactsIncluded) > 0 {
 		cr.ArtifactPrecision = float64(len(cr.RelevantIncluded)) / float64(len(cr.ArtifactsIncluded))
@@ -804,6 +1126,10 @@ func applyThresholds(cr *CaseResult, opts Options) {
 		cr.ThresholdFailures = append(cr.ThresholdFailures,
 			fmt.Sprintf("token reduction vs full planning %.1f%% below minimum %.1f%%", cr.TokenReductionVsFullPlanning*100, *opts.MinReductionFull*100))
 	}
+	if opts.MinMustRecall != nil && cr.MustExpectedCount > 0 && cr.MustHaveRecall < *opts.MinMustRecall {
+		cr.ThresholdFailures = append(cr.ThresholdFailures,
+			fmt.Sprintf("must-have recall %.1f%% below minimum %.1f%%", cr.MustHaveRecall*100, *opts.MinMustRecall*100))
+	}
 }
 
 func summarize(cases []CaseResult) Summary {
@@ -814,13 +1140,34 @@ func summarize(cases []CaseResult) Summary {
 	var reductionsFull, reductionsQueryFile []float64
 	worstRecall := math.MaxFloat64
 	largestTokens := -1
+	mustCases := 0
+	helpfulCases := 0
+	backgroundCases := 0
 	for _, c := range cases {
 		reductionsFull = append(reductionsFull, c.TokenReductionVsFullPlanning)
 		reductionsQueryFile = append(reductionsQueryFile, c.TokenReductionVsQueryFile)
 		s.MeanTokenReductionVsFullPlanning += c.TokenReductionVsFullPlanning
 		s.MeanArtifactRecall += c.ArtifactRecall
+		if c.MustExpectedCount > 0 {
+			s.MeanMustHaveRecall += c.MustHaveRecall
+			mustCases++
+		}
+		if c.HelpfulExpectedCount > 0 {
+			s.MeanHelpfulRecall += c.HelpfulRecall
+			helpfulCases++
+		}
+		if c.BackgroundExpectedCount > 0 {
+			s.MeanBackgroundRecall += c.BackgroundRecall
+			backgroundCases++
+		}
 		s.MeanArtifactPrecision += c.ArtifactPrecision
 		s.FailedThresholdCount += len(c.ThresholdFailures)
+		if c.ContextSufficiency.Configured {
+			s.ContextSufficiencyCases++
+			if c.ContextSufficiency.Passed {
+				s.ContextSufficiencyPassed++
+			}
+		}
 		if c.ArtifactRecall < worstRecall {
 			worstRecall = c.ArtifactRecall
 			s.WorstRecallCase = c.ID
@@ -833,9 +1180,28 @@ func summarize(cases []CaseResult) Summary {
 	n := float64(len(cases))
 	s.MeanTokenReductionVsFullPlanning /= n
 	s.MeanArtifactRecall /= n
+	if mustCases > 0 {
+		s.MeanMustHaveRecall /= float64(mustCases)
+	}
+	if helpfulCases > 0 {
+		s.MeanHelpfulRecall /= float64(helpfulCases)
+	}
+	if backgroundCases > 0 {
+		s.MeanBackgroundRecall /= float64(backgroundCases)
+	}
 	s.MeanArtifactPrecision /= n
+	if s.ContextSufficiencyCases > 0 {
+		s.ContextSufficiencyPassRate = float64(s.ContextSufficiencyPassed) / float64(s.ContextSufficiencyCases)
+	}
 	s.MedianTokenReductionVsFullPlanning = median(reductionsFull)
 	s.MedianTokenReductionVsQueryFileBaseline = median(reductionsQueryFile)
+	s.Pareto = ParetoSummary{
+		MeanTokenReductionVsFullPlanning: s.MeanTokenReductionVsFullPlanning,
+		MeanArtifactRecall:               s.MeanArtifactRecall,
+		MeanMustHaveRecall:               s.MeanMustHaveRecall,
+		MeanArtifactPrecision:            s.MeanArtifactPrecision,
+		ContextSufficiencyPassRate:       s.ContextSufficiencyPassRate,
+	}
 	return s
 }
 
@@ -844,6 +1210,10 @@ func CheckSummaryThresholds(r *Result, opts Options) []string {
 	if opts.MinMeanRecall != nil && r.Summary.MeanArtifactRecall < *opts.MinMeanRecall {
 		failures = append(failures,
 			fmt.Sprintf("mean recall %.1f%% below minimum %.1f%%", r.Summary.MeanArtifactRecall*100, *opts.MinMeanRecall*100))
+	}
+	if opts.MinSufficiency != nil && r.Summary.ContextSufficiencyPassRate < *opts.MinSufficiency {
+		failures = append(failures,
+			fmt.Sprintf("context sufficiency pass rate %.1f%% below minimum %.1f%%", r.Summary.ContextSufficiencyPassRate*100, *opts.MinSufficiency*100))
 	}
 	return failures
 }
@@ -876,6 +1246,19 @@ func stringSet(items []string) map[string]bool {
 	return out
 }
 
+func uniqueStrings(items []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, item := range items {
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	return out
+}
+
 func defaultString(value, fallback string) string {
 	if strings.TrimSpace(value) == "" {
 		return fallback
@@ -897,6 +1280,9 @@ func FormatText(r *Result) string {
 	if r.PricingProfile.Name != "" {
 		fmt.Fprintf(&b, "Pricing profile: %s\n", r.PricingProfile.Name)
 	}
+	if r.ResultsFile != "" {
+		fmt.Fprintf(&b, "Results file: %s\n", r.ResultsFile)
+	}
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "Corpus")
 	fmt.Fprintf(&b, "- Planning artifacts: %d files / %s tokens\n", r.Corpus.PlanningArtifacts.Files, comma(r.Corpus.PlanningArtifacts.Tokens))
@@ -909,7 +1295,19 @@ func FormatText(r *Result) string {
 	fmt.Fprintf(&b, "- Mean token reduction vs full planning corpus: %s\n", pct(r.Summary.MeanTokenReductionVsFullPlanning))
 	fmt.Fprintf(&b, "- Median token reduction vs query file baseline: %s\n", pct(r.Summary.MedianTokenReductionVsQueryFileBaseline))
 	fmt.Fprintf(&b, "- Mean artifact recall: %s\n", pct(r.Summary.MeanArtifactRecall))
+	fmt.Fprintf(&b, "- Mean must-have recall: %s\n", pct(r.Summary.MeanMustHaveRecall))
+	fmt.Fprintf(&b, "- Mean helpful recall: %s\n", pct(r.Summary.MeanHelpfulRecall))
+	fmt.Fprintf(&b, "- Mean background recall: %s\n", pct(r.Summary.MeanBackgroundRecall))
 	fmt.Fprintf(&b, "- Mean artifact precision: %s\n", pct(r.Summary.MeanArtifactPrecision))
+	if r.Summary.ContextSufficiencyCases > 0 {
+		fmt.Fprintf(&b, "- Context sufficiency pass rate: %d/%d = %s\n", r.Summary.ContextSufficiencyPassed, r.Summary.ContextSufficiencyCases, pct(r.Summary.ContextSufficiencyPassRate))
+	}
+	fmt.Fprintf(&b, "- Pareto: reduction %s / recall %s / must-have recall %s / precision %s / sufficiency %s\n",
+		pct(r.Summary.Pareto.MeanTokenReductionVsFullPlanning),
+		pct(r.Summary.Pareto.MeanArtifactRecall),
+		pct(r.Summary.Pareto.MeanMustHaveRecall),
+		pct(r.Summary.Pareto.MeanArtifactPrecision),
+		pct(r.Summary.Pareto.ContextSufficiencyPassRate))
 	if r.Summary.FailedThresholdCount > 0 {
 		fmt.Fprintf(&b, "- Failed thresholds: %d\n", r.Summary.FailedThresholdCount)
 	}
@@ -927,7 +1325,18 @@ func FormatText(r *Result) string {
 		fmt.Fprintf(&b, "- Reduction vs full candidate corpus: %s\n", pct(c.TokenReductionVsFullCandidate))
 		fmt.Fprintf(&b, "- Reduction vs query file baseline: %s\n", pct(c.TokenReductionVsQueryFile))
 		fmt.Fprintf(&b, "- Recall: %d/%d = %s\n", c.RelevantRetrieved, c.ExpectedRelevantCount, pct(c.ArtifactRecall))
+		fmt.Fprintf(&b, "- Must-have recall: %s\n", recallText(c.MustRelevantRetrieved, c.MustExpectedCount, c.MustHaveRecall))
+		fmt.Fprintf(&b, "- Helpful recall: %s\n", recallText(c.HelpfulRelevantRetrieved, c.HelpfulExpectedCount, c.HelpfulRecall))
+		fmt.Fprintf(&b, "- Background recall: %s\n", recallText(c.BackgroundRelevantRetrieved, c.BackgroundExpectedCount, c.BackgroundRecall))
 		fmt.Fprintf(&b, "- Precision: %d/%d = %s\n", len(c.RelevantIncluded), len(c.ArtifactsIncluded), pct(c.ArtifactPrecision))
+		if c.ContextSufficiency.Configured {
+			fmt.Fprintf(&b, "- Sufficiency: %s\n", passFail(c.ContextSufficiency.Passed))
+			if len(c.ContextSufficiency.Failures) > 0 {
+				fmt.Fprintf(&b, "- Sufficiency failures: %s\n", strings.Join(c.ContextSufficiency.Failures, "; "))
+			}
+		} else {
+			fmt.Fprintf(&b, "- Sufficiency: not configured\n")
+		}
 		fmt.Fprintf(&b, "- Artifacts included: %s\n", listOrNone(c.ArtifactsIncluded))
 		fmt.Fprintf(&b, "- Relevant included: %s\n", listOrNone(c.RelevantIncluded))
 		fmt.Fprintf(&b, "- Irrelevant included: %s\n", listOrNone(c.IrrelevantIncluded))
@@ -947,6 +1356,20 @@ func FormatJSON(r *Result) ([]byte, error) {
 
 func pct(v float64) string {
 	return fmt.Sprintf("%.1f%%", v*100)
+}
+
+func recallText(retrieved, total int, recall float64) string {
+	if total == 0 {
+		return "n/a"
+	}
+	return fmt.Sprintf("%d/%d = %s", retrieved, total, pct(recall))
+}
+
+func passFail(passed bool) string {
+	if passed {
+		return "pass"
+	}
+	return "fail"
 }
 
 func comma(n int) string {
