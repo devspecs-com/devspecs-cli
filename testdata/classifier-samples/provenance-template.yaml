@@ -1,0 +1,14 @@
+version: 1
+samples:
+  - id: example-adr-nygard
+    source_url: https://example.com/org/repo/blob/COMMIT/docs/adr/0001-example.md
+    repository: org/repo
+    commit_sha: COMMIT_SHA
+    license: LICENSE_ID
+    original_path: docs/adr/0001-example.md
+    format_label: adr.nygard
+    can_commit_file: false
+    reduction_notes: >
+      If redistribution is unclear, keep the original file outside the repo and
+      commit only a reduced synthetic derivative that preserves classifier
+      features without copying protected expression.
