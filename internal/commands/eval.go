@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/devspecs-com/devspecs-cli/internal/classify"
 	"github.com/devspecs-com/devspecs-cli/internal/evalharness"
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
@@ -36,6 +37,7 @@ func NewEvalCmd() *cobra.Command {
 		indexed          bool
 		filesystem       bool
 		commandUnderTest string
+		classifierEval   bool
 	)
 
 	cmd := &cobra.Command{
@@ -43,6 +45,33 @@ func NewEvalCmd() *cobra.Command {
 		Short: "Run deterministic context retrieval evals for a fixture repo",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if classifierEval {
+				if strings.TrimSpace(commandUnderTest) != "" {
+					return fmt.Errorf("--classifier cannot be combined with --command")
+				}
+				result, err := classify.RunEval(args[0], classify.EvalOptions{})
+				if err != nil {
+					return err
+				}
+				if !noSave {
+					resultsFile, err := saveClassifierEvalResult(result, resultsDir, nowUTC())
+					if err != nil {
+						return err
+					}
+					result.ResultsFile = filepath.ToSlash(resultsFile)
+				}
+				if asJSON {
+					data, err := classify.FormatEvalJSON(result)
+					if err != nil {
+						return err
+					}
+					fmt.Fprintln(cmd.OutOrStdout(), string(data))
+				} else {
+					fmt.Fprint(cmd.OutOrStdout(), classify.FormatEvalText(result))
+				}
+				return nil
+			}
+
 			opts := evalharness.Options{JSON: asJSON}
 			if filesystem {
 				opts.CorpusSource = evalharness.CorpusSourceFilesystemFixture
@@ -112,6 +141,7 @@ func NewEvalCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&indexed, "indexed", false, "Use indexed eval corpus (default; retained for explicit CI scripts)")
 	cmd.Flags().BoolVar(&filesystem, "filesystem", false, "Use raw fixture filesystem corpus instead of the indexed eval corpus")
+	cmd.Flags().BoolVar(&classifierEval, "classifier", false, "Run deterministic classifier evals from classifier_cases.yaml")
 	cmd.Flags().StringVar(&commandUnderTest, "command", "", "Run eval through a live command path: find or resume-query")
 	cmd.Flags().StringVar(&resultsDir, "results-dir", defaultEvalResultsDir, "Directory for timestamped JSON eval result files")
 	cmd.Flags().BoolVar(&noSave, "no-save", false, "Do not write a timestamped JSON eval result file")
@@ -121,6 +151,43 @@ func NewEvalCmd() *cobra.Command {
 	cmd.Flags().Float64Var(&minSufficiency, "min-sufficiency-rate", 0, "Minimum aggregate context sufficiency pass rate, as 0.0-1.0")
 	cmd.Flags().Float64Var(&minReductionFull, "min-reduction-full", 0, "Minimum token reduction vs full planning corpus per case, as 0.0-1.0")
 	return cmd
+}
+
+func saveClassifierEvalResult(result *classify.EvalResult, resultsDir string, now time.Time) (string, error) {
+	if strings.TrimSpace(resultsDir) == "" {
+		resultsDir = defaultEvalResultsDir
+	}
+	fixtureSlug := safeFilenamePart(filepath.Base(filepath.Clean(result.Fixture)))
+	if fixtureSlug == "" || fixtureSlug == "." {
+		fixtureSlug = "fixture"
+	}
+	runDir := filepath.Join(resultsDir, fixtureSlug)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		return "", fmt.Errorf("create classifier eval results dir: %w", err)
+	}
+	timestamp := now.UTC().Format("20060102T150405Z")
+	nameParts := []string{
+		timestamp,
+		fixtureSlug,
+		safeFilenamePart(result.EvalStage),
+		"classifier",
+		safeFilenamePart(result.Evaluator),
+		safeFilenamePart(result.ClassifierProfile),
+	}
+	name := strings.Join(nameParts, "_") + ".json"
+	path := filepath.Join(runDir, name)
+	for i := 2; fileExists(path); i++ {
+		path = filepath.Join(runDir, strings.TrimSuffix(name, ".json")+fmt.Sprintf("_%02d.json", i))
+	}
+	result.ResultsFile = filepath.ToSlash(path)
+	data, err := classify.FormatEvalJSON(result)
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return "", fmt.Errorf("write classifier eval results file: %w", err)
+	}
+	return path, nil
 }
 
 func saveEvalResult(result *evalharness.Result, resultsDir string, now time.Time) (string, error) {

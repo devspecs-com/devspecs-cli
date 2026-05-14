@@ -81,6 +81,60 @@ func TestEvalCommand_JSONOutput(t *testing.T) {
 	}
 }
 
+func TestEvalCommand_ClassifierTextOutput(t *testing.T) {
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"), "--classifier", "--no-save"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"DevSpecs Classifier Eval:",
+		"Eval stage: seed_smoke",
+		"Evaluator: declarative_document_models_v0",
+		"Classifier profile: builtin_intent_docs_v1",
+		"Model accuracy:",
+		"Generic fallback rate:",
+		"Case: adr-webhook-idempotency-nygard",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in output:\n%s", want, out)
+		}
+	}
+}
+
+func TestEvalCommand_ClassifierJSONOutput(t *testing.T) {
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"), "--classifier", "--json", "--no-save"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["evaluator"] != "declarative_document_models_v0" {
+		t.Fatalf("evaluator = %#v", got["evaluator"])
+	}
+	if got["classifier_profile"] != "builtin_intent_docs_v1" {
+		t.Fatalf("classifier_profile = %#v", got["classifier_profile"])
+	}
+	if got["eval_stage"] != "seed_smoke" {
+		t.Fatalf("eval_stage = %#v", got["eval_stage"])
+	}
+	summary, ok := got["summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing summary: %#v", got["summary"])
+	}
+	if _, ok := summary["accuracy"].(float64); !ok {
+		t.Fatalf("missing accuracy: %#v", summary["accuracy"])
+	}
+}
+
 func TestEvalCommand_FilesystemCorpusDiagnosticFlag(t *testing.T) {
 	cmd := NewEvalCmd()
 	cmd.SetArgs([]string{filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"), "--filesystem", "--json", "--no-save"})
@@ -136,6 +190,53 @@ func TestEvalCommand_LiveResumeQueryCommand(t *testing.T) {
 	first := cases[0].(map[string]any)
 	if _, ok := first["artifact_reasons"].([]any); !ok {
 		t.Fatalf("missing artifact reasons: %#v", first["artifact_reasons"])
+	}
+}
+
+func TestEvalCommand_ClassifierSavesTimestampedResultFile(t *testing.T) {
+	oldNow := nowUTC
+	nowUTC = func() time.Time {
+		return time.Date(2026, 5, 13, 12, 34, 56, 0, time.UTC)
+	}
+	defer func() { nowUTC = oldNow }()
+
+	resultsDir := t.TempDir()
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{
+		filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"),
+		"--classifier",
+		"--results-dir", resultsDir,
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Results file:") {
+		t.Fatalf("missing results file in output:\n%s", out)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(resultsDir, "agentic-saas-fragmented", "20260513T123456Z_agentic-saas-fragmented_seed_smoke_classifier_declarative_document_models_v0_builtin_intent_docs_v1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected one timestamped classifier result file, got %d", len(matches))
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["results_file"] == "" {
+		t.Fatalf("saved result missing results_file: %#v", got["results_file"])
+	}
+	if got["evaluator"] != "declarative_document_models_v0" {
+		t.Fatalf("evaluator = %#v", got["evaluator"])
 	}
 }
 

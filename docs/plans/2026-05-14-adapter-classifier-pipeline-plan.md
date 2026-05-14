@@ -855,7 +855,38 @@ Result:
 - Added local model evaluation that inherits a base model and adds declarative local evidence.
 - Kept scan, DB, CLI, and retrieval behavior unchanged.
 
-### Phase 3: Scan Pipeline Integration
+### Phase 3: Classifier Eval
+
+Status: implemented
+
+Deliverables:
+
+- focused classifier eval mode
+- model accuracy by document model
+- subformat/family accuracy where expected labels exist
+- false positives and false negatives by model
+- ambiguity rate
+- generic fallback rate
+- reject rate
+- top confusion pairs
+- reason coverage
+- timestamped classifier eval JSON
+
+Success criteria:
+
+- [x] classifier eval runs without scan, DB, retrieval, network, or model calls
+- [x] classifier eval labels the evaluator and classifier profile
+- [x] classifier eval reports confusion, fallback, ambiguity, rejection, and reason metrics
+- [x] classifier eval saves timestamped JSON by default through `ds eval --classifier`
+
+Result:
+
+- Added `ds eval <fixture> --classifier`.
+- Added `internal/classify.RunEval` with text and JSON formatters.
+- Added per-case classifier outcomes, per-model precision/recall, subformat/family accuracy, generic fallback rate, ambiguity rate, reject rate, reason coverage, and child-candidate coverage.
+- The current seed smoke classifier goldens are intentionally small and currently pass 6/6; this validates the harness, not a locked benchmark.
+
+### Phase 4: Scan Pipeline Integration
 
 Status: planned
 
@@ -872,7 +903,7 @@ Success criteria:
 - current configured-path behavior still works
 - indexed eval does not regress catastrophically
 
-### Phase 4: Retrieval Consumption
+### Phase 5: Retrieval Consumption
 
 Status: planned
 
@@ -888,7 +919,7 @@ Success criteria:
 - sufficiency improves in at least one implementation-context case
 - no new public CLI command is required
 
-### Phase 5: Schema Hardening
+### Phase 6: Schema Hardening
 
 Status: deferred
 

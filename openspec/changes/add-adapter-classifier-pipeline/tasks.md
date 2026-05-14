@@ -14,6 +14,7 @@
 - Phase 0 is intentionally contract-only: no scan, DB, retrieval, or command behavior changes.
 - Phase 1 is implemented in `internal/classify` as pure feature extraction only.
 - Phase 2 is implemented as a generic declarative document-model evaluator, not as hard-coded Go classifiers per document type.
+- Phase 3 is implemented as a focused classifier eval mode under `ds eval --classifier`.
 - Initial classifier goldens live at `fixtures/agentic-saas-fragmented/classifier_cases.yaml`.
 - Real sample intake template lives at `testdata/classifier-samples/provenance-template.yaml`.
 
@@ -68,16 +69,16 @@
 
 ## Phase 3: Classifier Eval
 
-- [ ] Report discovery coverage.
-- [ ] Report classifier accuracy by model.
-- [ ] Report classifier accuracy by subformat/family where expected labels exist.
-- [ ] Report false positives and false negatives.
-- [ ] Report ambiguity rate.
-- [ ] Report generic fallback rate.
-- [ ] Report reject rate.
-- [ ] Report top confusion pairs.
-- [ ] Report reason coverage.
-- [ ] Persist timestamped classifier eval JSON.
+- [x] Report discovery coverage.
+- [x] Report classifier accuracy by model.
+- [x] Report classifier accuracy by subformat/family where expected labels exist.
+- [x] Report false positives and false negatives.
+- [x] Report ambiguity rate.
+- [x] Report generic fallback rate.
+- [x] Report reject rate.
+- [x] Report top confusion pairs.
+- [x] Report reason coverage.
+- [x] Persist timestamped classifier eval JSON.
 
 ## Phase 4: Scan Integration
 

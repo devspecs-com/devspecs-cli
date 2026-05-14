@@ -131,3 +131,10 @@ DevSpecs MUST measure classifier quality separately from retrieval quality.
 - **WHEN** classifier eval runs repeatedly
 - **THEN** results are deterministic
 - **AND** no network or model calls are required
+
+#### Scenario: classifier eval writes timestamped JSON
+
+- **GIVEN** classifier eval runs from `ds eval --classifier`
+- **WHEN** result saving is enabled
+- **THEN** DevSpecs writes a timestamped classifier eval JSON result file
+- **AND** the JSON includes eval stage, evaluator, classifier profile, summary metrics, model metrics, confusion pairs, and per-case outcomes
