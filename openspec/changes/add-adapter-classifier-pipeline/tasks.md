@@ -12,6 +12,7 @@
 
 - Phase 0 is implemented as `internal/classify`.
 - Phase 0 is intentionally contract-only: no scan, DB, retrieval, or command behavior changes.
+- Phase 1 is implemented in `internal/classify` as pure feature extraction only.
 - Initial classifier goldens live at `fixtures/agentic-saas-fragmented/classifier_cases.yaml`.
 - Real sample intake template lives at `testdata/classifier-samples/provenance-template.yaml`.
 
@@ -33,17 +34,17 @@
 
 ## Phase 1: Universal Feature Extraction
 
-- [ ] Extract path tokens and filename slugs.
-- [ ] Extract dated filename tokens.
-- [ ] Extract frontmatter.
-- [ ] Extract title and markdown headings.
-- [ ] Extract markdown section spans.
-- [ ] Extract checklist density.
-- [ ] Extract status/lifecycle phrases.
-- [ ] Extract identifier-shaped terms.
-- [ ] Extract path-shaped references.
-- [ ] Extract generated/changelog/stale markers.
-- [ ] Add deterministic unit tests for feature extraction.
+- [x] Extract path tokens and filename slugs.
+- [x] Extract dated filename tokens.
+- [x] Extract frontmatter.
+- [x] Extract title and markdown headings.
+- [x] Extract markdown section spans.
+- [x] Extract checklist density.
+- [x] Extract status/lifecycle phrases.
+- [x] Extract identifier-shaped terms.
+- [x] Extract path-shaped references.
+- [x] Extract generated/changelog/stale markers.
+- [x] Add deterministic unit tests for feature extraction.
 
 ## Phase 2: Classifiers
 

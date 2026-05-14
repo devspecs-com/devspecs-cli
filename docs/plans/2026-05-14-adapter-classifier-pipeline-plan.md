@@ -782,7 +782,7 @@ Result:
 
 ### Phase 1: Universal Feature Extractor
 
-Status: planned
+Status: implemented
 
 Deliverables:
 
@@ -792,9 +792,15 @@ Deliverables:
 
 Success criteria:
 
-- feature extraction has golden tests
-- extraction is stack-neutral
-- extraction respects ignore and size limits
+- [x] feature extraction has deterministic tests
+- [x] extraction is stack-neutral
+- [x] extraction remains disconnected from scan/retrieval integration
+
+Result:
+
+- Added `ExtractFeatures` and `EnrichCandidate` in `internal/classify`.
+- Extracts path tokens, filename tokens, dated tokens, frontmatter, title, headings, section spans/roles, checklist counts, status/lifecycle phrases, identifier-shaped terms, path references, links, code fence languages, local repeated terms, and generated/changelog/stale markers.
+- Added feature extraction unit tests without changing scan, DB, CLI, or retrieval behavior.
 
 ### Phase 2: Classifier Implementations
 

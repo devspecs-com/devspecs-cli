@@ -1,7 +1,7 @@
 // Package classify defines deterministic document-classification contracts.
 //
-// Phase 0 intentionally contains only contracts, defaults, and golden-case
-// loading. It does not classify, scan, index, or affect retrieval behavior yet.
+// The package intentionally stays pure: it does not scan, index, or affect
+// retrieval behavior until later integration phases opt into these contracts.
 package classify
 
 import "fmt"
@@ -50,6 +50,7 @@ type Features struct {
 type Heading struct {
 	Level int    `json:"level" yaml:"level"`
 	Text  string `json:"text" yaml:"text"`
+	Line  int    `json:"line,omitempty" yaml:"line,omitempty"`
 }
 
 type Section struct {
