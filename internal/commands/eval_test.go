@@ -22,6 +22,8 @@ func TestEvalCommand_TextOutputLabelsRetrieverAndTokenCounter(t *testing.T) {
 	for _, want := range []string{
 		"Fixture version: agentic-saas-fragmented-v1",
 		"Eval stage: seed_smoke",
+		"Corpus source: sqlite_index",
+		"Product path: indexed_harness",
 		"Retriever: eval_weighted_files_v0",
 		"Token counter: approx_chars_div_4",
 		"Pricing profile: none",
@@ -58,6 +60,12 @@ func TestEvalCommand_JSONOutput(t *testing.T) {
 	if got["eval_stage"] != "seed_smoke" {
 		t.Fatalf("eval_stage = %#v", got["eval_stage"])
 	}
+	if got["corpus_source"] != "sqlite_index" {
+		t.Fatalf("corpus_source = %#v", got["corpus_source"])
+	}
+	if got["product_path"] != "indexed_harness" {
+		t.Fatalf("product_path = %#v", got["product_path"])
+	}
 	if _, ok := got["corpus"].(map[string]any); !ok {
 		t.Fatalf("missing corpus summary: %#v", got["corpus"])
 	}
@@ -70,6 +78,31 @@ func TestEvalCommand_JSONOutput(t *testing.T) {
 	}
 	if _, ok := summary["context_sufficiency_pass_rate"].(float64); !ok {
 		t.Fatalf("missing sufficiency pass rate: %#v", summary["context_sufficiency_pass_rate"])
+	}
+}
+
+func TestEvalCommand_FilesystemCorpusDiagnosticFlag(t *testing.T) {
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"), "--filesystem", "--json", "--no-save"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["corpus_source"] != "filesystem_fixture" {
+		t.Fatalf("corpus_source = %#v", got["corpus_source"])
+	}
+	if got["product_path"] != "lab_only" {
+		t.Fatalf("product_path = %#v", got["product_path"])
+	}
+	corpus := got["corpus"].(map[string]any)
+	planning := corpus["planning_artifacts"].(map[string]any)
+	if planning["files"].(float64) == 0 {
+		t.Fatalf("filesystem eval should load planning artifacts: %#v", planning)
 	}
 }
 

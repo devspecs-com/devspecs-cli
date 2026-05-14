@@ -1,6 +1,7 @@
 package evalharness
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -10,7 +11,22 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/devspecs-com/devspecs-cli/internal/adapters"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/adr"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
+	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/devspecs-com/devspecs-cli/internal/idgen"
+	"github.com/devspecs-com/devspecs-cli/internal/scan"
+	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"gopkg.in/yaml.v3"
+)
+
+const (
+	CorpusSourceFilesystemFixture = "filesystem_fixture"
+	CorpusSourceSQLiteIndex       = "sqlite_index"
+	ProductPathLabOnly            = "lab_only"
+	ProductPathIndexedHarness     = "indexed_harness"
 )
 
 type TokenCounter interface {
@@ -79,6 +95,7 @@ type Options struct {
 	MinMustRecall    *float64
 	MinSufficiency   *float64
 	MinReductionFull *float64
+	CorpusSource     string
 	TokenCounter     TokenCounter
 	Retriever        Retriever
 }
@@ -234,6 +251,8 @@ type Result struct {
 	Fixture          string           `json:"fixture"`
 	FixtureVersion   string           `json:"fixture_version"`
 	EvalStage        string           `json:"eval_stage"`
+	CorpusSource     string           `json:"corpus_source"`
+	ProductPath      string           `json:"product_path"`
 	Retriever        string           `json:"retriever"`
 	TokenCounter     string           `json:"token_counter"`
 	TokenizerProfile TokenizerProfile `json:"tokenizer_profile"`
@@ -277,7 +296,8 @@ func Run(fixture string, opts Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	files, err := collectFiles(fixtureAbs)
+	corpusSource := defaultString(opts.CorpusSource, CorpusSourceSQLiteIndex)
+	files, err := collectCorpusFiles(fixtureAbs, corpusSource)
 	if err != nil {
 		return nil, err
 	}
@@ -298,6 +318,8 @@ func Run(fixture string, opts Options) (*Result, error) {
 		Fixture:          filepath.ToSlash(fixture),
 		FixtureVersion:   defaultString(caseFile.FixtureVersion, "agentic-saas-fragmented-v0"),
 		EvalStage:        defaultString(caseFile.EvalStage, "seed_smoke"),
+		CorpusSource:     corpusSource,
+		ProductPath:      productPathForCorpusSource(corpusSource),
 		Retriever:        retriever.Name(),
 		TokenCounter:     counter.Name(),
 		TokenizerProfile: tokenizerProfile,
@@ -438,6 +460,26 @@ type File struct {
 	Content string
 }
 
+func collectCorpusFiles(root, corpusSource string) ([]File, error) {
+	switch corpusSource {
+	case "", CorpusSourceFilesystemFixture:
+		return collectFiles(root)
+	case CorpusSourceSQLiteIndex:
+		return collectIndexedFiles(root)
+	default:
+		return nil, fmt.Errorf("unknown eval corpus source %q", corpusSource)
+	}
+}
+
+func productPathForCorpusSource(corpusSource string) string {
+	switch corpusSource {
+	case CorpusSourceSQLiteIndex:
+		return ProductPathIndexedHarness
+	default:
+		return ProductPathLabOnly
+	}
+}
+
 func collectFiles(root string) ([]File, error) {
 	var files []File
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -473,6 +515,109 @@ func collectFiles(root string) ([]File, error) {
 	})
 	sort.Slice(files, func(i, j int) bool { return files[i].Rel < files[j].Rel })
 	return files, err
+}
+
+func collectIndexedFiles(root string) ([]File, error) {
+	tempDir, err := os.MkdirTemp("", "devspecs-eval-index-*")
+	if err != nil {
+		return nil, fmt.Errorf("create indexed eval temp dir: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	db, err := store.Open(filepath.Join(tempDir, "devspecs.db"))
+	if err != nil {
+		return nil, fmt.Errorf("open indexed eval database: %w", err)
+	}
+	defer db.Close()
+
+	cfg, err := config.LoadRepoConfig(root)
+	if err != nil {
+		return nil, fmt.Errorf("load fixture repo config: %w", err)
+	}
+	scanner := scan.New(db, idgen.NewFactory(), []adapters.Adapter{
+		&openspec.Adapter{},
+		&adr.Adapter{},
+		&markdown.Adapter{},
+	})
+	if _, err := scanner.Run(context.Background(), root, cfg); err != nil {
+		return nil, fmt.Errorf("scan fixture into indexed eval database: %w", err)
+	}
+
+	artifacts, err := db.ListArtifacts(store.FilterParams{RepoRoot: root})
+	if err != nil {
+		return nil, fmt.Errorf("list indexed eval artifacts: %w", err)
+	}
+	seen := map[string]bool{}
+	var files []File
+	for _, art := range artifacts {
+		sources, _ := db.GetSourcesForArtifact(art.ID)
+		rel := indexedArtifactRel(art, sources)
+		if rel == "" || seen[rel] {
+			continue
+		}
+		seen[rel] = true
+
+		var body string
+		if art.CurrentRevID != "" {
+			if rev, err := db.GetRevision(art.CurrentRevID); err == nil && rev != nil {
+				body = rev.Body
+			}
+		}
+		todos, _ := db.GetTodosForArtifact(art.ID)
+		files = append(files, File{
+			Rel:     filepath.ToSlash(rel),
+			Content: renderIndexedArtifactContent(art, sources, todos, body),
+		})
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Rel < files[j].Rel })
+	return files, nil
+}
+
+func indexedArtifactRel(art store.ArtifactRow, sources []store.SourceRow) string {
+	for _, src := range sources {
+		if strings.TrimSpace(src.Path) != "" {
+			return filepath.ToSlash(src.Path)
+		}
+	}
+	if art.Title != "" {
+		return strings.TrimSpace(art.Title)
+	}
+	return art.ID
+}
+
+func renderIndexedArtifactContent(art store.ArtifactRow, sources []store.SourceRow, todos []store.TodoRow, body string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Title: %s\n", art.Title)
+	fmt.Fprintf(&b, "Kind: %s\n", art.Kind)
+	if art.Subtype != "" {
+		fmt.Fprintf(&b, "Subtype: %s\n", art.Subtype)
+	}
+	fmt.Fprintf(&b, "Status: %s\n", art.Status)
+	for _, src := range sources {
+		if src.Path != "" {
+			fmt.Fprintf(&b, "Source: %s\n", filepath.ToSlash(src.Path))
+		}
+		if src.FormatProfile != "" {
+			fmt.Fprintf(&b, "Format profile: %s\n", src.FormatProfile)
+		}
+		if src.LayoutGroup != "" {
+			fmt.Fprintf(&b, "Layout group: %s\n", src.LayoutGroup)
+		}
+	}
+	if len(todos) > 0 {
+		fmt.Fprintln(&b, "\nTasks:")
+		for _, td := range todos {
+			marker := "[ ]"
+			if td.Done {
+				marker = "[x]"
+			}
+			fmt.Fprintf(&b, "- %s %s\n", marker, td.Text)
+		}
+	}
+	if strings.TrimSpace(body) != "" {
+		fmt.Fprintf(&b, "\n%s", strings.TrimRight(body, "\r\n"))
+	}
+	return b.String()
 }
 
 func shouldIgnore(rel string, isDir bool) bool {
@@ -1272,6 +1417,8 @@ func FormatText(r *Result) string {
 	fmt.Fprintf(&b, "Cases: %d\n", r.Summary.Cases)
 	fmt.Fprintf(&b, "Fixture version: %s\n", r.FixtureVersion)
 	fmt.Fprintf(&b, "Eval stage: %s\n", r.EvalStage)
+	fmt.Fprintf(&b, "Corpus source: %s\n", r.CorpusSource)
+	fmt.Fprintf(&b, "Product path: %s\n", r.ProductPath)
 	fmt.Fprintf(&b, "Retriever: %s\n", r.Retriever)
 	fmt.Fprintf(&b, "Token counter: %s\n", r.TokenCounter)
 	if r.TokenizerProfile.Approximation != "" {

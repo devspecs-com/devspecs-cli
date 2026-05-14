@@ -2,7 +2,9 @@
 
 ## Current State
 
-The seed eval is deterministic and filesystem-based. It measures context retrieval/compression, not answer quality. The current retriever compresses aggressively but misses important artifacts and includes broad distractors.
+The seed eval is deterministic and local-only. By default it scans the fixture into an isolated SQLite index, then measures context retrieval/compression over indexed artifacts rather than agent answer quality. The filesystem fixture path remains as a diagnostic mode for separating scan/index coverage gaps from retriever-scoring gaps.
+
+The current indexed baseline shows that scan/index coverage and retrieval quality are both weak. The older filesystem diagnostic compresses aggressively but still misses important artifacts and includes broad distractors, so it should not be used as the product control.
 
 The useful next step is to improve deterministic signals before adding LLM judging.
 
@@ -118,4 +120,3 @@ The highest risk is overfitting the seed fixture. Mitigation:
 - Keep visible misses and noisy inclusions in output.
 - Prefer trial-report-derived fixes.
 - Add held-out or locked fixtures before marketing claims.
-

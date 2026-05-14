@@ -29,6 +29,8 @@ func NewEvalCmd() *cobra.Command {
 		minReductionFull float64
 		resultsDir       string
 		noSave           bool
+		indexed          bool
+		filesystem       bool
 	)
 
 	cmd := &cobra.Command{
@@ -37,6 +39,11 @@ func NewEvalCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts := evalharness.Options{JSON: asJSON}
+			if filesystem {
+				opts.CorpusSource = evalharness.CorpusSourceFilesystemFixture
+			} else if indexed {
+				opts.CorpusSource = evalharness.CorpusSourceSQLiteIndex
+			}
 			if cmd.Flags().Changed("min-recall") {
 				opts.MinRecall = &minRecall
 			}
@@ -85,6 +92,8 @@ func NewEvalCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
+	cmd.Flags().BoolVar(&indexed, "indexed", false, "Use indexed eval corpus (default; retained for explicit CI scripts)")
+	cmd.Flags().BoolVar(&filesystem, "filesystem", false, "Use raw fixture filesystem corpus instead of the indexed eval corpus")
 	cmd.Flags().StringVar(&resultsDir, "results-dir", defaultEvalResultsDir, "Directory for timestamped JSON eval result files")
 	cmd.Flags().BoolVar(&noSave, "no-save", false, "Do not write a timestamped JSON eval result file")
 	cmd.Flags().Float64Var(&minRecall, "min-recall", 0, "Minimum artifact recall per case, as 0.0-1.0")

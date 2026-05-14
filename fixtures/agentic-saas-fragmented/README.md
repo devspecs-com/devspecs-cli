@@ -18,4 +18,6 @@ Important identifiers appear across planning and source files:
 
 ## Eval Caveat
 
-This seed eval is deterministic and filesystem-based. It measures context retrieval/compression, not agent answer quality. The seed fixture validates the harness; benchmark claims should use locked fixtures with distractors and no case-specific tuning.
+This seed eval is deterministic and local-only. By default, `ds eval` scans the fixture into an isolated SQLite index and measures retrieval/compression over indexed artifacts. `--filesystem` is available as a diagnostic mode for separating scan/index coverage gaps from retrieval-scoring gaps.
+
+It measures context retrieval/compression, not agent answer quality. The seed fixture validates the harness; benchmark claims should use locked fixtures with distractors, indexed or live-command eval paths, and no case-specific tuning.

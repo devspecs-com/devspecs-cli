@@ -9,18 +9,30 @@ tags: [eval, retrieval, context, quality]
 
 ## Context
 
-The `agentic-saas-fragmented-v1` seed eval now gives us an honest starting point:
+The `agentic-saas-fragmented-v1` seed eval now gives us an honest indexed starting point:
 
 - Eval stage: `seed_smoke`
+- Corpus source: `sqlite_index`
+- Product path: `indexed_harness`
 - Retriever: `eval_weighted_files_v0`
 - Token counter: `approx_chars_div_4`
-- Planning corpus: 51 files / ~20,060 tokens
-- Full candidate corpus: 59 files / ~21,080 tokens
+- Planning corpus: 26 indexed files / ~14,318 tokens
+- Source/context candidates: 0 indexed files
+- Mean token reduction vs full planning corpus: ~63.8%
+- Mean artifact recall: ~27.3%
+- Mean must-have recall: ~26.7%
+- Mean artifact precision: ~14.3%
+- Context sufficiency pass rate: 0.0%
+
+Diagnostic filesystem-only eval still scores higher, but that path is no longer the product-adjacent baseline:
+
 - Mean token reduction vs full planning corpus: ~80.3%
 - Mean artifact recall: ~68.8%
+- Mean must-have recall: ~81.7%
 - Mean artifact precision: ~36.6%
+- Context sufficiency pass rate: 40.0%
 
-Interpretation: DevSpecs can compress aggressively, but retrieval quality is not yet strong enough for agent handoff claims. The next product goal is to improve recall and precision while preserving most of the token reduction.
+Interpretation: the indexed path exposes scan/index/schema/adapter coverage as a core retrieval-quality problem. The next product goal is not just better ranking; it is better indexed candidate coverage plus shared retrieval logic that can power a real query-driven CLI workflow.
 
 This plan is based on the seed eval plus the May 12 trial report from `pdpp` and `unity-surfaces`.
 
@@ -35,10 +47,28 @@ Target direction for v0:
 - >=70% token reduction vs full planning corpus
 - >=85% artifact recall
 - >=60% artifact precision
-- >=90% must-have artifact recall once importance labels exist
+- >=90% must-have artifact recall
+- >=70% context sufficiency pass rate
 - Clear missed and noisy artifacts for every case
 
 Do not optimize token reduction alone. Empty or overly tiny context is not useful.
+
+## Current Implementation Priority
+
+Implement the eval-to-CLI bridge before additional heuristic tuning.
+
+Priority order:
+
+1. Keep indexed eval as the default measurement path.
+2. Extract shared retrieval candidate/retriever logic out of `internal/evalharness`.
+3. Wire shared retrieval into existing CLI workflows first, starting with `ds find` and query-focused `ds resume <query>`.
+4. Add live-command eval for the existing command path.
+5. Decide whether a public `ds pack <query>` command is still needed after the existing workflows are measured.
+6. Then iterate on retrieval improvements from the test index.
+
+Reason: schema, scan discovery, adapters, indexed metadata, and source/content availability materially affect eval results. Optimizing a filesystem-only retriever would hide the product gap.
+
+`pack` remains a useful internal concept: retrieve, rank, and assemble a compact context bundle under a token budget. It should not be treated as the next public CLI surface until the current commands prove the retrieval behavior.
 
 ## Auditable Success Criteria
 
@@ -166,29 +196,20 @@ The trial report highlights concrete product gaps that should guide retrieval wo
 - Slug and filename identity: users should be able to reference stable human slugs, not only short hashes.
 - Missed source locations: scan/discovery should surface likely plan dirs outside defaults.
 
-## Planned Eval Additions
+## Completed Eval Additions
 
-Before optimizing retrieval, add richer deterministic metrics:
+The first eval hardening pass is complete:
 
-- Importance-weighted relevance:
-  - `must`
-  - `helpful`
-  - `background`
-- Report:
-  - overall recall
-  - must-have recall
-  - helpful recall
-  - background recall
-- Context sufficiency:
-  - `must_contain_terms`
-  - `must_contain_artifacts`
-  - `must_not_contain_terms`
-  - `must_not_contain_artifacts`
-- Report:
-  - per-case sufficiency pass/fail
-  - aggregate sufficiency pass rate
+- Importance-weighted relevance: `must`, `helpful`, `background`
+- Overall, must-have, helpful, and background recall
+- Context sufficiency criteria
+- Per-case sufficiency pass/fail
+- Aggregate sufficiency pass rate
+- Timestamped JSON result files
+- Indexed SQLite corpus as the default eval path
+- Filesystem eval as a diagnostic fallback
 
-This keeps the eval deterministic while getting closer to the question: "Could an agent plausibly continue from this context?"
+This keeps the eval deterministic while getting closer to the product question: "Can the indexed CLI path retrieve enough relevant intent for an agent or human to continue?"
 
 ## Retrieval Improvement Workstreams
 
@@ -222,7 +243,7 @@ Tasks:
 
 Expected eval impact:
 
-- Improve recall for `pack-agent-context-webhook-replay`.
+- Improve recall for the webhook replay implementation-context case.
 - Improve recall for auth-session design/spec-delta cases.
 - Reduce misses where `design.md` is decisive.
 
@@ -291,14 +312,17 @@ Expected eval impact:
 
 ## Work Order
 
-1. Add importance-weighted relevance and context sufficiency metrics.
-2. Update seed cases with `must/helpful/background` labels.
-3. Add score-reason output to the eval harness.
-4. Implement identifier-aware matching.
-5. Implement OpenSpec bundle retrieval.
-6. Add lifecycle/authority scoring.
-7. Add query intent classification.
-8. Re-run seed eval and compare:
+1. Keep indexed eval as the default control.
+2. Extract shared retrieval candidate/retriever logic out of `internal/evalharness`.
+3. Upgrade `ds find` to use or prepare for shared indexed retrieval with reasons.
+4. Add query-focused `ds resume <query>` for continuation context.
+5. Add live-command eval for the existing command path.
+6. Decide whether `ds pack <query>` is needed as a public command after results and workflow feedback.
+7. Implement identifier-aware matching.
+8. Implement OpenSpec bundle retrieval.
+9. Add lifecycle/authority scoring.
+10. Add query intent classification.
+11. Re-run seed eval and compare:
    - token reduction
    - overall recall
    - must-have recall
@@ -310,7 +334,7 @@ Expected eval impact:
 - Do not tune weights to make visible cases perfect.
 - Do not add LLM judging yet.
 - Do not claim coding success.
-- Preserve deterministic filesystem-based evaluation.
+- Preserve deterministic local evaluation through the indexed path, with filesystem mode only as a diagnostic comparison.
 - Keep `eval_stage: seed_smoke` until cases and distractors are locked.
 - Prefer improvements justified by trial-report failures over fixture-specific hacks.
 

@@ -11,7 +11,7 @@ func fixturePath(t *testing.T) string {
 }
 
 func TestRun_AgenticSaaSFixture(t *testing.T) {
-	result, err := Run(fixturePath(t), Options{})
+	result, err := Run(fixturePath(t), Options{CorpusSource: CorpusSourceFilesystemFixture})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,6 +33,12 @@ func TestRun_AgenticSaaSFixture(t *testing.T) {
 	}
 	if result.EvalStage != "seed_smoke" {
 		t.Fatalf("eval stage = %q", result.EvalStage)
+	}
+	if result.CorpusSource != CorpusSourceFilesystemFixture {
+		t.Fatalf("corpus source = %q", result.CorpusSource)
+	}
+	if result.ProductPath != ProductPathLabOnly {
+		t.Fatalf("product path = %q", result.ProductPath)
 	}
 	if len(result.Cases) < 8 {
 		t.Fatalf("cases = %d", len(result.Cases))
@@ -105,9 +111,25 @@ func TestRun_AgenticSaaSFixture(t *testing.T) {
 	}
 }
 
+func TestRun_DefaultUsesIndexedCorpus(t *testing.T) {
+	result, err := Run(fixturePath(t), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.CorpusSource != CorpusSourceSQLiteIndex {
+		t.Fatalf("corpus source = %q", result.CorpusSource)
+	}
+	if result.ProductPath != ProductPathIndexedHarness {
+		t.Fatalf("product path = %q", result.ProductPath)
+	}
+	if result.Corpus.PlanningArtifacts.Files == 0 {
+		t.Fatalf("expected indexed planning artifacts: %#v", result.Corpus)
+	}
+}
+
 func TestRun_ThresholdFailure(t *testing.T) {
 	minRecall := 1.01
-	result, err := Run(fixturePath(t), Options{MinRecall: &minRecall})
+	result, err := Run(fixturePath(t), Options{MinRecall: &minRecall, CorpusSource: CorpusSourceFilesystemFixture})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +138,7 @@ func TestRun_ThresholdFailure(t *testing.T) {
 	}
 
 	minMeanRecall := 1.01
-	result, err = Run(fixturePath(t), Options{MinMeanRecall: &minMeanRecall})
+	result, err = Run(fixturePath(t), Options{MinMeanRecall: &minMeanRecall, CorpusSource: CorpusSourceFilesystemFixture})
 	if err != nil {
 		t.Fatal(err)
 	}
