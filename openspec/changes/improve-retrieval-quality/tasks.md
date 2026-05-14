@@ -26,7 +26,7 @@
 - [x] Extract shared retrieval candidate/retriever logic out of `internal/evalharness`.
 - [x] Upgrade `ds find` to use or prepare for shared indexed retrieval with reasons.
 - [x] Add query-focused `ds resume <query>` over indexed candidates.
-- [ ] Add live-command eval mode for the existing command path.
+- [x] Add live-command eval mode for the existing command path.
 - [ ] Decide whether a public `ds pack <query>` command is needed after existing workflows are measured.
 - [ ] Decide keep/deprecate/remove path for `ds context <id>`.
 - [ ] Add identifier-aware tokenization and matching.

@@ -66,7 +66,9 @@ Priority order:
 5. Decide whether a public `ds pack <query>` command is still needed after the existing workflows are measured.
 6. Then iterate on retrieval improvements from the test index.
 
-Status as of 2026-05-14: steps 1-3 are implemented. The latest indexed eval result is `.devspecs/eval-runs/agentic-saas-fragmented/20260514T054719Z_agentic-saas-fragmented_seed_smoke_eval_weighted_files_v0.json`. The next implementation priority is live-command eval over `ds find` and/or query-focused `ds resume <query>`.
+Status as of 2026-05-14: steps 1-5 are implemented. The latest indexed eval result is `.devspecs/eval-runs/agentic-saas-fragmented/20260514T054719Z_agentic-saas-fragmented_seed_smoke_eval_weighted_files_v0.json`. The latest live `resume-query` eval result is `.devspecs/eval-runs/agentic-saas-fragmented/20260514T060213Z_agentic-saas-fragmented_seed_smoke_resume-query_eval_weighted_files_v0.json`.
+
+The next implementation priority is retrieval quality improvement on the measured live path. Candidate coverage and artifact grouping are now higher priority than adding more CLI surface area; public `ds pack <query>` remains a later UX decision.
 
 Reason: schema, scan discovery, adapters, indexed metadata, and source/content availability materially affect eval results. Optimizing a filesystem-only retriever would hide the product gap.
 

@@ -19,6 +19,8 @@ Improve DevSpecs retrieval quality while preserving substantial context-token re
 
 The earlier filesystem-only diagnostic showed stronger numbers, which proves the bridge to real indexed CLI workflows matters. This change proposes deterministic retrieval, indexed eval, and CLI integration improvements before any LLM-based judging. The work should make DevSpecs better at preparing compact, relevant agent context from indexed repo intent artifacts.
 
+The first live command eval now exists for `ds resume <query>` and `ds find`. The current `resume-query` baseline compresses more aggressively but retrieves less relevant intent than the indexed harness, so the next product work should improve candidate coverage, grouping, and ranking on the live path.
+
 ## Motivation
 
 The May 12 trial report exposed concrete retrieval gaps:

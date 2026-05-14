@@ -187,11 +187,11 @@ Exit criteria:
 - [x] `ds resume <query>` produces query-focused continuation context from indexed artifacts.
 - [x] Output includes retriever label, source paths, and deterministic reasons.
 - [x] `--json` output is parseable for both command paths.
-- [ ] Live-command eval parses these command outputs. This belongs to Phase 4.
+- [x] Live-command eval parses these command outputs.
 
 ### Phase 4: Live CLI Regression Eval
 
-Status: next
+Status: implemented
 
 Goal:
 
@@ -221,10 +221,36 @@ command_under_test: resume-query
 
 Exit criteria:
 
-- Eval catches regressions in scan, index conversion, retrieval, context assembly, and command output.
-- Marketing claims can cite live-command eval, not just lab or indexed harness eval.
+- [x] Eval supports `--command resume-query`.
+- [x] Eval supports `--command find`.
+- [x] Eval labels live runs with `product_path: live_cli_command`.
+- [x] Eval labels the command with `command_under_test`.
+- [x] Eval catches regressions in scan, index conversion, retrieval, context assembly, and command output.
+- [x] Marketing claims can cite live-command eval, not just lab or indexed harness eval.
+
+Current live baseline:
+
+```text
+ds eval ./fixtures/agentic-saas-fragmented --command resume-query
+
+product_path: live_cli_command
+command_under_test: resume-query
+Mean token reduction vs full planning corpus: 73.3%
+Mean artifact recall: 21.2%
+Mean must-have recall: 18.3%
+Mean artifact precision: 12.0%
+Context sufficiency pass rate: 10.0%
+```
+
+Result file:
+
+```text
+.devspecs/eval-runs/agentic-saas-fragmented/20260514T060213Z_agentic-saas-fragmented_seed_smoke_resume-query_eval_weighted_files_v0.json
+```
 
 ### Phase 5: Public Context-Packing UX Decision
+
+Status: next
 
 Goal:
 

@@ -52,9 +52,23 @@ Mean artifact precision: 14.3%
 Context sufficiency pass rate: 0.0%
 ```
 
+Live command baseline:
+
+```text
+Command: ds eval ./fixtures/agentic-saas-fragmented --command resume-query
+Product path: live_cli_command
+Command under test: resume-query
+Mean token reduction vs full planning corpus: 73.3%
+Mean artifact recall: 21.2%
+Mean must-have recall: 18.3%
+Mean artifact precision: 12.0%
+Context sufficiency pass rate: 10.0%
+```
+
 Interpretation:
 
 - Indexed eval is now exposing real scan/index coverage gaps.
+- Live command eval exposes the user-facing effect of default focused context limits.
 - Source/context candidates are not available through the indexed corpus yet.
 - Several expected OpenSpec companion files and PRD/.claude/app-plan artifacts are missing or underrepresented in scan/index output.
 - The old filesystem-only result was much better, which proves the product bridge matters.
@@ -224,7 +238,7 @@ Result:
 
 ### CLI-003: Live Command Eval For Existing Workflows
 
-Status: next
+Status: complete
 
 Hypothesis:
 
@@ -248,6 +262,18 @@ Keep criteria:
 
 - Eval JSON labels `product_path: live_cli_command`.
 - Live-command eval catches retrieval, ranking, and context-assembly regressions.
+
+Result:
+
+- Added `ds eval --command resume-query`.
+- Added `ds eval --command find`.
+- Live command eval builds an isolated fixture index, invokes the selected command JSON path, parses included artifacts, and reports the same recall, precision, sufficiency, and token metrics.
+- `resume-query` live baseline:
+  - 73.3% mean token reduction vs full planning corpus
+  - 21.2% mean artifact recall
+  - 18.3% mean must-have recall
+  - 12.0% mean precision
+  - 10.0% sufficiency pass rate
 
 ### RET-000: Baseline Control
 
@@ -767,5 +793,14 @@ Before result file: .devspecs/eval-runs/agentic-saas-fragmented/20260514T053421Z
 After result file: .devspecs/eval-runs/agentic-saas-fragmented/20260514T054719Z_agentic-saas-fragmented_seed_smoke_eval_weighted_files_v0.json
 Summary delta: token reduction improved from 63.8% to 66.2%; recall, must-have recall, precision, and sufficiency stayed flat at 27.3% / 26.7% / 14.3% / 0.0%.
 Decision: keep
-Notes: Product bridge now exists without adding a public `ds pack` command. Next work should add live-command eval over `ds find` and query-focused `ds resume <query>`.
+Notes: Product bridge now exists without adding a public `ds pack` command. Live-command eval was added in CLI-003.
+
+Experiment ID: CLI-003
+Date: 2026-05-14
+Change: Added live command eval modes for `ds eval --command resume-query` and `ds eval --command find`.
+Before result file: .devspecs/eval-runs/agentic-saas-fragmented/20260514T054719Z_agentic-saas-fragmented_seed_smoke_eval_weighted_files_v0.json
+After result file: .devspecs/eval-runs/agentic-saas-fragmented/20260514T060213Z_agentic-saas-fragmented_seed_smoke_resume-query_eval_weighted_files_v0.json
+Summary delta: live `resume-query` measures 73.3% token reduction / 21.2% recall / 18.3% must-have recall / 12.0% precision / 10.0% sufficiency. Compression improves because the command emits a focused 5-artifact context, but recall and precision are weaker than the indexed harness.
+Decision: keep
+Notes: This is the first product-path eval. Next improvements should target candidate coverage, grouping, and ranking on the live command path.
 ```

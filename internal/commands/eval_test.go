@@ -106,6 +106,58 @@ func TestEvalCommand_FilesystemCorpusDiagnosticFlag(t *testing.T) {
 	}
 }
 
+func TestEvalCommand_LiveResumeQueryCommand(t *testing.T) {
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{
+		filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"),
+		"--command", "resume-query",
+		"--json",
+		"--no-save",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["product_path"] != "live_cli_command" {
+		t.Fatalf("product_path = %#v", got["product_path"])
+	}
+	if got["command_under_test"] != "resume-query" {
+		t.Fatalf("command_under_test = %#v", got["command_under_test"])
+	}
+	cases, ok := got["cases"].([]any)
+	if !ok || len(cases) == 0 {
+		t.Fatalf("missing cases: %#v", got["cases"])
+	}
+	first := cases[0].(map[string]any)
+	if _, ok := first["artifact_reasons"].([]any); !ok {
+		t.Fatalf("missing artifact reasons: %#v", first["artifact_reasons"])
+	}
+}
+
+func TestEvalCommand_CommandRejectsFilesystemCorpus(t *testing.T) {
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{
+		filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"),
+		"--command", "find",
+		"--filesystem",
+		"--no-save",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected --command with --filesystem to fail")
+	}
+	if !strings.Contains(err.Error(), "--command requires the indexed eval corpus") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestEvalCommand_SavesTimestampedResultFile(t *testing.T) {
 	oldNow := nowUTC
 	nowUTC = func() time.Time {

@@ -27,6 +27,7 @@ const (
 	CorpusSourceSQLiteIndex       = "sqlite_index"
 	ProductPathLabOnly            = "lab_only"
 	ProductPathIndexedHarness     = "indexed_harness"
+	ProductPathLiveCLICommand     = "live_cli_command"
 )
 
 type TokenCounter interface {
@@ -83,8 +84,18 @@ type Options struct {
 	MinSufficiency   *float64
 	MinReductionFull *float64
 	CorpusSource     string
+	CommandUnderTest string
+	CommandRunner    CommandRunner
 	TokenCounter     TokenCounter
 	Retriever        retrieval.Retriever
+}
+
+type CommandRunner func(fixtureAbs string, cases []CaseSpec) (map[string]CommandCaseOutput, error)
+
+type CommandCaseOutput struct {
+	Artifacts       []retrieval.Candidate
+	Context         string
+	ArtifactReasons []ArtifactReason
 }
 
 type CaseFile struct {
@@ -237,6 +248,7 @@ type Result struct {
 	EvalStage        string           `json:"eval_stage"`
 	CorpusSource     string           `json:"corpus_source"`
 	ProductPath      string           `json:"product_path"`
+	CommandUnderTest string           `json:"command_under_test,omitempty"`
 	Retriever        string           `json:"retriever"`
 	TokenCounter     string           `json:"token_counter"`
 	TokenizerProfile TokenizerProfile `json:"tokenizer_profile"`
@@ -285,6 +297,13 @@ func Run(fixture string, opts Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	var commandOutputs map[string]CommandCaseOutput
+	if opts.CommandRunner != nil {
+		commandOutputs, err = opts.CommandRunner(fixtureAbs, caseFile.Cases)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	fullPlanning := fullPlanningCorpus(files)
 	allMarkdown := filterFiles(files, func(f File) bool {
@@ -303,7 +322,8 @@ func Run(fixture string, opts Options) (*Result, error) {
 		FixtureVersion:   defaultString(caseFile.FixtureVersion, "agentic-saas-fragmented-v0"),
 		EvalStage:        defaultString(caseFile.EvalStage, "seed_smoke"),
 		CorpusSource:     corpusSource,
-		ProductPath:      productPathForCorpusSource(corpusSource),
+		ProductPath:      productPathForRun(corpusSource, opts.CommandUnderTest),
+		CommandUnderTest: strings.TrimSpace(opts.CommandUnderTest),
 		Retriever:        retriever.Name(),
 		TokenCounter:     counter.Name(),
 		TokenizerProfile: tokenizerProfile,
@@ -320,6 +340,23 @@ func Run(fixture string, opts Options) (*Result, error) {
 		queryFiles := retrieval.QueryBaseline(files, c.Query)
 
 		devContext := renderContext(c.Query, devspecsFiles)
+		artifactReasons := retrieval.ExplainCandidates(devspecsFiles, c.Query)
+		if commandOutputs != nil {
+			output, ok := commandOutputs[c.ID]
+			if !ok {
+				return nil, fmt.Errorf("command eval missing output for case %q", c.ID)
+			}
+			devspecsFiles = output.Artifacts
+			if output.Context != "" {
+				devContext = output.Context
+			} else {
+				devContext = renderContext(c.Query, devspecsFiles)
+			}
+			artifactReasons = output.ArtifactReasons
+			if len(artifactReasons) == 0 {
+				artifactReasons = retrieval.ExplainCandidates(devspecsFiles, c.Query)
+			}
+		}
 		queryContext := renderContext(c.Query, queryFiles)
 
 		cr := CaseResult{
@@ -331,7 +368,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 			FullCandidateCorpusTokens: counter.Count(fullCandidateContext),
 			QueryFileBaselineTokens:   counter.Count(queryContext),
 			ArtifactsIncluded:         rels(devspecsFiles),
-			ArtifactReasons:           retrieval.ExplainCandidates(devspecsFiles, c.Query),
+			ArtifactReasons:           artifactReasons,
 			Baselines: []BaselineMetrics{
 				baselineMetrics("full_planning_corpus", "planning/intent docs only: openspec/**/*.md, docs/**/*.md, .cursor/**/*.md, .claude/**/*.md, plans/**/*.md, scratch/**/*.md", false, fullPlanning, expectedPaths(c.ExpectedRelevant), counter.Count(fullContext)),
 				baselineMetrics("all_markdown", "all *.md files, excluding ignored dirs and cases.yaml", false, allMarkdown, expectedPaths(c.ExpectedRelevant), counter.Count(allMarkdownContext)),
@@ -452,7 +489,10 @@ func collectCorpusFiles(root, corpusSource string) ([]File, error) {
 	}
 }
 
-func productPathForCorpusSource(corpusSource string) string {
+func productPathForRun(corpusSource, commandUnderTest string) string {
+	if strings.TrimSpace(commandUnderTest) != "" {
+		return ProductPathLiveCLICommand
+	}
 	switch corpusSource {
 	case CorpusSourceSQLiteIndex:
 		return ProductPathIndexedHarness
@@ -1031,6 +1071,9 @@ func FormatText(r *Result) string {
 	fmt.Fprintf(&b, "Eval stage: %s\n", r.EvalStage)
 	fmt.Fprintf(&b, "Corpus source: %s\n", r.CorpusSource)
 	fmt.Fprintf(&b, "Product path: %s\n", r.ProductPath)
+	if r.CommandUnderTest != "" {
+		fmt.Fprintf(&b, "Command under test: %s\n", r.CommandUnderTest)
+	}
 	fmt.Fprintf(&b, "Retriever: %s\n", r.Retriever)
 	fmt.Fprintf(&b, "Token counter: %s\n", r.TokenCounter)
 	if r.TokenizerProfile.Approximation != "" {
