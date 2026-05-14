@@ -45,7 +45,7 @@ token_counter: approx_chars_div_4
 Current measured result:
 
 ```text
-Mean token reduction vs full planning corpus: 63.8%
+Mean token reduction vs full planning corpus: 66.2%
 Mean artifact recall: 27.3%
 Mean must-have recall: 26.7%
 Mean artifact precision: 14.3%
@@ -179,7 +179,7 @@ Result:
 
 ### CLI-002: Existing Command Retrieval Bridge
 
-Status: next
+Status: complete
 
 Hypothesis:
 
@@ -209,9 +209,22 @@ Keep criteria:
 - Output is parseable enough for future live-command eval.
 - `ds context <id>` has an explicit keep/deprecate/remove decision, not an assumed removal.
 
+Result:
+
+- `ds find` now uses `internal/retrieval` over indexed candidates and reports source paths/reasons.
+- `ds resume <query>` now renders a focused continuation context using the shared retriever.
+- `ds context <id>` remains a precise single-artifact export.
+- Title-aware candidate matching was added so live command retrieval does not regress obvious title searches.
+- Indexed eval changed from the previous control to:
+  - 66.2% mean token reduction vs full planning corpus
+  - 27.3% mean artifact recall
+  - 26.7% mean must-have recall
+  - 14.3% mean precision
+  - 0.0% sufficiency pass rate
+
 ### CLI-003: Live Command Eval For Existing Workflows
 
-Status: after CLI-002
+Status: next
 
 Hypothesis:
 
@@ -746,4 +759,13 @@ After result file: .devspecs/eval-runs/agentic-saas-fragmented/20260514T053421Z_
 Summary delta: No metric movement expected or observed; indexed eval stayed at 63.8% reduction / 27.3% recall / 26.7% must-have recall / 14.3% precision / 0.0% sufficiency.
 Decision: keep
 Notes: Mechanical Phase 2 bridge. Next work should wire the shared package into existing commands.
+
+Experiment ID: CLI-002
+Date: 2026-05-14
+Change: Wired shared retrieval into `ds find`; added query-focused `ds resume <query>`; added title-aware candidate scoring for live command usability.
+Before result file: .devspecs/eval-runs/agentic-saas-fragmented/20260514T053421Z_agentic-saas-fragmented_seed_smoke_eval_weighted_files_v0.json
+After result file: .devspecs/eval-runs/agentic-saas-fragmented/20260514T054719Z_agentic-saas-fragmented_seed_smoke_eval_weighted_files_v0.json
+Summary delta: token reduction improved from 63.8% to 66.2%; recall, must-have recall, precision, and sufficiency stayed flat at 27.3% / 26.7% / 14.3% / 0.0%.
+Decision: keep
+Notes: Product bridge now exists without adding a public `ds pack` command. Next work should add live-command eval over `ds find` and query-focused `ds resume <query>`.
 ```

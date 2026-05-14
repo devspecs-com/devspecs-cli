@@ -11,7 +11,7 @@ Change ID: `improve-retrieval-quality`
 
 Improve DevSpecs retrieval quality while preserving substantial context-token reduction. The default indexed seed eval now shows that scan/index coverage and retrieval quality are both major gaps:
 
-- Mean token reduction vs full planning corpus: ~63.8%
+- Mean token reduction vs full planning corpus: ~66.2%
 - Mean artifact recall: ~27.3%
 - Mean must-have recall: ~26.7%
 - Mean artifact precision: ~14.3%

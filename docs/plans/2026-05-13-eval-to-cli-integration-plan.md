@@ -151,12 +151,12 @@ Exit criteria:
 - [x] `internal/retrieval` exposes shared candidates, retriever interface, query baseline, and artifact reasons.
 - [x] Eval output labels the shared retriever name.
 - [x] Tests cover the shared retrieval package and indexed eval behavior.
-- [ ] `ds find` and query-focused `ds resume` call the same retrieval logic. This belongs to Phase 3.
+- [x] `ds find` and query-focused `ds resume` call the same retrieval logic.
 - [ ] Internal context assembly calls the same retrieval logic if a public `pack` command is added later.
 
 ### Phase 3: Improve Existing CLI Workflows
 
-Status: next
+Status: implemented
 
 Goal:
 
@@ -183,13 +183,15 @@ Expected behavior:
 
 Exit criteria:
 
-- `ds find` uses shared indexed retrieval or has an explicit migration path to it.
-- `ds resume <query>` produces query-focused continuation context from indexed artifacts.
-- Output is useful to humans and agents.
-- Reasons and source paths are visible.
-- Support `--json`.
+- [x] `ds find` uses shared indexed retrieval.
+- [x] `ds resume <query>` produces query-focused continuation context from indexed artifacts.
+- [x] Output includes retriever label, source paths, and deterministic reasons.
+- [x] `--json` output is parseable for both command paths.
+- [ ] Live-command eval parses these command outputs. This belongs to Phase 4.
 
 ### Phase 4: Live CLI Regression Eval
+
+Status: next
 
 Goal:
 

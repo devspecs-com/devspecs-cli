@@ -143,6 +143,7 @@ func retrievalLimit(queryLower string, terms map[string]float64) int {
 
 func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) float64 {
 	pathLower := strings.ToLower(c.Path)
+	titleLower := strings.ToLower(c.Title)
 	bodyLower := strings.ToLower(c.Body)
 	score := 0.0
 	sourceFile := IsSourceContextCandidate(c)
@@ -153,6 +154,9 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 		}
 		if strings.Contains(pathLower, term) {
 			score += 6.0 * weight
+		}
+		if strings.Contains(titleLower, term) {
+			score += 4.0 * weight
 		}
 		hits := strings.Count(bodyLower, term)
 		if hits > 8 {
@@ -361,6 +365,7 @@ func splitIdentifier(s string) []string {
 
 func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower string) []string {
 	pathLower := strings.ToLower(c.Path)
+	titleLower := strings.ToLower(c.Title)
 	bodyLower := strings.ToLower(c.Body)
 	var reasons []string
 	for term := range terms {
@@ -370,6 +375,8 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 		switch {
 		case strings.Contains(pathLower, term):
 			reasons = append(reasons, "query term match in path: "+term)
+		case strings.Contains(titleLower, term):
+			reasons = append(reasons, "query term match in title: "+term)
 		case strings.Contains(bodyLower, term):
 			if strings.ContainsAny(term, "_.-") {
 				reasons = append(reasons, "identifier/body match: "+term)

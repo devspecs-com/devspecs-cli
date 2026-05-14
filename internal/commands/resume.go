@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -25,11 +26,11 @@ func NewResumeCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "resume",
+		Use:   "resume [query]",
 		Short: "Show artifacts grouped by lifecycle phase — continue where you left off",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fp := store.FilterParams{Tag: tag, Branch: branch, User: user}
-			return runResume(cmd, fp, repoName, asJSON, noRefresh, limit, all)
+			return runResume(cmd, strings.Join(args, " "), fp, repoName, asJSON, noRefresh, limit, all)
 		},
 	}
 
@@ -49,7 +50,7 @@ var settledStatuses = map[string]bool{
 	"accepted": true, "rejected": true, "cancelled": true, "superseded": true,
 }
 
-func runResume(cmd *cobra.Command, fp store.FilterParams, repoName string, asJSON, noRefresh bool, limit int, all bool) error {
+func runResume(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, asJSON, noRefresh bool, limit int, all bool) error {
 	db, err := openDB()
 	if err != nil {
 		return err
@@ -61,6 +62,11 @@ func runResume(cmd *cobra.Command, fp store.FilterParams, repoName string, asJSO
 	}
 
 	repoRoot := resolveRepoScope(db, repoName, false)
+	fp.RepoRoot = repoRoot
+
+	if strings.TrimSpace(query) != "" {
+		return runFocusedResume(cmd, db, repoRoot, query, fp, asJSON, limit)
+	}
 
 	rows, err := db.ResumeArtifacts(repoRoot, fp)
 	if err != nil {
@@ -147,6 +153,110 @@ func runResume(cmd *cobra.Command, fp store.FilterParams, repoName string, asJSO
 	}
 
 	return nil
+}
+
+func runFocusedResume(cmd *cobra.Command, db *store.DB, repoRoot, query string, fp store.FilterParams, asJSON bool, limit int) error {
+	candidates, err := loadRetrievalCandidates(db, fp)
+	if err != nil {
+		return fmt.Errorf("resume query: %w", err)
+	}
+	retriever := retrieval.WeightedFilesRetrieverV0{}
+	matches := retriever.Retrieve(candidates, query)
+	if len(matches) == 0 {
+		matches = retrieval.QueryBaseline(candidates, query)
+	}
+	matches = capCandidates(matches, limit)
+	reasons := reasonsByPath(retrieval.ExplainCandidates(matches, query))
+	context := buildFocusedResumeContext(query, matches)
+	tokens := approximateTokenCount(context)
+
+	if asJSON {
+		obj := map[string]any{
+			"query":         query,
+			"repo_root":     repoRoot,
+			"retriever":     retriever.Name(),
+			"token_counter": commandTokenCounterName,
+			"tokens":        tokens,
+			"artifacts":     resumeCandidatesToJSON(matches, reasons),
+			"context":       context,
+		}
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(obj)
+	}
+
+	out := cmd.OutOrStdout()
+	repoBasename := repoRoot
+	if idx := strings.LastIndex(repoBasename, "/"); idx >= 0 {
+		repoBasename = repoBasename[idx+1:]
+	}
+	if idx := strings.LastIndex(repoBasename, "\\"); idx >= 0 {
+		repoBasename = repoBasename[idx+1:]
+	}
+	fmt.Fprintf(out, "DevSpecs Focused Resume (%s)\n", repoBasename)
+	fmt.Fprintf(out, "Query: %s\n", query)
+	fmt.Fprintf(out, "Retriever: %s\n", retriever.Name())
+	fmt.Fprintf(out, "Token counter: %s\n", commandTokenCounterName)
+	fmt.Fprintf(out, "Context: %d tokens\n", tokens)
+	if len(matches) == 0 {
+		fmt.Fprintln(out, "\nNo matching indexed artifacts.")
+		return nil
+	}
+	fmt.Fprintf(out, "\nIncluded Artifacts (%d)\n", len(matches))
+	for i, c := range matches {
+		fmt.Fprintf(out, "\n%2d. %s  %s\n", i+1, shortCandidateID(c), c.Title)
+		fmt.Fprintf(out, "    Status: %s  |  Kind: %s\n", c.Status, c.Kind)
+		if c.Source != "" {
+			fmt.Fprintf(out, "    Source: %s\n", c.Source)
+		}
+		if rs := reasons[c.Path]; len(rs) > 0 {
+			fmt.Fprintf(out, "    Reasons: %s\n", strings.Join(rs, "; "))
+		}
+		if id := shortCandidateID(c); id != "" {
+			fmt.Fprintf(out, "    Continue: ds context %s\n", id)
+		}
+	}
+	fmt.Fprintf(out, "\n%s", context)
+	return nil
+}
+
+func buildFocusedResumeContext(query string, candidates []retrieval.Candidate) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# DevSpecs Focused Resume Context\n\n")
+	fmt.Fprintf(&b, "Query: %s\n\n", query)
+	for _, c := range candidates {
+		path := c.Source
+		if path == "" {
+			path = c.Path
+		}
+		fmt.Fprintf(&b, "## %s\n\n", path)
+		fmt.Fprintf(&b, "Title: %s\n", c.Title)
+		fmt.Fprintf(&b, "Kind: %s\n", c.Kind)
+		if c.Subtype != "" {
+			fmt.Fprintf(&b, "Subtype: %s\n", c.Subtype)
+		}
+		fmt.Fprintf(&b, "Status: %s\n\n", c.Status)
+		fmt.Fprintf(&b, "```text\n%s\n```\n\n", strings.TrimRight(c.Body, "\r\n"))
+	}
+	return b.String()
+}
+
+func resumeCandidatesToJSON(candidates []retrieval.Candidate, reasons map[string][]string) []map[string]any {
+	out := make([]map[string]any, 0, len(candidates))
+	for _, c := range candidates {
+		item := map[string]any{
+			"id":          c.ID,
+			"short_id":    metadataValue(c, "short_id"),
+			"kind":        c.Kind,
+			"subtype":     c.Subtype,
+			"title":       c.Title,
+			"status":      c.Status,
+			"source_path": c.Source,
+			"reasons":     reasons[c.Path],
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func writeInProgressItem(w io.Writer, idx *int, r store.ResumeRow, now time.Time) {

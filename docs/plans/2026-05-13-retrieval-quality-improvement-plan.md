@@ -18,7 +18,7 @@ The `agentic-saas-fragmented-v1` seed eval now gives us an honest indexed starti
 - Token counter: `approx_chars_div_4`
 - Planning corpus: 26 indexed files / ~14,318 tokens
 - Source/context candidates: 0 indexed files
-- Mean token reduction vs full planning corpus: ~63.8%
+- Mean token reduction vs full planning corpus: ~66.2%
 - Mean artifact recall: ~27.3%
 - Mean must-have recall: ~26.7%
 - Mean artifact precision: ~14.3%
@@ -65,6 +65,8 @@ Priority order:
 4. Add live-command eval for the existing command path.
 5. Decide whether a public `ds pack <query>` command is still needed after the existing workflows are measured.
 6. Then iterate on retrieval improvements from the test index.
+
+Status as of 2026-05-14: steps 1-3 are implemented. The latest indexed eval result is `.devspecs/eval-runs/agentic-saas-fragmented/20260514T054719Z_agentic-saas-fragmented_seed_smoke_eval_weighted_files_v0.json`. The next implementation priority is live-command eval over `ds find` and/or query-focused `ds resume <query>`.
 
 Reason: schema, scan discovery, adapters, indexed metadata, and source/content availability materially affect eval results. Optimizing a filesystem-only retriever would hide the product gap.
 

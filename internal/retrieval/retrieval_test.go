@@ -45,3 +45,18 @@ func TestQueryBaselineMatchesPathOrBody(t *testing.T) {
 		t.Fatalf("paths = %#v", paths)
 	}
 }
+
+func TestWeightedFilesRetrieverV0_UsesCandidateTitle(t *testing.T) {
+	candidates := []Candidate{
+		{Path: "plan.md", Title: "Golden Plan", Body: "Short body."},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "Golden")
+	if len(got) != 1 {
+		t.Fatalf("retrieved %d candidates, want 1", len(got))
+	}
+	reasons := ExplainCandidates(got, "Golden")
+	if len(reasons) == 0 || len(reasons[0].Reasons) == 0 || reasons[0].Reasons[0] != "query term match in title: golden" {
+		t.Fatalf("reasons = %#v", reasons)
+	}
+}

@@ -441,4 +441,44 @@ func TestFind_JSONOutput(t *testing.T) {
 	if len(arts) == 0 {
 		t.Fatal("find --json returned empty array")
 	}
+	if _, ok := arts[0]["reasons"].([]any); !ok {
+		t.Fatalf("find --json missing retrieval reasons: %#v", arts[0])
+	}
+	if arts[0]["source_path"] != "plan.md" {
+		t.Fatalf("find --json source_path = %#v", arts[0]["source_path"])
+	}
+	if arts[0]["retriever"] != "eval_weighted_files_v0" {
+		t.Fatalf("find --json retriever = %#v", arts[0]["retriever"])
+	}
+}
+
+func TestResume_QueryFocusedContextJSON(t *testing.T) {
+	setupReadEnv(t)
+
+	cmd := NewResumeCmd()
+	cmd.SetArgs([]string{"Open task", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var obj map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &obj); err != nil {
+		t.Fatalf("resume query --json invalid: %v\n%s", err, buf.String())
+	}
+	if obj["retriever"] != "eval_weighted_files_v0" {
+		t.Fatalf("retriever = %#v", obj["retriever"])
+	}
+	if obj["token_counter"] != "approx_chars_div_4" {
+		t.Fatalf("token counter = %#v", obj["token_counter"])
+	}
+	arts, ok := obj["artifacts"].([]any)
+	if !ok || len(arts) == 0 {
+		t.Fatalf("resume query returned no artifacts: %#v", obj["artifacts"])
+	}
+	context, _ := obj["context"].(string)
+	if !strings.Contains(context, "Open task") || !strings.Contains(context, "plan.md") {
+		t.Fatalf("focused context missing expected content: %s", context)
+	}
 }

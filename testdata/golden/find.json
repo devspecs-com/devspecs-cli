@@ -10,6 +10,11 @@
     "Status": "draft",
     "Subtype": "",
     "Title": "Golden Plan",
-    "UpdatedAt": "\u003cMASKED\u003e"
+    "UpdatedAt": "\u003cMASKED\u003e",
+    "reasons": [
+      "query term match in title: golden"
+    ],
+    "retriever": "eval_weighted_files_v0",
+    "source_path": "plan.md"
   }
 ]
