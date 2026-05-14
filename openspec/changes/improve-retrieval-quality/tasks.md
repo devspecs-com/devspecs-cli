@@ -23,7 +23,7 @@
 
 - [x] Use `docs/plans/2026-05-13-retrieval-improvement-test-index.md` to plan each retrieval experiment before implementation.
 - [x] Use `docs/plans/2026-05-13-eval-to-cli-integration-plan.md` to keep eval work connected to indexed and live CLI paths.
-- [ ] Extract shared retrieval candidate/retriever logic out of `internal/evalharness`.
+- [x] Extract shared retrieval candidate/retriever logic out of `internal/evalharness`.
 - [ ] Upgrade `ds find` to use or prepare for shared indexed retrieval with reasons.
 - [ ] Add query-focused `ds resume <query>` over indexed candidates.
 - [ ] Add live-command eval mode for the existing command path.

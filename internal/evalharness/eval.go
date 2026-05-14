@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"unicode"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/adr"
@@ -17,6 +16,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
+	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/scan"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"gopkg.in/yaml.v3"
@@ -75,19 +75,6 @@ func (ApproxTokenCounter) Profile() TokenizerProfile {
 	}
 }
 
-type Retriever interface {
-	Name() string
-	Retrieve(files []File, query string) []File
-}
-
-type WeightedFilesRetrieverV0 struct{}
-
-func (WeightedFilesRetrieverV0) Name() string { return "eval_weighted_files_v0" }
-
-func (WeightedFilesRetrieverV0) Retrieve(files []File, query string) []File {
-	return retrieveDevSpecs(files, query)
-}
-
 type Options struct {
 	JSON             bool
 	MinRecall        *float64
@@ -97,7 +84,7 @@ type Options struct {
 	MinReductionFull *float64
 	CorpusSource     string
 	TokenCounter     TokenCounter
-	Retriever        Retriever
+	Retriever        retrieval.Retriever
 }
 
 type CaseFile struct {
@@ -232,10 +219,7 @@ type ParetoSummary struct {
 	ContextSufficiencyPassRate       float64 `json:"context_sufficiency_pass_rate"`
 }
 
-type ArtifactReason struct {
-	Path    string   `json:"path"`
-	Reasons []string `json:"reasons"`
-}
+type ArtifactReason = retrieval.Reason
 
 type SufficiencyResult struct {
 	Configured                bool     `json:"configured"`
@@ -285,7 +269,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 	}
 	retriever := opts.Retriever
 	if retriever == nil {
-		retriever = WeightedFilesRetrieverV0{}
+		retriever = retrieval.WeightedFilesRetrieverV0{}
 	}
 	tokenizerProfile := tokenizerProfile(counter)
 	fixtureAbs, err := filepath.Abs(fixture)
@@ -304,7 +288,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 
 	fullPlanning := fullPlanningCorpus(files)
 	allMarkdown := filterFiles(files, func(f File) bool {
-		return strings.EqualFold(filepath.Ext(f.Rel), ".md")
+		return strings.EqualFold(filepath.Ext(f.Path), ".md")
 	})
 	sourceCandidates := sourceContextCandidates(files)
 	fullCandidate := mergeFiles(fullPlanning, sourceCandidates)
@@ -333,7 +317,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 	}
 	for _, c := range caseFile.Cases {
 		devspecsFiles := retriever.Retrieve(files, c.Query)
-		queryFiles := queryBaseline(files, c.Query)
+		queryFiles := retrieval.QueryBaseline(files, c.Query)
 
 		devContext := renderContext(c.Query, devspecsFiles)
 		queryContext := renderContext(c.Query, queryFiles)
@@ -347,7 +331,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 			FullCandidateCorpusTokens: counter.Count(fullCandidateContext),
 			QueryFileBaselineTokens:   counter.Count(queryContext),
 			ArtifactsIncluded:         rels(devspecsFiles),
-			ArtifactReasons:           explainArtifacts(devspecsFiles, c.Query),
+			ArtifactReasons:           retrieval.ExplainCandidates(devspecsFiles, c.Query),
 			Baselines: []BaselineMetrics{
 				baselineMetrics("full_planning_corpus", "planning/intent docs only: openspec/**/*.md, docs/**/*.md, .cursor/**/*.md, .claude/**/*.md, plans/**/*.md, scratch/**/*.md", false, fullPlanning, expectedPaths(c.ExpectedRelevant), counter.Count(fullContext)),
 				baselineMetrics("all_markdown", "all *.md files, excluding ignored dirs and cases.yaml", false, allMarkdown, expectedPaths(c.ExpectedRelevant), counter.Count(allMarkdownContext)),
@@ -455,10 +439,7 @@ func normalizeCriteriaPaths(c *SuccessCriteria) {
 	}
 }
 
-type File struct {
-	Rel     string
-	Content string
-}
+type File = retrieval.Candidate
 
 func collectCorpusFiles(root, corpusSource string) ([]File, error) {
 	switch corpusSource {
@@ -510,10 +491,10 @@ func collectFiles(root string) ([]File, error) {
 		if err != nil {
 			return nil
 		}
-		files = append(files, File{Rel: rel, Content: string(data)})
+		files = append(files, File{Path: rel, Body: string(data)})
 		return nil
 	})
-	sort.Slice(files, func(i, j int) bool { return files[i].Rel < files[j].Rel })
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files, err
 }
 
@@ -565,11 +546,16 @@ func collectIndexedFiles(root string) ([]File, error) {
 		}
 		todos, _ := db.GetTodosForArtifact(art.ID)
 		files = append(files, File{
-			Rel:     filepath.ToSlash(rel),
-			Content: renderIndexedArtifactContent(art, sources, todos, body),
+			ID:      art.ID,
+			Path:    filepath.ToSlash(rel),
+			Kind:    art.Kind,
+			Subtype: art.Subtype,
+			Title:   art.Title,
+			Status:  art.Status,
+			Body:    renderIndexedArtifactContent(art, sources, todos, body),
 		})
 	}
-	sort.Slice(files, func(i, j int) bool { return files[i].Rel < files[j].Rel })
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files, nil
 }
 
@@ -646,7 +632,7 @@ func isTextArtifact(rel string) bool {
 
 func fullPlanningCorpus(files []File) []File {
 	return filterFiles(files, func(f File) bool {
-		rel := f.Rel
+		rel := f.Path
 		if !strings.EqualFold(filepath.Ext(rel), ".md") {
 			return false
 		}
@@ -661,10 +647,10 @@ func fullPlanningCorpus(files []File) []File {
 
 func sourceContextCandidates(files []File) []File {
 	return filterFiles(files, func(f File) bool {
-		if strings.EqualFold(filepath.Ext(f.Rel), ".md") {
+		if strings.EqualFold(filepath.Ext(f.Path), ".md") {
 			return false
 		}
-		if isPlanningIntentPath(f.Rel) {
+		if retrieval.IsPlanningIntentPath(f.Path) {
 			return false
 		}
 		return true
@@ -676,14 +662,14 @@ func mergeFiles(groups ...[]File) []File {
 	var out []File
 	for _, group := range groups {
 		for _, f := range group {
-			if seen[f.Rel] {
+			if seen[f.Path] {
 				continue
 			}
-			seen[f.Rel] = true
+			seen[f.Path] = true
 			out = append(out, f)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Rel < out[j].Rel })
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
 }
 
@@ -707,309 +693,11 @@ func corpusSlice(scope string, includesSource bool, files []File, tokens int) Co
 	}
 }
 
-func retrieveDevSpecs(files []File, query string) []File {
-	terms := expandedTerms(query)
-	queryLower := strings.ToLower(query)
-	type scored struct {
-		file  File
-		score float64
-	}
-	var scoredFiles []scored
-	for _, f := range files {
-		score := scoreFile(f, terms, queryLower)
-		if score >= 4.0 {
-			scoredFiles = append(scoredFiles, scored{file: f, score: score})
-		}
-	}
-	sort.Slice(scoredFiles, func(i, j int) bool {
-		if scoredFiles[i].score == scoredFiles[j].score {
-			return scoredFiles[i].file.Rel < scoredFiles[j].file.Rel
-		}
-		return scoredFiles[i].score > scoredFiles[j].score
-	})
-	limit := retrievalLimit(queryLower, terms)
-	if len(scoredFiles) > limit {
-		scoredFiles = scoredFiles[:limit]
-	}
-	out := make([]File, 0, len(scoredFiles))
-	for _, sf := range scoredFiles {
-		out = append(out, sf.file)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Rel < out[j].Rel })
-	return out
-}
-
-func retrievalLimit(queryLower string, terms map[string]float64) int {
-	limit := 8
-	switch {
-	case strings.Contains(queryLower, "implementation context") || strings.Contains(queryLower, "agent context") || strings.Contains(queryLower, "implement"):
-		limit = 6
-	case strings.Contains(queryLower, "resume") || strings.Contains(queryLower, "continue"):
-		limit = 7
-	case strings.Contains(queryLower, "why") || strings.Contains(queryLower, "decision") || strings.Contains(queryLower, "adr"):
-		limit = 5
-	case strings.Contains(queryLower, "prd") || strings.Contains(queryLower, "product") || strings.Contains(queryLower, "background"):
-		limit = 7
-	case strings.Contains(queryLower, "stale") || strings.Contains(queryLower, "superseded"):
-		limit = 5
-	}
-	if hasIdentifierTerm(terms) && limit > 6 {
-		limit = 6
-	}
-	return limit
-}
-
-func scoreFile(f File, terms map[string]float64, queryLower string) float64 {
-	relLower := strings.ToLower(f.Rel)
-	bodyLower := strings.ToLower(f.Content)
-	score := 0.0
-	sourceFile := isSourceContextCandidate(f)
-	role := fileRole(f.Rel)
-	for term, weight := range terms {
-		if term == "" {
-			continue
-		}
-		if strings.Contains(relLower, term) {
-			score += 6.0 * weight
-		}
-		hits := strings.Count(bodyLower, term)
-		if hits > 8 {
-			hits = 8
-		}
-		score += float64(hits) * weight
-	}
-
-	if isPlanningIntentPath(f.Rel) {
-		score += 1.0
-	}
-	switch role {
-	case "adr":
-		if containsAny(queryLower, "adr", "decision", "boundary", "why", "architecture", "rationale", "superseded", "stale") {
-			score += 3.0
-		}
-	case "prd":
-		if containsAny(queryLower, "prd", "product", "background", "requirements", "user") {
-			score += 4.0
-		} else if containsAny(queryLower, "implement", "implementation", "agent context", "source file") {
-			score -= 3.0
-		}
-	case "openspec_design":
-		if containsAny(queryLower, "design", "rationale", "why", "context", "implement", "implementation", "agent context") {
-			score += 3.0
-		}
-	case "openspec_tasks":
-		if containsAny(queryLower, "task", "todo", "implement", "implementation", "resume", "continue", "agent context") {
-			score += 3.0
-		}
-	case "openspec_spec":
-		if containsAny(queryLower, "spec", "delta", "requirement", "acceptance") {
-			score += 2.0
-		}
-	case "plan":
-		if containsAny(queryLower, "plan", "resume", "continue", "migration", "notes") {
-			score += 2.0
-		}
-	case "agent_note":
-		if containsAny(queryLower, "resume", "continue", "followup", "follow-up", "agent", "notes") {
-			score += 2.0
-		}
-	}
-	if sourceFile {
-		if containsAny(queryLower, "source", "file", "code", "implement", "implementation", "handler", "migration") || hasIdentifierTerm(terms) {
-			score += 2.0
-		} else {
-			score -= 2.0
-		}
-	}
-	if strings.Contains(relLower, "scratch/") || strings.Contains(relLower, "old-") || strings.Contains(relLower, "legacy") {
-		score -= 4.0
-	}
-	if strings.Contains(relLower, "superseded") || strings.Contains(bodyLower, "status: superseded") || strings.Contains(bodyLower, "status: stale") {
-		if containsAny(queryLower, "stale", "superseded", "old", "local", "caching", "history", "why") {
-			score += 4.0
-		} else {
-			score -= 5.0
-		}
-	}
-	return score
-}
-
-func fileRole(rel string) string {
-	rel = filepath.ToSlash(rel)
-	switch {
-	case strings.Contains(rel, "/specs/") && strings.HasSuffix(rel, "/spec.md"):
-		return "openspec_spec"
-	case strings.HasPrefix(rel, "openspec/") && strings.HasSuffix(rel, "/design.md"):
-		return "openspec_design"
-	case strings.HasPrefix(rel, "openspec/") && strings.HasSuffix(rel, "/tasks.md"):
-		return "openspec_tasks"
-	case strings.HasPrefix(rel, "openspec/") && strings.HasSuffix(rel, "/proposal.md"):
-		return "openspec_proposal"
-	case strings.HasPrefix(rel, "docs/adr/") || strings.HasPrefix(rel, "docs/adrs/"):
-		return "adr"
-	case strings.HasPrefix(rel, "docs/prd/") || strings.Contains(rel, "/prd/"):
-		return "prd"
-	case strings.Contains(rel, "/plans/") || strings.HasPrefix(rel, "plans/"):
-		return "plan"
-	case strings.HasPrefix(rel, ".cursor/") || strings.HasPrefix(rel, ".claude/"):
-		return "agent_note"
-	default:
-		return ""
-	}
-}
-
-func isSourceContextCandidate(f File) bool {
-	return !strings.EqualFold(filepath.Ext(f.Rel), ".md") && !isPlanningIntentPath(f.Rel)
-}
-
-func containsAny(s string, needles ...string) bool {
-	for _, needle := range needles {
-		if strings.Contains(s, needle) {
-			return true
-		}
-	}
-	return false
-}
-
-func hasIdentifierTerm(terms map[string]float64) bool {
-	for term := range terms {
-		if strings.ContainsAny(term, "_.-") {
-			return true
-		}
-	}
-	return false
-}
-
-func isPlanningIntentPath(rel string) bool {
-	for _, prefix := range []string{"openspec/", "docs/adr/", "docs/plans/", "docs/prd/", ".cursor/", ".claude/"} {
-		if strings.HasPrefix(rel, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-func queryBaseline(files []File, query string) []File {
-	terms := meaningfulTerms(query)
-	var out []File
-	for _, f := range files {
-		haystack := strings.ToLower(f.Rel + "\n" + f.Content)
-		for _, term := range terms {
-			if strings.Contains(haystack, term) {
-				out = append(out, f)
-				break
-			}
-		}
-	}
-	return out
-}
-
-func expandedTerms(query string) map[string]float64 {
-	terms := map[string]float64{}
-	for _, term := range meaningfulTerms(query) {
-		terms[term] = 1.0
-	}
-	has := func(term string) bool {
-		_, ok := terms[term]
-		return ok
-	}
-	add := func(term string, weight float64) {
-		if current, ok := terms[term]; !ok || current < weight {
-			terms[term] = weight
-		}
-	}
-	if has("entitlement") && has("sync") {
-		add("entitlement_sync", 2.0)
-		add("harden-entitlement-sync", 2.0)
-		add("billing-webhook-hardening", 1.5)
-		add("entitlements", 1.2)
-	}
-	if has("webhook") && (has("replay") || has("protection")) {
-		add("webhook_replay_protection", 2.0)
-		add("stripe_event_id", 1.5)
-		add("idempotency", 1.5)
-		add("billing-webhook-hardening", 1.2)
-	}
-	if has("stripe_event_id") || (has("stripe") && has("event")) {
-		add("stripe_event_id", 2.0)
-		add("idempotency", 2.0)
-		add("webhook", 1.2)
-	}
-	if has("local") && (has("entitlement") || has("entitlements")) {
-		add("local entitlements", 2.0)
-		add("local entitlement", 2.0)
-		add("caching", 1.5)
-		add("cache", 1.2)
-		add("superseded", 1.8)
-	}
-	if has("harden") || has("hardening") {
-		add("harden-entitlement-sync", 2.0)
-		add("billing-webhook-hardening", 1.8)
-	}
-	return terms
-}
-
-func meaningfulTerms(query string) []string {
-	raw := tokenizePreservingIdentifiers(query)
-	stop := map[string]bool{
-		"a": true, "an": true, "and": true, "all": true, "for": true, "give": true,
-		"to": true, "the": true, "of": true, "in": true, "on": true, "with": true,
-		"agent": true, "context": true, "resume": true, "continue": true, "find": true,
-	}
-	seen := map[string]bool{}
-	var terms []string
-	for _, t := range raw {
-		if len(t) < 3 || stop[t] || seen[t] {
-			continue
-		}
-		seen[t] = true
-		terms = append(terms, t)
-		for _, part := range splitIdentifier(t) {
-			if len(part) >= 3 && !stop[part] && !seen[part] {
-				seen[part] = true
-				terms = append(terms, part)
-			}
-		}
-	}
-	return terms
-}
-
-func tokenizePreservingIdentifiers(s string) []string {
-	var terms []string
-	var b strings.Builder
-	flush := func() {
-		if b.Len() == 0 {
-			return
-		}
-		terms = append(terms, strings.ToLower(b.String()))
-		b.Reset()
-	}
-	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' || r == '.' {
-			b.WriteRune(unicode.ToLower(r))
-			continue
-		}
-		flush()
-	}
-	flush()
-	return terms
-}
-
-func splitIdentifier(s string) []string {
-	fields := strings.FieldsFunc(s, func(r rune) bool {
-		return r == '_' || r == '-' || r == '.'
-	})
-	if len(fields) <= 1 {
-		return nil
-	}
-	return fields
-}
-
 func renderContext(label string, files []File) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# DevSpecs Eval Context\n\nQuery: %s\n\n", label)
 	for _, f := range files {
-		fmt.Fprintf(&b, "## %s\n\n```text\n%s\n```\n\n", f.Rel, strings.TrimRight(f.Content, "\r\n"))
+		fmt.Fprintf(&b, "## %s\n\n```text\n%s\n```\n\n", f.Path, strings.TrimRight(f.Body, "\r\n"))
 	}
 	return b.String()
 }
@@ -1017,7 +705,7 @@ func renderContext(label string, files []File) string {
 func rels(files []File) []string {
 	out := make([]string, len(files))
 	for i, f := range files {
-		out[i] = f.Rel
+		out[i] = f.Path
 	}
 	return out
 }
@@ -1040,69 +728,6 @@ func expectedImportanceSet(items []ExpectedArtifact) map[string]string {
 		out[filepath.ToSlash(item.Path)] = importance
 	}
 	return out
-}
-
-func explainArtifacts(files []File, query string) []ArtifactReason {
-	out := make([]ArtifactReason, 0, len(files))
-	terms := expandedTerms(query)
-	queryLower := strings.ToLower(query)
-	for _, f := range files {
-		out = append(out, ArtifactReason{
-			Path:    f.Rel,
-			Reasons: reasonsForFile(f, terms, queryLower),
-		})
-	}
-	return out
-}
-
-func reasonsForFile(f File, terms map[string]float64, queryLower string) []string {
-	relLower := strings.ToLower(f.Rel)
-	bodyLower := strings.ToLower(f.Content)
-	var reasons []string
-	for term := range terms {
-		if term == "" {
-			continue
-		}
-		switch {
-		case strings.Contains(relLower, term):
-			reasons = append(reasons, "query term match in path: "+term)
-		case strings.Contains(bodyLower, term):
-			if strings.ContainsAny(term, "_.-") {
-				reasons = append(reasons, "identifier/body match: "+term)
-			} else {
-				reasons = append(reasons, "query term match in body: "+term)
-			}
-		}
-		if len(reasons) >= 3 {
-			break
-		}
-	}
-	role := fileRole(f.Rel)
-	switch role {
-	case "adr":
-		if containsAny(queryLower, "adr", "decision", "boundary", "why", "architecture", "rationale", "superseded", "stale") {
-			reasons = append(reasons, "authority/query-intent signal: ADR")
-		}
-	case "prd":
-		if containsAny(queryLower, "prd", "product", "background", "requirements", "user") {
-			reasons = append(reasons, "authority/query-intent signal: PRD")
-		}
-	case "openspec_design", "openspec_tasks", "openspec_spec", "openspec_proposal":
-		if containsAny(queryLower, "design", "context", "implement", "implementation", "agent context", "resume", "continue", "spec") {
-			reasons = append(reasons, "OpenSpec change artifact candidate")
-		}
-	case "plan", "agent_note":
-		if containsAny(queryLower, "plan", "resume", "continue", "notes", "followup", "follow-up", "agent") {
-			reasons = append(reasons, "planning/query-intent signal")
-		}
-	}
-	if strings.Contains(bodyLower, "status: superseded") || strings.Contains(bodyLower, "status: stale") || strings.Contains(relLower, "superseded") {
-		reasons = append(reasons, "lifecycle signal: superseded-or-stale")
-	}
-	if len(reasons) == 0 {
-		reasons = append(reasons, "selected by retriever score")
-	}
-	return uniqueStrings(reasons)
 }
 
 func evaluateSufficiency(criteria SuccessCriteria, context string, included []string) SufficiencyResult {
@@ -1387,19 +1012,6 @@ func stringSet(items []string) map[string]bool {
 	out := make(map[string]bool, len(items))
 	for _, item := range items {
 		out[filepath.ToSlash(item)] = true
-	}
-	return out
-}
-
-func uniqueStrings(items []string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, item := range items {
-		if item == "" || seen[item] {
-			continue
-		}
-		seen[item] = true
-		out = append(out, item)
 	}
 	return out
 }

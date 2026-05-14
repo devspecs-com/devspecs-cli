@@ -138,7 +138,7 @@ Notes:
 
 ### CLI-001: Shared Retrieval Core
 
-Status: next
+Status: complete
 
 Hypothesis:
 
@@ -166,9 +166,20 @@ Keep criteria:
 - Filesystem diagnostic still works.
 - Retriever name and result schema remain stable.
 
+Result:
+
+- Added `internal/retrieval`.
+- `ds eval` now calls the shared retriever package.
+- Indexed eval metrics remained unchanged from the control:
+  - 63.8% mean token reduction vs full planning corpus
+  - 27.3% mean artifact recall
+  - 26.7% mean must-have recall
+  - 14.3% mean precision
+  - 0.0% sufficiency pass rate
+
 ### CLI-002: Existing Command Retrieval Bridge
 
-Status: after CLI-001
+Status: next
 
 Hypothesis:
 
@@ -727,12 +738,12 @@ Reason:
 Add entries here as experiments are run.
 
 ```text
-Experiment ID:
-Date:
-Change:
-Before result file:
-After result file:
-Summary delta:
-Decision:
-Notes:
+Experiment ID: CLI-001
+Date: 2026-05-14
+Change: Extracted weighted file retriever, query baseline, candidates, and reasons into internal/retrieval.
+Before result file: not saved for this mechanical refactor
+After result file: .devspecs/eval-runs/agentic-saas-fragmented/20260514T053421Z_agentic-saas-fragmented_seed_smoke_eval_weighted_files_v0.json
+Summary delta: No metric movement expected or observed; indexed eval stayed at 63.8% reduction / 27.3% recall / 26.7% must-have recall / 14.3% precision / 0.0% sufficiency.
+Decision: keep
+Notes: Mechanical Phase 2 bridge. Next work should wire the shared package into existing commands.
 ```

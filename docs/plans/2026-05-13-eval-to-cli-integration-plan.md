@@ -112,13 +112,13 @@ Exit criteria:
 
 ### Phase 2: Shared Retrieval Core
 
-Status: next
+Status: implemented
 
 Goal:
 
 Move retrieval logic out of `internal/evalharness` into a package usable by eval and live commands.
 
-Possible package:
+Package:
 
 ```text
 internal/retrieval
@@ -147,15 +147,16 @@ Adapters:
 
 Exit criteria:
 
-- `ds eval` calls shared retrieval logic.
-- `ds find` and query-focused `ds resume` can call the same retrieval logic.
-- Internal context assembly can call the same retrieval logic if a public `pack` command is added later.
-- Eval output labels the shared retriever name.
-- Tests cover indexed candidate conversion.
+- [x] `ds eval` calls shared retrieval logic.
+- [x] `internal/retrieval` exposes shared candidates, retriever interface, query baseline, and artifact reasons.
+- [x] Eval output labels the shared retriever name.
+- [x] Tests cover the shared retrieval package and indexed eval behavior.
+- [ ] `ds find` and query-focused `ds resume` call the same retrieval logic. This belongs to Phase 3.
+- [ ] Internal context assembly calls the same retrieval logic if a public `pack` command is added later.
 
 ### Phase 3: Improve Existing CLI Workflows
 
-Status: next after shared retrieval core
+Status: next
 
 Goal:
 
