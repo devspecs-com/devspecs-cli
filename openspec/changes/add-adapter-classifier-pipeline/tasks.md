@@ -83,11 +83,11 @@
 ## Phase 4: Scan Integration
 
 - [ ] Add broad safe candidate discovery behind conservative filters.
-- [ ] Run classifier resolver before parse/index.
-- [ ] Preserve existing configured-path adapter behavior.
-- [ ] Store classifier metadata in extracted JSON.
-- [ ] Include classifier metadata in indexed retrieval candidates.
-- [ ] Confirm `ds scan` remains deterministic and local-only.
+- [x] Run classifier resolver during scan before index for existing adapter-discovered candidates.
+- [x] Preserve existing configured-path adapter behavior.
+- [x] Store classifier metadata in extracted JSON.
+- [x] Include classifier metadata in indexed retrieval candidates.
+- [x] Confirm `ds scan` remains deterministic and local-only.
 
 ## Phase 5: Retrieval Integration
 

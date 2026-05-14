@@ -71,6 +71,7 @@ func (s *Scanner) Run(ctx context.Context, repoRoot string, cfg *config.RepoConf
 			if err != nil {
 				continue
 			}
+			art = attachClassifierMetadata(repoRoot, c, art)
 			if err := s.upsertArtifact(repoRoot, repoID, adapter.Name(), art, sources, pr, now, result); err != nil {
 				return nil, fmt.Errorf("upsert artifact %q: %w", art.SourceIdentity, err)
 			}

@@ -316,10 +316,8 @@ func statusPhrases(frontmatter map[string]string, lines []string) []string {
 
 func lifecyclePhrases(frontmatter map[string]string, lines []string, path string) []string {
 	haystack := strings.ToLower(path + "\n" + strings.Join(lines, "\n"))
-	if frontmatter != nil {
-		for key, value := range frontmatter {
-			haystack += "\n" + strings.ToLower(key+":"+value)
-		}
+	for key, value := range frontmatter {
+		haystack += "\n" + strings.ToLower(key+":"+value)
 	}
 	var out []string
 	for _, phrase := range []string{

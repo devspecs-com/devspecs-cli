@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -22,17 +23,19 @@ func loadRetrievalCandidates(db *store.DB, fp store.FilterParams) ([]retrieval.C
 		sources, _ := db.GetSourcesForArtifact(art.ID)
 		todos, _ := db.GetTodosForArtifact(art.ID)
 		var body string
+		var extractedJSON string
 		if art.CurrentRevID != "" {
 			if rev, err := db.GetRevision(art.CurrentRevID); err == nil && rev != nil {
 				body = rev.Body
+				extractedJSON = rev.ExtractedJSON
 			}
 		}
-		candidates = append(candidates, artifactCandidate(art, sources, todos, body))
+		candidates = append(candidates, artifactCandidate(art, sources, todos, body, extractedJSON))
 	}
 	return candidates, nil
 }
 
-func artifactCandidate(art store.ArtifactRow, sources []store.SourceRow, todos []store.TodoRow, body string) retrieval.Candidate {
+func artifactCandidate(art store.ArtifactRow, sources []store.SourceRow, todos []store.TodoRow, body, extractedJSON string) retrieval.Candidate {
 	sourcePath := firstSourcePath(sources)
 	path := sourcePath
 	if path == "" {
@@ -41,27 +44,87 @@ func artifactCandidate(art store.ArtifactRow, sources []store.SourceRow, todos [
 	if path == "" {
 		path = art.ID
 	}
-	return retrieval.Candidate{
-		ID:      art.ID,
-		Path:    filepath.ToSlash(path),
-		Kind:    art.Kind,
-		Subtype: art.Subtype,
-		Title:   art.Title,
-		Status:  art.Status,
-		Source:  filepath.ToSlash(sourcePath),
-		Body:    renderRetrievalCandidateBody(art, sources, todos, body),
-		Metadata: map[string]string{
-			"repo_id":              art.RepoID,
-			"short_id":             art.ShortID,
-			"current_revision_id":  art.CurrentRevID,
-			"created_at":           art.CreatedAt,
-			"updated_at":           art.UpdatedAt,
-			"last_observed_at":     art.LastObservedAt,
-			"token_counter":        commandTokenCounterName,
-			"retrieval_candidate":  "sqlite_artifact",
-			"source_context_scope": "indexed_artifacts",
-		},
+	metadata := map[string]string{
+		"repo_id":              art.RepoID,
+		"short_id":             art.ShortID,
+		"current_revision_id":  art.CurrentRevID,
+		"created_at":           art.CreatedAt,
+		"updated_at":           art.UpdatedAt,
+		"last_observed_at":     art.LastObservedAt,
+		"token_counter":        commandTokenCounterName,
+		"retrieval_candidate":  "sqlite_artifact",
+		"source_context_scope": "indexed_artifacts",
 	}
+	for key, value := range classifierCandidateMetadata(extractedJSON) {
+		metadata[key] = value
+	}
+	return retrieval.Candidate{
+		ID:       art.ID,
+		Path:     filepath.ToSlash(path),
+		Kind:     art.Kind,
+		Subtype:  art.Subtype,
+		Title:    art.Title,
+		Status:   art.Status,
+		Source:   filepath.ToSlash(sourcePath),
+		Body:     renderRetrievalCandidateBody(art, sources, todos, body),
+		Metadata: metadata,
+	}
+}
+
+func classifierCandidateMetadata(extractedJSON string) map[string]string {
+	if strings.TrimSpace(extractedJSON) == "" {
+		return nil
+	}
+	var payload struct {
+		Classifier struct {
+			Evaluator       string `json:"evaluator"`
+			Profile         string `json:"profile"`
+			ConfigVersion   int    `json:"config_version"`
+			Ambiguous       bool   `json:"ambiguous"`
+			FallbackGeneric bool   `json:"fallback_generic"`
+			Winner          struct {
+				Classifier    string  `json:"classifier"`
+				Subformat     string  `json:"subformat"`
+				Family        string  `json:"family"`
+				Confidence    float64 `json:"confidence"`
+				Kind          string  `json:"kind"`
+				Subtype       string  `json:"subtype"`
+				Status        string  `json:"status"`
+				Lifecycle     string  `json:"lifecycle"`
+				Authority     string  `json:"authority"`
+				FormatProfile string  `json:"format_profile"`
+			} `json:"winner"`
+		} `json:"classifier"`
+	}
+	if err := json.Unmarshal([]byte(extractedJSON), &payload); err != nil {
+		return nil
+	}
+	if payload.Classifier.Winner.Classifier == "" {
+		return nil
+	}
+	out := map[string]string{
+		"classifier_evaluator":        payload.Classifier.Evaluator,
+		"classifier_profile":          payload.Classifier.Profile,
+		"classifier_config_version":   fmt.Sprintf("%d", payload.Classifier.ConfigVersion),
+		"classifier_model":            payload.Classifier.Winner.Classifier,
+		"classifier_confidence":       fmt.Sprintf("%.3f", payload.Classifier.Winner.Confidence),
+		"classifier_ambiguous":        fmt.Sprintf("%t", payload.Classifier.Ambiguous),
+		"classifier_fallback_generic": fmt.Sprintf("%t", payload.Classifier.FallbackGeneric),
+		"classifier_kind":             payload.Classifier.Winner.Kind,
+		"classifier_subtype":          payload.Classifier.Winner.Subtype,
+		"classifier_status":           payload.Classifier.Winner.Status,
+		"classifier_subformat":        payload.Classifier.Winner.Subformat,
+		"classifier_family":           payload.Classifier.Winner.Family,
+		"classifier_lifecycle":        payload.Classifier.Winner.Lifecycle,
+		"classifier_authority":        payload.Classifier.Winner.Authority,
+		"classifier_format_profile":   payload.Classifier.Winner.FormatProfile,
+	}
+	for key, value := range out {
+		if value == "" {
+			delete(out, key)
+		}
+	}
+	return out
 }
 
 func renderRetrievalCandidateBody(art store.ArtifactRow, sources []store.SourceRow, todos []store.TodoRow, body string) string {

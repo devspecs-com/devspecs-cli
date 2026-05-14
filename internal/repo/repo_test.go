@@ -4,9 +4,36 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func gitCmd(args ...string) *exec.Cmd {
+	cmd := exec.Command("git", args...)
+	cmd.Env = cleanGitTestEnv()
+	return cmd
+}
+
+func cleanGitTestEnv() []string {
+	blocked := map[string]bool{
+		"GIT_DIR":                          true,
+		"GIT_WORK_TREE":                    true,
+		"GIT_INDEX_FILE":                   true,
+		"GIT_PREFIX":                       true,
+		"GIT_OBJECT_DIRECTORY":             true,
+		"GIT_ALTERNATE_OBJECT_DIRECTORIES": true,
+	}
+	var env []string
+	for _, entry := range os.Environ() {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok && blocked[key] {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return env
+}
 
 func TestDetect_NonGitDir(t *testing.T) {
 	tmp := t.TempDir()
@@ -22,7 +49,7 @@ func TestDetect_NonGitDir(t *testing.T) {
 func TestDetect_GitDir(t *testing.T) {
 	tmp := t.TempDir()
 
-	cmd := exec.Command("git", "init", "-b", "testbranch", tmp)
+	cmd := gitCmd("init", "-b", "testbranch", tmp)
 	if err := cmd.Run(); err != nil {
 		t.Skip("git not available:", err)
 	}
@@ -30,8 +57,8 @@ func TestDetect_GitDir(t *testing.T) {
 	// Create a commit so HEAD exists
 	f, _ := os.Create(filepath.Join(tmp, "file.txt"))
 	f.Close()
-	exec.Command("git", "-C", tmp, "add", ".").Run()
-	exec.Command("git", "-C", tmp, "commit", "-m", "init", "--allow-empty").Run()
+	gitCmd("-C", tmp, "add", ".").Run()
+	gitCmd("-C", tmp, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "init", "--allow-empty").Run()
 
 	info := Detect(tmp)
 	if !info.IsGit {
@@ -47,21 +74,21 @@ func TestFileFirstCommitDate(t *testing.T) {
 		t.Skip("git not available:", err)
 	}
 	tmp := t.TempDir()
-	if err := exec.Command("git", "init", "-b", "main", tmp).Run(); err != nil {
+	if err := gitCmd("init", "-b", "main", tmp).Run(); err != nil {
 		t.Fatal(err)
 	}
 	p := filepath.Join(tmp, "doc.md")
 	if err := os.WriteFile(p, []byte("v1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("git", "-C", tmp, "add", "doc.md")
+	cmd := gitCmd("-C", tmp, "add", "doc.md")
 	if err := cmd.Run(); err != nil {
 		t.Fatal(err)
 	}
 	want := "2020-03-15T14:30:00Z"
-	commit := exec.Command("git", "-C", tmp, "-c", "user.name=t", "-c", "user.email=t@t", "commit",
+	commit := gitCmd("-C", tmp, "-c", "user.name=t", "-c", "user.email=t@t", "commit",
 		"-m", "add doc", "--date", want)
-	commit.Env = append(os.Environ(),
+	commit.Env = append(commit.Env,
 		"GIT_AUTHOR_DATE="+want,
 		"GIT_COMMITTER_DATE="+want,
 	)
@@ -87,16 +114,16 @@ func TestHeadCommit_gitRepo(t *testing.T) {
 		t.Skip("git not available:", err)
 	}
 	tmp := t.TempDir()
-	if err := exec.Command("git", "init", "-b", "main", tmp).Run(); err != nil {
+	if err := gitCmd("init", "-b", "main", tmp).Run(); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(tmp, "f.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := exec.Command("git", "-C", tmp, "add", "f.txt").Run(); err != nil {
+	if err := gitCmd("-C", tmp, "add", "f.txt").Run(); err != nil {
 		t.Fatal(err)
 	}
-	c := exec.Command("git", "-C", tmp, "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-m", "init")
+	c := gitCmd("-C", tmp, "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-m", "init")
 	if err := c.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -117,25 +144,25 @@ func TestChangedFiles_latestCommit(t *testing.T) {
 		t.Skip("git not available:", err)
 	}
 	tmp := t.TempDir()
-	if err := exec.Command("git", "init", "-b", "main", tmp).Run(); err != nil {
+	if err := gitCmd("init", "-b", "main", tmp).Run(); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(tmp, "a.txt"), []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := exec.Command("git", "-C", tmp, "add", "a.txt").Run(); err != nil {
+	if err := gitCmd("-C", tmp, "add", "a.txt").Run(); err != nil {
 		t.Fatal(err)
 	}
-	if err := exec.Command("git", "-C", tmp, "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-m", "a").Run(); err != nil {
+	if err := gitCmd("-C", tmp, "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-m", "a").Run(); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(tmp, "b.txt"), []byte("b"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := exec.Command("git", "-C", tmp, "add", "b.txt").Run(); err != nil {
+	if err := gitCmd("-C", tmp, "add", "b.txt").Run(); err != nil {
 		t.Fatal(err)
 	}
-	if err := exec.Command("git", "-C", tmp, "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-m", "b").Run(); err != nil {
+	if err := gitCmd("-C", tmp, "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-m", "b").Run(); err != nil {
 		t.Fatal(err)
 	}
 	files := ChangedFiles(tmp)

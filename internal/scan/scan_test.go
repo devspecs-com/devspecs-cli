@@ -239,7 +239,10 @@ func TestScan_PersistsExtractedJSONWithFrontmatter(t *testing.T) {
 	if !strings.Contains(ex, "frontmatter") {
 		t.Fatalf("expected frontmatter in extracted json: %s", ex)
 	}
-	// Same map the markdown adapter produces for this file (full parity through scan path).
+	if !strings.Contains(ex, "classifier") {
+		t.Fatalf("expected classifier metadata in extracted json: %s", ex)
+	}
+	// Apart from scan-level classifier metadata, preserve the markdown adapter extraction.
 	md := &markdown.Adapter{}
 	repoRoot := filepath.Join(tmp, "repo")
 	abs := filepath.Join(repoRoot, "plans", "fm.md")
@@ -259,8 +262,56 @@ func TestScan_PersistsExtractedJSONWithFrontmatter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	delete(got, "classifier")
 	if !reflect.DeepEqual(got, wantCanon) {
 		t.Fatalf("extracted_json != parsed Extracted (JSON semantics)\ngot:  %#v\nwant: %#v", got, wantCanon)
+	}
+}
+
+func TestScan_PersistsClassifierMetadata(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	plansDir := filepath.Join(tmp, "repo", "docs", "plans")
+	os.MkdirAll(plansDir, 0o755)
+	content := "---\nstatus: active\n---\n# Auth Token Migration Plan\n\n## Tasks\n\n- [ ] Add session guard\n"
+	os.WriteFile(filepath.Join(plansDir, "2026-05-14-auth-token-plan.md"), []byte(content), 0o644)
+
+	dbPath := filepath.Join(home, "devspecs.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	ids := idgen.NewFactory()
+	s := New(db, ids, []adapters.Adapter{&markdown.Adapter{}})
+	if _, err := s.Run(context.Background(), filepath.Join(tmp, "repo"), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	var ex string
+	err = db.QueryRow(`SELECT COALESCE(rv.extracted_json, '') FROM artifact_revisions rv JOIN artifacts a ON a.current_revision_id = rv.id LIMIT 1`).Scan(&ex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(ex), &got); err != nil {
+		t.Fatal(err)
+	}
+	classifier, ok := got["classifier"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing classifier metadata: %#v", got)
+	}
+	if classifier["evaluator"] != "declarative_document_models_v0" {
+		t.Fatalf("evaluator = %#v", classifier["evaluator"])
+	}
+	winner := classifier["winner"].(map[string]any)
+	if winner["classifier"] != "plan" {
+		t.Fatalf("winner classifier = %#v", winner["classifier"])
+	}
+	if winner["family"] != "plan.implementation_plan" {
+		t.Fatalf("winner family = %#v", winner["family"])
 	}
 }
 

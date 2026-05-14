@@ -62,6 +62,28 @@ Classifier decisions MUST expose auditable positive and negative reasons.
 - **THEN** negative reasons reduce confidence
 - **AND** those reasons are available in eval JSON
 
+#### Scenario: scan persists classifier metadata
+
+- **GIVEN** existing adapters discover and parse an artifact during `ds scan`
+- **WHEN** the scan indexes the artifact revision
+- **THEN** DevSpecs stores the declarative classifier decision in extracted JSON
+- **AND** the metadata includes evaluator, classifier profile, winner, confidence, positive reasons, negative reasons, ambiguity, fallback, and alternatives
+- **AND** this does not require a schema migration
+
+#### Scenario: scan preserves configured adapter behavior
+
+- **GIVEN** a repository is scanned with existing configured paths
+- **WHEN** classifier metadata is attached during scan
+- **THEN** existing adapters still determine which artifacts are indexed
+- **AND** classifier metadata does not change artifact counts or source identities in this phase
+
+#### Scenario: indexed retrieval candidate exposes classifier metadata
+
+- **GIVEN** an indexed artifact revision has classifier metadata in extracted JSON
+- **WHEN** DevSpecs builds retrieval candidates from the SQLite index
+- **THEN** the retrieval candidate metadata includes classifier model, profile, confidence, authority, lifecycle, subformat, and family fields when present
+- **AND** ranking does not consume those fields until the retrieval integration phase
+
 ### Requirement: Classifier configuration
 
 DevSpecs MUST support a versioned classifier configuration structure that covers documented built-in document models and subformat/family models.

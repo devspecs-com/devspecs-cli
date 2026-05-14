@@ -888,20 +888,33 @@ Result:
 
 ### Phase 4: Scan Pipeline Integration
 
-Status: planned
+Status: partially implemented
 
 Deliverables:
 
-- broad safe candidate discovery
-- classifier resolver before parse/index
+- classifier resolver during scan for existing adapter-discovered candidates
 - existing configured adapters remain compatible
 - classification metadata stored in `Artifact.Extracted` first
+- indexed retrieval candidates expose classifier metadata for later ranking experiments
+- OpenSpec container classification metadata attached when an existing OpenSpec change layout is indexed
+- broad safe candidate discovery remains planned until we can test it without changing artifact counts unpredictably
 
 Success criteria:
 
-- `ds scan` remains deterministic
-- current configured-path behavior still works
-- indexed eval does not regress catastrophically
+- [x] `ds scan` remains deterministic
+- [x] current configured-path behavior still works
+- [x] classifier metadata is persisted in `artifact_revisions.extracted_json`
+- [x] classifier metadata is available on indexed retrieval candidates
+- [x] no DB/schema migration required
+- [ ] broad classifier-driven candidate discovery is tested behind conservative filters
+- [ ] indexed eval does not regress catastrophically after classifier metadata is consumed by retrieval
+
+Result:
+
+- Added scan-level classifier metadata enrichment for artifacts emitted by existing adapters.
+- Stored evaluator, profile, config version, winner, alternatives, confidence, reasons, ambiguity, fallback, and OpenSpec container child evidence under `extracted_json.classifier`.
+- Copied classifier summary fields into indexed retrieval candidate metadata without changing ranking yet.
+- Did not change artifact counts, public CLI surface, configured source behavior, or retrieval ranking.
 
 ### Phase 5: Retrieval Consumption
 
