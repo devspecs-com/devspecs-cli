@@ -11,15 +11,15 @@ Change ID: `improve-retrieval-quality`
 
 Improve DevSpecs retrieval quality while preserving substantial context-token reduction. The default indexed seed eval now shows that scan/index coverage and retrieval quality are both major gaps:
 
-- Mean token reduction vs full planning corpus: ~66.2%
-- Mean artifact recall: ~27.3%
-- Mean must-have recall: ~26.7%
-- Mean artifact precision: ~14.3%
-- Context sufficiency pass rate: 0.0%
+- Mean token reduction vs full planning corpus: ~73.3%
+- Mean artifact recall: ~40.7%
+- Mean must-have recall: ~46.7%
+- Mean artifact precision: ~17.0%
+- Context sufficiency pass rate: 20.0%
 
 The earlier filesystem-only diagnostic showed stronger numbers, which proves the bridge to real indexed CLI workflows matters. This change proposes deterministic retrieval, indexed eval, and CLI integration improvements before any LLM-based judging. The work should make DevSpecs better at preparing compact, relevant agent context from indexed repo intent artifacts.
 
-The first live command eval now exists for `ds resume <query>` and `ds find`. The current `resume-query` baseline compresses more aggressively but retrieves less relevant intent than the indexed harness, so the next product work should improve candidate coverage, grouping, and ranking on the live path.
+The first live command eval now exists for `ds resume <query>` and `ds find`. The current `resume-query` baseline is ~78.3% token reduction, ~34.5% overall recall, ~38.3% must-have recall, ~16.0% precision, and 30.0% sufficiency. It compresses aggressively but still retrieves too little relevant intent, so the next product work should improve classifier quality, source candidate extraction, OpenSpec grouping, and ranking on the live path.
 
 ## Motivation
 

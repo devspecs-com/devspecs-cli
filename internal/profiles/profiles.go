@@ -65,9 +65,9 @@ func All() []WorkflowProfile {
 			SourceType: "adr", Paths: []string{"docs/adr", "docs/adrs", "adr", "adrs"}, DetectDirs: []string{"docs/adr", "docs/adrs", "adr", "adrs"},
 		},
 		{
-			ID: "docs", Label: "Docs (docs/specs/, docs/plans/)", Description: "Specs and plans under docs/",
-			SourceType: "markdown", Paths: []string{"docs/specs", "docs/plans", "docs/design", "docs/technical"},
-			DetectDirs: []string{"docs/specs", "docs/plans"},
+			ID: "docs", Label: "Docs (docs/specs/, docs/plans/, docs/prd/)", Description: "Specs, plans, PRDs, and design notes under docs/",
+			SourceType: "markdown", Paths: []string{"docs/specs", "docs/plans", "docs/prd", "docs/design", "docs/technical"},
+			DetectDirs: []string{"docs/specs", "docs/plans", "docs/prd"},
 		},
 	}
 }

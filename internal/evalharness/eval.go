@@ -681,7 +681,7 @@ func fullPlanningCorpus(files []File) []File {
 				return true
 			}
 		}
-		return false
+		return retrieval.IsPlanningIntentPath(rel)
 	})
 }
 

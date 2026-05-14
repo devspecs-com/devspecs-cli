@@ -22,10 +22,31 @@ type Adapter struct{}
 func (a *Adapter) Name() string { return "markdown" }
 
 func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.RepoConfig) ([]adapters.Candidate, error) {
-	paths, rules := markdownSource(cfg)
+	paths, rules, useDefaultCoverage := markdownSource(cfg)
 
 	var candidates []adapters.Candidate
 	seen := make(map[string]bool)
+	addCandidate := func(absPath string) {
+		rel, err := filepath.Rel(repoRoot, absPath)
+		if err != nil {
+			return
+		}
+		rel = filepath.ToSlash(rel)
+		if m := ignore.FromContext(ctx); m != nil && m.ShouldSkip(rel, false) {
+			return
+		}
+		if seen[rel] {
+			return
+		}
+		seen[rel] = true
+		candidates = append(candidates, adapters.Candidate{
+			PrimaryPath:   absPath,
+			RelPath:       rel,
+			AdapterName:   "markdown",
+			MarkdownPaths: paths,
+			MarkdownRules: rules,
+		})
+	}
 
 	for _, p := range paths {
 		dir := filepath.Join(repoRoot, p)
@@ -34,19 +55,16 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 			continue
 		}
 		for _, absPath := range entries {
-			rel, _ := filepath.Rel(repoRoot, absPath)
-			rel = filepath.ToSlash(rel)
-			if seen[rel] {
-				continue
+			addCandidate(absPath)
+		}
+	}
+
+	if useDefaultCoverage {
+		entries, err := walkNestedDefaultMarkdownFiles(ctx, repoRoot)
+		if err == nil {
+			for _, absPath := range entries {
+				addCandidate(absPath)
 			}
-			seen[rel] = true
-			candidates = append(candidates, adapters.Candidate{
-				PrimaryPath:   absPath,
-				RelPath:       rel,
-				AdapterName:   "markdown",
-				MarkdownPaths: paths,
-				MarkdownRules: rules,
-			})
 		}
 	}
 
@@ -54,46 +72,31 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 	for _, pattern := range rootGlobs() {
 		matches, _ := filepath.Glob(filepath.Join(repoRoot, pattern))
 		for _, absPath := range matches {
-			rel, _ := filepath.Rel(repoRoot, absPath)
-			rel = filepath.ToSlash(rel)
-			if m := ignore.FromContext(ctx); m != nil && m.ShouldSkip(rel, false) {
-				continue
-			}
-			if seen[rel] {
-				continue
-			}
-			seen[rel] = true
-			candidates = append(candidates, adapters.Candidate{
-				PrimaryPath:   absPath,
-				RelPath:       rel,
-				AdapterName:   "markdown",
-				MarkdownPaths: paths,
-				MarkdownRules: rules,
-			})
+			addCandidate(absPath)
 		}
 	}
 
 	return candidates, nil
 }
 
-func markdownSource(cfg *config.RepoConfig) (paths []string, rules []config.SourceRule) {
+func markdownSource(cfg *config.RepoConfig) (paths []string, rules []config.SourceRule, useDefaultCoverage bool) {
 	paths = defaultPaths()
 	if cfg == nil {
-		return paths, nil
+		return paths, nil, true
 	}
 	for _, src := range cfg.Sources {
 		if src.Type != "markdown" {
 			continue
 		}
 		if len(src.Paths) > 0 {
-			return src.Paths, src.Rules
+			return src.Paths, src.Rules, sameStrings(src.Paths, paths) && len(src.Rules) == 0
 		}
 		if src.Path != "" {
-			return []string{src.Path}, src.Rules
+			return []string{src.Path}, src.Rules, false
 		}
 		break
 	}
-	return paths, nil
+	return paths, nil, true
 }
 
 func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Artifact, []adapters.Source, todoparse.ParseResult, error) {
@@ -193,7 +196,7 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 func defaultPaths() []string {
 	return []string{
 		"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans",
-		"docs/design", "docs/technical",
+		"docs/prd", "docs/design", "docs/technical",
 		"_bmad-output", ".specify/memory",
 	}
 }
@@ -232,6 +235,88 @@ func walkMarkdownFiles(ctx context.Context, repoRoot, dir string) ([]string, err
 		return nil
 	})
 	return files, err
+}
+
+func walkNestedDefaultMarkdownFiles(ctx context.Context, repoRoot string) ([]string, error) {
+	m := ignore.FromContext(ctx)
+	var files []string
+	err := filepath.Walk(repoRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		rel, rerr := filepath.Rel(repoRoot, path)
+		if rerr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+		if m != nil && m.ShouldSkip(rel, info.IsDir()) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() {
+			if isBuiltinIgnoredDir(info.Name()) {
+				return filepath.SkipDir
+			}
+			if isDefaultNestedMarkdownDir(rel) {
+				entries, walkErr := walkMarkdownFiles(ctx, repoRoot, path)
+				if walkErr != nil {
+					return walkErr
+				}
+				files = append(files, entries...)
+				return filepath.SkipDir
+			}
+		}
+		return nil
+	})
+	return files, err
+}
+
+func isBuiltinIgnoredDir(name string) bool {
+	switch strings.ToLower(name) {
+	case ".git", "node_modules", "dist", "build", ".next", "coverage", "tmp", "vendor":
+		return true
+	default:
+		return false
+	}
+}
+
+func isDefaultNestedMarkdownDir(rel string) bool {
+	rel = strings.Trim(filepath.ToSlash(rel), "/")
+	if rel == "" || rel == "." {
+		return false
+	}
+	for _, suffix := range []string{
+		"docs/specs",
+		"docs/plans",
+		"docs/prd",
+		"docs/design",
+		"docs/technical",
+	} {
+		if rel == suffix || strings.HasSuffix(rel, "/"+suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func parseFrontmatter(content string) map[string]string {
@@ -346,6 +431,10 @@ func pathGeneratorForExtract(relPath string) string {
 
 	if strings.Contains(norm, ".cursor/plans/") {
 		return "cursor-plan"
+	}
+
+	if strings.Contains(norm, ".claude/") {
+		return "claude"
 	}
 
 	return ""

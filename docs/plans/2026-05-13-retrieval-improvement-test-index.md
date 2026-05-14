@@ -45,11 +45,11 @@ token_counter: approx_chars_div_4
 Current measured result:
 
 ```text
-Mean token reduction vs full planning corpus: 66.2%
-Mean artifact recall: 27.3%
-Mean must-have recall: 26.7%
-Mean artifact precision: 14.3%
-Context sufficiency pass rate: 0.0%
+Mean token reduction vs full planning corpus: 73.3%
+Mean artifact recall: 40.7%
+Mean must-have recall: 46.7%
+Mean artifact precision: 17.0%
+Context sufficiency pass rate: 20.0%
 ```
 
 Live command baseline:
@@ -58,11 +58,11 @@ Live command baseline:
 Command: ds eval ./fixtures/agentic-saas-fragmented --command resume-query
 Product path: live_cli_command
 Command under test: resume-query
-Mean token reduction vs full planning corpus: 73.3%
-Mean artifact recall: 21.2%
-Mean must-have recall: 18.3%
-Mean artifact precision: 12.0%
-Context sufficiency pass rate: 10.0%
+Mean token reduction vs full planning corpus: 78.3%
+Mean artifact recall: 34.5%
+Mean must-have recall: 38.3%
+Mean artifact precision: 16.0%
+Context sufficiency pass rate: 30.0%
 ```
 
 Interpretation:
@@ -70,9 +70,10 @@ Interpretation:
 - Indexed eval is now exposing real scan/index coverage gaps.
 - Live command eval exposes the user-facing effect of default focused context limits.
 - Source/context candidates are not available through the indexed corpus yet.
-- Several expected OpenSpec companion files and PRD/.claude/app-plan artifacts are missing or underrepresented in scan/index output.
+- Several expected source files, OpenSpec companion files, and agent-note artifacts are missing or underrepresented in scan/index output.
 - The old filesystem-only result was much better, which proves the product bridge matters.
 - Context sufficiency is currently the clearest product gap.
+- The first general candidate-coverage bridge improved recall and sufficiency, but precision remains weak; the next work should improve classifier/ranking quality, not add fixture-specific paths.
 
 Filesystem diagnostic comparison:
 
@@ -128,6 +129,30 @@ Do not accept an improvement if:
 - Generic terms like `billing`, `customer`, `auth`, `token`, or `webhook` start dominating more cases.
 - Retrieval requires an LLM, embedding service, Ollama, Anthropic, OpenAI, or network call.
 - TypeScript, React, Node, or any one stack becomes a core retrieval assumption.
+- Candidate discovery grows by hardcoding paths that only exist to satisfy the seed fixture.
+
+## Architecture Direction
+
+Path configuration should be treated as a bootstrap and user override mechanism, not the center of retrieval architecture.
+
+The target shape is:
+
+```text
+broad safe candidate discovery
+-> adapter classifiers score each candidate
+-> the best adapter claims high-confidence documents
+-> ambiguous documents fall back to generic markdown
+-> adapters emit normalized metadata, lifecycle, entities, sections, and reasons
+-> retrieval ranks normalized candidates
+```
+
+This keeps DevSpecs from becoming a list of hardcoded workflow folders. General folder conventions can still help candidate generation, but the durable product behavior should come from deterministic document classifiers and auditable scoring. Classifiers should use positive and negative features such as frontmatter, headings, status fields, checklist density, proposal/design/task/spec shape, decision/rationale sections, generated-doc markers, changelog/release-note markers, stale/scratch markers, and path hints.
+
+Evaluate this in layers:
+
+- **Discovery coverage:** did scan/index see plausible intent candidates?
+- **Classifier quality:** did adapters accept, reject, and label artifacts correctly?
+- **Retrieval quality:** did ranking select useful context for the query?
 
 ## Decision Template
 
@@ -503,31 +528,41 @@ Keep criteria:
 - Artifact reasons include section role.
 - Precision improves or remains stable.
 
-### RET-007: Artifact-Type Adapters
+### RET-007: Adapter Classifiers And Artifact-Type Models
 
 Hypothesis:
 
-- Purpose-built adapters for OpenSpec, ADR, PRD, plans, and agent notes will improve authority and lifecycle detection more safely than generic text scoring.
+- Purpose-built deterministic classifiers for OpenSpec, ADR, PRD, plans, agent notes, and generic markdown will improve discovery and metadata quality more safely than adding more configured paths or generic text scoring.
 
 Scope:
 
-- OpenSpec adapter
-- ADR adapter
-- PRD adapter
-- plan adapter
-- Cursor/Claude note adapter
+- Broad safe markdown candidate discovery with ignore, size, and generated-file filters.
+- Adapter-level accept/reject classifiers with confidence scores.
+- Positive and negative classifier features.
+- OpenSpec adapter/model.
+- ADR adapter/model.
+- PRD adapter/model.
+- Plan adapter/model.
+- Agent-note adapter/model.
+- Generic markdown fallback for ambiguous documents.
+- User-configured paths as hints/overrides, not as the only way to discover candidates.
 
 Expected wins:
 
+- Better indexed candidate coverage without fixture-specific folder additions.
 - Broad improvement across recall, must-have recall, and sufficiency.
+- Better precision because ambiguous or low-confidence files can fall back to generic markdown or remain low authority.
 
 Risks:
 
 - Too many adapter-specific boosts can become another weight maze.
+- Broad discovery can index noisy markdown unless classifier rejection and negative features are strong.
+- Classifier confidence can look semantic while only encoding fragile conventions.
 
 Keep criteria:
 
 - Per-adapter reasons are auditable.
+- Classifier acceptance can be tested independently from retrieval ranking.
 - Precision improves in noisy cases.
 - No artifact type becomes globally dominant across all query intents.
 
@@ -740,7 +775,7 @@ Reason:
 
 - RET-005: OpenSpec companion bundle edges
 - RET-006: Markdown section boundary extraction
-- RET-007: Artifact-type adapters
+- RET-007: Adapter classifiers and artifact-type models
 
 Reason:
 
@@ -803,4 +838,15 @@ After result file: .devspecs/eval-runs/agentic-saas-fragmented/20260514T060213Z_
 Summary delta: live `resume-query` measures 73.3% token reduction / 21.2% recall / 18.3% must-have recall / 12.0% precision / 10.0% sufficiency. Compression improves because the command emits a focused 5-artifact context, but recall and precision are weaker than the indexed harness.
 Decision: keep
 Notes: This is the first product-path eval. Next improvements should target candidate coverage, grouping, and ranking on the live command path.
+
+Experiment ID: COV-001
+Date: 2026-05-14
+Change: Added general markdown intent coverage for PRD docs and nested `*/docs/{specs,plans,prd,design,technical}` directories; updated docs profile to include `docs/prd`; deferred public `ds pack` decision in favor of measured retrieval improvements.
+Before result file: .devspecs/eval-runs/agentic-saas-fragmented/20260514T054719Z_agentic-saas-fragmented_seed_smoke_eval_weighted_files_v0.json
+After indexed result file: .devspecs/eval-runs/agentic-saas-fragmented/20260514T064428Z_agentic-saas-fragmented_seed_smoke_eval_weighted_files_v0.json
+After live resume result file: .devspecs/eval-runs/agentic-saas-fragmented/20260514T064441Z_agentic-saas-fragmented_seed_smoke_resume-query_eval_weighted_files_v0.json
+After live find result file: .devspecs/eval-runs/agentic-saas-fragmented/20260514T064502Z_agentic-saas-fragmented_seed_smoke_find_eval_weighted_files_v0.json
+Summary delta: indexed eval moved to 73.3% reduction / 40.7% recall / 46.7% must-have recall / 17.0% precision / 20.0% sufficiency. Live `resume-query` moved to 78.3% reduction / 34.5% recall / 38.3% must-have recall / 16.0% precision / 30.0% sufficiency.
+Decision: keep
+Notes: This is a narrow coverage bridge, not the long-term architecture. It uses general docs conventions, does not add fixture-specific app paths, and does not default-index scratch. Remaining misses point to source candidate extraction, OpenSpec companion edges, and adapter classifier/ranking quality.
 ```

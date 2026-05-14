@@ -54,6 +54,64 @@ func TestDiscover_ConfigPaths(t *testing.T) {
 	}
 }
 
+func TestDiscover_DefaultNestedDocsIntentDirs(t *testing.T) {
+	tmp := t.TempDir()
+	nestedPlan := filepath.Join(tmp, "apps", "desktop", "docs", "plans")
+	nestedPRD := filepath.Join(tmp, "services", "api", "docs", "prd")
+	if err := os.MkdirAll(nestedPlan, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(nestedPRD, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(nestedPlan, "pnpm-migration.md"), []byte("# PNPM Migration\n"), 0o644)
+	os.WriteFile(filepath.Join(nestedPRD, "billing.md"), []byte("# Billing PRD\n"), 0o644)
+
+	a := &Adapter{}
+	candidates, err := a.Discover(context.Background(), tmp, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := candidateRelPaths(candidates)
+	for _, want := range []string{
+		"apps/desktop/docs/plans/pnpm-migration.md",
+		"services/api/docs/prd/billing.md",
+	} {
+		if !stringSliceContains(got, want) {
+			t.Fatalf("missing nested default intent doc %q in %v", want, got)
+		}
+	}
+}
+
+func TestDiscover_CustomConfigDoesNotAddNestedDefaults(t *testing.T) {
+	tmp := t.TempDir()
+	customDir := filepath.Join(tmp, "my-plans")
+	nestedDir := filepath.Join(tmp, "apps", "desktop", "docs", "plans")
+	os.MkdirAll(customDir, 0o755)
+	os.MkdirAll(nestedDir, 0o755)
+	os.WriteFile(filepath.Join(customDir, "plan.md"), []byte("# Plan\n"), 0o644)
+	os.WriteFile(filepath.Join(nestedDir, "hidden.md"), []byte("# Hidden\n"), 0o644)
+
+	cfg := &config.RepoConfig{
+		Sources: []config.SourceConfig{
+			{Type: "markdown", Paths: []string{"my-plans"}},
+		},
+	}
+
+	a := &Adapter{}
+	candidates, err := a.Discover(context.Background(), tmp, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := candidateRelPaths(candidates)
+	if !stringSliceContains(got, "my-plans/plan.md") {
+		t.Fatalf("missing configured markdown candidate in %v", got)
+	}
+	if stringSliceContains(got, "apps/desktop/docs/plans/hidden.md") {
+		t.Fatalf("custom config should not add nested defaults, got %v", got)
+	}
+}
+
 func TestParse_FrontmatterOverrides(t *testing.T) {
 	tmp := t.TempDir()
 	content := "---\ntitle: Custom Title\nkind: spec\nstatus: draft\n---\n# Ignored H1\n\nBody here.\n"
@@ -282,7 +340,7 @@ func TestInferKind(t *testing.T) {
 
 func TestDefaultPaths_NarrowDocs(t *testing.T) {
 	paths := defaultPaths()
-	required := []string{"docs/specs", "docs/plans", "docs/design", "docs/technical", "_bmad-output", ".specify/memory"}
+	required := []string{"docs/specs", "docs/plans", "docs/prd", "docs/design", "docs/technical", "_bmad-output", ".specify/memory"}
 	for _, req := range required {
 		found := false
 		for _, p := range paths {
@@ -722,6 +780,14 @@ func stringSliceContains(ss []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func candidateRelPaths(candidates []adapters.Candidate) []string {
+	out := make([]string, len(candidates))
+	for i, c := range candidates {
+		out[i] = filepath.ToSlash(c.RelPath)
+	}
+	return out
 }
 
 func TestDiscover_IgnoredSubtreeExcluded(t *testing.T) {

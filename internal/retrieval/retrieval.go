@@ -77,8 +77,14 @@ func ExplainCandidates(candidates []Candidate, query string) []Reason {
 }
 
 func IsPlanningIntentPath(path string) bool {
+	path = filepath.ToSlash(path)
 	for _, prefix := range []string{"openspec/", "docs/adr/", "docs/plans/", "docs/prd/", ".cursor/", ".claude/"} {
 		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	for _, segment := range []string{"/docs/adr/", "/docs/adrs/", "/docs/plans/", "/docs/prd/", "/docs/specs/", "/docs/design/", "/docs/technical/"} {
+		if strings.Contains(path, segment) {
 			return true
 		}
 	}

@@ -129,6 +129,17 @@ func TestDefaultRepoConfig_Structure(t *testing.T) {
 			t.Errorf("missing source type %q", want)
 		}
 	}
+	var markdownPaths []string
+	for _, s := range cfg.Sources {
+		if s.Type == "markdown" {
+			markdownPaths = s.Paths
+		}
+	}
+	for _, want := range []string{"docs/specs", "docs/plans", "docs/prd", "docs/design", "docs/technical"} {
+		if !containsString(markdownPaths, want) {
+			t.Errorf("missing default markdown path %q", want)
+		}
+	}
 }
 
 func TestDBPath_WithEnvOverride(t *testing.T) {
@@ -234,4 +245,13 @@ sources:
 	if _, err := LoadRepoConfig(tmp); err == nil {
 		t.Fatal("expected validation error for invalid kind in rules")
 	}
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }

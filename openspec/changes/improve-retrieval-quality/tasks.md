@@ -27,8 +27,10 @@
 - [x] Upgrade `ds find` to use or prepare for shared indexed retrieval with reasons.
 - [x] Add query-focused `ds resume <query>` over indexed candidates.
 - [x] Add live-command eval mode for the existing command path.
-- [ ] Decide whether a public `ds pack <query>` command is needed after existing workflows are measured.
+- [x] Defer public `ds pack <query>` decision until existing workflows reach acceptable measured retrieval quality.
 - [ ] Decide keep/deprecate/remove path for `ds context <id>`.
+- [x] Improve indexed candidate coverage through general intent-doc conventions rather than fixture-specific paths.
+- [ ] Define adapter-level classifier scoring so paths become hints/overrides rather than the core discovery architecture.
 - [ ] Add identifier-aware tokenization and matching.
 - [ ] Search identifier matches in path, title, body, extracted tasks, and source candidates.
 - [ ] Add dated filename/slug matching tests.

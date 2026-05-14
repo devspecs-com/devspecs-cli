@@ -16,13 +16,13 @@ The `agentic-saas-fragmented-v1` seed eval now gives us an honest indexed starti
 - Product path: `indexed_harness`
 - Retriever: `eval_weighted_files_v0`
 - Token counter: `approx_chars_div_4`
-- Planning corpus: 26 indexed files / ~14,318 tokens
+- Planning corpus: 33 indexed files / ~17,402 tokens
 - Source/context candidates: 0 indexed files
-- Mean token reduction vs full planning corpus: ~66.2%
-- Mean artifact recall: ~27.3%
-- Mean must-have recall: ~26.7%
-- Mean artifact precision: ~14.3%
-- Context sufficiency pass rate: 0.0%
+- Mean token reduction vs full planning corpus: ~73.3%
+- Mean artifact recall: ~40.7%
+- Mean must-have recall: ~46.7%
+- Mean artifact precision: ~17.0%
+- Context sufficiency pass rate: 20.0%
 
 Diagnostic filesystem-only eval still scores higher, but that path is no longer the product-adjacent baseline:
 
@@ -63,16 +63,27 @@ Priority order:
 2. Extract shared retrieval candidate/retriever logic out of `internal/evalharness`.
 3. Wire shared retrieval into existing CLI workflows first, starting with `ds find` and query-focused `ds resume <query>`.
 4. Add live-command eval for the existing command path.
-5. Decide whether a public `ds pack <query>` command is still needed after the existing workflows are measured.
+5. Defer any public `ds pack <query>` decision until indexed and live-command retrieval quality are acceptable.
 6. Then iterate on retrieval improvements from the test index.
 
-Status as of 2026-05-14: steps 1-5 are implemented. The latest indexed eval result is `.devspecs/eval-runs/agentic-saas-fragmented/20260514T054719Z_agentic-saas-fragmented_seed_smoke_eval_weighted_files_v0.json`. The latest live `resume-query` eval result is `.devspecs/eval-runs/agentic-saas-fragmented/20260514T060213Z_agentic-saas-fragmented_seed_smoke_resume-query_eval_weighted_files_v0.json`.
+Status as of 2026-05-14: steps 1-5 are implemented. A first general candidate-coverage bridge is also implemented. The latest indexed eval result is `.devspecs/eval-runs/agentic-saas-fragmented/20260514T064428Z_agentic-saas-fragmented_seed_smoke_eval_weighted_files_v0.json`. The latest live `resume-query` eval result is `.devspecs/eval-runs/agentic-saas-fragmented/20260514T064441Z_agentic-saas-fragmented_seed_smoke_resume-query_eval_weighted_files_v0.json`.
 
-The next implementation priority is retrieval quality improvement on the measured live path. Candidate coverage and artifact grouping are now higher priority than adding more CLI surface area; public `ds pack <query>` remains a later UX decision.
+The next implementation priority is retrieval quality improvement on the measured live path. Candidate coverage and artifact grouping are now higher priority than adding more CLI surface area; public `ds pack <query>` is deferred until the existing workflows prove acceptable retrieval quality.
 
 Reason: schema, scan discovery, adapters, indexed metadata, and source/content availability materially affect eval results. Optimizing a filesystem-only retriever would hide the product gap.
 
 `pack` remains a useful internal concept: retrieve, rank, and assemble a compact context bundle under a token budget. It should not be treated as the next public CLI surface until the current commands prove the retrieval behavior.
+
+Path configuration is also not the intended long-term center of the product. It should remain useful for hints and user overrides, but the stronger architecture is deterministic adapter-level classification:
+
+```text
+broad safe candidate discovery
+-> adapter classifiers and confidence scores
+-> normalized artifact metadata/entities/sections
+-> query retrieval over normalized candidates
+```
+
+This lets DevSpecs support repo and workflow diversity without hardcoding every folder convention into the default config.
 
 ## Auditable Success Criteria
 
@@ -321,12 +332,13 @@ Expected eval impact:
 3. Upgrade `ds find` to use or prepare for shared indexed retrieval with reasons.
 4. Add query-focused `ds resume <query>` for continuation context.
 5. Add live-command eval for the existing command path.
-6. Decide whether `ds pack <query>` is needed as a public command after results and workflow feedback.
+6. Improve indexed candidate coverage, starting with general intent-doc conventions rather than fixture-specific paths.
 7. Implement identifier-aware matching.
 8. Implement OpenSpec bundle retrieval.
 9. Add lifecycle/authority scoring.
 10. Add query intent classification.
-11. Re-run seed eval and compare:
+11. Decide whether `ds pack <query>` is needed only after existing workflows have acceptable measured retrieval quality.
+12. Re-run seed eval and compare:
    - token reduction
    - overall recall
    - must-have recall

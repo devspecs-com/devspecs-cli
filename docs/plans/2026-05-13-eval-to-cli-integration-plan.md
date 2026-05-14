@@ -235,26 +235,28 @@ ds eval ./fixtures/agentic-saas-fragmented --command resume-query
 
 product_path: live_cli_command
 command_under_test: resume-query
-Mean token reduction vs full planning corpus: 73.3%
-Mean artifact recall: 21.2%
-Mean must-have recall: 18.3%
-Mean artifact precision: 12.0%
-Context sufficiency pass rate: 10.0%
+Mean token reduction vs full planning corpus: 78.3%
+Mean artifact recall: 34.5%
+Mean must-have recall: 38.3%
+Mean artifact precision: 16.0%
+Context sufficiency pass rate: 30.0%
 ```
 
 Result file:
 
 ```text
-.devspecs/eval-runs/agentic-saas-fragmented/20260514T060213Z_agentic-saas-fragmented_seed_smoke_resume-query_eval_weighted_files_v0.json
+.devspecs/eval-runs/agentic-saas-fragmented/20260514T064441Z_agentic-saas-fragmented_seed_smoke_resume-query_eval_weighted_files_v0.json
 ```
 
 ### Phase 5: Public Context-Packing UX Decision
 
-Status: next
+Status: deferred
 
 Goal:
 
 Decide whether context packing should remain inside `ds resume <query>` / `ds find --context`, become a new `ds pack <query>` command, or replace/deprecate `ds context <id>`.
+
+This phase is intentionally deferred. Current eval and live-command numbers show retrieval quality is the blocker, not CLI vocabulary. Continue improving scan/index coverage, candidate representation, ranking, and sufficiency on existing workflows before adding or removing public commands.
 
 Decision inputs:
 
@@ -322,7 +324,8 @@ Acceptable after live-command eval:
 4. Upgrade `ds find` to use or prepare for shared indexed retrieval with reasons.
 5. Add query-focused `ds resume <query>` using shared indexed retrieval.
 6. Add live-command eval mode for the existing command path.
-7. Decide whether public `ds pack <query>` is needed after the existing workflows are measured.
+7. Improve indexed candidate coverage and ranking on existing workflows before any public `ds pack <query>` decision.
+8. Decide whether public `ds pack <query>` is needed only after live-command retrieval quality is acceptable.
 
 ## Auditable Success Criteria
 

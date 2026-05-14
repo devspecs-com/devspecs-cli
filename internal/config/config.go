@@ -40,7 +40,7 @@ func DefaultRepoConfig() *RepoConfig {
 			{Type: "adr", Paths: []string{"docs/adr", "docs/adrs", "adr", "adrs"}},
 			{Type: "markdown", Paths: []string{
 				"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans",
-				"docs/design", "docs/technical",
+				"docs/prd", "docs/design", "docs/technical",
 				"_bmad-output", ".specify/memory",
 			}},
 		},
