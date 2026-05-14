@@ -18,14 +18,15 @@ func (s Scope) Valid() bool {
 }
 
 type Candidate struct {
-	Path        string       `json:"path" yaml:"path"`
-	Scope       Scope        `json:"scope" yaml:"scope"`
-	Role        string       `json:"role,omitempty" yaml:"role,omitempty"`
-	Ext         string       `json:"ext,omitempty" yaml:"ext,omitempty"`
-	SizeBytes   int64        `json:"size_bytes,omitempty" yaml:"size_bytes,omitempty"`
-	Body        string       `json:"-" yaml:"-"`
-	Features    Features     `json:"features,omitempty" yaml:"features,omitempty"`
-	SourceHints []SourceHint `json:"source_hints,omitempty" yaml:"source_hints,omitempty"`
+	Path            string       `json:"path" yaml:"path"`
+	Scope           Scope        `json:"scope" yaml:"scope"`
+	Role            string       `json:"role,omitempty" yaml:"role,omitempty"`
+	Ext             string       `json:"ext,omitempty" yaml:"ext,omitempty"`
+	SizeBytes       int64        `json:"size_bytes,omitempty" yaml:"size_bytes,omitempty"`
+	Body            string       `json:"-" yaml:"-"`
+	Features        Features     `json:"features,omitempty" yaml:"features,omitempty"`
+	SourceHints     []SourceHint `json:"source_hints,omitempty" yaml:"source_hints,omitempty"`
+	ChildCandidates []Candidate  `json:"child_candidates,omitempty" yaml:"child_candidates,omitempty"`
 }
 
 type Features struct {

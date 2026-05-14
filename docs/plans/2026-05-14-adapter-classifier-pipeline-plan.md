@@ -23,7 +23,7 @@ But the product should not require users or eval fixtures to enumerate every int
 ```text
 broad safe candidate discovery
 -> universal document feature extraction
--> adapter classifiers score candidates
+-> declarative document models score candidates
 -> classifier resolver chooses a document model
 -> parser emits normalized artifact metadata
 -> retrieval ranks normalized artifacts and sections
@@ -74,7 +74,7 @@ Use a staged pipeline common to robust local document processing systems:
 1. **Acquisition:** enumerate plausible local files without interpreting them.
 2. **Filtering:** reject ignored, binary, generated, oversized, vendored, and low-value files early.
 3. **Feature Extraction:** extract cheap universal signals once.
-4. **Classification:** let container and document models score candidates with positive and negative evidence.
+4. **Classification:** let declarative container and document models score candidates with positive and negative evidence.
 5. **Resolution:** choose container/document models, fall back when ambiguous, and preserve reasons.
 6. **Expansion and Parsing:** container models can emit child document candidates; document parsers produce normalized artifacts, sections, entities, lifecycle, and authority.
 7. **Indexing:** persist normalized output plus classifier evidence.
@@ -135,9 +135,13 @@ Extract once for every candidate:
 - changelog/release-note markers
 - stale/scratch/deprecated markers
 
-These features should be available to all classifiers and to retrieval reasons.
+These features should be available to all document models and to retrieval reasons.
 
 ### Classifier Contract
+
+Classifier behavior should be represented as declarative document-model configuration: stable evidence rule IDs, feature predicates, weights, negative evidence, and resolver thresholds. The Go implementation should be a generic evaluator for that configuration rather than a hard-coded classifier per document type.
+
+This is intentional because we want to mine and tune weights from real sample files with automated statistical regressions and sample test sets. If evidence is buried in Go branches, we cannot audit feature contribution, compare fitted weights, or reject brittle patterns cleanly.
 
 Introduce a package such as:
 
@@ -200,13 +204,13 @@ The exact names can change during implementation, but the contract should preser
 - accepted/rejected state
 - fallback/ambiguity
 - normalized kind/subtype/status/lifecycle/authority
-- child document candidates emitted by container classifiers
+- child document candidates emitted by container document models
 
 ### Classifier Scopes
 
-#### Container Classifiers
+#### Container Document Models
 
-Container classifiers evaluate directories or multi-file layouts. They can emit multiple child document candidates and layout-level edges.
+Container document models evaluate directories or multi-file layouts. They can emit multiple child document candidates and layout-level edges.
 
 Examples:
 
@@ -222,9 +226,9 @@ Container classifier output should include:
 - shared lifecycle/status when applicable
 - container-level reasons
 
-#### Document Classifiers
+#### Primitive Document Models
 
-Document classifiers evaluate standalone files. They usually emit one artifact.
+Primitive document models evaluate standalone files. They usually emit one artifact.
 
 Examples:
 
@@ -254,9 +258,9 @@ The resolver compares classifier outputs.
 Initial deterministic rules:
 
 - Strong accept when top confidence is above a threshold and separated from the next classifier.
-- Ambiguous when the top score is weak or the top two classifiers are close.
+- Ambiguous when the top score is weak or the top two document models are close.
 - Generic markdown fallback when ambiguous but the file is still useful text.
-- Reject when all classifiers are low-confidence and negative evidence is strong.
+- Reject when all document models are low-confidence and negative evidence is strong.
 - User-configured paths can add a prior, but should not force a bad classification by themselves.
 
 Example thresholds for planning, not implementation gospel:
@@ -284,6 +288,26 @@ Avoid exposing raw scoring weights as the primary user interface. Most users sho
 ### Proposed Shape
 
 This shape is illustrative, but the concepts should survive implementation:
+
+Document-model behavior is expressed with reusable evidence rules:
+
+```yaml
+evidence:
+  - id: adr_nygard_sections
+    weight: 0.26
+    reason: subformat_evidence
+    match:
+      scope: document
+      headings_all: [Context, Decision, Consequences]
+negative_evidence:
+  - id: plan_generated_marker
+    weight: 0.24
+    reason: generated_marker
+    match:
+      markers_any: [generated]
+```
+
+Supported predicate families include path hints/globs, title terms, frontmatter keys and values, heading patterns, section roles, checklist density, date tokens, markers, identifiers, local terms, body terms/regexes, and container child roles.
 
 ```yaml
 classifier_pipeline:
@@ -409,7 +433,7 @@ classifier_pipeline:
       authority: neutral
 
   local_models:
-    # Optional repo-defined classifiers can add hints and labels, but should not
+    # Optional repo-defined document models can add hints and labels, but should not
     # bypass resolver confidence/ambiguity rules by default.
     enabled: true
     definitions: []
@@ -493,7 +517,7 @@ The configuration structure must support:
 
 ## Adapter Models
 
-### OpenSpec Classifier
+### OpenSpec Document Model
 
 Scope:
 
@@ -521,7 +545,7 @@ Emits:
 - layout group for the change directory
 - companion edge candidates
 
-### ADR Classifier
+### ADR Document Model
 
 Scope:
 
@@ -555,7 +579,7 @@ Emits:
 - authority high for accepted decisions
 - supersession metadata
 
-### PRD Classifier
+### PRD Document Model
 
 PRDs should start as a product-intent feature classifier rather than a list of named subformats. Real samples may later reveal recurring templates, but v0 should avoid pretending there is one universal PRD standard.
 
@@ -582,7 +606,7 @@ Emits:
 - `subtype: prd`
 - product-background authority
 
-### RFC Classifier
+### RFC Document Model
 
 RFCs and engineering proposals should use section-pattern family evidence rather than strict named standards.
 
@@ -617,7 +641,7 @@ Emits:
 - optional `subformat: rfc.section_pattern`
 - design/proposal authority
 
-### Plan Classifier
+### Plan Document Model
 
 Scope:
 
@@ -643,7 +667,7 @@ Emits:
 - `kind: plan`
 - section roles for tasks, risks, open questions, deferred work
 
-### Agent Note Classifier
+### Agent Note Document Model
 
 Scope:
 
@@ -666,7 +690,7 @@ Emits:
 - `format_profile` for the agent/tool when deterministic
 - lower authority than ADR/OpenSpec by default
 
-### Generic Markdown Classifier
+### Generic Markdown Document Model
 
 Generic markdown is not failure. It is the safe fallback.
 
@@ -677,7 +701,7 @@ Scope:
 Use it when:
 
 - a document is useful text but does not strongly match a known model
-- multiple classifiers are close
+- multiple document models are close
 - path hints and content features disagree
 
 Emits:
@@ -802,25 +826,34 @@ Result:
 - Extracts path tokens, filename tokens, dated tokens, frontmatter, title, headings, section spans/roles, checklist counts, status/lifecycle phrases, identifier-shaped terms, path references, links, code fence languages, local repeated terms, and generated/changelog/stale markers.
 - Added feature extraction unit tests without changing scan, DB, CLI, or retrieval behavior.
 
-### Phase 2: Classifier Implementations
+### Phase 2: Declarative Document Model Evaluator
 
-Status: planned
+Status: implemented
 
 Deliverables:
 
-- OpenSpec classifier
-- ADR classifier
-- PRD classifier
-- RFC/proposal classifier
-- Plan classifier
-- Agent-note classifier
-- Generic markdown fallback
+- generic evidence-rule evaluator over built-in model configuration
+- declarative OpenSpec, ADR, PRD, RFC/proposal, plan, agent-note, and generic markdown model rules
+- declarative ADR Nygard, MADR, and Y-Statement subformat evidence
+- declarative PRD/RFC/plan/agent-note family evidence
+- resolver for confidence, ambiguity, and generic fallback
+- local model definitions that inherit built-in models and add declarative evidence
+- deterministic unit tests for goldens, subformats, fallback, negative evidence, and local models
 
 Success criteria:
 
-- classifier eval reports accuracy/confusion metrics
-- ambiguous documents fall back instead of being overclaimed
-- negative reasons are visible
+- [x] document-model rules are data in `PipelineConfig`, not hard-coded per-type branches
+- [x] ambiguous documents fall back instead of being overclaimed
+- [x] negative reasons are visible
+- [x] rule IDs and weights are auditable for future sample-based fitting
+
+Result:
+
+- Added `ClassifyCandidate` as a generic declarative evaluator in `internal/classify`.
+- Extended `PipelineConfig` with `EvidenceRule` and `EvidenceMatch`.
+- Added default evidence rules for all documented built-in models and subformat/family models.
+- Added local model evaluation that inherits a base model and adds declarative local evidence.
+- Kept scan, DB, CLI, and retrieval behavior unchanged.
 
 ### Phase 3: Scan Pipeline Integration
 

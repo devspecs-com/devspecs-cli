@@ -60,6 +60,36 @@ func TestValidateConfigRejectsBadLocalModelBase(t *testing.T) {
 	}
 }
 
+func TestValidateConfigRejectsBadEvidenceRule(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+	model := cfg.Models[ModelADR]
+	model.Evidence = append(model.Evidence, EvidenceRule{
+		ID:     "bad_weight",
+		Weight: 1.5,
+		Reason: ReasonHeadingMatch,
+		Match:  EvidenceMatch{Scope: ScopeDocument, HeadingsAny: []string{"Decision"}},
+	})
+	cfg.Models[ModelADR] = model
+	if err := ValidateConfig(cfg); err == nil {
+		t.Fatal("expected bad evidence weight error")
+	}
+}
+
+func TestDefaultPipelineConfigUsesDeclarativeEvidenceRules(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+	for _, id := range []string{ModelOpenSpec, ModelADR, ModelRFC, ModelPRD, ModelPlan, ModelAgentNote, ModelGenericMarkdown} {
+		if len(cfg.Models[id].Evidence) == 0 {
+			t.Fatalf("%s should declare evidence rules", id)
+		}
+	}
+	if len(cfg.Models[ModelADR].Subformats["nygard"].Evidence) == 0 {
+		t.Fatal("ADR Nygard subformat should declare evidence rules")
+	}
+	if len(cfg.Models[ModelPRD].Families["product_intent"].Evidence) == 0 {
+		t.Fatal("PRD product-intent family should declare evidence rules")
+	}
+}
+
 func TestReasonVocabularyIncludesPositiveAndNegativeSignals(t *testing.T) {
 	got := map[ReasonCode]bool{}
 	for _, code := range ReasonVocabulary() {

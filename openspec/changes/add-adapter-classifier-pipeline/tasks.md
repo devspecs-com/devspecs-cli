@@ -13,6 +13,7 @@
 - Phase 0 is implemented as `internal/classify`.
 - Phase 0 is intentionally contract-only: no scan, DB, retrieval, or command behavior changes.
 - Phase 1 is implemented in `internal/classify` as pure feature extraction only.
+- Phase 2 is implemented as a generic declarative document-model evaluator, not as hard-coded Go classifiers per document type.
 - Initial classifier goldens live at `fixtures/agentic-saas-fragmented/classifier_cases.yaml`.
 - Real sample intake template lives at `testdata/classifier-samples/provenance-template.yaml`.
 
@@ -46,21 +47,24 @@
 - [x] Extract generated/changelog/stale markers.
 - [x] Add deterministic unit tests for feature extraction.
 
-## Phase 2: Classifiers
+## Phase 2: Declarative Document Model Evaluator
 
-- [ ] Add OpenSpec classifier.
-- [ ] Add OpenSpec container expansion for proposal/design/tasks/spec child artifacts.
-- [ ] Add ADR classifier.
-- [ ] Add ADR Nygard subformat evidence.
-- [ ] Add ADR MADR subformat evidence.
-- [ ] Add ADR Y-Statement subformat evidence.
-- [ ] Add PRD classifier.
-- [ ] Add RFC/proposal section-pattern classifier.
-- [ ] Add plan classifier.
-- [ ] Add agent-note classifier.
-- [ ] Add generic markdown fallback classifier.
-- [ ] Add tests for ambiguous documents and generic fallback.
-- [ ] Add tests for negative evidence.
+- [x] Add generic evidence-rule evaluator over `PipelineConfig`.
+- [x] Add auditable evidence rule IDs, weights, reasons, and feature predicates.
+- [x] Add declarative OpenSpec document model rules.
+- [x] Add declarative OpenSpec container expansion for proposal/design/tasks/spec child artifacts.
+- [x] Add declarative ADR document model rules.
+- [x] Add declarative ADR Nygard subformat evidence.
+- [x] Add declarative ADR MADR subformat evidence.
+- [x] Add declarative ADR Y-Statement subformat evidence.
+- [x] Add declarative PRD document model rules.
+- [x] Add declarative RFC/proposal section-pattern rules.
+- [x] Add declarative plan document model rules.
+- [x] Add declarative agent-note document model rules.
+- [x] Add declarative generic markdown fallback rules.
+- [x] Add local model definitions that inherit base models and add declarative evidence.
+- [x] Add tests for ambiguous documents and generic fallback.
+- [x] Add tests for negative evidence.
 
 ## Phase 3: Classifier Eval
 

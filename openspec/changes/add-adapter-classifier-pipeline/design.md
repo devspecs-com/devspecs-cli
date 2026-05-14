@@ -21,7 +21,7 @@ This mirrors robust document-processing pipelines where classification is a meas
 ```text
 Candidate Discovery
   -> Universal Feature Extraction
-  -> Container and Document Classifier Set
+  -> Declarative Container and Document Model Evaluation
   -> Resolver
   -> Container Expansion
   -> Parser
@@ -51,7 +51,7 @@ OpenSpec is the motivating container example: an `openspec/changes/<change>/` di
 
 ### Universal Feature Extraction
 
-Universal features are extracted once and shared by classifiers:
+Universal features are extracted once and shared by document models:
 
 - path tokens
 - filename slug and date tokens
@@ -68,9 +68,20 @@ Universal features are extracted once and shared by classifiers:
 
 The feature extractor should be deterministic and stack-neutral.
 
-### Classifiers
+### Declarative Document Models
 
-Each classifier receives the same candidate and features, then returns a classification:
+Document models are configuration, not one hard-coded Go classifier per type. The runtime classifier is a generic evidence evaluator over:
+
+- stable rule IDs
+- positive and negative feature predicates
+- weights
+- reason codes
+- model metadata
+- subformat/family definitions
+
+This keeps classifier decisions auditable and lets future sample-mining work compare or fit weights without rewriting product code.
+
+Each document model receives the same candidate and features, then returns a classification:
 
 - classifier name
 - scope: container or document
@@ -85,7 +96,7 @@ Each classifier receives the same candidate and features, then returns a classif
 - negative reasons
 - child candidates when a container classifier expands a layout
 
-Initial classifiers:
+Initial built-in document models:
 
 - OpenSpec container/document
 - ADR
@@ -110,10 +121,10 @@ RFC and PRD classification should be more conservative. RFCs can use recurring e
 The resolver chooses a winner or fallback:
 
 - strong accept when top confidence is high and separated
-- ambiguous when top classifiers are close
+- ambiguous when top document models are close
 - generic markdown fallback for useful but ambiguous text
-- reject when all classifiers are weak and negative evidence is strong
-- container winners can emit child document candidates before document classifiers run
+- reject when all document models are weak and negative evidence is strong
+- container winners can emit child document candidates before primitive document models run
 
 Configured paths may add a prior but must not force a clearly wrong classification.
 

@@ -16,9 +16,9 @@ The intended pipeline is:
 ```text
 broad safe candidate discovery
 -> universal feature extraction
--> container and document classifiers score candidates
+-> declarative container and document models score candidates
 -> resolver chooses model or generic fallback
--> container classifiers emit child document candidates when needed
+-> container models emit child document candidates when needed
 -> parser emits normalized artifact metadata
 -> retrieval ranks indexed artifacts and sections
 ```
@@ -34,7 +34,7 @@ The current path-centered adapter approach has hit a product limit:
 - scan/index coverage and retrieval ranking failures are hard to separate
 - ambiguous documents are treated as whatever adapter found them first
 
-Classifier-backed adapters let DevSpecs use general document-processing signals:
+Classifier-backed adapters let DevSpecs use general document-processing signals through declarative document models:
 
 - frontmatter
 - headings and section roles
@@ -46,6 +46,8 @@ Classifier-backed adapters let DevSpecs use general document-processing signals:
 - user-configured paths as hints, not hard truth
 
 ADRs are the first document family where known subformats should improve accuracy. The classifier should recognize Nygard-style ADRs, MADR, and Y-Statement structure as ADR subformat evidence. RFCs and PRDs should start more conservatively as section-pattern families unless real samples show repeatable named templates.
+
+The classifier implementation should remain a generic evidence-rule evaluator. Built-in and local model behavior should live in versioned configuration with auditable rule IDs and weights so future sample-mining and statistical regression work can tune rules without burying evidence in Go branches.
 
 ## Goals
 

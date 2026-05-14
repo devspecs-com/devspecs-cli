@@ -75,20 +75,64 @@ type ResolverConfig struct {
 }
 
 type ModelConfig struct {
-	Enabled         bool                      `json:"enabled" yaml:"enabled"`
-	Scopes          []Scope                   `json:"scopes" yaml:"scopes"`
-	Authority       string                    `json:"authority,omitempty" yaml:"authority,omitempty"`
-	PathHints       []string                  `json:"path_hints,omitempty" yaml:"path_hints,omitempty"`
-	LayoutHints     map[string]string         `json:"layout_hints,omitempty" yaml:"layout_hints,omitempty"`
-	EmitsEdges      []string                  `json:"emits_edges,omitempty" yaml:"emits_edges,omitempty"`
-	Subformats      map[string]SubmodelConfig `json:"subformats,omitempty" yaml:"subformats,omitempty"`
-	Families        map[string]SubmodelConfig `json:"families,omitempty" yaml:"families,omitempty"`
-	NamedSubformats []string                  `json:"named_subformats,omitempty" yaml:"named_subformats,omitempty"`
-	Fallback        bool                      `json:"fallback,omitempty" yaml:"fallback,omitempty"`
+	Enabled             bool                      `json:"enabled" yaml:"enabled"`
+	Scopes              []Scope                   `json:"scopes" yaml:"scopes"`
+	Kind                string                    `json:"kind,omitempty" yaml:"kind,omitempty"`
+	Subtype             string                    `json:"subtype,omitempty" yaml:"subtype,omitempty"`
+	Authority           string                    `json:"authority,omitempty" yaml:"authority,omitempty"`
+	FormatProfile       string                    `json:"format_profile,omitempty" yaml:"format_profile,omitempty"`
+	PathHints           []string                  `json:"path_hints,omitempty" yaml:"path_hints,omitempty"`
+	LayoutHints         map[string]string         `json:"layout_hints,omitempty" yaml:"layout_hints,omitempty"`
+	EmitsEdges          []string                  `json:"emits_edges,omitempty" yaml:"emits_edges,omitempty"`
+	EmitChildCandidates bool                      `json:"emit_child_candidates,omitempty" yaml:"emit_child_candidates,omitempty"`
+	Evidence            []EvidenceRule            `json:"evidence,omitempty" yaml:"evidence,omitempty"`
+	NegativeEvidence    []EvidenceRule            `json:"negative_evidence,omitempty" yaml:"negative_evidence,omitempty"`
+	Subformats          map[string]SubmodelConfig `json:"subformats,omitempty" yaml:"subformats,omitempty"`
+	Families            map[string]SubmodelConfig `json:"families,omitempty" yaml:"families,omitempty"`
+	NamedSubformats     []string                  `json:"named_subformats,omitempty" yaml:"named_subformats,omitempty"`
+	Fallback            bool                      `json:"fallback,omitempty" yaml:"fallback,omitempty"`
 }
 
 type SubmodelConfig struct {
-	Enabled bool `json:"enabled" yaml:"enabled"`
+	Enabled          bool           `json:"enabled" yaml:"enabled"`
+	Evidence         []EvidenceRule `json:"evidence,omitempty" yaml:"evidence,omitempty"`
+	NegativeEvidence []EvidenceRule `json:"negative_evidence,omitempty" yaml:"negative_evidence,omitempty"`
+}
+
+type EvidenceRule struct {
+	ID      string        `json:"id" yaml:"id"`
+	Weight  float64       `json:"weight" yaml:"weight"`
+	Reason  ReasonCode    `json:"reason" yaml:"reason"`
+	Message string        `json:"message,omitempty" yaml:"message,omitempty"`
+	Match   EvidenceMatch `json:"match" yaml:"match"`
+}
+
+type EvidenceMatch struct {
+	Always            bool              `json:"always,omitempty" yaml:"always,omitempty"`
+	Scope             Scope             `json:"scope,omitempty" yaml:"scope,omitempty"`
+	PathHints         bool              `json:"path_hints,omitempty" yaml:"path_hints,omitempty"`
+	PathGlobs         []string          `json:"path_globs,omitempty" yaml:"path_globs,omitempty"`
+	PathContainsAny   []string          `json:"path_contains_any,omitempty" yaml:"path_contains_any,omitempty"`
+	PathSuffixesAny   []string          `json:"path_suffixes_any,omitempty" yaml:"path_suffixes_any,omitempty"`
+	FilenameAny       []string          `json:"filename_any,omitempty" yaml:"filename_any,omitempty"`
+	TitleAny          []string          `json:"title_any,omitempty" yaml:"title_any,omitempty"`
+	TitleAll          []string          `json:"title_all,omitempty" yaml:"title_all,omitempty"`
+	FrontmatterExists []string          `json:"frontmatter_exists,omitempty" yaml:"frontmatter_exists,omitempty"`
+	FrontmatterEquals map[string]string `json:"frontmatter_equals,omitempty" yaml:"frontmatter_equals,omitempty"`
+	HeadingsAny       []string          `json:"headings_any,omitempty" yaml:"headings_any,omitempty"`
+	HeadingsAll       []string          `json:"headings_all,omitempty" yaml:"headings_all,omitempty"`
+	SectionRolesAny   []string          `json:"section_roles_any,omitempty" yaml:"section_roles_any,omitempty"`
+	SectionRolesAll   []string          `json:"section_roles_all,omitempty" yaml:"section_roles_all,omitempty"`
+	ChecklistMin      int               `json:"checklist_min,omitempty" yaml:"checklist_min,omitempty"`
+	DateTokensMin     int               `json:"date_tokens_min,omitempty" yaml:"date_tokens_min,omitempty"`
+	MarkersAny        []string          `json:"markers_any,omitempty" yaml:"markers_any,omitempty"`
+	IdentifiersAny    []string          `json:"identifiers_any,omitempty" yaml:"identifiers_any,omitempty"`
+	LocalTermsAny     []string          `json:"local_terms_any,omitempty" yaml:"local_terms_any,omitempty"`
+	BodyContainsAny   []string          `json:"body_contains_any,omitempty" yaml:"body_contains_any,omitempty"`
+	BodyContainsAll   []string          `json:"body_contains_all,omitempty" yaml:"body_contains_all,omitempty"`
+	BodyRegexAny      []string          `json:"body_regex_any,omitempty" yaml:"body_regex_any,omitempty"`
+	ChildRolesAny     []string          `json:"child_roles_any,omitempty" yaml:"child_roles_any,omitempty"`
+	ChildRolesAll     []string          `json:"child_roles_all,omitempty" yaml:"child_roles_all,omitempty"`
 }
 
 type LocalModelsConfig struct {
@@ -97,17 +141,29 @@ type LocalModelsConfig struct {
 }
 
 type LocalModelDefinition struct {
-	ID               string   `json:"id" yaml:"id"`
-	BaseModel        string   `json:"base_model" yaml:"base_model"`
-	Authority        string   `json:"authority,omitempty" yaml:"authority,omitempty"`
-	PathHints        []string `json:"path_hints,omitempty" yaml:"path_hints,omitempty"`
-	RequiredHeadings []string `json:"required_headings,omitempty" yaml:"required_headings,omitempty"`
-	PositiveTerms    []string `json:"positive_terms,omitempty" yaml:"positive_terms,omitempty"`
-	NegativeTerms    []string `json:"negative_terms,omitempty" yaml:"negative_terms,omitempty"`
-	Experimental     bool     `json:"experimental,omitempty" yaml:"experimental,omitempty"`
+	ID               string         `json:"id" yaml:"id"`
+	BaseModel        string         `json:"base_model" yaml:"base_model"`
+	Authority        string         `json:"authority,omitempty" yaml:"authority,omitempty"`
+	PathHints        []string       `json:"path_hints,omitempty" yaml:"path_hints,omitempty"`
+	RequiredHeadings []string       `json:"required_headings,omitempty" yaml:"required_headings,omitempty"`
+	PositiveTerms    []string       `json:"positive_terms,omitempty" yaml:"positive_terms,omitempty"`
+	NegativeTerms    []string       `json:"negative_terms,omitempty" yaml:"negative_terms,omitempty"`
+	Evidence         []EvidenceRule `json:"evidence,omitempty" yaml:"evidence,omitempty"`
+	NegativeEvidence []EvidenceRule `json:"negative_evidence,omitempty" yaml:"negative_evidence,omitempty"`
+	Experimental     bool           `json:"experimental,omitempty" yaml:"experimental,omitempty"`
 }
 
 func DefaultPipelineConfig() PipelineConfig {
+	evidence := func(id string, weight float64, reason ReasonCode, message string, match EvidenceMatch) EvidenceRule {
+		return EvidenceRule{
+			ID:      id,
+			Weight:  weight,
+			Reason:  reason,
+			Message: message,
+			Match:   match,
+		}
+	}
+
 	return PipelineConfig{
 		Version: 1,
 		Profile: ProfileBuiltinIntentDocsV1,
@@ -133,10 +189,13 @@ func DefaultPipelineConfig() PipelineConfig {
 		},
 		Models: map[string]ModelConfig{
 			ModelOpenSpec: {
-				Enabled:   true,
-				Scopes:    []Scope{ScopeContainer, ScopeDocument},
-				Authority: AuthorityHighCurrentIntent,
-				PathHints: []string{"openspec/changes/**"},
+				Enabled:             true,
+				Scopes:              []Scope{ScopeContainer, ScopeDocument},
+				Kind:                "spec",
+				Authority:           AuthorityHighCurrentIntent,
+				FormatProfile:       "openspec",
+				PathHints:           []string{"openspec/changes/**"},
+				EmitChildCandidates: true,
 				LayoutHints: map[string]string{
 					"proposal": "proposal.md",
 					"design":   "design.md",
@@ -144,63 +203,325 @@ func DefaultPipelineConfig() PipelineConfig {
 					"specs":    "specs/**/spec.md",
 				},
 				EmitsEdges: []string{"openspec_companion"},
+				Evidence: []EvidenceRule{
+					evidence("openspec_container_core_layout", 0.55, ReasonLayoutMatch, "OpenSpec change container includes proposal, design, and tasks roles.", EvidenceMatch{
+						Scope:         ScopeContainer,
+						ChildRolesAll: []string{"proposal", "design", "tasks"},
+					}),
+					evidence("openspec_container_spec_delta", 0.12, ReasonContainerChild, "OpenSpec container includes a spec delta child.", EvidenceMatch{
+						Scope:         ScopeContainer,
+						ChildRolesAny: []string{"spec_delta"},
+					}),
+					evidence("openspec_document_layout", 0.42, ReasonLayoutMatch, "OpenSpec document path matches a known child artifact layout.", EvidenceMatch{
+						Scope: ScopeDocument,
+						PathGlobs: []string{
+							"openspec/changes/*/proposal.md",
+							"openspec/changes/*/design.md",
+							"openspec/changes/*/tasks.md",
+							"openspec/changes/*/specs/*/spec.md",
+						},
+					}),
+					evidence("openspec_requirements_language", 0.12, ReasonHeadingMatch, "OpenSpec document includes requirements, tasks, or impact structure.", EvidenceMatch{
+						Scope:       ScopeDocument,
+						HeadingsAny: []string{"proposal", "motivation", "impact", "requirements", "tasks"},
+					}),
+				},
+				NegativeEvidence: []EvidenceRule{
+					evidence("openspec_generated_marker", 0.20, ReasonGeneratedMarker, "Generated marker reduces OpenSpec confidence.", EvidenceMatch{MarkersAny: []string{MarkerGenerated}}),
+					evidence("openspec_changelog_marker", 0.14, ReasonChangelogMarker, "Changelog marker reduces OpenSpec confidence.", EvidenceMatch{MarkersAny: []string{MarkerChangelog}}),
+				},
 			},
 			ModelADR: {
 				Enabled:   true,
 				Scopes:    []Scope{ScopeDocument},
+				Kind:      "decision",
 				Authority: AuthorityHighDecision,
 				PathHints: []string{"docs/adr/**", "docs/adrs/**", "adr/**", "adrs/**"},
+				Evidence: []EvidenceRule{
+					evidence("adr_title_signal", 0.12, ReasonHeadingMatch, "ADR title contains decision-record language.", EvidenceMatch{
+						Scope:    ScopeDocument,
+						TitleAny: []string{"adr", "architecture decision", "decision record"},
+					}),
+					evidence("adr_path_signal", 0.08, ReasonPathHint, "ADR path contains decision-record language.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						PathContainsAny: []string{"adr", "adrs", "decision-record"},
+					}),
+					evidence("adr_status_frontmatter", 0.16, ReasonFrontmatter, "ADR status is declared in frontmatter.", EvidenceMatch{
+						Scope:             ScopeDocument,
+						FrontmatterExists: []string{"status"},
+					}),
+					evidence("adr_decision_heading", 0.17, ReasonHeadingMatch, "ADR includes a decision heading.", EvidenceMatch{
+						Scope:       ScopeDocument,
+						HeadingsAny: []string{"decision", "decision outcome"},
+					}),
+					evidence("adr_context_decision_structure", 0.16, ReasonHeadingMatch, "ADR includes context and decision structure.", EvidenceMatch{
+						Scope:       ScopeDocument,
+						HeadingsAll: []string{"context", "decision"},
+					}),
+				},
+				NegativeEvidence: []EvidenceRule{
+					evidence("adr_changelog_marker", 0.20, ReasonChangelogMarker, "Changelog marker reduces ADR confidence.", EvidenceMatch{MarkersAny: []string{MarkerChangelog}}),
+					evidence("adr_generated_marker", 0.18, ReasonGeneratedMarker, "Generated marker reduces ADR confidence.", EvidenceMatch{MarkersAny: []string{MarkerGenerated}}),
+				},
 				Subformats: map[string]SubmodelConfig{
-					"nygard":      {Enabled: true},
-					"madr":        {Enabled: true},
-					"y_statement": {Enabled: true},
+					"nygard": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("adr_nygard_sections", 0.26, ReasonSubformatEvidence, "Nygard ADR sections are present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								HeadingsAll: []string{"context", "decision", "consequences"},
+							}),
+						},
+					},
+					"madr": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("adr_madr_sections", 0.26, ReasonSubformatEvidence, "MADR-style problem, options, and outcome sections are present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								HeadingsAll: []string{"context and problem statement", "decision outcome"},
+								HeadingsAny: []string{"decision drivers", "considered options"},
+							}),
+						},
+					},
+					"y_statement": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("adr_y_statement_sentence", 0.28, ReasonSubformatEvidence, "Y-Statement decision sentence is present.", EvidenceMatch{
+								Scope: ScopeDocument,
+								BodyRegexAny: []string{
+									`(?is)\bin the context of\b.+\bfacing\b.+\bwe decided\b.+\bto achieve\b.+\baccepting\b`,
+								},
+							}),
+						},
+					},
 				},
 			},
 			ModelRFC: {
 				Enabled:   true,
 				Scopes:    []Scope{ScopeDocument},
+				Kind:      "design",
 				Authority: AuthorityDesignProposal,
 				PathHints: []string{"rfcs/**", "docs/rfcs/**", "docs/proposals/**"},
+				Evidence: []EvidenceRule{
+					evidence("rfc_title_signal", 0.12, ReasonHeadingMatch, "RFC/proposal title signal is present.", EvidenceMatch{
+						Scope:    ScopeDocument,
+						TitleAny: []string{"rfc", "request for comments", "proposal"},
+					}),
+					evidence("rfc_path_signal", 0.08, ReasonPathHint, "RFC/proposal path signal is present.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						PathContainsAny: []string{"rfc", "rfcs", "proposal", "proposals"},
+					}),
+					evidence("rfc_design_sections", 0.23, ReasonHeadingMatch, "RFC/proposal design sections are present.", EvidenceMatch{
+						Scope:       ScopeDocument,
+						HeadingsAny: []string{"summary", "abstract", "motivation", "proposal", "detailed design", "alternatives", "risks", "rollout", "open questions"},
+					}),
+					evidence("rfc_engineering_shape", 0.18, ReasonHeadingMatch, "RFC/proposal has problem and proposal structure.", EvidenceMatch{
+						Scope:       ScopeDocument,
+						HeadingsAll: []string{"problem", "proposal"},
+					}),
+				},
+				NegativeEvidence: []EvidenceRule{
+					evidence("rfc_changelog_marker", 0.22, ReasonChangelogMarker, "Changelog marker reduces RFC confidence.", EvidenceMatch{MarkersAny: []string{MarkerChangelog}}),
+					evidence("rfc_generated_marker", 0.18, ReasonGeneratedMarker, "Generated marker reduces RFC confidence.", EvidenceMatch{MarkersAny: []string{MarkerGenerated}}),
+				},
 				Families: map[string]SubmodelConfig{
-					"section_pattern": {Enabled: true},
+					"section_pattern": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("rfc_section_pattern_family", 0.24, ReasonFamilyEvidence, "RFC section-pattern family evidence is present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								HeadingsAny: []string{"summary", "abstract", "motivation", "detailed design", "alternatives", "drawbacks", "risks", "unresolved questions", "open questions"},
+							}),
+						},
+					},
 				},
 			},
 			ModelPRD: {
 				Enabled:   true,
 				Scopes:    []Scope{ScopeDocument},
+				Kind:      "requirements",
+				Subtype:   "prd",
 				Authority: AuthorityProductBackground,
 				PathHints: []string{"docs/prd/**", "docs/prds/**", "prd/**", "prds/**"},
+				Evidence: []EvidenceRule{
+					evidence("prd_frontmatter_kind", 0.18, ReasonFrontmatter, "PRD frontmatter declares requirements kind.", EvidenceMatch{
+						Scope:             ScopeDocument,
+						FrontmatterEquals: map[string]string{"kind": "requirements"},
+					}),
+					evidence("prd_frontmatter_subtype", 0.16, ReasonFrontmatter, "PRD frontmatter declares PRD subtype.", EvidenceMatch{
+						Scope:             ScopeDocument,
+						FrontmatterEquals: map[string]string{"subtype": "prd"},
+					}),
+					evidence("prd_title_signal", 0.12, ReasonHeadingMatch, "PRD title signal is present.", EvidenceMatch{
+						Scope:    ScopeDocument,
+						TitleAny: []string{"prd", "product requirements", "requirements"},
+					}),
+					evidence("prd_path_signal", 0.08, ReasonPathHint, "PRD path signal is present.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						PathContainsAny: []string{"prd", "prds", "requirements"},
+					}),
+					evidence("prd_product_sections", 0.18, ReasonHeadingMatch, "Product requirement sections are present.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						SectionRolesAny: []string{"product", "requirements"},
+					}),
+				},
+				NegativeEvidence: []EvidenceRule{
+					evidence("prd_changelog_marker", 0.22, ReasonChangelogMarker, "Changelog marker reduces PRD confidence.", EvidenceMatch{MarkersAny: []string{MarkerChangelog}}),
+					evidence("prd_generated_marker", 0.18, ReasonGeneratedMarker, "Generated marker reduces PRD confidence.", EvidenceMatch{MarkersAny: []string{MarkerGenerated}}),
+				},
 				Families: map[string]SubmodelConfig{
-					"product_intent": {Enabled: true},
+					"product_intent": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("prd_product_intent_family", 0.24, ReasonFamilyEvidence, "Product-intent family evidence is present.", EvidenceMatch{
+								Scope:           ScopeDocument,
+								SectionRolesAny: []string{"product", "requirements"},
+								HeadingsAny:     []string{"goals", "non-goals", "user outcomes", "success metrics", "requirements", "acceptance criteria"},
+							}),
+						},
+					},
 				},
 			},
 			ModelPlan: {
 				Enabled:   true,
 				Scopes:    []Scope{ScopeDocument},
+				Kind:      "plan",
 				Authority: AuthorityWorkingPlan,
 				PathHints: []string{"plans/**", "docs/plans/**"},
+				Evidence: []EvidenceRule{
+					evidence("plan_dated_filename", 0.12, ReasonLifecycleSignal, "Plan has dated filename or path token.", EvidenceMatch{
+						Scope:         ScopeDocument,
+						DateTokensMin: 1,
+					}),
+					evidence("plan_title_signal", 0.12, ReasonHeadingMatch, "Plan title signal is present.", EvidenceMatch{
+						Scope:    ScopeDocument,
+						TitleAny: []string{"plan", "implementation", "migration", "rollout"},
+					}),
+					evidence("plan_path_signal", 0.08, ReasonPathHint, "Plan path signal is present.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						PathContainsAny: []string{"plan", "plans"},
+					}),
+					evidence("plan_checklist", 0.15, ReasonHeadingMatch, "Plan includes checklist/task items.", EvidenceMatch{
+						Scope:        ScopeDocument,
+						ChecklistMin: 1,
+					}),
+					evidence("plan_work_sections", 0.16, ReasonHeadingMatch, "Plan includes implementation, task, risk, or open-question sections.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						SectionRolesAny: []string{"tasks", "risk", "open_questions"},
+						HeadingsAny:     []string{"implementation", "phases", "tasks", "risks", "open questions", "deferred"},
+					}),
+					evidence("plan_work_language", 0.12, ReasonHeadingMatch, "Plan includes step, sequence, phase, or task language.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						BodyContainsAny: []string{"step", "sequence", "phase", "task", "todo", "next"},
+					}),
+				},
+				NegativeEvidence: []EvidenceRule{
+					evidence("plan_generated_marker", 0.24, ReasonGeneratedMarker, "Generated marker reduces plan confidence.", EvidenceMatch{MarkersAny: []string{MarkerGenerated}}),
+					evidence("plan_changelog_marker", 0.22, ReasonChangelogMarker, "Changelog marker reduces plan confidence.", EvidenceMatch{MarkersAny: []string{MarkerChangelog}}),
+				},
 				Families: map[string]SubmodelConfig{
-					"implementation_plan": {Enabled: true},
-					"migration_plan":      {Enabled: true},
-					"rollout_plan":        {Enabled: true},
+					"implementation_plan": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("plan_implementation_family", 0.24, ReasonFamilyEvidence, "Implementation-plan family evidence is present.", EvidenceMatch{
+								Scope:           ScopeDocument,
+								HeadingsAny:     []string{"implementation", "phases", "tasks", "next steps", "plan"},
+								SectionRolesAny: []string{"tasks"},
+							}),
+						},
+					},
+					"migration_plan": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("plan_migration_family", 0.22, ReasonFamilyEvidence, "Migration-plan family evidence is present.", EvidenceMatch{
+								Scope:           ScopeDocument,
+								TitleAny:        []string{"migration"},
+								HeadingsAny:     []string{"migration", "rollout", "backfill", "compatibility"},
+								BodyContainsAny: []string{"migration", "backfill"},
+							}),
+						},
+					},
+					"rollout_plan": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("plan_rollout_family", 0.22, ReasonFamilyEvidence, "Rollout-plan family evidence is present.", EvidenceMatch{
+								Scope:           ScopeDocument,
+								TitleAny:        []string{"rollout"},
+								HeadingsAny:     []string{"rollout", "launch", "monitoring"},
+								BodyContainsAny: []string{"rollout", "launch"},
+							}),
+						},
+					},
 				},
 			},
 			ModelAgentNote: {
 				Enabled:   true,
 				Scopes:    []Scope{ScopeDocument},
+				Kind:      "plan",
 				Authority: AuthorityHandoffNote,
 				PathHints: []string{".cursor/plans/**", ".claude/**", ".codex/**"},
+				Evidence: []EvidenceRule{
+					evidence("agent_note_path_signal", 0.18, ReasonPathHint, "Agent-note path signal is present.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						PathContainsAny: []string{".cursor", ".claude", ".codex"},
+					}),
+					evidence("agent_note_frontmatter_signal", 0.12, ReasonFrontmatter, "Agent-note frontmatter signal is present.", EvidenceMatch{
+						Scope:             ScopeDocument,
+						FrontmatterExists: []string{"agent", "tool", "source", "generator"},
+					}),
+					evidence("agent_note_handoff_terms", 0.20, ReasonHeadingMatch, "Agent handoff or continuation language is present.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						BodyContainsAny: []string{"follow-up", "follow up", "handoff", "resume", "next step", "blocked", "blocker", "stopped after"},
+					}),
+				},
+				NegativeEvidence: []EvidenceRule{
+					evidence("agent_note_generated_marker", 0.18, ReasonGeneratedMarker, "Generated marker reduces agent-note confidence.", EvidenceMatch{MarkersAny: []string{MarkerGenerated}}),
+					evidence("agent_note_changelog_marker", 0.16, ReasonChangelogMarker, "Changelog marker reduces agent-note confidence.", EvidenceMatch{MarkersAny: []string{MarkerChangelog}}),
+				},
 				Families: map[string]SubmodelConfig{
-					"continuation_note": {Enabled: true},
-					"followup_note":     {Enabled: true},
-					"blocker_note":      {Enabled: true},
+					"continuation_note": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("agent_continuation_family", 0.24, ReasonFamilyEvidence, "Continuation-note family evidence is present.", EvidenceMatch{
+								Scope:           ScopeDocument,
+								BodyContainsAny: []string{"resume", "continue", "handoff", "stopped after", "next step"},
+							}),
+						},
+					},
+					"followup_note": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("agent_followup_family", 0.30, ReasonFamilyEvidence, "Follow-up-note family evidence is present.", EvidenceMatch{
+								Scope:           ScopeDocument,
+								TitleAny:        []string{"followup", "follow-up", "follow up"},
+								BodyContainsAny: []string{"follow-up", "follow up", "followup"},
+							}),
+						},
+					},
+					"blocker_note": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("agent_blocker_family", 0.24, ReasonFamilyEvidence, "Blocker-note family evidence is present.", EvidenceMatch{
+								Scope:           ScopeDocument,
+								TitleAny:        []string{"blocker", "blocked"},
+								BodyContainsAny: []string{"blocked", "blocker", "cannot proceed"},
+							}),
+						},
+					},
 				},
 			},
 			ModelGenericMarkdown: {
 				Enabled:   true,
 				Scopes:    []Scope{ScopeDocument},
+				Kind:      "markdown_artifact",
 				Authority: AuthorityNeutral,
 				Fallback:  true,
+				Evidence: []EvidenceRule{
+					evidence("generic_markdown_fallback", 0.40, ReasonFallback, "Generic markdown fallback for useful text without a stronger model match.", EvidenceMatch{
+						Scope:  ScopeDocument,
+						Always: true,
+					}),
+				},
 			},
 		},
 		LocalModels: LocalModelsConfig{Enabled: true},
@@ -311,6 +632,28 @@ func ValidateConfig(cfg PipelineConfig) error {
 				return fmt.Errorf("classifier model %q: %w", id, err)
 			}
 		}
+		if err := validateRuleSet(id, "evidence", model.Evidence); err != nil {
+			return err
+		}
+		if err := validateRuleSet(id, "negative_evidence", model.NegativeEvidence); err != nil {
+			return err
+		}
+		for subID, sub := range model.Subformats {
+			if err := validateRuleSet(id+"."+subID, "evidence", sub.Evidence); err != nil {
+				return err
+			}
+			if err := validateRuleSet(id+"."+subID, "negative_evidence", sub.NegativeEvidence); err != nil {
+				return err
+			}
+		}
+		for familyID, family := range model.Families {
+			if err := validateRuleSet(id+"."+familyID, "evidence", family.Evidence); err != nil {
+				return err
+			}
+			if err := validateRuleSet(id+"."+familyID, "negative_evidence", family.NegativeEvidence); err != nil {
+				return err
+			}
+		}
 	}
 	if missing := MissingDocumentedModels(cfg); len(missing) > 0 {
 		return fmt.Errorf("classifier_pipeline missing documented models: %v", missing)
@@ -324,6 +667,12 @@ func ValidateConfig(cfg PipelineConfig) error {
 		}
 		if _, ok := cfg.Models[local.BaseModel]; !ok {
 			return fmt.Errorf("local model %q references unknown base_model %q", local.ID, local.BaseModel)
+		}
+		if err := validateRuleSet(local.ID, "evidence", local.Evidence); err != nil {
+			return err
+		}
+		if err := validateRuleSet(local.ID, "negative_evidence", local.NegativeEvidence); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -360,4 +709,21 @@ func hasScope(model ModelConfig, scope Scope) bool {
 		}
 	}
 	return false
+}
+
+func validateRuleSet(owner, field string, rules []EvidenceRule) error {
+	for _, rule := range rules {
+		if rule.ID == "" {
+			return fmt.Errorf("classifier model %q %s rule id is required", owner, field)
+		}
+		if rule.Weight < 0 || rule.Weight > 1 {
+			return fmt.Errorf("classifier model %q %s rule %q weight must be between 0 and 1", owner, field, rule.ID)
+		}
+		if rule.Match.Scope != "" {
+			if err := ValidateScope(rule.Match.Scope); err != nil {
+				return fmt.Errorf("classifier model %q %s rule %q: %w", owner, field, rule.ID, err)
+			}
+		}
+	}
+	return nil
 }
