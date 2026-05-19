@@ -53,6 +53,21 @@ classifier_cases:
         - frontmatter
         - family_evidence
 
+  - id: rfc-billing-webhook-replay
+    path: docs/rfcs/0008-billing-webhook-replay-protection.md
+    scope: document
+    expected:
+      classifier: rfc
+      scope: document
+      family: rfc.section_pattern
+      kind: design
+      status: accepted
+      authority: design_proposal
+      should_index: true
+      required_reasons:
+        - path_hint
+        - family_evidence
+
   - id: plan-entitlement-sync
     path: docs/plans/2026-05-01-entitlement-sync-plan.md
     scope: document

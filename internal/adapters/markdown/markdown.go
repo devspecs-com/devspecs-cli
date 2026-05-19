@@ -196,7 +196,8 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 func defaultPaths() []string {
 	return []string{
 		"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans",
-		".claude/notes", "docs/prd", "docs/design", "docs/technical",
+		".claude/notes", "docs/prd", "rfcs", "rfc", "docs/rfcs", "docs/rfc",
+		"docs/design", "docs/technical",
 		"_bmad-output", ".specify/memory",
 	}
 }
@@ -204,7 +205,7 @@ func defaultPaths() []string {
 func rootGlobs() []string {
 	return []string{
 		"*.spec.md", "*.plan.md", "*.prd.md",
-		"*.design.md", "*.contract.md", "*.requirements.md",
+		"*.rfc.md", "*.design.md", "*.contract.md", "*.requirements.md",
 	}
 }
 
@@ -298,6 +299,8 @@ func isDefaultNestedMarkdownDir(rel string) bool {
 		"docs/plans",
 		".claude/notes",
 		"docs/prd",
+		"docs/rfcs",
+		"docs/rfc",
 		"docs/design",
 		"docs/technical",
 	} {
@@ -387,6 +390,8 @@ func inferKindSubtype(relPath string) (kind, subtype string) {
 	switch {
 	case strings.Contains(lower, "prd"):
 		return config.KindRequirements, config.SubtypePRD
+	case isRFCPath(lower):
+		return config.KindDesign, ""
 	case strings.Contains(lower, "plan"):
 		return config.KindPlan, ""
 	case strings.Contains(lower, "spec"):
@@ -400,6 +405,26 @@ func inferKindSubtype(relPath string) (kind, subtype string) {
 	default:
 		return config.KindMarkdownArtifact, ""
 	}
+}
+
+func isRFCPath(relPath string) bool {
+	relPath = strings.Trim(filepath.ToSlash(relPath), "/")
+	if relPath == "" {
+		return false
+	}
+	segments := strings.Split(relPath, "/")
+	for _, segment := range segments[:len(segments)-1] {
+		if segment == "rfc" || segment == "rfcs" {
+			return true
+		}
+	}
+	base := strings.TrimSuffix(filepath.Base(relPath), filepath.Ext(relPath))
+	return base == "rfc" ||
+		strings.HasPrefix(base, "rfc-") ||
+		strings.HasPrefix(base, "rfc_") ||
+		strings.HasSuffix(base, "-rfc") ||
+		strings.HasSuffix(base, ".rfc") ||
+		strings.Contains(base, "request-for-comments")
 }
 
 func inferKind(relPath string) string {

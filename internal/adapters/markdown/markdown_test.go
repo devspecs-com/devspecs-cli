@@ -58,14 +58,19 @@ func TestDiscover_DefaultNestedDocsIntentDirs(t *testing.T) {
 	tmp := t.TempDir()
 	nestedPlan := filepath.Join(tmp, "apps", "desktop", "docs", "plans")
 	nestedPRD := filepath.Join(tmp, "services", "api", "docs", "prd")
+	nestedRFC := filepath.Join(tmp, "packages", "api", "docs", "rfcs")
 	if err := os.MkdirAll(nestedPlan, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(nestedPRD, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(nestedRFC, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	os.WriteFile(filepath.Join(nestedPlan, "pnpm-migration.md"), []byte("# PNPM Migration\n"), 0o644)
 	os.WriteFile(filepath.Join(nestedPRD, "billing.md"), []byte("# Billing PRD\n"), 0o644)
+	os.WriteFile(filepath.Join(nestedRFC, "token-boundary.md"), []byte("# Token Boundary RFC\n"), 0o644)
 
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), tmp, nil)
@@ -76,6 +81,7 @@ func TestDiscover_DefaultNestedDocsIntentDirs(t *testing.T) {
 	for _, want := range []string{
 		"apps/desktop/docs/plans/pnpm-migration.md",
 		"services/api/docs/prd/billing.md",
+		"packages/api/docs/rfcs/token-boundary.md",
 	} {
 		if !stringSliceContains(got, want) {
 			t.Fatalf("missing nested default intent doc %q in %v", want, got)
@@ -322,6 +328,9 @@ func TestInferKind(t *testing.T) {
 	}{
 		{"plans/refactor.md", "plan"},
 		{"specs/api.md", "spec"},
+		{"docs/rfcs/0007-auth-session.md", "design"},
+		{"rfcs/session-token-handoff.md", "design"},
+		{"token-boundary.rfc.md", "design"},
 		{"docs/requirements/auth.md", "requirements"},
 		{"notes/random.md", "markdown_artifact"},
 		{"v0.prd.md", "requirements"},
@@ -340,7 +349,7 @@ func TestInferKind(t *testing.T) {
 
 func TestDefaultPaths_NarrowDocs(t *testing.T) {
 	paths := defaultPaths()
-	required := []string{".claude/notes", "docs/specs", "docs/plans", "docs/prd", "docs/design", "docs/technical", "_bmad-output", ".specify/memory"}
+	required := []string{".claude/notes", "docs/specs", "docs/plans", "docs/prd", "docs/rfcs", "rfcs", "docs/design", "docs/technical", "_bmad-output", ".specify/memory"}
 	for _, req := range required {
 		found := false
 		for _, p := range paths {
@@ -362,7 +371,7 @@ func TestDefaultPaths_NarrowDocs(t *testing.T) {
 
 func TestRootGlobs_AllPatterns(t *testing.T) {
 	globs := rootGlobs()
-	expected := []string{"*.spec.md", "*.plan.md", "*.prd.md", "*.design.md", "*.contract.md", "*.requirements.md"}
+	expected := []string{"*.spec.md", "*.plan.md", "*.prd.md", "*.rfc.md", "*.design.md", "*.contract.md", "*.requirements.md"}
 	if len(globs) != len(expected) {
 		t.Fatalf("expected %d root globs, got %d", len(expected), len(globs))
 	}

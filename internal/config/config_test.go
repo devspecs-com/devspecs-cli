@@ -135,7 +135,7 @@ func TestDefaultRepoConfig_Structure(t *testing.T) {
 			markdownPaths = s.Paths
 		}
 	}
-	for _, want := range []string{".claude/notes", "docs/specs", "docs/plans", "docs/prd", "docs/design", "docs/technical"} {
+	for _, want := range []string{".claude/notes", "docs/specs", "docs/plans", "docs/prd", "docs/rfcs", "rfcs", "docs/design", "docs/technical"} {
 		if !containsString(markdownPaths, want) {
 			t.Errorf("missing default markdown path %q", want)
 		}

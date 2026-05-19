@@ -60,3 +60,100 @@ func TestWeightedFilesRetrieverV0_UsesCandidateTitle(t *testing.T) {
 		t.Fatalf("reasons = %#v", reasons)
 	}
 }
+
+func TestWeightedFilesRetrieverV0_SourceIntentPrefersExactSourceFiles(t *testing.T) {
+	candidates := []Candidate{
+		{Path: "services/api/src/auth/session.ts", Body: "type Session = { customer_id?: string; authorization_details?: unknown }"},
+		{Path: "services/api/src/billing/entitlements.ts", Body: "const authorization_details = await loadAuthorizationDetails(customer_id)"},
+		{Path: "docs/prd/billing-entitlements-v1.md", Body: "Requirements mention `authorization_details` and `customer_id` for access checks."},
+		{Path: "docs/adr/0005-auth-session-cookie-boundary.md", Body: "Decision: session cookies own customer_id lookup boundaries."},
+		{Path: "openspec/changes/refactor-auth-session/design.md", Body: "Design: load authorization_details from the server session before token handoff."},
+		{Path: "docs/plans/billing-ops-runbook.md", Body: "Known false positive: customer_id authorization_details source file billing support replay customer customer customer."},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "authorization_details customer_id source file")
+	if !containsCandidatePath(got, "services/api/src/auth/session.ts") {
+		t.Fatalf("missing session source file: %#v", CandidatePaths(got))
+	}
+	if !containsCandidatePath(got, "services/api/src/billing/entitlements.ts") {
+		t.Fatalf("missing entitlements source file: %#v", CandidatePaths(got))
+	}
+	if containsCandidatePath(got, "docs/plans/billing-ops-runbook.md") {
+		t.Fatalf("broad runbook should not outrank exact source matches: %#v", CandidatePaths(got))
+	}
+}
+
+func TestWeightedFilesRetrieverV0_RFCIntentUsesRFCAndCoreTerms(t *testing.T) {
+	candidates := []Candidate{
+		{Path: "docs/rfcs/0008-billing-webhook-replay-protection.md", Body: "Summary Motivation Proposal Drawbacks Alternatives stripe_event_id webhook_replay_protection replay ledger."},
+		{Path: "docs/rfcs/0009-support-search-ranking.md", Body: "Summary Motivation Proposal Drawbacks Alternatives support search customer portal."},
+		{Path: "openspec/changes/harden-entitlement-sync/design.md", Body: "webhook replay protection uses stripe_event_id."},
+		{Path: "docs/adr/0002-webhook-idempotency-boundary.md", Body: "Decision for webhook idempotency boundary."},
+		{Path: "docs/plans/2026-04-billing-ops-runbook.md", Body: "support replay webhook customer portal runbook alternatives."},
+		{Path: "scratch/old-webhook-retry-investigation.md", Body: "old retry notes for replay."},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "RFC for webhook replay protection alternatives")
+	if !containsCandidatePath(got, "docs/rfcs/0008-billing-webhook-replay-protection.md") {
+		t.Fatalf("missing RFC candidate: %#v", CandidatePaths(got))
+	}
+	if containsCandidatePath(got, "docs/rfcs/0009-support-search-ranking.md") {
+		t.Fatalf("unrelated RFC should not be selected: %#v", CandidatePaths(got))
+	}
+}
+
+func TestWeightedFilesRetrieverV0_GenericPlanNeedsCoreEvidence(t *testing.T) {
+	candidates := []Candidate{
+		{Path: "docs/plans/2026-05-01-entitlement-sync-plan.md", Body: "Current progress for entitlement_sync hardening and billing-webhook-hardening."},
+		{Path: "docs/plans/generic-implementation-plan.md", Body: "Current progress next steps implementation notes without the requested feature words."},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "resume entitlement sync hardening")
+	if !containsCandidatePath(got, "docs/plans/2026-05-01-entitlement-sync-plan.md") {
+		t.Fatalf("missing specific plan: %#v", CandidatePaths(got))
+	}
+	if containsCandidatePath(got, "docs/plans/generic-implementation-plan.md") {
+		t.Fatalf("generic plan should not pass without core evidence: %#v", CandidatePaths(got))
+	}
+}
+
+func TestWeightedFilesRetrieverV0_LifecycleIntentPrefersStaleDecision(t *testing.T) {
+	candidates := []Candidate{
+		{Path: "docs/adr/0003-superseded-local-entitlements.md", Status: "superseded", Body: "The local entitlement caching plan was abandoned."},
+		{Path: "docs/plans/active-entitlement-rollout.md", Status: "active", Body: "Mentions local entitlement caching as old context but tracks current rollout."},
+		{Path: ".claude/notes/local-entitlements-experiment.md", Status: "stale", Body: "Historical local entitlement cache experiment."},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "continue local entitlement caching plan")
+	if !containsCandidatePath(got, "docs/adr/0003-superseded-local-entitlements.md") {
+		t.Fatalf("missing superseded ADR: %#v", CandidatePaths(got))
+	}
+	if containsCandidatePath(got, "docs/plans/active-entitlement-rollout.md") {
+		t.Fatalf("active rollout should not beat lifecycle candidates: %#v", CandidatePaths(got))
+	}
+}
+
+func TestWeightedFilesRetrieverV0_ProductBackgroundDownranksSourceFiles(t *testing.T) {
+	candidates := []Candidate{
+		{Path: "docs/prd/billing-entitlements-v1.md", Body: "Product requirements for billing entitlements and customer access."},
+		{Path: "services/api/src/billing/entitlements.ts", Body: "customer access billing entitlements implementation code"},
+		{Path: "docs/plans/customer-access-notes.md", Body: "customer access support notes"},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "product background for billing entitlements and customer access")
+	if !containsCandidatePath(got, "docs/prd/billing-entitlements-v1.md") {
+		t.Fatalf("missing PRD: %#v", CandidatePaths(got))
+	}
+	if containsCandidatePath(got, "services/api/src/billing/entitlements.ts") {
+		t.Fatalf("source file should not be selected for product background: %#v", CandidatePaths(got))
+	}
+}
+
+func containsCandidatePath(candidates []Candidate, path string) bool {
+	for _, c := range candidates {
+		if c.Path == path {
+			return true
+		}
+	}
+	return false
+}
