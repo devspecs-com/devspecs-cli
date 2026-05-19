@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "structure_type": "bundle",
+  "format_profile": "openspec",
+  "artifact_family": "OPENSPEC",
+  "repository": "CleanCocoa/TextBuffer",
+  "commit_sha": "5885a592be26325a332d49365751c2083fe665d4",
+  "license": "MIT",
+  "source_url": "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-test-scaffolding/proposal.md",
+  "storage_decision": "real_full_file",
+  "can_commit_full_file": true,
+  "root_path": "openspec",
+  "layout_group": "openspec/changes/archive/2026-03-13-m1-test-scaffolding",
+  "source_identity": "openspec/changes/archive/2026-03-13-m1-test-scaffolding|openspec",
+  "primary_path": "openspec/changes/archive/2026-03-13-m1-test-scaffolding/proposal.md",
+  "kind": "spec",
+  "subtype": "openspec_change",
+  "title": "2026 03 13 M1 Test Scaffolding",
+  "status": "proposed",
+  "composite_hash": "87057bde98d03deb085e21eeecfacd1ccfb761ba963fdb0e30c663dc16692636",
+  "manifest_ref": "structures/openspec/bundles/87057bde98d03deb085e21eeecfacd1ccfb761ba963fdb0e30c663dc16692636/manifest.json",
+  "files": [
+    {
+      "path": "openspec/changes/archive/2026-03-13-m1-test-scaffolding/design.md",
+      "role": "design",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/archive/2026-03-13-m1-test-scaffolding",
+      "source_identity": "openspec/changes/archive/2026-03-13-m1-test-scaffolding/design.md|openspec_file",
+      "source_url": "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-test-scaffolding/design.md",
+      "sha256": "509b2e770144f800d85b076416341fc34a75523a1487334307a65d8c2fec08a5",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/archive/2026-03-13-m1-test-scaffolding/proposal.md",
+      "role": "proposal",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/archive/2026-03-13-m1-test-scaffolding",
+      "source_identity": "openspec/changes/archive/2026-03-13-m1-test-scaffolding/proposal.md|openspec_file",
+      "source_url": "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-test-scaffolding/proposal.md",
+      "sha256": "2f7192017db7c99cf0e3d5adcb61c71d36c84160aa2691434b0c35da4d004734",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/archive/2026-03-13-m1-test-scaffolding/specs/undo-test-infrastructure/spec.md",
+      "role": "delta_spec",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/archive/2026-03-13-m1-test-scaffolding",
+      "source_identity": "openspec/changes/archive/2026-03-13-m1-test-scaffolding/specs/undo-test-infrastructure/spec.md|openspec_file",
+      "source_url": "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-test-scaffolding/specs/undo-test-infrastructure/spec.md",
+      "sha256": "42251d6373bfb3ce32ad2690e73d55f33e82ec7baeec89d0f7daa21224e65e09",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/archive/2026-03-13-m1-test-scaffolding/tasks.md",
+      "role": "tasks",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/archive/2026-03-13-m1-test-scaffolding",
+      "source_identity": "openspec/changes/archive/2026-03-13-m1-test-scaffolding/tasks.md|openspec_file",
+      "source_url": "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-test-scaffolding/tasks.md",
+      "sha256": "1c40483cc35d51679ba58bfa64a47163b5e07608f233147caf1277d070c2d44e",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    }
+  ]
+}

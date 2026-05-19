@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "structure_type": "bundle",
+  "format_profile": "openspec",
+  "artifact_family": "OPENSPEC",
+  "repository": "daijinru/wenko",
+  "commit_sha": "45461280f8c4f22072bc33bbd9fe4fcc2e48e83f",
+  "license": "MIT",
+  "source_url": "https://github.com/daijinru/wenko/blob/45461280f8c4f22072bc33bbd9fe4fcc2e48e83f/openspec/changes/add-execution-observation-layer/proposal.md",
+  "storage_decision": "real_full_file",
+  "can_commit_full_file": true,
+  "root_path": "openspec",
+  "layout_group": "openspec/changes/add-execution-observation-layer",
+  "source_identity": "openspec/changes/add-execution-observation-layer|openspec",
+  "primary_path": "openspec/changes/add-execution-observation-layer/proposal.md",
+  "kind": "spec",
+  "subtype": "openspec_change",
+  "title": "Change: Add Execution State Observation Layer",
+  "status": "proposed",
+  "composite_hash": "245f3f4e5d45b4eab4b7a4b61b548b17ae85e75a15e08b0f7d5695b521d18f2b",
+  "manifest_ref": "structures/openspec/bundles/245f3f4e5d45b4eab4b7a4b61b548b17ae85e75a15e08b0f7d5695b521d18f2b/manifest.json",
+  "files": [
+    {
+      "path": "openspec/changes/add-execution-observation-layer/design.md",
+      "role": "design",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-execution-observation-layer",
+      "source_identity": "openspec/changes/add-execution-observation-layer/design.md|openspec_file",
+      "source_url": "https://github.com/daijinru/wenko/blob/45461280f8c4f22072bc33bbd9fe4fcc2e48e83f/openspec/changes/add-execution-observation-layer/design.md",
+      "sha256": "507dc884167f9befec4927b9ec1380e88c62e9602b1dbe04533286adde116927",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/add-execution-observation-layer/proposal.md",
+      "role": "proposal",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-execution-observation-layer",
+      "source_identity": "openspec/changes/add-execution-observation-layer/proposal.md|openspec_file",
+      "source_url": "https://github.com/daijinru/wenko/blob/45461280f8c4f22072bc33bbd9fe4fcc2e48e83f/openspec/changes/add-execution-observation-layer/proposal.md",
+      "sha256": "4580506be75d57ad0cdd7a77dc1323d8a27113ef46870f5c3ba780c68ac12777",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/add-execution-observation-layer/specs/execution-observation/spec.md",
+      "role": "delta_spec",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-execution-observation-layer",
+      "source_identity": "openspec/changes/add-execution-observation-layer/specs/execution-observation/spec.md|openspec_file",
+      "source_url": "https://github.com/daijinru/wenko/blob/45461280f8c4f22072bc33bbd9fe4fcc2e48e83f/openspec/changes/add-execution-observation-layer/specs/execution-observation/spec.md",
+      "sha256": "735b105a245eb9cd249ed0c88713b2a28bc894a2bde5d56051868e1eefa344e6",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/add-execution-observation-layer/tasks.md",
+      "role": "tasks",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-execution-observation-layer",
+      "source_identity": "openspec/changes/add-execution-observation-layer/tasks.md|openspec_file",
+      "source_url": "https://github.com/daijinru/wenko/blob/45461280f8c4f22072bc33bbd9fe4fcc2e48e83f/openspec/changes/add-execution-observation-layer/tasks.md",
+      "sha256": "8863fdf5c7b0f04a387d155187eff3b398c5ad6cc78d4d4f4a827ac835f629ee",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    }
+  ]
+}

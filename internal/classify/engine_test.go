@@ -3,6 +3,7 @@ package classify
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -87,6 +88,115 @@ func TestClassifyCandidateRecognizesADRSubformatsDeclaratively(t *testing.T) {
 	}, cfg)
 	if yStatement.Winner.Classifier != ModelADR || yStatement.Winner.Subformat != SubmodelADRYStatement {
 		t.Fatalf("Y-Statement got %s/%s", yStatement.Winner.Classifier, yStatement.Winner.Subformat)
+	}
+}
+
+func TestClassifyCandidateRecognizesEnhancementProposalAsRFC(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+	resolution := ClassifyCandidate(Candidate{
+		Path:  "enhancements/operator-bundle-validation.md",
+		Scope: ScopeDocument,
+		Body: strings.Join([]string{
+			"---",
+			"title: bundle-validation",
+			"status: implementable",
+			"authors:",
+			"  - example",
+			"---",
+			"# Bundle Validation",
+			"",
+			"## Release Signoff Checklist",
+			"",
+			"- [ ] Enhancement is implementable",
+			"- [ ] Test plan is defined",
+			"",
+			"## Summary",
+			"",
+			"This enhancement proposes a validation library for bundles.",
+			"",
+			"## Motivation",
+			"",
+			"Operators need static validation before release.",
+			"",
+			"## Proposal",
+			"",
+			"Expose reusable validation rules and report errors consistently.",
+		}, "\n"),
+	}, cfg)
+	if resolution.Winner.Classifier != ModelRFC {
+		t.Fatalf("enhancement proposal got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
+	}
+}
+
+func TestClassifyCandidatePrefersRFCForGovernedProposalWithPlanShape(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+	resolution := ClassifyCandidate(Candidate{
+		Path:  "ships/0018-build-env-vars.md",
+		Scope: ScopeDocument,
+		Body: strings.Join([]string{
+			"<!-- SPDX-License-Identifier: Apache-2.0 -->",
+			"",
+			"---",
+			"title: build-env-vars",
+			"status: implementable",
+			"---",
+			"",
+			"# Build Environment Variables",
+			"",
+			"## Release Signoff Checklist",
+			"",
+			"- [ ] Enhancement is implementable",
+			"- [ ] Test plan is defined",
+			"",
+			"## Summary",
+			"",
+			"This proposal lets users add environment variables to build steps.",
+			"",
+			"## Motivation",
+			"",
+			"Build authors need a safe way to expose configuration.",
+			"",
+			"## Proposal",
+			"",
+			"Add an API field and document implementation behavior.",
+			"",
+			"### Implementation Notes",
+			"",
+			"Implementation proceeds through build strategy API updates.",
+		}, "\n"),
+	}, cfg)
+	if resolution.Winner.Classifier != ModelRFC {
+		t.Fatalf("governed proposal got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
+	}
+}
+
+func TestClassifyCandidateRecognizesPlainPRDFilenameAndBody(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+	resolution := ClassifyCandidate(Candidate{
+		Path:  "PRD.md",
+		Scope: ScopeDocument,
+		Body: strings.Join([]string{
+			"Product Requirements Document: Simple AI Chatbot",
+			"",
+			"1. Project Overview",
+			"",
+			"A minimalist AI chatbot with persistent chat history.",
+			"",
+			"2. UI/UX Requirements",
+			"",
+			"Simplicity, responsive layout, readability, and feedback.",
+			"",
+			"3. Functional Requirements",
+			"",
+			"Users can authenticate, stream chat responses, and manage threads.",
+			"",
+			"4. Success Metrics",
+			"",
+			"Fast response time and reliable message persistence.",
+		}, "\n"),
+	}, cfg)
+	if resolution.Winner.Classifier != ModelPRD {
+		t.Fatalf("plain PRD got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelPRD, resolution.Winner.Confidence, resolution.Alternatives)
 	}
 }
 

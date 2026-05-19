@@ -1,0 +1,2594 @@
+version: 1
+fixture: mined-intent-samples
+classifier_cases:
+  - id: "mined-adr-c77f7ebed853"
+    path: "samples/repos/100monkeys-ai__monkey-troop/docs/adrs/0016-node-reputation-and-qos.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/100monkeys-ai/monkey-troop/blob/e4df537f2e1473ccdc524447dc6b44ec7a0f9d2f/docs/adrs/0016-node-reputation-and-qos.md"
+      repository: "100monkeys-ai/monkey-troop"
+      commit_sha: "e4df537f2e1473ccdc524447dc6b44ec7a0f9d2f"
+      license: "MIT"
+      original_path: "docs/adrs/0016-node-reputation-and-qos.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-af6cf01a22ae"
+    path: "samples/repos/11vated__PAradigm-reference/adr/008-functor-composition.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/11vated/PAradigm-reference/blob/5f9be5fde3494b4fc7c3f66051e4a0ca1b0ee98c/adr/008-functor-composition.md"
+      repository: "11vated/PAradigm-reference"
+      commit_sha: "5f9be5fde3494b4fc7c3f66051e4a0ca1b0ee98c"
+      license: "Apache-2.0"
+      original_path: "adr/008-functor-composition.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-95e0349867c8"
+    path: "samples/repos/Azure-Samples__multimodal-agent-telecom-anomaly-detection/documentation/adr/0001-use-madr-format.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/Azure-Samples/multimodal-agent-telecom-anomaly-detection/blob/3c2ca8a86fa40ccfce1b80151ddfd2b36e154054/documentation/adr/0001-use-madr-format.md"
+      repository: "Azure-Samples/multimodal-agent-telecom-anomaly-detection"
+      commit_sha: "3c2ca8a86fa40ccfce1b80151ddfd2b36e154054"
+      license: "MIT"
+      original_path: "documentation/adr/0001-use-madr-format.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-81a09f383ab1"
+    path: "samples/repos/BjornMelin__ai-job-scraper/docs/adrs/ADR-014-hybrid-scraping-strategy.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/BjornMelin/ai-job-scraper/blob/19198bd8ffaab3ce345a6e17d4af9bef78419ed7/docs/adrs/ADR-014-hybrid-scraping-strategy.md"
+      repository: "BjornMelin/ai-job-scraper"
+      commit_sha: "19198bd8ffaab3ce345a6e17d4af9bef78419ed7"
+      license: "MIT"
+      original_path: "docs/adrs/ADR-014-hybrid-scraping-strategy.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-61fa28abb653"
+    path: "samples/repos/Brad-Edwards__aptl/docs/adrs/adr-001-docker-compose-deployment.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/Brad-Edwards/aptl/blob/c67aa1842debe978fe86f20bff4cfdc361732574/docs/adrs/adr-001-docker-compose-deployment.md"
+      repository: "Brad-Edwards/aptl"
+      commit_sha: "c67aa1842debe978fe86f20bff4cfdc361732574"
+      license: "MIT"
+      original_path: "docs/adrs/adr-001-docker-compose-deployment.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-9c8373d54047"
+    path: "samples/repos/ChildishGirl__serverless-data-pipeline/ADRs/01-use-markdown-architectural-decision-records.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/ChildishGirl/serverless-data-pipeline/blob/6b10d34082702b581f826a2bbc5da7b420c789a5/ADRs/01-use-markdown-architectural-decision-records.md"
+      repository: "ChildishGirl/serverless-data-pipeline"
+      commit_sha: "6b10d34082702b581f826a2bbc5da7b420c789a5"
+      license: "MIT"
+      original_path: "ADRs/01-use-markdown-architectural-decision-records.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-98d87b3c258e"
+    path: "samples/repos/ComPWA__compwa.github.io/docs/adr/000.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/ComPWA/compwa.github.io/blob/7bb2cdf9a7aab25d36bb4493104eccc058ac5dfb/docs/adr/000.md"
+      repository: "ComPWA/compwa.github.io"
+      commit_sha: "7bb2cdf9a7aab25d36bb4493104eccc058ac5dfb"
+      license: "Apache-2.0"
+      original_path: "docs/adr/000.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-f643c60c5460"
+    path: "samples/repos/CueMol__cuemol2/docs/migration/adr/ADR-0012-save-scene-parity.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/CueMol/cuemol2/blob/6dcaaf8e4db943dbd2f0dc3ab1e8ff3cb4dbce89/docs/migration/adr/ADR-0012-save-scene-parity.md"
+      repository: "CueMol/cuemol2"
+      commit_sha: "6dcaaf8e4db943dbd2f0dc3ab1e8ff3cb4dbce89"
+      license: "MIT"
+      original_path: "docs/migration/adr/ADR-0012-save-scene-parity.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-c78376f1970f"
+    path: "samples/repos/DFE-Digital__early-years-foundation-reform/adr/0001-record-architecture-decisions.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/DFE-Digital/early-years-foundation-reform/blob/07d62873f74af3c84b6bdc1362f6c1290f6d8d27/adr/0001-record-architecture-decisions.md"
+      repository: "DFE-Digital/early-years-foundation-reform"
+      commit_sha: "07d62873f74af3c84b6bdc1362f6c1290f6d8d27"
+      license: "MIT"
+      original_path: "adr/0001-record-architecture-decisions.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-902d694fae7c"
+    path: "samples/repos/FabioLeitao__data-boar/docs/adr/ADR-0050-plan-document-metadata-standard.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/FabioLeitao/data-boar/blob/9f7e48e2b4a1a0be543cdd3830bb4c840528845c/docs/adr/ADR-0050-plan-document-metadata-standard.md"
+      repository: "FabioLeitao/data-boar"
+      commit_sha: "9f7e48e2b4a1a0be543cdd3830bb4c840528845c"
+      license: "BSD-3-Clause"
+      original_path: "docs/adr/ADR-0050-plan-document-metadata-standard.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-47765fafc04d"
+    path: "samples/repos/FirelyTeam__spark/Documentation/ADR/0003-SMART.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/FirelyTeam/spark/blob/b9cf7a244bee1217f953112de5e6ac7c45113b24/Documentation/ADR/0003-SMART.md"
+      repository: "FirelyTeam/spark"
+      commit_sha: "b9cf7a244bee1217f953112de5e6ac7c45113b24"
+      license: "BSD-3-Clause"
+      original_path: "Documentation/ADR/0003-SMART.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-4f57a340955f"
+    path: "samples/repos/GiantCroissant-Lunar__pinto-bean/docs/adr/20250922-use-markdown-architectural-decision-records.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/GiantCroissant-Lunar/pinto-bean/blob/16aa181be4ef493888764f5ca3c99f969bc48f34/docs/adr/20250922-use-markdown-architectural-decision-records.md"
+      repository: "GiantCroissant-Lunar/pinto-bean"
+      commit_sha: "16aa181be4ef493888764f5ca3c99f969bc48f34"
+      license: "MIT"
+      original_path: "docs/adr/20250922-use-markdown-architectural-decision-records.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-79b33ca4530a"
+    path: "samples/repos/IsmaelMartinez__votescot/docs/adr/0001-regional-list-candidates.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/IsmaelMartinez/votescot/blob/e533941668f26a16c36fe7ddc5a46a61cb5fb4a3/docs/adr/0001-regional-list-candidates.md"
+      repository: "IsmaelMartinez/votescot"
+      commit_sha: "e533941668f26a16c36fe7ddc5a46a61cb5fb4a3"
+      license: "MIT"
+      original_path: "docs/adr/0001-regional-list-candidates.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-ad01c70a4ee9"
+    path: "samples/repos/IsmaelMartinez__yourear/docs/adr/007-accessibility.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/IsmaelMartinez/yourear/blob/9bc2672a62094de51fc6cf8ff60b1ce8db0816f4/docs/adr/007-accessibility.md"
+      repository: "IsmaelMartinez/yourear"
+      commit_sha: "9bc2672a62094de51fc6cf8ff60b1ce8db0816f4"
+      license: "MIT"
+      original_path: "docs/adr/007-accessibility.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-1ee293ff8752"
+    path: "samples/repos/JVBotelho__RASP.Net/docs/ADR/004-memory-disclosure-protection.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/JVBotelho/RASP.Net/blob/0b5fb83e68ee2b9350416214466c74454aa85107/docs/ADR/004-memory-disclosure-protection.md"
+      repository: "JVBotelho/RASP.Net"
+      commit_sha: "0b5fb83e68ee2b9350416214466c74454aa85107"
+      license: "MIT"
+      original_path: "docs/ADR/004-memory-disclosure-protection.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-b89d2cf6157f"
+    path: "samples/repos/JoJo275__feedback-triage-app/docs/adr/017-task-runner.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/JoJo275/feedback-triage-app/blob/cc68199c5f5fc8b1e43c780816111b32caf1ad68/docs/adr/017-task-runner.md"
+      repository: "JoJo275/feedback-triage-app"
+      commit_sha: "cc68199c5f5fc8b1e43c780816111b32caf1ad68"
+      license: "Apache-2.0"
+      original_path: "docs/adr/017-task-runner.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-705baba23269"
+    path: "samples/repos/Kaikei-e__Alt/docs/ADR/000818.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/Kaikei-e/Alt/blob/19499fdce0e1665bff0be2787ed9916dde6a1503/docs/ADR/000818.md"
+      repository: "Kaikei-e/Alt"
+      commit_sha: "19499fdce0e1665bff0be2787ed9916dde6a1503"
+      license: "Apache-2.0"
+      original_path: "docs/ADR/000818.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-073b05ffe1ea"
+    path: "samples/repos/KooshaPari__phenoDesign/ADR.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/KooshaPari/phenoDesign/blob/9bd8fa2963a0f3281ab03d7c55de22200e154656/ADR.md"
+      repository: "KooshaPari/phenoDesign"
+      commit_sha: "9bd8fa2963a0f3281ab03d7c55de22200e154656"
+      license: "MIT"
+      original_path: "ADR.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-d41096b57c0d"
+    path: "samples/repos/Moffran__calibrated_explanations/docs/improvement/adrs/superseded ADR-025-legacy-plot-rendering-semantics.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/Moffran/calibrated_explanations/blob/2ae9295cb1f93f57c236aeb55add7302534b69cd/docs/improvement/adrs/superseded%20ADR-025-legacy-plot-rendering-semantics.md"
+      repository: "Moffran/calibrated_explanations"
+      commit_sha: "2ae9295cb1f93f57c236aeb55add7302534b69cd"
+      license: "BSD-3-Clause"
+      original_path: "docs/improvement/adrs/superseded ADR-025-legacy-plot-rendering-semantics.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-0439046ce715"
+    path: "samples/repos/PedroKlein__pi-baml/docs/adr/008-soft-fail-degradation.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/PedroKlein/pi-baml/blob/02cf79c2f2bd8b19af42ee96e9019683eb846928/docs/adr/008-soft-fail-degradation.md"
+      repository: "PedroKlein/pi-baml"
+      commit_sha: "02cf79c2f2bd8b19af42ee96e9019683eb846928"
+      license: "MIT"
+      original_path: "docs/adr/008-soft-fail-degradation.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-f751d0e8a889"
+    path: "samples/repos/mi-classroom__mi-web-technologien-beiboot-ss2022-pfropfen/ADR/03_daten.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/mi-classroom/mi-web-technologien-beiboot-ss2022-pfropfen/blob/8dac46c6b8c57851b15a61b8c1259855445f0b4c/ADR/03_daten.md"
+      repository: "mi-classroom/mi-web-technologien-beiboot-ss2022-pfropfen"
+      commit_sha: "8dac46c6b8c57851b15a61b8c1259855445f0b4c"
+      license: "MIT"
+      original_path: "ADR/03_daten.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-e0af3fb29c94"
+    path: "samples/repos/nickkatsios__ADR-thesis/data/ADRs-Updated/adr-03-prettier.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/nickkatsios/ADR-thesis/blob/995d845e7a26cb6550f6dc350aab7b32878098d2/data/ADRs-Updated/adr-03-prettier.md"
+      repository: "nickkatsios/ADR-thesis"
+      commit_sha: "995d845e7a26cb6550f6dc350aab7b32878098d2"
+      license: "MIT"
+      original_path: "data/ADRs-Updated/adr-03-prettier.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-b545bac0249d"
+    path: "samples/repos/sachamarlov__crypto-sidecar/docs/adr/0000-record-architectural-decisions.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/sachamarlov/crypto-sidecar/blob/b18981ff677740c595de489953ce6cf24910bac8/docs/adr/0000-record-architectural-decisions.md"
+      repository: "sachamarlov/crypto-sidecar"
+      commit_sha: "b18981ff677740c595de489953ce6cf24910bac8"
+      license: "Apache-2.0"
+      original_path: "docs/adr/0000-record-architectural-decisions.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-adr-b67ab9f58a2a"
+    path: "samples/repos/mi-classroom__mi-web-technologien-beiboot-ss2022-pfropfen/ADR/04_docker.md"
+    scope: document
+    expected:
+      classifier: "adr"
+      scope: document
+      kind: "decision"
+      authority: "high_decision"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/mi-classroom/mi-web-technologien-beiboot-ss2022-pfropfen/blob/8dac46c6b8c57851b15a61b8c1259855445f0b4c/ADR/04_docker.md"
+      repository: "mi-classroom/mi-web-technologien-beiboot-ss2022-pfropfen"
+      commit_sha: "8dac46c6b8c57851b15a61b8c1259855445f0b4c"
+      license: "MIT"
+      original_path: "ADR/04_docker.md"
+      format_label: "ADR"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-569647a6c024"
+    path: "samples/repos/Kong__kubernetes-ingress-controller/keps/0002-kong-gateway-api.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/Kong/kubernetes-ingress-controller/blob/bf2c0c7934b9f5fc11f497eda2f3ba8be186d640/keps/0002-kong-gateway-api.md"
+      repository: "Kong/kubernetes-ingress-controller"
+      commit_sha: "bf2c0c7934b9f5fc11f497eda2f3ba8be186d640"
+      license: "Apache-2.0"
+      original_path: "keps/0002-kong-gateway-api.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-b9c501c15b3d"
+    path: "samples/repos/alibaba__OpenSandbox/oseps/0006-developer-console.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/alibaba/OpenSandbox/blob/8fab5d854f48ea3736493466575fd1cc1d41f39e/oseps/0006-developer-console.md"
+      repository: "alibaba/OpenSandbox"
+      commit_sha: "8fab5d854f48ea3736493466575fd1cc1d41f39e"
+      license: "Apache-2.0"
+      original_path: "oseps/0006-developer-console.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-8a133aca16f3"
+    path: "samples/repos/argoproj__argo-cd/docs/proposals/deletion-strategy-progressive-sync.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/argoproj/argo-cd/blob/be6cab0e5c186a7b741fde16c4e23609a453396b/docs/proposals/deletion-strategy-progressive-sync.md"
+      repository: "argoproj/argo-cd"
+      commit_sha: "be6cab0e5c186a7b741fde16c4e23609a453396b"
+      license: "Apache-2.0"
+      original_path: "docs/proposals/deletion-strategy-progressive-sync.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-037966ba7d48"
+    path: "samples/repos/datum-cloud__enhancements/enhancements/platform/billing/initial-scope.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/datum-cloud/enhancements/blob/6bd3764c34dd263bc4bf7b1a6a10e8a01a60d6c6/enhancements/platform/billing/initial-scope.md"
+      repository: "datum-cloud/enhancements"
+      commit_sha: "6bd3764c34dd263bc4bf7b1a6a10e8a01a60d6c6"
+      license: "CC0-1.0"
+      original_path: "enhancements/platform/billing/initial-scope.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-56a11c56b61f"
+    path: "samples/repos/dcoppa__argo-cd-tf/docs/proposals/applicationset-plugin-generator.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/dcoppa/argo-cd-tf/blob/e4f2d3599e0abeac26d7938ca7253e5560f25bad/docs/proposals/applicationset-plugin-generator.md"
+      repository: "dcoppa/argo-cd-tf"
+      commit_sha: "e4f2d3599e0abeac26d7938ca7253e5560f25bad"
+      license: "Apache-2.0"
+      original_path: "docs/proposals/applicationset-plugin-generator.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-f8c0bc1bb83b"
+    path: "samples/repos/diegutierrez__external-secret-conjur/design/002-secretsink.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/diegutierrez/external-secret-conjur/blob/53afbcf07f3022e8b6c3350155a53e5efd669d02/design/002-secretsink.md"
+      repository: "diegutierrez/external-secret-conjur"
+      commit_sha: "53afbcf07f3022e8b6c3350155a53e5efd669d02"
+      license: "Apache-2.0"
+      original_path: "design/002-secretsink.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-05be95a51289"
+    path: "samples/repos/gridgentoo__assisted-service/docs/enhancements/platform-integration.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/gridgentoo/assisted-service/blob/7d69353bc6cecf0e0c3c1e8993db41d6b34af045/docs/enhancements/platform-integration.md"
+      repository: "gridgentoo/assisted-service"
+      commit_sha: "7d69353bc6cecf0e0c3c1e8993db41d6b34af045"
+      license: "Apache-2.0"
+      original_path: "docs/enhancements/platform-integration.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-c3914346d125"
+    path: "samples/repos/holymollyhao__fedbalancer/enhancements/0001-20220311-flower-enhancement-doc.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/holymollyhao/fedbalancer/blob/8a00ba9eb511cdbddbfe6b6209a2be2eb53c80d8/enhancements/0001-20220311-flower-enhancement-doc.md"
+      repository: "holymollyhao/fedbalancer"
+      commit_sha: "8a00ba9eb511cdbddbfe6b6209a2be2eb53c80d8"
+      license: "Apache-2.0"
+      original_path: "enhancements/0001-20220311-flower-enhancement-doc.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-4e2cc440e5d1"
+    path: "samples/repos/karakuscem__boycotted-sites-alert/RFC.MD"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/karakuscem/boycotted-sites-alert/blob/979c18f6abdf655c626837e3606678c3acb2748a/RFC.MD"
+      repository: "karakuscem/boycotted-sites-alert"
+      commit_sha: "979c18f6abdf655c626837e3606678c3acb2748a"
+      license: "MIT"
+      original_path: "RFC.MD"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-f5dad0124a92"
+    path: "samples/repos/konveyor__enhancements/enhancements/ai-assisted-rules-generation/README.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/konveyor/enhancements/blob/8fa3e7ed6f609aa8343d844b00f503139dba9c32/enhancements/ai-assisted-rules-generation/README.md"
+      repository: "konveyor/enhancements"
+      commit_sha: "8fa3e7ed6f609aa8343d844b00f503139dba9c32"
+      license: "Apache-2.0"
+      original_path: "enhancements/ai-assisted-rules-generation/README.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-41fb0e64a074"
+    path: "samples/repos/kubernetes-sigs__kueue/keps/1282-pods-ready-requeue-strategy/README.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/kubernetes-sigs/kueue/blob/93b31d1a23e1757f7f0c50d64522c1d78d5f916f/keps/1282-pods-ready-requeue-strategy/README.md"
+      repository: "kubernetes-sigs/kueue"
+      commit_sha: "93b31d1a23e1757f7f0c50d64522c1d78d5f916f"
+      license: "Apache-2.0"
+      original_path: "keps/1282-pods-ready-requeue-strategy/README.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-9629db14e9b6"
+    path: "samples/repos/kubernetes__enhancements/keps/sig-multicluster/1645-multi-cluster-services-api/README.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/kubernetes/enhancements/blob/b176ada034185e4a36a4816c6beedfebd1777b1b/keps/sig-multicluster/1645-multi-cluster-services-api/README.md"
+      repository: "kubernetes/enhancements"
+      commit_sha: "b176ada034185e4a36a4816c6beedfebd1777b1b"
+      license: "Apache-2.0"
+      original_path: "keps/sig-multicluster/1645-multi-cluster-services-api/README.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-731e221a40d1"
+    path: "samples/repos/metal3-io__metal3-docs/design/baremetal-operator/bios-config.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/metal3-io/metal3-docs/blob/891c88dd2cdf456517d08373dac47d084e4b76f0/design/baremetal-operator/bios-config.md"
+      repository: "metal3-io/metal3-docs"
+      commit_sha: "891c88dd2cdf456517d08373dac47d084e4b76f0"
+      license: "Apache-2.0"
+      original_path: "design/baremetal-operator/bios-config.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-6174ad95ed07"
+    path: "samples/repos/open-cluster-management-io__enhancements/enhancements/sig-policy/59-ansible-everyevent-mode/README.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/open-cluster-management-io/enhancements/blob/5b069210c87dcb52007304ac9153628c851f7e32/enhancements/sig-policy/59-ansible-everyevent-mode/README.md"
+      repository: "open-cluster-management-io/enhancements"
+      commit_sha: "5b069210c87dcb52007304ac9153628c851f7e32"
+      license: "Apache-2.0"
+      original_path: "enhancements/sig-policy/59-ansible-everyevent-mode/README.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-cbe12b8175ba"
+    path: "samples/repos/openeverest__openeverest-catalog/docs/design/dbaas-catalog-design.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/openeverest/openeverest-catalog/blob/f3c3dfe0199c4894f19b92987717c360f5c0a907/docs/design/dbaas-catalog-design.md"
+      repository: "openeverest/openeverest-catalog"
+      commit_sha: "f3c3dfe0199c4894f19b92987717c360f5c0a907"
+      license: "Apache-2.0"
+      original_path: "docs/design/dbaas-catalog-design.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-7679fa583c5c"
+    path: "samples/repos/openshift-kni__kni-enhancements/enhancements/cgu-precaching-additional-images.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/openshift-kni/kni-enhancements/blob/7ffac45003985dd9e655afc838689906e5e743d3/enhancements/cgu-precaching-additional-images.md"
+      repository: "openshift-kni/kni-enhancements"
+      commit_sha: "7ffac45003985dd9e655afc838689906e5e743d3"
+      license: "Apache-2.0"
+      original_path: "enhancements/cgu-precaching-additional-images.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-c3f747764185"
+    path: "samples/repos/openshift__enhancements/enhancements/baremetal/baremetal-config-raid-and-bios.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/openshift/enhancements/blob/2ef3d441e804a771ccbe0a10478084772d223abf/enhancements/baremetal/baremetal-config-raid-and-bios.md"
+      repository: "openshift/enhancements"
+      commit_sha: "2ef3d441e804a771ccbe0a10478084772d223abf"
+      license: "Apache-2.0"
+      original_path: "enhancements/baremetal/baremetal-config-raid-and-bios.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-017d49e89adc"
+    path: "samples/repos/operator-framework__enhancements/enhancements/bundle-validation.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/operator-framework/enhancements/blob/bebf7b587393af645cfe3f9b544e842d91909435/enhancements/bundle-validation.md"
+      repository: "operator-framework/enhancements"
+      commit_sha: "bebf7b587393af645cfe3f9b544e842d91909435"
+      license: "Apache-2.0"
+      original_path: "enhancements/bundle-validation.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-e5dcd0f2d402"
+    path: "samples/repos/scylladb__scylla-operator/enhancements/proposals/1304-external-seeds/README.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/scylladb/scylla-operator/blob/f88e9349b5dddf40a1868d8ca9577b9d84868758/enhancements/proposals/1304-external-seeds/README.md"
+      repository: "scylladb/scylla-operator"
+      commit_sha: "f88e9349b5dddf40a1868d8ca9577b9d84868758"
+      license: "Apache-2.0"
+      original_path: "enhancements/proposals/1304-external-seeds/README.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-c647106f25da"
+    path: "samples/repos/shipwright-io__community/ships/0018-build-env-vars.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/shipwright-io/community/blob/c6148010ca9d2d213460dce2513e40299aee9018/ships/0018-build-env-vars.md"
+      repository: "shipwright-io/community"
+      commit_sha: "c6148010ca9d2d213460dce2513e40299aee9018"
+      license: "Apache-2.0"
+      original_path: "ships/0018-build-env-vars.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-693f110ae924"
+    path: "samples/repos/storyprotocol__SIPs/proposals/00004-emit-reward-distribution-event.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/storyprotocol/SIPs/blob/255f5e4071de26d9cb115cc5f8230b7a06ec7beb/proposals/00004-emit-reward-distribution-event.md"
+      repository: "storyprotocol/SIPs"
+      commit_sha: "255f5e4071de26d9cb115cc5f8230b7a06ec7beb"
+      license: "CC0-1.0"
+      original_path: "proposals/00004-emit-reward-distribution-event.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-946eb9463b26"
+    path: "samples/repos/tektoncd__community/teps/0012-api-spec.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/tektoncd/community/blob/8b214fc73b9b0b7bf3a52a481643298542f2352c/teps/0012-api-spec.md"
+      repository: "tektoncd/community"
+      commit_sha: "8b214fc73b9b0b7bf3a52a481643298542f2352c"
+      license: "Apache-2.0"
+      original_path: "teps/0012-api-spec.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-31819f334eb1"
+    path: "samples/repos/Kong__kubernetes-ingress-controller/keps/0010-dynamic-plugin-configuration.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/Kong/kubernetes-ingress-controller/blob/bf2c0c7934b9f5fc11f497eda2f3ba8be186d640/keps/0010-dynamic-plugin-configuration.md"
+      repository: "Kong/kubernetes-ingress-controller"
+      commit_sha: "bf2c0c7934b9f5fc11f497eda2f3ba8be186d640"
+      license: "Apache-2.0"
+      original_path: "keps/0010-dynamic-plugin-configuration.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-6fedb7e1c9b4"
+    path: "samples/repos/argoproj__argo-cd/docs/proposals/headless-argocd.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/argoproj/argo-cd/blob/be6cab0e5c186a7b741fde16c4e23609a453396b/docs/proposals/headless-argocd.md"
+      repository: "argoproj/argo-cd"
+      commit_sha: "be6cab0e5c186a7b741fde16c4e23609a453396b"
+      license: "Apache-2.0"
+      original_path: "docs/proposals/headless-argocd.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-75f9f8b3a8f6"
+    path: "samples/repos/konveyor__enhancements/enhancements/assets-generation/cloud-foundry-application-discovery/README.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/konveyor/enhancements/blob/8fa3e7ed6f609aa8343d844b00f503139dba9c32/enhancements/assets-generation/cloud-foundry-application-discovery/README.md"
+      repository: "konveyor/enhancements"
+      commit_sha: "8fa3e7ed6f609aa8343d844b00f503139dba9c32"
+      license: "Apache-2.0"
+      original_path: "enhancements/assets-generation/cloud-foundry-application-discovery/README.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-45d722c3416d"
+    path: "samples/repos/kubernetes-sigs__kueue/keps/77-dynamically-sized-jobs/README.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/kubernetes-sigs/kueue/blob/93b31d1a23e1757f7f0c50d64522c1d78d5f916f/keps/77-dynamically-sized-jobs/README.md"
+      repository: "kubernetes-sigs/kueue"
+      commit_sha: "93b31d1a23e1757f7f0c50d64522c1d78d5f916f"
+      license: "Apache-2.0"
+      original_path: "keps/77-dynamically-sized-jobs/README.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-8dae4358c0ef"
+    path: "samples/repos/kubernetes__enhancements/keps/sig-node/2008-forensic-container-checkpointing/README.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/kubernetes/enhancements/blob/b176ada034185e4a36a4816c6beedfebd1777b1b/keps/sig-node/2008-forensic-container-checkpointing/README.md"
+      repository: "kubernetes/enhancements"
+      commit_sha: "b176ada034185e4a36a4816c6beedfebd1777b1b"
+      license: "Apache-2.0"
+      original_path: "keps/sig-node/2008-forensic-container-checkpointing/README.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-7d3a0261e09c"
+    path: "samples/repos/metal3-io__metal3-docs/design/baremetal-operator/host-config-drive.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/metal3-io/metal3-docs/blob/891c88dd2cdf456517d08373dac47d084e4b76f0/design/baremetal-operator/host-config-drive.md"
+      repository: "metal3-io/metal3-docs"
+      commit_sha: "891c88dd2cdf456517d08373dac47d084e4b76f0"
+      license: "Apache-2.0"
+      original_path: "design/baremetal-operator/host-config-drive.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-c019ab91cd88"
+    path: "samples/repos/open-cluster-management-io__enhancements/enhancements/sig-policy/83-multiline-policy-templating/README.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/open-cluster-management-io/enhancements/blob/5b069210c87dcb52007304ac9153628c851f7e32/enhancements/sig-policy/83-multiline-policy-templating/README.md"
+      repository: "open-cluster-management-io/enhancements"
+      commit_sha: "5b069210c87dcb52007304ac9153628c851f7e32"
+      license: "Apache-2.0"
+      original_path: "enhancements/sig-policy/83-multiline-policy-templating/README.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-d91c9de54c5b"
+    path: "samples/repos/openeverest__openeverest-catalog/docs/proposals/00-dbaas-community-catalog.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/openeverest/openeverest-catalog/blob/f3c3dfe0199c4894f19b92987717c360f5c0a907/docs/proposals/00-dbaas-community-catalog.md"
+      repository: "openeverest/openeverest-catalog"
+      commit_sha: "f3c3dfe0199c4894f19b92987717c360f5c0a907"
+      license: "Apache-2.0"
+      original_path: "docs/proposals/00-dbaas-community-catalog.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-f12d2007476b"
+    path: "samples/repos/openshift-kni__kni-enhancements/enhancements/cguConditionEnhancement.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/openshift-kni/kni-enhancements/blob/7ffac45003985dd9e655afc838689906e5e743d3/enhancements/cguConditionEnhancement.md"
+      repository: "openshift-kni/kni-enhancements"
+      commit_sha: "7ffac45003985dd9e655afc838689906e5e743d3"
+      license: "Apache-2.0"
+      original_path: "enhancements/cguConditionEnhancement.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-e63618e4bb56"
+    path: "samples/repos/openshift__enhancements/enhancements/installer/aws-customer-provided-subnets.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/openshift/enhancements/blob/2ef3d441e804a771ccbe0a10478084772d223abf/enhancements/installer/aws-customer-provided-subnets.md"
+      repository: "openshift/enhancements"
+      commit_sha: "2ef3d441e804a771ccbe0a10478084772d223abf"
+      license: "Apache-2.0"
+      original_path: "enhancements/installer/aws-customer-provided-subnets.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-b5ff2a7ba6b1"
+    path: "samples/repos/operator-framework__enhancements/enhancements/hybrid-helm-operator.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/operator-framework/enhancements/blob/bebf7b587393af645cfe3f9b544e842d91909435/enhancements/hybrid-helm-operator.md"
+      repository: "operator-framework/enhancements"
+      commit_sha: "bebf7b587393af645cfe3f9b544e842d91909435"
+      license: "Apache-2.0"
+      original_path: "enhancements/hybrid-helm-operator.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-11abc1421521"
+    path: "samples/repos/shipwright-io__community/ships/0022-build-strategy-volumes.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/shipwright-io/community/blob/c6148010ca9d2d213460dce2513e40299aee9018/ships/0022-build-strategy-volumes.md"
+      repository: "shipwright-io/community"
+      commit_sha: "c6148010ca9d2d213460dce2513e40299aee9018"
+      license: "Apache-2.0"
+      original_path: "ships/0022-build-strategy-volumes.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-cd17c9f3cff7"
+    path: "samples/repos/tektoncd__community/teps/0028-task-execution-status-at-runtime.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/tektoncd/community/blob/8b214fc73b9b0b7bf3a52a481643298542f2352c/teps/0028-task-execution-status-at-runtime.md"
+      repository: "tektoncd/community"
+      commit_sha: "8b214fc73b9b0b7bf3a52a481643298542f2352c"
+      license: "Apache-2.0"
+      original_path: "teps/0028-task-execution-status-at-runtime.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-c498c05da8e7"
+    path: "samples/repos/kubernetes__enhancements/keps/sig-windows/4802-windows-node-shutdown/README.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/kubernetes/enhancements/blob/b176ada034185e4a36a4816c6beedfebd1777b1b/keps/sig-windows/4802-windows-node-shutdown/README.md"
+      repository: "kubernetes/enhancements"
+      commit_sha: "b176ada034185e4a36a4816c6beedfebd1777b1b"
+      license: "Apache-2.0"
+      original_path: "keps/sig-windows/4802-windows-node-shutdown/README.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-cbe9252bc672"
+    path: "samples/repos/metal3-io__metal3-docs/design/baremetal-operator/host-live-updates.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/metal3-io/metal3-docs/blob/891c88dd2cdf456517d08373dac47d084e4b76f0/design/baremetal-operator/host-live-updates.md"
+      repository: "metal3-io/metal3-docs"
+      commit_sha: "891c88dd2cdf456517d08373dac47d084e4b76f0"
+      license: "Apache-2.0"
+      original_path: "design/baremetal-operator/host-live-updates.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-bd345d80d845"
+    path: "samples/repos/openshift-kni__kni-enhancements/enhancements/ptp-ha.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/openshift-kni/kni-enhancements/blob/7ffac45003985dd9e655afc838689906e5e743d3/enhancements/ptp-ha.md"
+      repository: "openshift-kni/kni-enhancements"
+      commit_sha: "7ffac45003985dd9e655afc838689906e5e743d3"
+      license: "Apache-2.0"
+      original_path: "enhancements/ptp-ha.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-e0431e479255"
+    path: "samples/repos/openshift__enhancements/enhancements/kubelet/kubelet-node-sizing.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/openshift/enhancements/blob/2ef3d441e804a771ccbe0a10478084772d223abf/enhancements/kubelet/kubelet-node-sizing.md"
+      repository: "openshift/enhancements"
+      commit_sha: "2ef3d441e804a771ccbe0a10478084772d223abf"
+      license: "Apache-2.0"
+      original_path: "enhancements/kubelet/kubelet-node-sizing.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-0d62678d2925"
+    path: "samples/repos/operator-framework__enhancements/enhancements/sdk-external-and-pluggable-validations.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/operator-framework/enhancements/blob/bebf7b587393af645cfe3f9b544e842d91909435/enhancements/sdk-external-and-pluggable-validations.md"
+      repository: "operator-framework/enhancements"
+      commit_sha: "bebf7b587393af645cfe3f9b544e842d91909435"
+      license: "Apache-2.0"
+      original_path: "enhancements/sdk-external-and-pluggable-validations.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-f82efe90714c"
+    path: "samples/repos/shipwright-io__community/ships/0025-strategy-parameters-enhancements.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/shipwright-io/community/blob/c6148010ca9d2d213460dce2513e40299aee9018/ships/0025-strategy-parameters-enhancements.md"
+      repository: "shipwright-io/community"
+      commit_sha: "c6148010ca9d2d213460dce2513e40299aee9018"
+      license: "Apache-2.0"
+      original_path: "ships/0025-strategy-parameters-enhancements.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-rfc-71155e175b2b"
+    path: "samples/repos/tektoncd__community/teps/0047-pipeline-task-display-name.md"
+    scope: document
+    expected:
+      classifier: "rfc"
+      scope: document
+      kind: "design"
+      authority: "design_proposal"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/tektoncd/community/blob/8b214fc73b9b0b7bf3a52a481643298542f2352c/teps/0047-pipeline-task-display-name.md"
+      repository: "tektoncd/community"
+      commit_sha: "8b214fc73b9b0b7bf3a52a481643298542f2352c"
+      license: "Apache-2.0"
+      original_path: "teps/0047-pipeline-task-display-name.md"
+      format_label: "RFC"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-prd-899da07205ac"
+    path: "samples/repos/4shil__DeonAi/PRD.md"
+    scope: document
+    expected:
+      classifier: "prd"
+      scope: document
+      kind: "requirements"
+      subtype: "prd"
+      authority: "product_background"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/4shil/DeonAi/blob/466c1cec2386aa22ba54cfb67e0ad02a85838d82/PRD.md"
+      repository: "4shil/DeonAi"
+      commit_sha: "466c1cec2386aa22ba54cfb67e0ad02a85838d82"
+      license: "MIT"
+      original_path: "PRD.md"
+      format_label: "PRD"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-prd-0f0c532dab67"
+    path: "samples/repos/AbhijitKumarJ__TaskDissembler/docs/Historical_and_Planning_Documents/Project Docs/PRD Phase 1.md"
+    scope: document
+    expected:
+      classifier: "prd"
+      scope: document
+      kind: "requirements"
+      subtype: "prd"
+      authority: "product_background"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/AbhijitKumarJ/TaskDissembler/blob/ce07480ebad8b078a2527c2fc62424b0d4cc90fb/docs/Historical_and_Planning_Documents/Project%20Docs/PRD%20Phase%201.md"
+      repository: "AbhijitKumarJ/TaskDissembler"
+      commit_sha: "ce07480ebad8b078a2527c2fc62424b0d4cc90fb"
+      license: "Apache-2.0"
+      original_path: "docs/Historical_and_Planning_Documents/Project Docs/PRD Phase 1.md"
+      format_label: "PRD"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-prd-3cbd5339e913"
+    path: "samples/repos/CryonicsX__Sonetra-AI-Mixer/PRD.MD"
+    scope: document
+    expected:
+      classifier: "prd"
+      scope: document
+      kind: "requirements"
+      subtype: "prd"
+      authority: "product_background"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/CryonicsX/Sonetra-AI-Mixer/blob/bbd8d6829200cc607cec11dbd988b4b431f7bd94/PRD.MD"
+      repository: "CryonicsX/Sonetra-AI-Mixer"
+      commit_sha: "bbd8d6829200cc607cec11dbd988b4b431f7bd94"
+      license: "MIT"
+      original_path: "PRD.MD"
+      format_label: "PRD"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-prd-aae4a46cf7b6"
+    path: "samples/repos/DamageLabs__clahub/PRD.md"
+    scope: document
+    expected:
+      classifier: "prd"
+      scope: document
+      kind: "requirements"
+      subtype: "prd"
+      authority: "product_background"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/DamageLabs/clahub/blob/9d1e666e1d30f271aea9640393229a7cbfbd1b62/PRD.md"
+      repository: "DamageLabs/clahub"
+      commit_sha: "9d1e666e1d30f271aea9640393229a7cbfbd1b62"
+      license: "MIT"
+      original_path: "PRD.md"
+      format_label: "PRD"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-prd-688da2294d1f"
+    path: "samples/repos/FocusTorn__focused-ux/.cursor/commands/PRD - AI Command Creation Framework.md"
+    scope: document
+    expected:
+      classifier: "prd"
+      scope: document
+      kind: "requirements"
+      subtype: "prd"
+      authority: "product_background"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/FocusTorn/focused-ux/blob/3b2e75b21825727684985afd303088eb8cbe680c/.cursor/commands/PRD%20-%20AI%20Command%20Creation%20Framework.md"
+      repository: "FocusTorn/focused-ux"
+      commit_sha: "3b2e75b21825727684985afd303088eb8cbe680c"
+      license: "MIT"
+      original_path: ".cursor/commands/PRD - AI Command Creation Framework.md"
+      format_label: "PRD"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-prd-b00d9ad11d93"
+    path: "samples/repos/Guy-Bilitski__agents-task-7/docs/PRODUCT_REQUIREMENTS.md"
+    scope: document
+    expected:
+      classifier: "prd"
+      scope: document
+      kind: "requirements"
+      subtype: "prd"
+      authority: "product_background"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/Guy-Bilitski/agents-task-7/blob/ca715e764c294254ccb30500dd850acb3ab5d4e7/docs/PRODUCT_REQUIREMENTS.md"
+      repository: "Guy-Bilitski/agents-task-7"
+      commit_sha: "ca715e764c294254ccb30500dd850acb3ab5d4e7"
+      license: "MIT"
+      original_path: "docs/PRODUCT_REQUIREMENTS.md"
+      format_label: "PRD"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-prd-7c64a368a6a5"
+    path: "samples/repos/KooshaPari__HexaKit/PRD.md"
+    scope: document
+    expected:
+      classifier: "prd"
+      scope: document
+      kind: "requirements"
+      subtype: "prd"
+      authority: "product_background"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/KooshaPari/HexaKit/blob/97dd15c972acdd2718234b9e5bc258ce64c5e9e0/PRD.md"
+      repository: "KooshaPari/HexaKit"
+      commit_sha: "97dd15c972acdd2718234b9e5bc258ce64c5e9e0"
+      license: "MIT"
+      original_path: "PRD.md"
+      format_label: "PRD"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-prd-86e745da9deb"
+    path: "samples/repos/NAME0x0__MALD/PRD.md"
+    scope: document
+    expected:
+      classifier: "prd"
+      scope: document
+      kind: "requirements"
+      subtype: "prd"
+      authority: "product_background"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/NAME0x0/MALD/blob/9e4b4c6e603432b989bf36f946902eb1ea90facd/PRD.md"
+      repository: "NAME0x0/MALD"
+      commit_sha: "9e4b4c6e603432b989bf36f946902eb1ea90facd"
+      license: "MIT"
+      original_path: "PRD.md"
+      format_label: "PRD"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-prd-775846aaa408"
+    path: "samples/repos/Nainish-Rai__simple-task/memory-bank/PRODUCT_REQUIREMENTS.md"
+    scope: document
+    expected:
+      classifier: "prd"
+      scope: document
+      kind: "requirements"
+      subtype: "prd"
+      authority: "product_background"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/Nainish-Rai/simple-task/blob/897b2bc7daf4a56c857718c3ad7bc64d457a0182/memory-bank/PRODUCT_REQUIREMENTS.md"
+      repository: "Nainish-Rai/simple-task"
+      commit_sha: "897b2bc7daf4a56c857718c3ad7bc64d457a0182"
+      license: "MIT"
+      original_path: "memory-bank/PRODUCT_REQUIREMENTS.md"
+      format_label: "PRD"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-prd-981bb8a9057b"
+    path: "samples/repos/PaulKinlan__NotebookLM-Chrome/PRD.md"
+    scope: document
+    expected:
+      classifier: "prd"
+      scope: document
+      kind: "requirements"
+      subtype: "prd"
+      authority: "product_background"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/PaulKinlan/NotebookLM-Chrome/blob/3333512e9bb258fd2aad3c2fa5a0ea1b7ae5445d/PRD.md"
+      repository: "PaulKinlan/NotebookLM-Chrome"
+      commit_sha: "3333512e9bb258fd2aad3c2fa5a0ea1b7ae5445d"
+      license: "Apache-2.0"
+      original_path: "PRD.md"
+      format_label: "PRD"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-prd-a144a8eff3e9"
+    path: "samples/repos/SIRHAMY__phase-golem/changes/WRK-010_log-warning-when-load-config-silently-injects-default-pipeline/WRK-010_log-warning-when-load-config-silently-injects-default-pipeline_PRD.md"
+    scope: document
+    expected:
+      classifier: "prd"
+      scope: document
+      kind: "requirements"
+      subtype: "prd"
+      authority: "product_background"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/SIRHAMY/phase-golem/blob/f9636d2e7d9677c9ce1591f606508cc7de33e6be/changes/WRK-010_log-warning-when-load-config-silently-injects-default-pipeline/WRK-010_log-warning-when-load-config-silently-injects-default-pipeline_PRD.md"
+      repository: "SIRHAMY/phase-golem"
+      commit_sha: "f9636d2e7d9677c9ce1591f606508cc7de33e6be"
+      license: "Apache-2.0"
+      original_path: "changes/WRK-010_log-warning-when-load-config-silently-injects-default-pipeline/WRK-010_log-warning-when-load-config-silently-injects-default-pipeline_PRD.md"
+      format_label: "PRD"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-prd-4bfea788eb38"
+    path: "samples/repos/abraham-yusuf__web3ai-hub/PRD.md"
+    scope: document
+    expected:
+      classifier: "prd"
+      scope: document
+      kind: "requirements"
+      subtype: "prd"
+      authority: "product_background"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/abraham-yusuf/web3ai-hub/blob/1e27f4a0afa868b2d11c5e522ca9ab14de6f41e4/PRD.md"
+      repository: "abraham-yusuf/web3ai-hub"
+      commit_sha: "1e27f4a0afa868b2d11c5e522ca9ab14de6f41e4"
+      license: "MIT"
+      original_path: "PRD.md"
+      format_label: "PRD"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-prd-360b83b2ed91"
+    path: "samples/repos/iamladi__cautious-computing-machine--sdlc-plugin/plans/x-search-skill-integration.md"
+    scope: document
+    expected:
+      classifier: "prd"
+      scope: document
+      kind: "requirements"
+      subtype: "prd"
+      authority: "product_background"
+      should_index: true
+    provenance:
+      source_url: "https://github.com/iamladi/cautious-computing-machine--sdlc-plugin/blob/7fc9e5a0aa8d85995cef28f26f672bfb06900d06/plans/x-search-skill-integration.md"
+      repository: "iamladi/cautious-computing-machine--sdlc-plugin"
+      commit_sha: "7fc9e5a0aa8d85995cef28f26f672bfb06900d06"
+      license: "MIT"
+      original_path: "plans/x-search-skill-integration.md"
+      format_label: "PRD"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real GitHub sample promoted from miner output. Expected label comes from miner+LLM adjudication and should be manually reviewed before becoming training data."
+
+  - id: "mined-openspec-bundle-17be45c2c420"
+    path: "samples/repos/CleanCocoa__TextBuffer/openspec/changes/archive/2026-03-13-m1-operation-log"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/CleanCocoa__TextBuffer/openspec/changes/archive/2026-03-13-m1-operation-log/design.md"
+          role: "design"
+        - path: "samples/repos/CleanCocoa__TextBuffer/openspec/changes/archive/2026-03-13-m1-operation-log/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/CleanCocoa__TextBuffer/openspec/changes/archive/2026-03-13-m1-operation-log/specs/operation-log-types/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/CleanCocoa__TextBuffer/openspec/changes/archive/2026-03-13-m1-operation-log/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-operation-log/proposal.md"
+      repository: "CleanCocoa/TextBuffer"
+      commit_sha: "5885a592be26325a332d49365751c2083fe665d4"
+      license: "MIT"
+      original_path: "openspec/changes/archive/2026-03-13-m1-operation-log"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-3224934c02fa"
+    path: "samples/repos/FHIR__sql-on-fhir-v2/openspec/changes/align-sqlquery-run-with-cql"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/FHIR__sql-on-fhir-v2/openspec/changes/align-sqlquery-run-with-cql/design.md"
+          role: "design"
+        - path: "samples/repos/FHIR__sql-on-fhir-v2/openspec/changes/align-sqlquery-run-with-cql/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/FHIR__sql-on-fhir-v2/openspec/changes/align-sqlquery-run-with-cql/specs/sqlquery-run/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/FHIR__sql-on-fhir-v2/openspec/changes/align-sqlquery-run-with-cql/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/FHIR/sql-on-fhir-v2/blob/e325ec9ef36a56ca40dd512ea5a037cc018aa82a/openspec/changes/align-sqlquery-run-with-cql/proposal.md"
+      repository: "FHIR/sql-on-fhir-v2"
+      commit_sha: "e325ec9ef36a56ca40dd512ea5a037cc018aa82a"
+      license: "MIT"
+      original_path: "openspec/changes/align-sqlquery-run-with-cql"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-35174fecb1b0"
+    path: "samples/repos/Yourdaylight__stock_datasource/openspec/changes/add-market-overview-ui"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/Yourdaylight__stock_datasource/openspec/changes/add-market-overview-ui/design.md"
+          role: "design"
+        - path: "samples/repos/Yourdaylight__stock_datasource/openspec/changes/add-market-overview-ui/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/Yourdaylight__stock_datasource/openspec/changes/add-market-overview-ui/specs/etf-display/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/Yourdaylight__stock_datasource/openspec/changes/add-market-overview-ui/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/Yourdaylight/stock_datasource/blob/2863e38c483c30a4de3b7e07620f5fa95fcd9b4d/openspec/changes/add-market-overview-ui/proposal.md"
+      repository: "Yourdaylight/stock_datasource"
+      commit_sha: "2863e38c483c30a4de3b7e07620f5fa95fcd9b4d"
+      license: "MIT"
+      original_path: "openspec/changes/add-market-overview-ui"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-03055fa333c8"
+    path: "samples/repos/averagenative__0x808/openspec/changes/imgui-migration"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/averagenative__0x808/openspec/changes/imgui-migration/design.md"
+          role: "design"
+        - path: "samples/repos/averagenative__0x808/openspec/changes/imgui-migration/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/averagenative__0x808/openspec/changes/imgui-migration/specs/guitar-effects/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/averagenative__0x808/openspec/changes/imgui-migration/specs/imgui-drum-grid/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/averagenative__0x808/openspec/changes/imgui-migration/specs/imgui-gui-framework/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/averagenative__0x808/openspec/changes/imgui-migration/specs/imgui-mixer-browser/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/averagenative__0x808/openspec/changes/imgui-migration/specs/imgui-piano-roll/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/averagenative__0x808/openspec/changes/imgui-migration/specs/imgui-synth-editor/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/averagenative__0x808/openspec/changes/imgui-migration/specs/imgui-toolbar/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/averagenative__0x808/openspec/changes/imgui-migration/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/averagenative/0x808/blob/a11b89115ed1851f4680d8e66c82c709587ada6f/openspec/changes/imgui-migration/proposal.md"
+      repository: "averagenative/0x808"
+      commit_sha: "a11b89115ed1851f4680d8e66c82c709587ada6f"
+      license: "MIT"
+      original_path: "openspec/changes/imgui-migration"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-f78a01eeb2a5"
+    path: "samples/repos/carverauto__serviceradar/openspec/changes/add-agent-config-dependency-catalog"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/carverauto__serviceradar/openspec/changes/add-agent-config-dependency-catalog/design.md"
+          role: "design"
+        - path: "samples/repos/carverauto__serviceradar/openspec/changes/add-agent-config-dependency-catalog/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/carverauto__serviceradar/openspec/changes/add-agent-config-dependency-catalog/specs/agent-config/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/carverauto__serviceradar/openspec/changes/add-agent-config-dependency-catalog/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/carverauto/serviceradar/blob/263a3897b40759bb0b33fca5385cca130f1f5d17/openspec/changes/add-agent-config-dependency-catalog/proposal.md"
+      repository: "carverauto/serviceradar"
+      commit_sha: "263a3897b40759bb0b33fca5385cca130f1f5d17"
+      license: "Apache-2.0"
+      original_path: "openspec/changes/add-agent-config-dependency-catalog"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-245f3f4e5d45"
+    path: "samples/repos/daijinru__wenko/openspec/changes/add-execution-observation-layer"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/daijinru__wenko/openspec/changes/add-execution-observation-layer/design.md"
+          role: "design"
+        - path: "samples/repos/daijinru__wenko/openspec/changes/add-execution-observation-layer/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/daijinru__wenko/openspec/changes/add-execution-observation-layer/specs/execution-observation/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/daijinru__wenko/openspec/changes/add-execution-observation-layer/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/daijinru/wenko/blob/45461280f8c4f22072bc33bbd9fe4fcc2e48e83f/openspec/changes/add-execution-observation-layer/proposal.md"
+      repository: "daijinru/wenko"
+      commit_sha: "45461280f8c4f22072bc33bbd9fe4fcc2e48e83f"
+      license: "MIT"
+      original_path: "openspec/changes/add-execution-observation-layer"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-899faee69c08"
+    path: "samples/repos/dallay__corvus/openspec/changes/archive/2025-08-07-2026-04-26-dream-system"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2025-08-07-2026-04-26-dream-system/design.md"
+          role: "design"
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2025-08-07-2026-04-26-dream-system/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2025-08-07-2026-04-26-dream-system/specs/gateway-integration/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2025-08-07-2026-04-26-dream-system/specs/gateway/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2025-08-07-2026-04-26-dream-system/specs/sessions/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2025-08-07-2026-04-26-dream-system/tasks.md"
+          role: "tasks"
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2025-08-07-2026-04-26-dream-system/verify-report.md"
+          role: "other_markdown"
+    provenance:
+      source_url: "https://github.com/dallay/corvus/blob/39380446341f924e55be195a6cb82c0bb63e3f81/openspec/changes/archive/2025-08-07-2026-04-26-dream-system/proposal.md"
+      repository: "dallay/corvus"
+      commit_sha: "39380446341f924e55be195a6cb82c0bb63e3f81"
+      license: "MIT"
+      original_path: "openspec/changes/archive/2025-08-07-2026-04-26-dream-system"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-0dd6c4aaba8a"
+    path: "samples/repos/denisfl__inbox/openspec/changes/adr-documentation"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/denisfl__inbox/openspec/changes/adr-documentation/design.md"
+          role: "design"
+        - path: "samples/repos/denisfl__inbox/openspec/changes/adr-documentation/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/denisfl__inbox/openspec/changes/adr-documentation/specs/adr-records/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/denisfl__inbox/openspec/changes/adr-documentation/specs/data-model-docs/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/denisfl__inbox/openspec/changes/adr-documentation/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/denisfl/inbox/blob/5afd41b0233fb3d2a13069426e60df06062a4aaa/openspec/changes/adr-documentation/proposal.md"
+      repository: "denisfl/inbox"
+      commit_sha: "5afd41b0233fb3d2a13069426e60df06062a4aaa"
+      license: "MIT"
+      original_path: "openspec/changes/adr-documentation"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-bbab6363b81e"
+    path: "samples/repos/gene-lang__gene/openspec/changes/add-adapter-field-mappings"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/gene-lang__gene/openspec/changes/add-adapter-field-mappings/design.md"
+          role: "design"
+        - path: "samples/repos/gene-lang__gene/openspec/changes/add-adapter-field-mappings/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/gene-lang__gene/openspec/changes/add-adapter-field-mappings/specs/object-model/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/gene-lang__gene/openspec/changes/add-adapter-field-mappings/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/gene-lang/gene/blob/9633c6f7b91879228e15911bd884ddc33bdd6cab/openspec/changes/add-adapter-field-mappings/proposal.md"
+      repository: "gene-lang/gene"
+      commit_sha: "9633c6f7b91879228e15911bd884ddc33bdd6cab"
+      license: "MIT"
+      original_path: "openspec/changes/add-adapter-field-mappings"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-5fae008b5cbb"
+    path: "samples/repos/melpomenex__incrementum-tauri/openspec/changes/add-apkg-media-import-ux"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/melpomenex__incrementum-tauri/openspec/changes/add-apkg-media-import-ux/design.md"
+          role: "design"
+        - path: "samples/repos/melpomenex__incrementum-tauri/openspec/changes/add-apkg-media-import-ux/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/melpomenex__incrementum-tauri/openspec/changes/add-apkg-media-import-ux/specs/apkg-media-import/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/melpomenex__incrementum-tauri/openspec/changes/add-apkg-media-import-ux/specs/document-rating/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/melpomenex__incrementum-tauri/openspec/changes/add-apkg-media-import-ux/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/melpomenex/incrementum-tauri/blob/9539751ccd9250d3abaffa37cf031f7a62c8bff3/openspec/changes/add-apkg-media-import-ux/proposal.md"
+      repository: "melpomenex/incrementum-tauri"
+      commit_sha: "9539751ccd9250d3abaffa37cf031f7a62c8bff3"
+      license: "Apache-2.0"
+      original_path: "openspec/changes/add-apkg-media-import-ux"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-c65728c2e51d"
+    path: "samples/repos/CleanCocoa__TextBuffer/openspec/changes/archive/2026-03-13-m1-puppet-undo-manager"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/CleanCocoa__TextBuffer/openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/design.md"
+          role: "design"
+        - path: "samples/repos/CleanCocoa__TextBuffer/openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/CleanCocoa__TextBuffer/openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/specs/puppet-undo-manager/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/CleanCocoa__TextBuffer/openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/proposal.md"
+      repository: "CleanCocoa/TextBuffer"
+      commit_sha: "5885a592be26325a332d49365751c2083fe665d4"
+      license: "MIT"
+      original_path: "openspec/changes/archive/2026-03-13-m1-puppet-undo-manager"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-7e2592ec55d0"
+    path: "samples/repos/FHIR__sql-on-fhir-v2/openspec/changes/archive/2026-02-05-add-row-index-variable"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/FHIR__sql-on-fhir-v2/openspec/changes/archive/2026-02-05-add-row-index-variable/design.md"
+          role: "design"
+        - path: "samples/repos/FHIR__sql-on-fhir-v2/openspec/changes/archive/2026-02-05-add-row-index-variable/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/FHIR__sql-on-fhir-v2/openspec/changes/archive/2026-02-05-add-row-index-variable/specs/row-index/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/FHIR__sql-on-fhir-v2/openspec/changes/archive/2026-02-05-add-row-index-variable/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/FHIR/sql-on-fhir-v2/blob/e325ec9ef36a56ca40dd512ea5a037cc018aa82a/openspec/changes/archive/2026-02-05-add-row-index-variable/proposal.md"
+      repository: "FHIR/sql-on-fhir-v2"
+      commit_sha: "e325ec9ef36a56ca40dd512ea5a037cc018aa82a"
+      license: "MIT"
+      original_path: "openspec/changes/archive/2026-02-05-add-row-index-variable"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-634eb7094309"
+    path: "samples/repos/Yourdaylight__stock_datasource/openspec/changes/add-predefined-plugin-groups"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/Yourdaylight__stock_datasource/openspec/changes/add-predefined-plugin-groups/design.md"
+          role: "design"
+        - path: "samples/repos/Yourdaylight__stock_datasource/openspec/changes/add-predefined-plugin-groups/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/Yourdaylight__stock_datasource/openspec/changes/add-predefined-plugin-groups/specs/predefined-plugin-groups/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/Yourdaylight__stock_datasource/openspec/changes/add-predefined-plugin-groups/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/Yourdaylight/stock_datasource/blob/2863e38c483c30a4de3b7e07620f5fa95fcd9b4d/openspec/changes/add-predefined-plugin-groups/proposal.md"
+      repository: "Yourdaylight/stock_datasource"
+      commit_sha: "2863e38c483c30a4de3b7e07620f5fa95fcd9b4d"
+      license: "MIT"
+      original_path: "openspec/changes/add-predefined-plugin-groups"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-b90805cce14d"
+    path: "samples/repos/averagenative__0x808/openspec/changes/midi-input"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/averagenative__0x808/openspec/changes/midi-input/design.md"
+          role: "design"
+        - path: "samples/repos/averagenative__0x808/openspec/changes/midi-input/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/averagenative__0x808/openspec/changes/midi-input/specs/midi-device-input/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/averagenative__0x808/openspec/changes/midi-input/specs/sequencer-note-off/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/averagenative__0x808/openspec/changes/midi-input/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/averagenative/0x808/blob/a11b89115ed1851f4680d8e66c82c709587ada6f/openspec/changes/midi-input/proposal.md"
+      repository: "averagenative/0x808"
+      commit_sha: "a11b89115ed1851f4680d8e66c82c709587ada6f"
+      license: "MIT"
+      original_path: "openspec/changes/midi-input"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-c86c73deab4d"
+    path: "samples/repos/carverauto__serviceradar/openspec/changes/add-alienvault-otx-integration"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/carverauto__serviceradar/openspec/changes/add-alienvault-otx-integration/design.md"
+          role: "design"
+        - path: "samples/repos/carverauto__serviceradar/openspec/changes/add-alienvault-otx-integration/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/carverauto__serviceradar/openspec/changes/add-alienvault-otx-integration/specs/alienvault-otx-threat-intel/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/carverauto__serviceradar/openspec/changes/add-alienvault-otx-integration/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/carverauto/serviceradar/blob/263a3897b40759bb0b33fca5385cca130f1f5d17/openspec/changes/add-alienvault-otx-integration/proposal.md"
+      repository: "carverauto/serviceradar"
+      commit_sha: "263a3897b40759bb0b33fca5385cca130f1f5d17"
+      license: "Apache-2.0"
+      original_path: "openspec/changes/add-alienvault-otx-integration"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-1ed80dee5b88"
+    path: "samples/repos/daijinru__wenko/openspec/changes/add-image-paste-memory"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/daijinru__wenko/openspec/changes/add-image-paste-memory/design.md"
+          role: "design"
+        - path: "samples/repos/daijinru__wenko/openspec/changes/add-image-paste-memory/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/daijinru__wenko/openspec/changes/add-image-paste-memory/specs/live2d-image-chat/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/daijinru__wenko/openspec/changes/add-image-paste-memory/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/daijinru/wenko/blob/45461280f8c4f22072bc33bbd9fe4fcc2e48e83f/openspec/changes/add-image-paste-memory/proposal.md"
+      repository: "daijinru/wenko"
+      commit_sha: "45461280f8c4f22072bc33bbd9fe4fcc2e48e83f"
+      license: "MIT"
+      original_path: "openspec/changes/add-image-paste-memory"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-0243adedfc17"
+    path: "samples/repos/dallay__corvus/openspec/changes/archive/2026-03-03-agent-loop"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2026-03-03-agent-loop/archive-report.md"
+          role: "other_markdown"
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2026-03-03-agent-loop/design.md"
+          role: "design"
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2026-03-03-agent-loop/exploration.md"
+          role: "other_markdown"
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2026-03-03-agent-loop/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2026-03-03-agent-loop/specs/agent-loop/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2026-03-03-agent-loop/tasks.md"
+          role: "tasks"
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2026-03-03-agent-loop/verify-report.md"
+          role: "other_markdown"
+    provenance:
+      source_url: "https://github.com/dallay/corvus/blob/39380446341f924e55be195a6cb82c0bb63e3f81/openspec/changes/archive/2026-03-03-agent-loop/proposal.md"
+      repository: "dallay/corvus"
+      commit_sha: "39380446341f924e55be195a6cb82c0bb63e3f81"
+      license: "MIT"
+      original_path: "openspec/changes/archive/2026-03-03-agent-loop"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-b01a19d0bb77"
+    path: "samples/repos/denisfl__inbox/openspec/changes/api-versioning-v1"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/denisfl__inbox/openspec/changes/api-versioning-v1/design.md"
+          role: "design"
+        - path: "samples/repos/denisfl__inbox/openspec/changes/api-versioning-v1/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/denisfl__inbox/openspec/changes/api-versioning-v1/specs/api-rate-limiting/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/denisfl__inbox/openspec/changes/api-versioning-v1/specs/api-v1-namespace/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/denisfl__inbox/openspec/changes/api-versioning-v1/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/denisfl/inbox/blob/5afd41b0233fb3d2a13069426e60df06062a4aaa/openspec/changes/api-versioning-v1/proposal.md"
+      repository: "denisfl/inbox"
+      commit_sha: "5afd41b0233fb3d2a13069426e60df06062a4aaa"
+      license: "MIT"
+      original_path: "openspec/changes/api-versioning-v1"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-32f155cd5fc7"
+    path: "samples/repos/gene-lang__gene/openspec/changes/add-ai-tooling-metadata-surface"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/gene-lang__gene/openspec/changes/add-ai-tooling-metadata-surface/design.md"
+          role: "design"
+        - path: "samples/repos/gene-lang__gene/openspec/changes/add-ai-tooling-metadata-surface/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/gene-lang__gene/openspec/changes/add-ai-tooling-metadata-surface/specs/ai-tooling-metadata-surface/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/gene-lang__gene/openspec/changes/add-ai-tooling-metadata-surface/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/gene-lang/gene/blob/9633c6f7b91879228e15911bd884ddc33bdd6cab/openspec/changes/add-ai-tooling-metadata-surface/proposal.md"
+      repository: "gene-lang/gene"
+      commit_sha: "9633c6f7b91879228e15911bd884ddc33bdd6cab"
+      license: "MIT"
+      original_path: "openspec/changes/add-ai-tooling-metadata-surface"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-1d5aa4e8d1dd"
+    path: "samples/repos/melpomenex__incrementum-tauri/openspec/changes/add-assistant-image-attachments"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/melpomenex__incrementum-tauri/openspec/changes/add-assistant-image-attachments/design.md"
+          role: "design"
+        - path: "samples/repos/melpomenex__incrementum-tauri/openspec/changes/add-assistant-image-attachments/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/melpomenex__incrementum-tauri/openspec/changes/add-assistant-image-attachments/specs/assistant-image-attachments/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/melpomenex__incrementum-tauri/openspec/changes/add-assistant-image-attachments/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/melpomenex/incrementum-tauri/blob/9539751ccd9250d3abaffa37cf031f7a62c8bff3/openspec/changes/add-assistant-image-attachments/proposal.md"
+      repository: "melpomenex/incrementum-tauri"
+      commit_sha: "9539751ccd9250d3abaffa37cf031f7a62c8bff3"
+      license: "Apache-2.0"
+      original_path: "openspec/changes/add-assistant-image-attachments"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-87057bde98d0"
+    path: "samples/repos/CleanCocoa__TextBuffer/openspec/changes/archive/2026-03-13-m1-test-scaffolding"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/CleanCocoa__TextBuffer/openspec/changes/archive/2026-03-13-m1-test-scaffolding/design.md"
+          role: "design"
+        - path: "samples/repos/CleanCocoa__TextBuffer/openspec/changes/archive/2026-03-13-m1-test-scaffolding/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/CleanCocoa__TextBuffer/openspec/changes/archive/2026-03-13-m1-test-scaffolding/specs/undo-test-infrastructure/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/CleanCocoa__TextBuffer/openspec/changes/archive/2026-03-13-m1-test-scaffolding/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-test-scaffolding/proposal.md"
+      repository: "CleanCocoa/TextBuffer"
+      commit_sha: "5885a592be26325a332d49365751c2083fe665d4"
+      license: "MIT"
+      original_path: "openspec/changes/archive/2026-03-13-m1-test-scaffolding"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-bd4dd915155a"
+    path: "samples/repos/FHIR__sql-on-fhir-v2/openspec/changes/implement-sqlquery-run-server"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/FHIR__sql-on-fhir-v2/openspec/changes/implement-sqlquery-run-server/design.md"
+          role: "design"
+        - path: "samples/repos/FHIR__sql-on-fhir-v2/openspec/changes/implement-sqlquery-run-server/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/FHIR__sql-on-fhir-v2/openspec/changes/implement-sqlquery-run-server/specs/sqlquery-run-server/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/FHIR__sql-on-fhir-v2/openspec/changes/implement-sqlquery-run-server/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/FHIR/sql-on-fhir-v2/blob/e325ec9ef36a56ca40dd512ea5a037cc018aa82a/openspec/changes/implement-sqlquery-run-server/proposal.md"
+      repository: "FHIR/sql-on-fhir-v2"
+      commit_sha: "e325ec9ef36a56ca40dd512ea5a037cc018aa82a"
+      license: "MIT"
+      original_path: "openspec/changes/implement-sqlquery-run-server"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-3789a8ba9022"
+    path: "samples/repos/Yourdaylight__stock_datasource/openspec/changes/add-realtime-kline-cache-sync"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/Yourdaylight__stock_datasource/openspec/changes/add-realtime-kline-cache-sync/design.md"
+          role: "design"
+        - path: "samples/repos/Yourdaylight__stock_datasource/openspec/changes/add-realtime-kline-cache-sync/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/Yourdaylight__stock_datasource/openspec/changes/add-realtime-kline-cache-sync/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/Yourdaylight/stock_datasource/blob/2863e38c483c30a4de3b7e07620f5fa95fcd9b4d/openspec/changes/add-realtime-kline-cache-sync/proposal.md"
+      repository: "Yourdaylight/stock_datasource"
+      commit_sha: "2863e38c483c30a4de3b7e07620f5fa95fcd9b4d"
+      license: "MIT"
+      original_path: "openspec/changes/add-realtime-kline-cache-sync"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-66741e175be8"
+    path: "samples/repos/averagenative__0x808/openspec/changes/robust-recording"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/averagenative__0x808/openspec/changes/robust-recording/design.md"
+          role: "design"
+        - path: "samples/repos/averagenative__0x808/openspec/changes/robust-recording/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/averagenative__0x808/openspec/changes/robust-recording/specs/recording-ui/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/averagenative__0x808/openspec/changes/robust-recording/specs/streaming-recorder/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/averagenative__0x808/openspec/changes/robust-recording/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/averagenative/0x808/blob/a11b89115ed1851f4680d8e66c82c709587ada6f/openspec/changes/robust-recording/proposal.md"
+      repository: "averagenative/0x808"
+      commit_sha: "a11b89115ed1851f4680d8e66c82c709587ada6f"
+      license: "MIT"
+      original_path: "openspec/changes/robust-recording"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-12c48db76d91"
+    path: "samples/repos/carverauto__serviceradar/openspec/changes/add-ansible-integration"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/carverauto__serviceradar/openspec/changes/add-ansible-integration/design.md"
+          role: "design"
+        - path: "samples/repos/carverauto__serviceradar/openspec/changes/add-ansible-integration/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/carverauto__serviceradar/openspec/changes/add-ansible-integration/specs/ansible-integration/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/carverauto__serviceradar/openspec/changes/add-ansible-integration/specs/device-inventory/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/carverauto__serviceradar/openspec/changes/add-ansible-integration/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/carverauto/serviceradar/blob/263a3897b40759bb0b33fca5385cca130f1f5d17/openspec/changes/add-ansible-integration/proposal.md"
+      repository: "carverauto/serviceradar"
+      commit_sha: "263a3897b40759bb0b33fca5385cca130f1f5d17"
+      license: "Apache-2.0"
+      original_path: "openspec/changes/add-ansible-integration"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-f7640912dc54"
+    path: "samples/repos/daijinru__wenko/openspec/changes/add-memory-emotion-system"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/daijinru__wenko/openspec/changes/add-memory-emotion-system/design.md"
+          role: "design"
+        - path: "samples/repos/daijinru__wenko/openspec/changes/add-memory-emotion-system/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/daijinru__wenko/openspec/changes/add-memory-emotion-system/specs/ai-chat-emotion/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/daijinru__wenko/openspec/changes/add-memory-emotion-system/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/daijinru/wenko/blob/45461280f8c4f22072bc33bbd9fe4fcc2e48e83f/openspec/changes/add-memory-emotion-system/proposal.md"
+      repository: "daijinru/wenko"
+      commit_sha: "45461280f8c4f22072bc33bbd9fe4fcc2e48e83f"
+      license: "MIT"
+      original_path: "openspec/changes/add-memory-emotion-system"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-885607051941"
+    path: "samples/repos/dallay__corvus/openspec/changes/archive/2026-03-03-support-mcps-agent-runtime"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2026-03-03-support-mcps-agent-runtime/design.md"
+          role: "design"
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2026-03-03-support-mcps-agent-runtime/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2026-03-03-support-mcps-agent-runtime/specs/mcp-runtime/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2026-03-03-support-mcps-agent-runtime/tasks.md"
+          role: "tasks"
+        - path: "samples/repos/dallay__corvus/openspec/changes/archive/2026-03-03-support-mcps-agent-runtime/verify-report.md"
+          role: "other_markdown"
+    provenance:
+      source_url: "https://github.com/dallay/corvus/blob/39380446341f924e55be195a6cb82c0bb63e3f81/openspec/changes/archive/2026-03-03-support-mcps-agent-runtime/proposal.md"
+      repository: "dallay/corvus"
+      commit_sha: "39380446341f924e55be195a6cb82c0bb63e3f81"
+      license: "MIT"
+      original_path: "openspec/changes/archive/2026-03-03-support-mcps-agent-runtime"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-7095dff24741"
+    path: "samples/repos/denisfl__inbox/openspec/changes/archive/2025-07-15-data-integrity-foreign-keys"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/denisfl__inbox/openspec/changes/archive/2025-07-15-data-integrity-foreign-keys/design.md"
+          role: "design"
+        - path: "samples/repos/denisfl__inbox/openspec/changes/archive/2025-07-15-data-integrity-foreign-keys/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/denisfl__inbox/openspec/changes/archive/2025-07-15-data-integrity-foreign-keys/specs/foreign-key-enforcement/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/denisfl__inbox/openspec/changes/archive/2025-07-15-data-integrity-foreign-keys/specs/integrity-check-task/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/denisfl__inbox/openspec/changes/archive/2025-07-15-data-integrity-foreign-keys/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/denisfl/inbox/blob/5afd41b0233fb3d2a13069426e60df06062a4aaa/openspec/changes/archive/2025-07-15-data-integrity-foreign-keys/proposal.md"
+      repository: "denisfl/inbox"
+      commit_sha: "5afd41b0233fb3d2a13069426e60df06062a4aaa"
+      license: "MIT"
+      original_path: "openspec/changes/archive/2025-07-15-data-integrity-foreign-keys"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-ebd2b32eb888"
+    path: "samples/repos/gene-lang__gene/openspec/changes/add-class-aspects"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/gene-lang__gene/openspec/changes/add-class-aspects/design.md"
+          role: "design"
+        - path: "samples/repos/gene-lang__gene/openspec/changes/add-class-aspects/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/gene-lang__gene/openspec/changes/add-class-aspects/specs/explicit-interception/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/gene-lang__gene/openspec/changes/add-class-aspects/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/gene-lang/gene/blob/9633c6f7b91879228e15911bd884ddc33bdd6cab/openspec/changes/add-class-aspects/proposal.md"
+      repository: "gene-lang/gene"
+      commit_sha: "9633c6f7b91879228e15911bd884ddc33bdd6cab"
+      license: "MIT"
+      original_path: "openspec/changes/add-class-aspects"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+
+  - id: "mined-openspec-bundle-3ff25a94d24e"
+    path: "samples/repos/melpomenex__incrementum-tauri/openspec/changes/add-assistant-tool-calls"
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      kind: spec
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: "samples/repos/melpomenex__incrementum-tauri/openspec/changes/add-assistant-tool-calls/design.md"
+          role: "design"
+        - path: "samples/repos/melpomenex__incrementum-tauri/openspec/changes/add-assistant-tool-calls/proposal.md"
+          role: "proposal"
+        - path: "samples/repos/melpomenex__incrementum-tauri/openspec/changes/add-assistant-tool-calls/specs/assistant-tools/spec.md"
+          role: "spec_delta"
+        - path: "samples/repos/melpomenex__incrementum-tauri/openspec/changes/add-assistant-tool-calls/tasks.md"
+          role: "tasks"
+    provenance:
+      source_url: "https://github.com/melpomenex/incrementum-tauri/blob/9539751ccd9250d3abaffa37cf031f7a62c8bff3/openspec/changes/add-assistant-tool-calls/proposal.md"
+      repository: "melpomenex/incrementum-tauri"
+      commit_sha: "9539751ccd9250d3abaffa37cf031f7a62c8bff3"
+      license: "Apache-2.0"
+      original_path: "openspec/changes/add-assistant-tool-calls"
+      format_label: "OPENSPEC"
+      can_commit_file: true
+      reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
+    notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
+

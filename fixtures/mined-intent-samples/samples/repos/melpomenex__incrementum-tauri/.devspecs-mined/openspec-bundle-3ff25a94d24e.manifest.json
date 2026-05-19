@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "structure_type": "bundle",
+  "format_profile": "openspec",
+  "artifact_family": "OPENSPEC",
+  "repository": "melpomenex/incrementum-tauri",
+  "commit_sha": "9539751ccd9250d3abaffa37cf031f7a62c8bff3",
+  "license": "Apache-2.0",
+  "source_url": "https://github.com/melpomenex/incrementum-tauri/blob/9539751ccd9250d3abaffa37cf031f7a62c8bff3/openspec/changes/add-assistant-tool-calls/proposal.md",
+  "storage_decision": "real_full_file",
+  "can_commit_full_file": true,
+  "root_path": "openspec",
+  "layout_group": "openspec/changes/add-assistant-tool-calls",
+  "source_identity": "openspec/changes/add-assistant-tool-calls|openspec",
+  "primary_path": "openspec/changes/add-assistant-tool-calls/proposal.md",
+  "kind": "spec",
+  "subtype": "openspec_change",
+  "title": "Change: Add assistant tool calling and expanded tool inventory",
+  "status": "proposed",
+  "composite_hash": "3ff25a94d24e97ee5635d095d44089670e1b969e4675831d039d7784c656711f",
+  "manifest_ref": "structures/openspec/bundles/3ff25a94d24e97ee5635d095d44089670e1b969e4675831d039d7784c656711f/manifest.json",
+  "files": [
+    {
+      "path": "openspec/changes/add-assistant-tool-calls/design.md",
+      "role": "design",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-assistant-tool-calls",
+      "source_identity": "openspec/changes/add-assistant-tool-calls/design.md|openspec_file",
+      "source_url": "https://github.com/melpomenex/incrementum-tauri/blob/9539751ccd9250d3abaffa37cf031f7a62c8bff3/openspec/changes/add-assistant-tool-calls/design.md",
+      "sha256": "8411f537c7bfae7c8b4da923cbb71b227317331d24dcf0a17f304640408bc772",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/add-assistant-tool-calls/proposal.md",
+      "role": "proposal",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-assistant-tool-calls",
+      "source_identity": "openspec/changes/add-assistant-tool-calls/proposal.md|openspec_file",
+      "source_url": "https://github.com/melpomenex/incrementum-tauri/blob/9539751ccd9250d3abaffa37cf031f7a62c8bff3/openspec/changes/add-assistant-tool-calls/proposal.md",
+      "sha256": "266857f9bf1502ecea0ef1ad0eb6969b575af84066df5e4191694036987023d7",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/add-assistant-tool-calls/specs/assistant-tools/spec.md",
+      "role": "delta_spec",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-assistant-tool-calls",
+      "source_identity": "openspec/changes/add-assistant-tool-calls/specs/assistant-tools/spec.md|openspec_file",
+      "source_url": "https://github.com/melpomenex/incrementum-tauri/blob/9539751ccd9250d3abaffa37cf031f7a62c8bff3/openspec/changes/add-assistant-tool-calls/specs/assistant-tools/spec.md",
+      "sha256": "4348c4e2ac4e2160e0390c02ac438dcbbfde57e71b3503142fb5e958c033c9a5",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/add-assistant-tool-calls/tasks.md",
+      "role": "tasks",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-assistant-tool-calls",
+      "source_identity": "openspec/changes/add-assistant-tool-calls/tasks.md|openspec_file",
+      "source_url": "https://github.com/melpomenex/incrementum-tauri/blob/9539751ccd9250d3abaffa37cf031f7a62c8bff3/openspec/changes/add-assistant-tool-calls/tasks.md",
+      "sha256": "6d2b47be2d3bdd6ece7ec662ba4f8a4512b39f778e287606d7ee528235502cb7",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    }
+  ]
+}

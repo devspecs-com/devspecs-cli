@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "structure_type": "bundle",
+  "format_profile": "openspec",
+  "artifact_family": "OPENSPEC",
+  "repository": "CleanCocoa/TextBuffer",
+  "commit_sha": "5885a592be26325a332d49365751c2083fe665d4",
+  "license": "MIT",
+  "source_url": "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/proposal.md",
+  "storage_decision": "real_full_file",
+  "can_commit_full_file": true,
+  "root_path": "openspec",
+  "layout_group": "openspec/changes/archive/2026-03-13-m1-puppet-undo-manager",
+  "source_identity": "openspec/changes/archive/2026-03-13-m1-puppet-undo-manager|openspec",
+  "primary_path": "openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/proposal.md",
+  "kind": "spec",
+  "subtype": "openspec_change",
+  "title": "2026 03 13 M1 Puppet Undo Manager",
+  "status": "proposed",
+  "composite_hash": "c65728c2e51d1dedf899d2effe2fba006c97555464ac686c82854cfb99fcfd64",
+  "manifest_ref": "structures/openspec/bundles/c65728c2e51d1dedf899d2effe2fba006c97555464ac686c82854cfb99fcfd64/manifest.json",
+  "files": [
+    {
+      "path": "openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/design.md",
+      "role": "design",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/archive/2026-03-13-m1-puppet-undo-manager",
+      "source_identity": "openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/design.md|openspec_file",
+      "source_url": "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/design.md",
+      "sha256": "4598f7f56361b4ba31e3e77af661524381e429fe88390c9595713a5ace288816",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/proposal.md",
+      "role": "proposal",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/archive/2026-03-13-m1-puppet-undo-manager",
+      "source_identity": "openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/proposal.md|openspec_file",
+      "source_url": "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/proposal.md",
+      "sha256": "28ad3b7f92f4b2a857921f56611a38bd9003e2a2c58a5342f90edbbad1d6ad4d",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/specs/puppet-undo-manager/spec.md",
+      "role": "delta_spec",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/archive/2026-03-13-m1-puppet-undo-manager",
+      "source_identity": "openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/specs/puppet-undo-manager/spec.md|openspec_file",
+      "source_url": "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/specs/puppet-undo-manager/spec.md",
+      "sha256": "3ab9dc533628cf5772ee4269cc57a81fab1c7fdbda5cf722a8dc488f4be22b9c",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/tasks.md",
+      "role": "tasks",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/archive/2026-03-13-m1-puppet-undo-manager",
+      "source_identity": "openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/tasks.md|openspec_file",
+      "source_url": "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-puppet-undo-manager/tasks.md",
+      "sha256": "ef8b58589dd30c1e459bd8c53ec93b3dde8d372f113c812073d4bb368dd71583",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    }
+  ]
+}

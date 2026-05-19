@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "structure_type": "bundle",
+  "format_profile": "openspec",
+  "artifact_family": "OPENSPEC",
+  "repository": "Yourdaylight/stock_datasource",
+  "commit_sha": "2863e38c483c30a4de3b7e07620f5fa95fcd9b4d",
+  "license": "MIT",
+  "source_url": "https://github.com/Yourdaylight/stock_datasource/blob/2863e38c483c30a4de3b7e07620f5fa95fcd9b4d/openspec/changes/add-realtime-kline-cache-sync/proposal.md",
+  "storage_decision": "real_full_file",
+  "can_commit_full_file": true,
+  "root_path": "openspec",
+  "layout_group": "openspec/changes/add-realtime-kline-cache-sync",
+  "source_identity": "openspec/changes/add-realtime-kline-cache-sync|openspec",
+  "primary_path": "openspec/changes/add-realtime-kline-cache-sync/proposal.md",
+  "kind": "spec",
+  "subtype": "openspec_change",
+  "title": "Change: 实时日线解耦流式缓存、云端秒级推送与分钟入库",
+  "status": "proposed",
+  "composite_hash": "3789a8ba902213c5484df6b78e620ce459273302feb1a3afd249b4453d172474",
+  "manifest_ref": "structures/openspec/bundles/3789a8ba902213c5484df6b78e620ce459273302feb1a3afd249b4453d172474/manifest.json",
+  "files": [
+    {
+      "path": "openspec/changes/add-realtime-kline-cache-sync/design.md",
+      "role": "design",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-realtime-kline-cache-sync",
+      "source_identity": "openspec/changes/add-realtime-kline-cache-sync/design.md|openspec_file",
+      "source_url": "https://github.com/Yourdaylight/stock_datasource/blob/2863e38c483c30a4de3b7e07620f5fa95fcd9b4d/openspec/changes/add-realtime-kline-cache-sync/design.md",
+      "sha256": "0592bb583c1be1e11ad7bfa18ff02f3af9011aadd40a555999368af64ab7b6a4",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/add-realtime-kline-cache-sync/proposal.md",
+      "role": "proposal",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-realtime-kline-cache-sync",
+      "source_identity": "openspec/changes/add-realtime-kline-cache-sync/proposal.md|openspec_file",
+      "source_url": "https://github.com/Yourdaylight/stock_datasource/blob/2863e38c483c30a4de3b7e07620f5fa95fcd9b4d/openspec/changes/add-realtime-kline-cache-sync/proposal.md",
+      "sha256": "da12341b692fb2a433428749dec98847fa389d60f4e3ea2be860b1357f31de81",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/add-realtime-kline-cache-sync/tasks.md",
+      "role": "tasks",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-realtime-kline-cache-sync",
+      "source_identity": "openspec/changes/add-realtime-kline-cache-sync/tasks.md|openspec_file",
+      "source_url": "https://github.com/Yourdaylight/stock_datasource/blob/2863e38c483c30a4de3b7e07620f5fa95fcd9b4d/openspec/changes/add-realtime-kline-cache-sync/tasks.md",
+      "sha256": "d23e2845e31f5203136e22467e3c392f3396014e5ae634b8f1204bfc8d8e936d",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    }
+  ]
+}

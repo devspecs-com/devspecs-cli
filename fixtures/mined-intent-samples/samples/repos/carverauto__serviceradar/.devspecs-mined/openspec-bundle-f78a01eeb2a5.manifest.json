@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "structure_type": "bundle",
+  "format_profile": "openspec",
+  "artifact_family": "OPENSPEC",
+  "repository": "carverauto/serviceradar",
+  "commit_sha": "263a3897b40759bb0b33fca5385cca130f1f5d17",
+  "license": "Apache-2.0",
+  "source_url": "https://github.com/carverauto/serviceradar/blob/263a3897b40759bb0b33fca5385cca130f1f5d17/openspec/changes/add-agent-config-dependency-catalog/proposal.md",
+  "storage_decision": "real_full_file",
+  "can_commit_full_file": true,
+  "root_path": "openspec",
+  "layout_group": "openspec/changes/add-agent-config-dependency-catalog",
+  "source_identity": "openspec/changes/add-agent-config-dependency-catalog|openspec",
+  "primary_path": "openspec/changes/add-agent-config-dependency-catalog/proposal.md",
+  "kind": "spec",
+  "subtype": "openspec_change",
+  "title": "Change: Add declarative agent config dependency catalog",
+  "status": "proposed",
+  "composite_hash": "f78a01eeb2a5c0aca01e86ca383d6b3b1767e167f9cfb7b1d045fd050727eaa5",
+  "manifest_ref": "structures/openspec/bundles/f78a01eeb2a5c0aca01e86ca383d6b3b1767e167f9cfb7b1d045fd050727eaa5/manifest.json",
+  "files": [
+    {
+      "path": "openspec/changes/add-agent-config-dependency-catalog/design.md",
+      "role": "design",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-agent-config-dependency-catalog",
+      "source_identity": "openspec/changes/add-agent-config-dependency-catalog/design.md|openspec_file",
+      "source_url": "https://github.com/carverauto/serviceradar/blob/263a3897b40759bb0b33fca5385cca130f1f5d17/openspec/changes/add-agent-config-dependency-catalog/design.md",
+      "sha256": "3016c75dbedf6534323f59d934433589cb37dfe53b0fa121b8655f620867a0d3",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/add-agent-config-dependency-catalog/proposal.md",
+      "role": "proposal",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-agent-config-dependency-catalog",
+      "source_identity": "openspec/changes/add-agent-config-dependency-catalog/proposal.md|openspec_file",
+      "source_url": "https://github.com/carverauto/serviceradar/blob/263a3897b40759bb0b33fca5385cca130f1f5d17/openspec/changes/add-agent-config-dependency-catalog/proposal.md",
+      "sha256": "b43e2588f4aad4ef25c7b36d04eae6fd877abea43f7a8251047f11d359ad171c",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/add-agent-config-dependency-catalog/specs/agent-config/spec.md",
+      "role": "delta_spec",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-agent-config-dependency-catalog",
+      "source_identity": "openspec/changes/add-agent-config-dependency-catalog/specs/agent-config/spec.md|openspec_file",
+      "source_url": "https://github.com/carverauto/serviceradar/blob/263a3897b40759bb0b33fca5385cca130f1f5d17/openspec/changes/add-agent-config-dependency-catalog/specs/agent-config/spec.md",
+      "sha256": "15df34ed765f43597756934331fd8ecca997da88433927836415c2250ab654db",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/add-agent-config-dependency-catalog/tasks.md",
+      "role": "tasks",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-agent-config-dependency-catalog",
+      "source_identity": "openspec/changes/add-agent-config-dependency-catalog/tasks.md|openspec_file",
+      "source_url": "https://github.com/carverauto/serviceradar/blob/263a3897b40759bb0b33fca5385cca130f1f5d17/openspec/changes/add-agent-config-dependency-catalog/tasks.md",
+      "sha256": "2f00d2e17496b64dfbe40bffa524b00692a4f7d64d387c9b20022bb597dee547",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    }
+  ]
+}

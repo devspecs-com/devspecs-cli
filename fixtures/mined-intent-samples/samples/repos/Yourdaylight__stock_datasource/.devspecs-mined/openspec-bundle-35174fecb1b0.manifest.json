@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "structure_type": "bundle",
+  "format_profile": "openspec",
+  "artifact_family": "OPENSPEC",
+  "repository": "Yourdaylight/stock_datasource",
+  "commit_sha": "2863e38c483c30a4de3b7e07620f5fa95fcd9b4d",
+  "license": "MIT",
+  "source_url": "https://github.com/Yourdaylight/stock_datasource/blob/2863e38c483c30a4de3b7e07620f5fa95fcd9b4d/openspec/changes/add-market-overview-ui/proposal.md",
+  "storage_decision": "real_full_file",
+  "can_commit_full_file": true,
+  "root_path": "openspec",
+  "layout_group": "openspec/changes/add-market-overview-ui",
+  "source_identity": "openspec/changes/add-market-overview-ui|openspec",
+  "primary_path": "openspec/changes/add-market-overview-ui/proposal.md",
+  "kind": "spec",
+  "subtype": "openspec_change",
+  "title": "Change: 新增ETF/指数行情展示界面与每日概览",
+  "status": "proposed",
+  "composite_hash": "35174fecb1b0f1bc239e6ae8c6dffd63f1571280f9498b2616e20b1e163d209f",
+  "manifest_ref": "structures/openspec/bundles/35174fecb1b0f1bc239e6ae8c6dffd63f1571280f9498b2616e20b1e163d209f/manifest.json",
+  "files": [
+    {
+      "path": "openspec/changes/add-market-overview-ui/design.md",
+      "role": "design",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-market-overview-ui",
+      "source_identity": "openspec/changes/add-market-overview-ui/design.md|openspec_file",
+      "source_url": "https://github.com/Yourdaylight/stock_datasource/blob/2863e38c483c30a4de3b7e07620f5fa95fcd9b4d/openspec/changes/add-market-overview-ui/design.md",
+      "sha256": "b591d76c76b2e515e5bae4af9eb5e6b5ac8bbbb9ed9d115fbe2fba20ebf6a3dd",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/add-market-overview-ui/proposal.md",
+      "role": "proposal",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-market-overview-ui",
+      "source_identity": "openspec/changes/add-market-overview-ui/proposal.md|openspec_file",
+      "source_url": "https://github.com/Yourdaylight/stock_datasource/blob/2863e38c483c30a4de3b7e07620f5fa95fcd9b4d/openspec/changes/add-market-overview-ui/proposal.md",
+      "sha256": "1bb615e3a1678c85b3b059e7b2ea5df676779aad8aaed6ecfe81a38c63c1ed4d",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/add-market-overview-ui/specs/etf-display/spec.md",
+      "role": "delta_spec",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-market-overview-ui",
+      "source_identity": "openspec/changes/add-market-overview-ui/specs/etf-display/spec.md|openspec_file",
+      "source_url": "https://github.com/Yourdaylight/stock_datasource/blob/2863e38c483c30a4de3b7e07620f5fa95fcd9b4d/openspec/changes/add-market-overview-ui/specs/etf-display/spec.md",
+      "sha256": "c71776f50170913d0556a5bae8a798af8c7bdf66d799616db5990ce31ac90122",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/add-market-overview-ui/tasks.md",
+      "role": "tasks",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-market-overview-ui",
+      "source_identity": "openspec/changes/add-market-overview-ui/tasks.md|openspec_file",
+      "source_url": "https://github.com/Yourdaylight/stock_datasource/blob/2863e38c483c30a4de3b7e07620f5fa95fcd9b4d/openspec/changes/add-market-overview-ui/tasks.md",
+      "sha256": "66480e91e7bb17b40984402ad0e3bd35b7d96fbc2d61d853c02512f3958d0c3d",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    }
+  ]
+}

@@ -301,7 +301,7 @@ func DefaultPipelineConfig() PipelineConfig {
 				Scopes:    []Scope{ScopeDocument},
 				Kind:      "design",
 				Authority: AuthorityDesignProposal,
-				PathHints: []string{"rfcs/**", "docs/rfcs/**", "docs/proposals/**"},
+				PathHints: []string{"rfcs/**", "docs/rfcs/**", "docs/proposals/**", "enhancements/**", "keps/**", "teps/**", "oseps/**"},
 				Evidence: []EvidenceRule{
 					evidence("rfc_title_signal", 0.12, ReasonHeadingMatch, "RFC/proposal title signal is present.", EvidenceMatch{
 						Scope:    ScopeDocument,
@@ -310,6 +310,14 @@ func DefaultPipelineConfig() PipelineConfig {
 					evidence("rfc_path_signal", 0.08, ReasonPathHint, "RFC/proposal path signal is present.", EvidenceMatch{
 						Scope:           ScopeDocument,
 						PathContainsAny: []string{"rfc", "rfcs", "proposal", "proposals"},
+					}),
+					evidence("rfc_enhancement_path_signal", 0.34, ReasonPathHint, "Enhancement/KEP/TEP/SIP/SHIP path signal is present.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						PathContainsAny: []string{"enhancements/", "/enhancements/", "keps/", "/keps/", "teps/", "/teps/", "oseps/", "/oseps/", "ships/", "/ships/", "sips/", "/sips/", "docs/design/", "docs/proposals/"},
+					}),
+					evidence("rfc_governance_frontmatter_status", 0.10, ReasonStatusSignal, "Proposal-style governance frontmatter declares a status.", EvidenceMatch{
+						Scope:             ScopeDocument,
+						FrontmatterExists: []string{"status"},
 					}),
 					evidence("rfc_design_sections", 0.23, ReasonHeadingMatch, "RFC/proposal design sections are present.", EvidenceMatch{
 						Scope:       ScopeDocument,
@@ -356,9 +364,17 @@ func DefaultPipelineConfig() PipelineConfig {
 						Scope:    ScopeDocument,
 						TitleAny: []string{"prd", "product requirements", "requirements"},
 					}),
+					evidence("prd_filename_signal", 0.22, ReasonPathHint, "PRD filename signal is present.", EvidenceMatch{
+						Scope:       ScopeDocument,
+						FilenameAny: []string{"prd", "product_requirements", "product-requirements", "product requirements"},
+					}),
 					evidence("prd_path_signal", 0.08, ReasonPathHint, "PRD path signal is present.", EvidenceMatch{
 						Scope:           ScopeDocument,
 						PathContainsAny: []string{"prd", "prds", "requirements"},
+					}),
+					evidence("prd_body_phrase_signal", 0.26, ReasonHeadingMatch, "PRD body includes product requirements language.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						BodyContainsAny: []string{"product requirements document", "functional requirements", "product scope", "user personas", "success metrics"},
 					}),
 					evidence("prd_product_sections", 0.18, ReasonHeadingMatch, "Product requirement sections are present.", EvidenceMatch{
 						Scope:           ScopeDocument,

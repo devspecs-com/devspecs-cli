@@ -1,0 +1,296 @@
+# Proposal: add-predefined-plugin-groups
+
+## Summary
+
+基于现有插件的表依赖关系，创建一组**预定义的插件组合**，覆盖常见的数据同步场景（如"A股完整数据"、"财务报表完整同步"、"指数数据完整同步"等），用户可直接使用这些组合进行一键同步，无需手动配置。
+
+## Why
+
+当前数据管理的"自定义组合"功能虽然已实现，但存在以下问题：
+
+1. **组合列表为空**：新用户打开"自定义组合"Tab 看到的是空列表（共 0 个组合），不知道该如何开始
+2. **依赖关系复杂**：`add-financial-statement-plugins` 和 `add-index-plugins` 两个提案创建了多个表，这些表之间存在依赖关系（如财务报表插件都依赖 `tushare_stock_basic`），用户难以手动配置正确的组合
+3. **缺乏开箱即用体验**：用户需要先理解每个插件的作用和依赖关系，才能创建有效的组合，学习成本高
+
+通过提供预定义的插件组合，用户可以：
+- 一键同步完整的财务报表数据
+- 一键同步指数相关数据
+- 参考预定义组合了解插件之间的关系
+
+## Background
+
+### 现状分析
+
+当前系统已具备以下功能：
+1. **自定义组合**：用户可手动创建插件组合，但目前组合列表为空（共 0 个组合）
+2. **依赖管理**：插件可声明依赖关系，系统会自动检查依赖是否满足
+3. **批量同步**：支持按依赖顺序批量执行多个插件
+
+### 存在的问题
+
+1. **用户需要理解复杂的依赖关系**：多个插件之间存在依赖（如财务报表依赖股票基础数据），用户难以准确配置
+2. **缺少开箱即用的组合**：新用户不知道该同步哪些插件，也不清楚它们之间的关系
+3. **表依赖关系分散在多个提案中**：
+   - `add-financial-statement-plugins`：9 个财务报表插件，都依赖 `tushare_stock_basic`
+   - `add-index-plugins`：3 个指数插件，其中 `tushare_index_weight` 和 `tushare_idx_factor_pro` 依赖 `tushare_index_basic`
+
+### 表和依赖关系汇总
+
+#### 财务报表插件（add-financial-statement-plugins）
+
+| 插件名 | 表名 | 依赖插件 |
+|--------|------|----------|
+| tushare_income | ods_income_statement | tushare_stock_basic |
+| tushare_balancesheet | ods_balance_sheet | tushare_stock_basic |
+| tushare_cashflow | ods_cash_flow | tushare_stock_basic |
+| tushare_forecast | ods_forecast | tushare_stock_basic |
+| tushare_express | ods_express | tushare_stock_basic |
+| tushare_fina_audit | ods_fina_audit | tushare_stock_basic |
+| tushare_income_vip | ods_income_statement (复用) | tushare_stock_basic |
+| tushare_balancesheet_vip | ods_balance_sheet (复用) | tushare_stock_basic |
+| tushare_cashflow_vip | ods_cash_flow (复用) | tushare_stock_basic |
+
+#### 指数插件（add-index-plugins）
+
+| 插件名 | 表名 | 依赖插件 |
+|--------|------|----------|
+| tushare_index_basic | dim_index_basic | 无（基础数据） |
+| tushare_index_weight | ods_index_weight | tushare_index_basic |
+| tushare_idx_factor_pro | ods_idx_factor_pro | tushare_index_basic |
+
+## Goals
+
+1. 提供一组**预定义的插件组合**，覆盖常见的数据同步场景
+2. 预定义组合**自动识别依赖关系**，确保按正确顺序执行
+3. 预定义组合与用户自定义组合**共存**，用户可选择使用或参考
+4. 支持**组合分类**，便于用户快速定位所需组合
+5. 预定义组合**不可删除或修改**（只读），保证系统稳定性
+
+## Non-Goals
+
+- 不修改现有的依赖检查机制
+- 不修改现有的批量同步逻辑
+- 不影响用户手动创建的自定义组合
+
+## Proposed Solution
+
+### 预定义组合列表
+
+| 组合名称 | 描述 | 包含插件 | 分类 | 默认同步类型 |
+|----------|------|----------|------|--------------|
+| **交易日历** | 交易日历数据（建议每半年执行一次，获取未来交易日信息） | tushare_trade_calendar | system | **full（覆盖）** |
+| **全市场日线数据** | A股/ETF/指数的日线行情数据，每次同步时覆盖更新（含各自的基础数据依赖） | tushare_stock_basic, tushare_daily, tushare_index_basic, tushare_index_daily, tushare_etf_basic, tushare_etf_fund_daily | daily | **full（覆盖）** |
+| **A股日线行情** | A股日线行情数据（含基础信息和复权因子） | tushare_stock_basic, tushare_daily, tushare_adj_factor | cn_stock | incremental |
+| **A股财务报表-基础版** | 三大财务报表（利润表、资产负债表、现金流量表） | tushare_stock_basic, tushare_income, tushare_balancesheet, tushare_cashflow | cn_stock | incremental |
+| **A股财务报表-完整版** | 完整财务数据（三大报表+业绩预告+业绩快报+审计意见） | tushare_stock_basic, tushare_income, tushare_balancesheet, tushare_cashflow, tushare_forecast, tushare_express, tushare_fina_audit | cn_stock | incremental |
+| **A股财务报表-VIP批量版** | VIP接口批量获取全市场财务数据（需5000积分） | tushare_stock_basic, tushare_income_vip, tushare_balancesheet_vip, tushare_cashflow_vip | cn_stock | incremental |
+| **指数完整数据** | 指数完整数据（基础信息+成分权重+技术因子） | tushare_index_basic, tushare_index_weight, tushare_idx_factor_pro | index | incremental |
+| **ETF完整数据** | ETF完整数据（基础信息+日线行情+复权因子） | tushare_etf_basic, tushare_etf_fund_daily, tushare_etf_fund_adj | etf_fund | incremental |
+| **全市场每日更新** | 每日需要更新的全部数据（适合定时调度，增量更新，不含交易日历） | tushare_daily, tushare_daily_basic, tushare_adj_factor, tushare_etf_fund_daily | daily | incremental |
+
+**注意**：
+- 交易日历（`tushare_trade_calendar`）不参与每日定时调度（`schedule_enabled: false`），因为交易日历数据变化不频繁，建议每半年手动执行一次更新
+- 全市场每日更新组合明确不包含交易日历，专为定时调度设计
+
+### 数据模型扩展
+
+```python
+class PluginGroup(BaseModel):
+    """插件组合模型"""
+    group_id: str                          # 组合ID
+    name: str                              # 组合名称
+    description: str                       # 组合描述
+    plugin_names: List[str]                # 包含的插件列表
+    default_task_type: TaskType            # 默认同步类型
+    category: str                          # 分类 (cn_stock/index/etf_fund/daily)
+    is_predefined: bool = False            # 是否为预定义组合（新增）
+    is_readonly: bool = False              # 是否只读（新增）
+    created_at: datetime
+    updated_at: Optional[datetime]
+```
+
+### 存储方案
+
+预定义组合存储在配置文件 `config/predefined_groups.json` 中：
+
+```json
+{
+  "groups": [
+    {
+      "group_id": "predefined_daily_all_markets",
+      "name": "全市场日线数据",
+      "description": "A股/ETF/指数的日线行情数据，每次同步时覆盖更新（含各自的基础数据依赖）",
+      "plugin_names": [
+        "tushare_stock_basic", "tushare_daily",
+        "tushare_index_basic", "tushare_index_daily",
+        "tushare_etf_basic", "tushare_etf_fund_daily"
+      ],
+      "default_task_type": "full",
+      "category": "daily",
+      "is_predefined": true,
+      "is_readonly": true
+    },
+    {
+      "group_id": "predefined_cn_stock_daily",
+      "name": "A股日线行情",
+      "description": "A股日线行情数据（含基础信息和复权因子）",
+      "plugin_names": ["tushare_stock_basic", "tushare_daily", "tushare_adj_factor"],
+      "default_task_type": "incremental",
+      "category": "cn_stock",
+      "is_predefined": true,
+      "is_readonly": true
+    },
+    // ... 其他预定义组合
+  ]
+}
+```
+
+### API 设计
+
+#### 获取组合列表（已有，需扩展）
+
+```
+GET /api/datamanage/groups
+Response:
+{
+  "groups": [
+    {
+      "group_id": "predefined_cn_stock_basic",
+      "name": "A股基础数据",
+      "is_predefined": true,
+      "is_readonly": true,
+      ...
+    },
+    {
+      "group_id": "user_custom_123",
+      "name": "我的自定义组合",
+      "is_predefined": false,
+      "is_readonly": false,
+      ...
+    }
+  ]
+}
+```
+
+#### 获取预定义组合列表（新增）
+
+```
+GET /api/datamanage/groups/predefined
+Response:
+{
+  "groups": [...],
+  "categories": [
+    {"key": "system", "label": "系统维护", "order": 0},
+    {"key": "daily", "label": "每日更新", "order": 1},
+    {"key": "cn_stock", "label": "A股", "order": 2},
+    {"key": "index", "label": "指数", "order": 3},
+    {"key": "etf_fund", "label": "ETF基金", "order": 4}
+  ]
+}
+```
+
+### 前端界面设计
+
+#### 自定义组合 Tab 改进
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 自定义组合                                                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ [全部] [系统维护] [每日更新] [A股] [指数] [ETF基金]   + 创建组合   ↻ 刷新    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  📦 预定义组合 (9)                                                           │
+│  ├─ 交易日历              交易日历数据...          1个插件   [执行] [详情]  │
+│  ├─ 全市场日线数据        A股/ETF/指数日线...    6个插件   [执行] [详情]    │
+│  ├─ A股日线行情          A股日线行情数据...      3个插件   [执行] [详情]    │
+│  ├─ A股财务报表-基础版   三大财务报表...         4个插件   [执行] [详情]    │
+│  ├─ A股财务报表-完整版   完整财务数据...         7个插件   [执行] [详情]    │
+│  └─ ...                                                                     │
+│                                                                             │
+│  📁 我的组合 (0)                                                             │
+│  └─ (暂无自定义组合，点击"创建组合"添加)                                      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 组合详情弹窗
+
+点击"详情"显示组合包含的插件及其依赖关系图：
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 组合详情：A股财务报表-基础版                                    [×]           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 描述：三大财务报表（利润表、资产负债表、现金流量表）                           │
+│ 分类：A股    插件数：4    默认同步：增量                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ 包含插件：                                                                   │
+│                                                                             │
+│  ┌──────────────────┐                                                       │
+│  │ tushare_stock_   │ ← 基础数据（第1步执行）                                │
+│  │     basic        │                                                       │
+│  └────────┬─────────┘                                                       │
+│           │                                                                 │
+│     ┌─────┴─────┬───────────┐                                               │
+│     ▼           ▼           ▼                                               │
+│ ┌────────┐ ┌────────┐ ┌────────┐                                            │
+│ │income  │ │balance │ │cashflow│ ← 财务报表（第2步并行执行）                  │
+│ │        │ │ sheet  │ │        │                                            │
+│ └────────┘ └────────┘ └────────┘                                            │
+│                                                                             │
+│ 执行顺序：tushare_stock_basic → tushare_income, tushare_balancesheet,       │
+│          tushare_cashflow（并行）                                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                              [取消]  [执行同步]              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Impact
+
+### Affected Specs
+- data-management（新增预定义组合相关 Requirements）
+
+### Affected Code
+- `src/stock_datasource/config/predefined_groups.json` - 新增预定义组合配置文件
+- `src/stock_datasource/modules/datamanage/schemas.py` - 扩展 PluginGroup 模型
+- `src/stock_datasource/modules/datamanage/router.py` - 新增/扩展组合 API
+- `src/stock_datasource/config/runtime_config.py` - 加载预定义组合
+- `frontend/src/views/datamanage/DataManageView.vue` - 组合列表展示改进
+- `frontend/src/views/datamanage/components/GroupDetailDialog.vue` - 新增组合详情弹窗
+- `frontend/src/api/datamanage.ts` - 新增 API 类型
+- `frontend/src/stores/datamanage.ts` - 扩展状态管理
+
+### Dependencies
+- 依赖 `add-financial-statement-plugins` 提案中的插件
+- 依赖 `add-index-plugins` 提案中的插件
+- 依赖现有的 `enhance-data-management` 中的组合管理功能
+
+## Risks & Mitigations
+
+| 风险 | 缓解措施 |
+|------|----------|
+| 预定义组合中的插件可能未安装 | 在展示时显示插件状态，不可用的组合标记为灰色 |
+| 用户可能误删预定义组合 | 预定义组合设为只读，不显示删除按钮 |
+| 预定义组合需要随插件更新而更新 | 配置文件版本化，升级时自动合并 |
+
+## Success Criteria
+
+1. 系统启动时自动加载预定义组合
+2. 预定义组合在"自定义组合"Tab 中正确显示
+3. 预定义组合可正常触发同步，按依赖顺序执行
+4. 预定义组合不可删除或修改
+5. 用户自定义组合与预定义组合共存显示
+6. 组合详情弹窗正确展示依赖关系图
+
+## Open Questions
+
+1. 是否需要支持"复制预定义组合为自定义组合"功能？（建议：Phase 2）
+2. 预定义组合的配置文件是否需要支持热更新？（建议：不需要，重启生效即可）
+
+## References
+
+- `add-financial-statement-plugins` 提案
+- `add-index-plugins` 提案
+- `enhance-data-management` 提案
+- `optimize-plugin-dependencies` 提案

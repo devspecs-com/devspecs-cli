@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "structure_type": "bundle",
+  "format_profile": "openspec",
+  "artifact_family": "OPENSPEC",
+  "repository": "gene-lang/gene",
+  "commit_sha": "9633c6f7b91879228e15911bd884ddc33bdd6cab",
+  "license": "MIT",
+  "source_url": "https://github.com/gene-lang/gene/blob/9633c6f7b91879228e15911bd884ddc33bdd6cab/openspec/changes/add-ai-tooling-metadata-surface/proposal.md",
+  "storage_decision": "real_full_file",
+  "can_commit_full_file": true,
+  "root_path": "openspec",
+  "layout_group": "openspec/changes/add-ai-tooling-metadata-surface",
+  "source_identity": "openspec/changes/add-ai-tooling-metadata-surface|openspec",
+  "primary_path": "openspec/changes/add-ai-tooling-metadata-surface/proposal.md",
+  "kind": "spec",
+  "subtype": "openspec_change",
+  "title": "Add Ai Tooling Metadata Surface",
+  "status": "proposed",
+  "composite_hash": "32f155cd5fc780380846110baa02fef2b14066fd0b401f8888c5c1800cc04ffd",
+  "manifest_ref": "structures/openspec/bundles/32f155cd5fc780380846110baa02fef2b14066fd0b401f8888c5c1800cc04ffd/manifest.json",
+  "files": [
+    {
+      "path": "openspec/changes/add-ai-tooling-metadata-surface/design.md",
+      "role": "design",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-ai-tooling-metadata-surface",
+      "source_identity": "openspec/changes/add-ai-tooling-metadata-surface/design.md|openspec_file",
+      "source_url": "https://github.com/gene-lang/gene/blob/9633c6f7b91879228e15911bd884ddc33bdd6cab/openspec/changes/add-ai-tooling-metadata-surface/design.md",
+      "sha256": "3587f0b10274e6428568a6ca61cbbf08a831c1875b5e3bdbb014f42b3a2177aa",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/add-ai-tooling-metadata-surface/proposal.md",
+      "role": "proposal",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-ai-tooling-metadata-surface",
+      "source_identity": "openspec/changes/add-ai-tooling-metadata-surface/proposal.md|openspec_file",
+      "source_url": "https://github.com/gene-lang/gene/blob/9633c6f7b91879228e15911bd884ddc33bdd6cab/openspec/changes/add-ai-tooling-metadata-surface/proposal.md",
+      "sha256": "834eedd72729a699d7253573410ed35176b7899866eb6387265b83c9d77b913f",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/add-ai-tooling-metadata-surface/specs/ai-tooling-metadata-surface/spec.md",
+      "role": "delta_spec",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-ai-tooling-metadata-surface",
+      "source_identity": "openspec/changes/add-ai-tooling-metadata-surface/specs/ai-tooling-metadata-surface/spec.md|openspec_file",
+      "source_url": "https://github.com/gene-lang/gene/blob/9633c6f7b91879228e15911bd884ddc33bdd6cab/openspec/changes/add-ai-tooling-metadata-surface/specs/ai-tooling-metadata-surface/spec.md",
+      "sha256": "f3fa6753b42d09fca1e37f4cb34a9a1f96590a5f45c8f62d23112b9e16b64e9d",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/add-ai-tooling-metadata-surface/tasks.md",
+      "role": "tasks",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/add-ai-tooling-metadata-surface",
+      "source_identity": "openspec/changes/add-ai-tooling-metadata-surface/tasks.md|openspec_file",
+      "source_url": "https://github.com/gene-lang/gene/blob/9633c6f7b91879228e15911bd884ddc33bdd6cab/openspec/changes/add-ai-tooling-metadata-surface/tasks.md",
+      "sha256": "9c90106f55e4421af19c5f472283aedd236e742b38843f441798d9c4bbc7807f",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    }
+  ]
+}

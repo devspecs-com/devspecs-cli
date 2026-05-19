@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "structure_type": "bundle",
+  "format_profile": "openspec",
+  "artifact_family": "OPENSPEC",
+  "repository": "CleanCocoa/TextBuffer",
+  "commit_sha": "5885a592be26325a332d49365751c2083fe665d4",
+  "license": "MIT",
+  "source_url": "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-operation-log/proposal.md",
+  "storage_decision": "real_full_file",
+  "can_commit_full_file": true,
+  "root_path": "openspec",
+  "layout_group": "openspec/changes/archive/2026-03-13-m1-operation-log",
+  "source_identity": "openspec/changes/archive/2026-03-13-m1-operation-log|openspec",
+  "primary_path": "openspec/changes/archive/2026-03-13-m1-operation-log/proposal.md",
+  "kind": "spec",
+  "subtype": "openspec_change",
+  "title": "2026 03 13 M1 Operation Log",
+  "status": "proposed",
+  "composite_hash": "17be45c2c4203fcbf1ce83419e796516ba9faea9909107d12e03d6bdb56905e2",
+  "manifest_ref": "structures/openspec/bundles/17be45c2c4203fcbf1ce83419e796516ba9faea9909107d12e03d6bdb56905e2/manifest.json",
+  "files": [
+    {
+      "path": "openspec/changes/archive/2026-03-13-m1-operation-log/design.md",
+      "role": "design",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/archive/2026-03-13-m1-operation-log",
+      "source_identity": "openspec/changes/archive/2026-03-13-m1-operation-log/design.md|openspec_file",
+      "source_url": "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-operation-log/design.md",
+      "sha256": "201576e6d54ac7b4ad6867b8fdc31c76ad3e030eee6302b3e446c0569befb5cd",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/archive/2026-03-13-m1-operation-log/proposal.md",
+      "role": "proposal",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/archive/2026-03-13-m1-operation-log",
+      "source_identity": "openspec/changes/archive/2026-03-13-m1-operation-log/proposal.md|openspec_file",
+      "source_url": "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-operation-log/proposal.md",
+      "sha256": "213779dc3d24d16763ab55196d61d2b257dc5ac9e6bf1beea87a7064b3c55cc3",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/archive/2026-03-13-m1-operation-log/specs/operation-log-types/spec.md",
+      "role": "delta_spec",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/archive/2026-03-13-m1-operation-log",
+      "source_identity": "openspec/changes/archive/2026-03-13-m1-operation-log/specs/operation-log-types/spec.md|openspec_file",
+      "source_url": "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-operation-log/specs/operation-log-types/spec.md",
+      "sha256": "696ac7a980127d13874df55d5e0f95508e3ea67f1c031224d1f888f28d0a8f7e",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    },
+    {
+      "path": "openspec/changes/archive/2026-03-13-m1-operation-log/tasks.md",
+      "role": "tasks",
+      "source_type": "openspec",
+      "format_profile": "openspec",
+      "layout_group": "openspec/changes/archive/2026-03-13-m1-operation-log",
+      "source_identity": "openspec/changes/archive/2026-03-13-m1-operation-log/tasks.md|openspec_file",
+      "source_url": "https://github.com/CleanCocoa/TextBuffer/blob/5885a592be26325a332d49365751c2083fe665d4/openspec/changes/archive/2026-03-13-m1-operation-log/tasks.md",
+      "sha256": "03315f8b20285e721f8b1f34cf2d1a11976521f1ffd6c01e3b622a4b9d41b56a",
+      "storage_decision": "real_full_file",
+      "body_present": true
+    }
+  ]
+}
