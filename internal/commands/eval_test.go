@@ -31,6 +31,9 @@ func TestEvalCommand_TextOutputLabelsRetrieverAndTokenCounter(t *testing.T) {
 		"Mean must-have recall:",
 		"Context sufficiency pass rate:",
 		"Pareto:",
+		"Diagnostics",
+		"Discovery coverage:",
+		"Role summaries:",
 		"Case: resume-entitlement-sync",
 	} {
 		if !strings.Contains(out, want) {
@@ -78,6 +81,16 @@ func TestEvalCommand_JSONOutput(t *testing.T) {
 	}
 	if _, ok := summary["context_sufficiency_pass_rate"].(float64); !ok {
 		t.Fatalf("missing sufficiency pass rate: %#v", summary["context_sufficiency_pass_rate"])
+	}
+	diagnostics, ok := got["diagnostics"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing diagnostics: %#v", got["diagnostics"])
+	}
+	if _, ok := diagnostics["discovery_coverage"].(float64); !ok {
+		t.Fatalf("missing discovery coverage: %#v", diagnostics["discovery_coverage"])
+	}
+	if summaries, ok := diagnostics["role_summaries"].([]any); !ok || len(summaries) == 0 {
+		t.Fatalf("missing role summaries: %#v", diagnostics["role_summaries"])
 	}
 }
 

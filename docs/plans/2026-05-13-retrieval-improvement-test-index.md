@@ -26,8 +26,10 @@ Related plans and OpenSpec changes:
 - `docs/plans/2026-05-13-retrieval-quality-improvement-plan.md`
 - `docs/plans/2026-05-13-language-agnostic-intent-graph-plan.md`
 - `docs/plans/2026-05-13-eval-to-cli-integration-plan.md`
+- `docs/plans/2026-05-14-adapter-classifier-pipeline-plan.md`
 - `openspec/changes/improve-retrieval-quality/`
 - `openspec/changes/language-agnostic-intent-graph/`
+- `openspec/changes/add-adapter-classifier-pipeline/`
 
 ## Current Baseline
 
@@ -532,7 +534,12 @@ Keep criteria:
 
 Hypothesis:
 
-- Purpose-built deterministic classifiers for OpenSpec, ADR, PRD, plans, agent notes, and generic markdown will improve discovery and metadata quality more safely than adding more configured paths or generic text scoring.
+- Purpose-built deterministic classifiers for OpenSpec, ADR, RFC/proposals, PRD, plans, agent notes, and generic markdown will improve discovery and metadata quality more safely than adding more configured paths or generic text scoring.
+
+Detailed plan:
+
+- `docs/plans/2026-05-14-adapter-classifier-pipeline-plan.md`
+- `openspec/changes/add-adapter-classifier-pipeline/`
 
 Scope:
 
@@ -541,7 +548,9 @@ Scope:
 - Positive and negative classifier features.
 - OpenSpec adapter/model.
 - ADR adapter/model.
+- ADR subformat evidence for Nygard, MADR, and Y-Statement documents.
 - PRD adapter/model.
+- RFC/proposal section-pattern model, without claiming named standards until real samples justify them.
 - Plan adapter/model.
 - Agent-note adapter/model.
 - Generic markdown fallback for ambiguous documents.

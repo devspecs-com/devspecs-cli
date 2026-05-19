@@ -70,6 +70,15 @@ func TestRun_AgenticSaaSFixture(t *testing.T) {
 	if result.Summary.MedianTokenReductionVsFullPlanning <= 0 {
 		t.Fatalf("expected positive full-planning reduction, got %.3f", result.Summary.MedianTokenReductionVsFullPlanning)
 	}
+	if result.Diagnostics.ExpectedRelevantCount == 0 {
+		t.Fatalf("expected eval diagnostics: %#v", result.Diagnostics)
+	}
+	if result.Diagnostics.DiscoveryCoverage != 1 {
+		t.Fatalf("filesystem fixture should expose all expected artifacts, got discovery coverage %.3f: %#v", result.Diagnostics.DiscoveryCoverage, result.Diagnostics)
+	}
+	if len(result.Diagnostics.RoleSummaries) == 0 {
+		t.Fatalf("expected diagnostic role summaries: %#v", result.Diagnostics)
+	}
 
 	sufficiencyPasses := 0
 	sufficiencyFailures := 0
@@ -96,6 +105,9 @@ func TestRun_AgenticSaaSFixture(t *testing.T) {
 		}
 		if len(c.ArtifactReasons) != len(c.ArtifactsIncluded) {
 			t.Fatalf("%s: artifact reason count mismatch", c.ID)
+		}
+		if c.DiscoveryCoverage == 0 {
+			t.Fatalf("%s: expected case discovery diagnostics", c.ID)
 		}
 		for _, reason := range c.ArtifactReasons {
 			if reason.Path == "" || len(reason.Reasons) == 0 {
@@ -124,6 +136,12 @@ func TestRun_DefaultUsesIndexedCorpus(t *testing.T) {
 	}
 	if result.Corpus.PlanningArtifacts.Files == 0 {
 		t.Fatalf("expected indexed planning artifacts: %#v", result.Corpus)
+	}
+	if result.Diagnostics.ExpectedMissingFromCorpusCount == 0 {
+		t.Fatalf("expected indexed diagnostics to expose missing corpus artifacts: %#v", result.Diagnostics)
+	}
+	if result.Diagnostics.DiscoveryCoverage >= 1 {
+		t.Fatalf("expected indexed discovery coverage gap, got %.3f", result.Diagnostics.DiscoveryCoverage)
 	}
 }
 

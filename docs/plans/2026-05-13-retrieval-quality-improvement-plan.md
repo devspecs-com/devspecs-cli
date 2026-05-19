@@ -36,7 +36,12 @@ Interpretation: the indexed path exposes scan/index/schema/adapter coverage as a
 
 This plan is based on the seed eval plus the May 12 trial report from `pdpp` and `unity-surfaces`.
 
-Related OpenSpec change: `openspec/changes/improve-retrieval-quality/`.
+Related planning and OpenSpec artifacts:
+
+- `openspec/changes/improve-retrieval-quality/`
+- `openspec/changes/add-adapter-classifier-pipeline/`
+- `docs/plans/2026-05-13-retrieval-improvement-test-index.md`
+- `docs/plans/2026-05-14-adapter-classifier-pipeline-plan.md`
 
 ## North Star
 

@@ -167,6 +167,30 @@ type BaselineMetrics struct {
 	IrrelevantCount          int      `json:"irrelevant_count"`
 }
 
+type Diagnostics struct {
+	ExpectedRelevantCount          int              `json:"expected_relevant_count"`
+	ExpectedAvailableCount         int              `json:"expected_available_count"`
+	ExpectedMissingFromCorpusCount int              `json:"expected_missing_from_corpus_count"`
+	MissedAfterDiscoveryCount      int              `json:"missed_after_discovery_count"`
+	DiscoveryCoverage              float64          `json:"discovery_coverage"`
+	RetrievalCoverageOfDiscovered  float64          `json:"retrieval_coverage_of_discovered"`
+	ExpectedMissingFromCorpus      []string         `json:"expected_missing_from_corpus,omitempty"`
+	MissedAfterDiscovery           []string         `json:"missed_after_discovery,omitempty"`
+	RoleSummaries                  []RoleDiagnostic `json:"role_summaries,omitempty"`
+}
+
+type RoleDiagnostic struct {
+	Role                          string  `json:"role"`
+	Expected                      int     `json:"expected"`
+	ExpectedAvailable             int     `json:"expected_available"`
+	Retrieved                     int     `json:"retrieved"`
+	IrrelevantRetrieved           int     `json:"irrelevant_retrieved"`
+	MissingFromCorpus             int     `json:"missing_from_corpus"`
+	MissedAfterDiscovery          int     `json:"missed_after_discovery"`
+	DiscoveryCoverage             float64 `json:"discovery_coverage"`
+	RetrievalCoverageOfDiscovered float64 `json:"retrieval_coverage_of_discovered"`
+}
+
 type CaseResult struct {
 	ID                            string            `json:"id"`
 	Query                         string            `json:"query"`
@@ -198,6 +222,11 @@ type CaseResult struct {
 	ArtifactPrecision             float64           `json:"artifact_precision"`
 	MissedExpectedRelevant        []string          `json:"missed_expected_relevant"`
 	UnexpectedExcludedHits        []string          `json:"unexpected_excluded_hits"`
+	ExpectedAvailableCount        int               `json:"expected_available_count"`
+	ExpectedMissingFromCorpus     []string          `json:"expected_missing_from_corpus,omitempty"`
+	MissedAfterDiscovery          []string          `json:"missed_after_discovery,omitempty"`
+	DiscoveryCoverage             float64           `json:"discovery_coverage"`
+	RetrievalCoverageOfDiscovered float64           `json:"retrieval_coverage_of_discovered"`
 	ContextSufficiency            SufficiencyResult `json:"context_sufficiency"`
 	Baselines                     []BaselineMetrics `json:"baselines"`
 	ThresholdFailures             []string          `json:"threshold_failures,omitempty"`
@@ -256,6 +285,7 @@ type Result struct {
 	ResultsFile      string           `json:"results_file,omitempty"`
 	Corpus           CorpusSummary    `json:"corpus"`
 	Summary          Summary          `json:"summary"`
+	Diagnostics      Diagnostics      `json:"diagnostics"`
 	Cases            []CaseResult     `json:"cases"`
 }
 
@@ -316,6 +346,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 	allMarkdownContext := renderContext("all markdown", allMarkdown)
 	sourceContext := renderContext("source/context candidates", sourceCandidates)
 	fullCandidateContext := renderContext("full candidate corpus", fullCandidate)
+	corpusPaths := candidatePathSet(files)
 
 	result := &Result{
 		Fixture:          filepath.ToSlash(fixture),
@@ -381,11 +412,13 @@ func Run(fixture string, opts Options) (*Result, error) {
 		cr.TokenReductionVsFullCandidate = tokenReduction(cr.DevSpecsTokens, cr.FullCandidateCorpusTokens)
 		cr.TokenReductionVsQueryFile = tokenReduction(cr.DevSpecsTokens, cr.QueryFileBaselineTokens)
 		applyArtifactMetrics(&cr, c)
+		applyDiscoveryDiagnostics(&cr, c, corpusPaths)
 		cr.ContextSufficiency = evaluateSufficiency(c.SuccessCriteria, devContext, cr.ArtifactsIncluded)
 		applyThresholds(&cr, opts)
 		result.Cases = append(result.Cases, cr)
 	}
 	result.Summary = summarize(result.Cases)
+	result.Diagnostics = summarizeDiagnostics(result.Cases)
 	result.Summary.FailedThresholdCount += len(CheckSummaryThresholds(result, opts))
 	return result, nil
 }
@@ -927,6 +960,150 @@ func applyArtifactMetrics(cr *CaseResult, spec CaseSpec) {
 	}
 }
 
+func applyDiscoveryDiagnostics(cr *CaseResult, spec CaseSpec, corpusPaths map[string]bool) {
+	included := stringSet(cr.ArtifactsIncluded)
+	availableRetrieved := 0
+	cr.ExpectedAvailableCount = 0
+	cr.ExpectedMissingFromCorpus = nil
+	cr.MissedAfterDiscovery = nil
+	for _, artifact := range spec.ExpectedRelevant {
+		path := filepath.ToSlash(artifact.Path)
+		if corpusPaths[path] {
+			cr.ExpectedAvailableCount++
+			if included[path] {
+				availableRetrieved++
+			} else {
+				cr.MissedAfterDiscovery = append(cr.MissedAfterDiscovery, path)
+			}
+			continue
+		}
+		cr.ExpectedMissingFromCorpus = append(cr.ExpectedMissingFromCorpus, path)
+	}
+	if cr.ExpectedRelevantCount > 0 {
+		cr.DiscoveryCoverage = float64(cr.ExpectedAvailableCount) / float64(cr.ExpectedRelevantCount)
+	}
+	if cr.ExpectedAvailableCount > 0 {
+		cr.RetrievalCoverageOfDiscovered = float64(availableRetrieved) / float64(cr.ExpectedAvailableCount)
+	}
+}
+
+func summarizeDiagnostics(cases []CaseResult) Diagnostics {
+	var out Diagnostics
+	if len(cases) == 0 {
+		return out
+	}
+	missingFromCorpus := map[string]bool{}
+	missedAfterDiscovery := map[string]bool{}
+	roles := map[string]*RoleDiagnostic{}
+	for _, c := range cases {
+		out.ExpectedRelevantCount += c.ExpectedRelevantCount
+		out.ExpectedAvailableCount += c.ExpectedAvailableCount
+		out.ExpectedMissingFromCorpusCount += len(c.ExpectedMissingFromCorpus)
+		out.MissedAfterDiscoveryCount += len(c.MissedAfterDiscovery)
+		for _, path := range c.ExpectedMissingFromCorpus {
+			missingFromCorpus[path] = true
+		}
+		for _, path := range c.MissedAfterDiscovery {
+			missedAfterDiscovery[path] = true
+		}
+		for _, path := range append([]string{}, c.RelevantIncluded...) {
+			role := diagnosticRole(path)
+			ensureRoleDiagnostic(roles, role).Retrieved++
+		}
+		for _, path := range c.IrrelevantIncluded {
+			role := diagnosticRole(path)
+			ensureRoleDiagnostic(roles, role).IrrelevantRetrieved++
+		}
+		for _, path := range append(append([]string{}, c.RelevantIncluded...), c.MissedExpectedRelevant...) {
+			role := diagnosticRole(path)
+			ensureRoleDiagnostic(roles, role).Expected++
+		}
+		for _, path := range append([]string{}, c.RelevantIncluded...) {
+			role := diagnosticRole(path)
+			roles[role].ExpectedAvailable++
+		}
+		for _, path := range c.MissedAfterDiscovery {
+			role := diagnosticRole(path)
+			diag := ensureRoleDiagnostic(roles, role)
+			diag.ExpectedAvailable++
+			diag.MissedAfterDiscovery++
+		}
+		for _, path := range c.ExpectedMissingFromCorpus {
+			role := diagnosticRole(path)
+			ensureRoleDiagnostic(roles, role).MissingFromCorpus++
+		}
+	}
+	out.ExpectedMissingFromCorpus = sortedSet(missingFromCorpus)
+	out.MissedAfterDiscovery = sortedSet(missedAfterDiscovery)
+	if out.ExpectedRelevantCount > 0 {
+		out.DiscoveryCoverage = float64(out.ExpectedAvailableCount) / float64(out.ExpectedRelevantCount)
+	}
+	if out.ExpectedAvailableCount > 0 {
+		retrieved := out.ExpectedAvailableCount - out.MissedAfterDiscoveryCount
+		if retrieved < 0 {
+			retrieved = 0
+		}
+		out.RetrievalCoverageOfDiscovered = float64(retrieved) / float64(out.ExpectedAvailableCount)
+	}
+	roleNames := make([]string, 0, len(roles))
+	for role := range roles {
+		roleNames = append(roleNames, role)
+	}
+	sort.Strings(roleNames)
+	for _, role := range roleNames {
+		diag := *roles[role]
+		if diag.Expected > 0 {
+			diag.DiscoveryCoverage = float64(diag.ExpectedAvailable) / float64(diag.Expected)
+		}
+		if diag.ExpectedAvailable > 0 {
+			diag.RetrievalCoverageOfDiscovered = float64(diag.Retrieved) / float64(diag.ExpectedAvailable)
+		}
+		out.RoleSummaries = append(out.RoleSummaries, diag)
+	}
+	return out
+}
+
+func ensureRoleDiagnostic(roles map[string]*RoleDiagnostic, role string) *RoleDiagnostic {
+	if roles[role] == nil {
+		roles[role] = &RoleDiagnostic{Role: role}
+	}
+	return roles[role]
+}
+
+func diagnosticRole(path string) string {
+	path = strings.ToLower(filepath.ToSlash(path))
+	switch {
+	case strings.HasPrefix(path, "openspec/specs/") && strings.HasSuffix(path, "/spec.md"):
+		return "openspec_base_spec"
+	case strings.HasPrefix(path, "openspec/") && strings.HasSuffix(path, "/proposal.md"):
+		return "openspec_proposal"
+	case strings.HasPrefix(path, "openspec/") && strings.HasSuffix(path, "/design.md"):
+		return "openspec_design"
+	case strings.HasPrefix(path, "openspec/") && strings.HasSuffix(path, "/tasks.md"):
+		return "openspec_tasks"
+	case strings.HasPrefix(path, "openspec/") && strings.Contains(path, "/specs/") && strings.HasSuffix(path, "/spec.md"):
+		return "openspec_spec_delta"
+	case strings.HasPrefix(path, "docs/adr/") || strings.HasPrefix(path, "docs/adrs/") || strings.Contains(path, "/docs/adr/") || strings.Contains(path, "/docs/adrs/"):
+		return "adr"
+	case strings.HasPrefix(path, "rfcs/") || strings.HasPrefix(path, "rfc/") || strings.HasPrefix(path, "docs/rfcs/") || strings.HasPrefix(path, "docs/rfc/") || strings.Contains(path, "/rfcs/") || strings.Contains(path, "/rfc/"):
+		return "rfc"
+	case strings.HasPrefix(path, "docs/prd/") || strings.HasPrefix(path, "docs/prds/") || strings.Contains(path, "/docs/prd/") || strings.Contains(path, "/docs/prds/"):
+		return "prd"
+	case strings.HasPrefix(path, ".cursor/"):
+		return "cursor_plan"
+	case strings.HasPrefix(path, ".claude/"):
+		return "claude_plan"
+	case strings.HasPrefix(path, ".codex/"):
+		return "codex_plan"
+	case strings.Contains(path, "/plans/") || strings.HasPrefix(path, "plans/") || strings.HasSuffix(path, ".plan.md"):
+		return "plan"
+	case strings.EqualFold(filepath.Ext(path), ".md"):
+		return "markdown"
+	default:
+		return "source"
+	}
+}
+
 func applyThresholds(cr *CaseResult, opts Options) {
 	if opts.MinRecall != nil && cr.ArtifactRecall < *opts.MinRecall {
 		cr.ThresholdFailures = append(cr.ThresholdFailures,
@@ -1056,6 +1233,23 @@ func stringSet(items []string) map[string]bool {
 	return out
 }
 
+func candidatePathSet(files []File) map[string]bool {
+	out := make(map[string]bool, len(files))
+	for _, f := range files {
+		out[filepath.ToSlash(f.Path)] = true
+	}
+	return out
+}
+
+func sortedSet(items map[string]bool) []string {
+	out := make([]string, 0, len(items))
+	for item := range items {
+		out = append(out, item)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func defaultString(value, fallback string) string {
 	if strings.TrimSpace(value) == "" {
 		return fallback
@@ -1115,6 +1309,26 @@ func FormatText(r *Result) string {
 	}
 	fmt.Fprintln(&b)
 
+	fmt.Fprintln(&b, "Diagnostics")
+	fmt.Fprintf(&b, "- Discovery coverage: %d/%d = %s\n", r.Diagnostics.ExpectedAvailableCount, r.Diagnostics.ExpectedRelevantCount, pct(r.Diagnostics.DiscoveryCoverage))
+	fmt.Fprintf(&b, "- Retrieval coverage of discovered expected artifacts: %s\n", recallText(r.Diagnostics.ExpectedAvailableCount-r.Diagnostics.MissedAfterDiscoveryCount, r.Diagnostics.ExpectedAvailableCount, r.Diagnostics.RetrievalCoverageOfDiscovered))
+	fmt.Fprintf(&b, "- Expected missing from corpus: %s\n", listOrNone(r.Diagnostics.ExpectedMissingFromCorpus))
+	fmt.Fprintf(&b, "- Missed after discovery: %s\n", listOrNone(r.Diagnostics.MissedAfterDiscovery))
+	if len(r.Diagnostics.RoleSummaries) > 0 {
+		fmt.Fprintln(&b, "- Role summaries:")
+		for _, role := range r.Diagnostics.RoleSummaries {
+			fmt.Fprintf(&b, "  - %s: expected %d / available %d / retrieved %d / missing-from-corpus %d / missed-after-discovery %d / irrelevant %d\n",
+				role.Role,
+				role.Expected,
+				role.ExpectedAvailable,
+				role.Retrieved,
+				role.MissingFromCorpus,
+				role.MissedAfterDiscovery,
+				role.IrrelevantRetrieved)
+		}
+	}
+	fmt.Fprintln(&b)
+
 	for _, c := range r.Cases {
 		fmt.Fprintf(&b, "Case: %s\n", c.ID)
 		fmt.Fprintf(&b, "- DevSpecs context: %s tokens\n", comma(c.DevSpecsTokens))
@@ -1143,6 +1357,10 @@ func FormatText(r *Result) string {
 		fmt.Fprintf(&b, "- Relevant included: %s\n", listOrNone(c.RelevantIncluded))
 		fmt.Fprintf(&b, "- Irrelevant included: %s\n", listOrNone(c.IrrelevantIncluded))
 		fmt.Fprintf(&b, "- Missed: %s\n", listOrNone(c.MissedExpectedRelevant))
+		fmt.Fprintf(&b, "- Discovery: %d/%d = %s\n", c.ExpectedAvailableCount, c.ExpectedRelevantCount, pct(c.DiscoveryCoverage))
+		fmt.Fprintf(&b, "- Retrieval of discovered expected artifacts: %s\n", recallText(c.ExpectedAvailableCount-len(c.MissedAfterDiscovery), c.ExpectedAvailableCount, c.RetrievalCoverageOfDiscovered))
+		fmt.Fprintf(&b, "- Expected missing from corpus: %s\n", listOrNone(c.ExpectedMissingFromCorpus))
+		fmt.Fprintf(&b, "- Missed after discovery: %s\n", listOrNone(c.MissedAfterDiscovery))
 		fmt.Fprintf(&b, "- Unexpected excluded hits: %s\n", listOrNone(c.UnexpectedExcludedHits))
 		if len(c.ThresholdFailures) > 0 {
 			fmt.Fprintf(&b, "- Threshold failures: %s\n", strings.Join(c.ThresholdFailures, "; "))
