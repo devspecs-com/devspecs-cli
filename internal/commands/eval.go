@@ -26,18 +26,21 @@ var nowUTC = func() time.Time {
 // NewEvalCmd creates the ds eval command.
 func NewEvalCmd() *cobra.Command {
 	var (
-		asJSON           bool
-		minRecall        float64
-		minMeanRecall    float64
-		minMustRecall    float64
-		minSufficiency   float64
-		minReductionFull float64
-		resultsDir       string
-		noSave           bool
-		indexed          bool
-		filesystem       bool
-		commandUnderTest string
-		classifierEval   bool
+		asJSON             bool
+		minRecall          float64
+		minMeanRecall      float64
+		minMustRecall      float64
+		minSufficiency     float64
+		minReductionFull   float64
+		resultsDir         string
+		noSave             bool
+		indexed            bool
+		filesystem         bool
+		commandUnderTest   string
+		classifierEval     bool
+		firstIndexReport   bool
+		classifierFixtures []string
+		inputUSDPer1M      float64
 	)
 
 	cmd := &cobra.Command{
@@ -45,6 +48,12 @@ func NewEvalCmd() *cobra.Command {
 		Short: "Run deterministic context retrieval evals for a fixture repo",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if inputUSDPer1M < 0 {
+				return fmt.Errorf("--input-usd-per-1m must be non-negative")
+			}
+			if classifierEval && firstIndexReport {
+				return fmt.Errorf("--classifier cannot be combined with --first-index-report")
+			}
 			if classifierEval {
 				if strings.TrimSpace(commandUnderTest) != "" {
 					return fmt.Errorf("--classifier cannot be combined with --command")
@@ -72,39 +81,34 @@ func NewEvalCmd() *cobra.Command {
 				return nil
 			}
 
-			opts := evalharness.Options{JSON: asJSON}
-			if filesystem {
-				opts.CorpusSource = evalharness.CorpusSourceFilesystemFixture
-			} else if indexed {
-				opts.CorpusSource = evalharness.CorpusSourceSQLiteIndex
+			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
+			if err != nil {
+				return err
 			}
-			if strings.TrimSpace(commandUnderTest) != "" {
-				if filesystem {
-					return fmt.Errorf("--command requires the indexed eval corpus; remove --filesystem")
-				}
-				normalized, err := normalizeEvalCommand(commandUnderTest)
+			if firstIndexReport {
+				report, err := runFirstIndexReport(args[0], opts, firstIndexReportOptions{
+					ClassifierFixtures: classifierFixtures,
+					ResultsDir:         resultsDir,
+					NoSave:             noSave,
+					GeneratedAt:        nowUTC(),
+					InputUSDPer1M:      inputUSDPer1M,
+				})
 				if err != nil {
 					return err
 				}
-				opts.CommandUnderTest = normalized
-				opts.CommandRunner = func(fixtureAbs string, cases []evalharness.CaseSpec) (map[string]evalharness.CommandCaseOutput, error) {
-					return runLiveCommandEval(normalized, fixtureAbs, cases)
+				if asJSON {
+					data, err := formatFirstIndexReportJSON(report)
+					if err != nil {
+						return err
+					}
+					fmt.Fprintln(cmd.OutOrStdout(), string(data))
+				} else {
+					fmt.Fprint(cmd.OutOrStdout(), formatFirstIndexReportText(report))
 				}
-			}
-			if cmd.Flags().Changed("min-recall") {
-				opts.MinRecall = &minRecall
-			}
-			if cmd.Flags().Changed("min-mean-recall") {
-				opts.MinMeanRecall = &minMeanRecall
-			}
-			if cmd.Flags().Changed("min-must-recall") {
-				opts.MinMustRecall = &minMustRecall
-			}
-			if cmd.Flags().Changed("min-sufficiency-rate") {
-				opts.MinSufficiency = &minSufficiency
-			}
-			if cmd.Flags().Changed("min-reduction-full") {
-				opts.MinReductionFull = &minReductionFull
+				if report.FailedThresholdCount > 0 {
+					return fmt.Errorf("eval thresholds failed")
+				}
+				return nil
 			}
 			result, err := evalharness.Run(args[0], opts)
 			if err != nil {
@@ -142,9 +146,12 @@ func NewEvalCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&indexed, "indexed", false, "Use indexed eval corpus (default; retained for explicit CI scripts)")
 	cmd.Flags().BoolVar(&filesystem, "filesystem", false, "Use raw fixture filesystem corpus instead of the indexed eval corpus")
 	cmd.Flags().BoolVar(&classifierEval, "classifier", false, "Run deterministic classifier evals from classifier_cases.yaml")
+	cmd.Flags().BoolVar(&firstIndexReport, "first-index-report", false, "Run retrieval and classifier evals and emit an auditable first-index report")
+	cmd.Flags().StringArrayVar(&classifierFixtures, "classifier-fixture", nil, "Classifier fixture to include in --first-index-report; may be repeated")
 	cmd.Flags().StringVar(&commandUnderTest, "command", "", "Run eval through a live command path: find or resume-query")
 	cmd.Flags().StringVar(&resultsDir, "results-dir", defaultEvalResultsDir, "Directory for timestamped JSON eval result files")
 	cmd.Flags().BoolVar(&noSave, "no-save", false, "Do not write a timestamped JSON eval result file")
+	cmd.Flags().Float64Var(&inputUSDPer1M, "input-usd-per-1m", 0, "Optional input-token price in USD per 1M tokens for first-index saved-cost estimates")
 	cmd.Flags().Float64Var(&minRecall, "min-recall", 0, "Minimum artifact recall per case, as 0.0-1.0")
 	cmd.Flags().Float64Var(&minMeanRecall, "min-mean-recall", 0, "Minimum mean artifact recall, as 0.0-1.0")
 	cmd.Flags().Float64Var(&minMustRecall, "min-must-recall", 0, "Minimum must-have artifact recall per case, as 0.0-1.0")

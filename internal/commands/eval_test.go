@@ -148,6 +148,96 @@ func TestEvalCommand_ClassifierJSONOutput(t *testing.T) {
 	}
 }
 
+func TestEvalCommand_FirstIndexReportTextOutput(t *testing.T) {
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{
+		filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"),
+		"--first-index-report",
+		"--classifier-fixture", filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"),
+		"--classifier-fixture", filepath.Join("..", "..", "fixtures", "mined-intent-samples"),
+		"--input-usd-per-1m", "0.15",
+		"--no-save",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"DevSpecs First-Index Eval Report",
+		"North Star",
+		"Token reduction:",
+		"saved",
+		"Retrieval: precision",
+		"Sufficiency:",
+		"Discovery:",
+		"Classifier:",
+		"Retrieval And Tokens",
+		"Classifier Fixtures",
+		"Model adr:",
+		"Residual Risks",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in output:\n%s", want, out)
+		}
+	}
+}
+
+func TestEvalCommand_FirstIndexReportJSONOutput(t *testing.T) {
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{
+		filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"),
+		"--first-index-report",
+		"--classifier-fixture", filepath.Join("..", "..", "fixtures", "mined-intent-samples"),
+		"--json",
+		"--no-save",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["generated_at"].(string); !ok {
+		t.Fatalf("missing generated_at: %#v", got["generated_at"])
+	}
+	summary, ok := got["summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing summary: %#v", got["summary"])
+	}
+	for _, key := range []string{
+		"mean_token_reduction_vs_full_planning",
+		"mean_artifact_precision",
+		"mean_artifact_recall",
+		"context_sufficiency_pass_rate",
+		"saved_input_tokens_vs_full_planning",
+		"classifier_accuracy",
+	} {
+		if _, ok := summary[key]; !ok {
+			t.Fatalf("missing summary[%s]: %#v", key, summary)
+		}
+	}
+	retrieval, ok := got["retrieval"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing retrieval: %#v", got["retrieval"])
+	}
+	if retrieval["retriever"] != "eval_weighted_files_v0" {
+		t.Fatalf("retriever = %#v", retrieval["retriever"])
+	}
+	classifiers, ok := got["classifiers"].([]any)
+	if !ok || len(classifiers) != 1 {
+		t.Fatalf("expected one classifier summary: %#v", got["classifiers"])
+	}
+	first := classifiers[0].(map[string]any)
+	if _, ok := first["models"].([]any); !ok {
+		t.Fatalf("missing classifier models: %#v", first["models"])
+	}
+}
+
 func TestEvalCommand_FilesystemCorpusDiagnosticFlag(t *testing.T) {
 	cmd := NewEvalCmd()
 	cmd.SetArgs([]string{filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"), "--filesystem", "--json", "--no-save"})
