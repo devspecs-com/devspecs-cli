@@ -14,6 +14,7 @@ const (
 	KindContract         = "contract"
 	KindDecision         = "decision"
 	KindMarkdownArtifact = "markdown_artifact"
+	KindSourceContext    = "source_context"
 )
 
 // Known subtypes per kind (empty subtype is always allowed).
@@ -31,6 +32,7 @@ var validKinds = map[string]struct{}{
 	KindContract:         {},
 	KindDecision:         {},
 	KindMarkdownArtifact: {},
+	KindSourceContext:    {},
 }
 
 // allowedSubtypes maps kind -> set of allowed non-empty subtype strings.

@@ -45,10 +45,10 @@ func TestE2E_SpecExample(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Should find 3 artifacts total: 1 openspec, 1 adr, 1 plan
+	// Should find 4 artifacts total: 2 OpenSpec child files, 1 ADR, 1 plan.
 	totalNew := result.New
-	if totalNew != 3 {
-		t.Errorf("expected 3 new artifacts, got %d (found: %v)", totalNew, result.Found)
+	if totalNew != 4 {
+		t.Errorf("expected 4 new artifacts, got %d (found: %v)", totalNew, result.Found)
 	}
 
 	// Verify kinds
@@ -60,8 +60,8 @@ func TestE2E_SpecExample(t *testing.T) {
 	for _, a := range arts {
 		kinds[a.Kind]++
 	}
-	if kinds["spec"] != 1 {
-		t.Errorf("expected 1 spec, got %d", kinds["spec"])
+	if kinds["spec"] != 2 {
+		t.Errorf("expected 2 specs, got %d", kinds["spec"])
 	}
 	if kinds["decision"] != 1 {
 		t.Errorf("expected 1 decision, got %d", kinds["decision"])
@@ -80,10 +80,10 @@ func TestE2E_SpecExample(t *testing.T) {
 		}
 	}
 
-	// Verify todos extracted (4 from tasks.md + 3 from plan)
+	// Verify todos extracted (4 aggregated on proposal, 4 from tasks artifact, 3 from plan).
 	var todoCount int
 	db.QueryRow("SELECT COUNT(*) FROM artifact_todos").Scan(&todoCount)
-	if todoCount != 7 {
-		t.Errorf("expected 7 total todos, got %d", todoCount)
+	if todoCount != 11 {
+		t.Errorf("expected 11 total todos, got %d", todoCount)
 	}
 }

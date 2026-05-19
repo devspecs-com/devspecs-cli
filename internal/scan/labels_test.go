@@ -7,6 +7,7 @@ func TestSourceTypeDisplayLabel(t *testing.T) {
 		{"markdown", "Planning docs"},
 		{"openspec", "OpenSpec"},
 		{"adr", "ADRs"},
+		{"source_context", "Source context"},
 		{"capture", "capture"},
 	}
 	for _, tc := range tests {

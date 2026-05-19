@@ -14,7 +14,7 @@ func TestValidateKind(t *testing.T) {
 	}
 	for _, k := range []string{
 		KindPlan, KindSpec, KindRequirements, KindDesign, KindContract,
-		KindDecision, KindMarkdownArtifact,
+		KindDecision, KindMarkdownArtifact, KindSourceContext,
 	} {
 		if err := ValidateKind(k); err != nil {
 			t.Fatalf("%q: %v", k, err)

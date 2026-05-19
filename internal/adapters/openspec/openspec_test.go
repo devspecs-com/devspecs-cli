@@ -37,8 +37,8 @@ func TestOpenSpec_ProposalDetected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != 1 {
-		t.Fatalf("expected 1 candidate, got %d", len(candidates))
+	if len(candidates) != 3 {
+		t.Fatalf("expected 3 candidates, got %d", len(candidates))
 	}
 	if candidates[0].AdapterName != "openspec" {
 		t.Errorf("expected adapter 'openspec', got %q", candidates[0].AdapterName)

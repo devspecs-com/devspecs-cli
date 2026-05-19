@@ -137,11 +137,14 @@ func TestRun_DefaultUsesIndexedCorpus(t *testing.T) {
 	if result.Corpus.PlanningArtifacts.Files == 0 {
 		t.Fatalf("expected indexed planning artifacts: %#v", result.Corpus)
 	}
-	if result.Diagnostics.ExpectedMissingFromCorpusCount == 0 {
-		t.Fatalf("expected indexed diagnostics to expose missing corpus artifacts: %#v", result.Diagnostics)
+	if result.Diagnostics.ExpectedMissingFromCorpusCount != 0 {
+		t.Fatalf("expected indexed corpus coverage gaps to be closed, got %#v", result.Diagnostics)
 	}
-	if result.Diagnostics.DiscoveryCoverage >= 1 {
-		t.Fatalf("expected indexed discovery coverage gap, got %.3f", result.Diagnostics.DiscoveryCoverage)
+	if result.Diagnostics.DiscoveryCoverage != 1 {
+		t.Fatalf("expected complete indexed discovery coverage, got %.3f", result.Diagnostics.DiscoveryCoverage)
+	}
+	if result.Diagnostics.MissedAfterDiscoveryCount == 0 {
+		t.Fatalf("expected remaining retrieval gaps after discovery: %#v", result.Diagnostics)
 	}
 }
 

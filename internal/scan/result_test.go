@@ -8,7 +8,7 @@ import (
 )
 
 func TestResult_finalizeSourcesBreakdown_Sums(t *testing.T) {
-	r := newResult([]string{"markdown", "openspec", "adr"})
+	r := newResult([]string{"markdown", "openspec", "adr", "source_context"})
 	tallyIndexed(r, "markdown", []adapters.Source{{SourceType: "markdown", FormatProfile: format.ProfileGeneric}}, adapters.Artifact{})
 	tallyIndexed(r, "markdown", []adapters.Source{{SourceType: "markdown", FormatProfile: format.ProfileCursorPlan}}, adapters.Artifact{})
 	tallyIndexed(r, "openspec", []adapters.Source{{SourceType: "openspec", FormatProfile: format.ProfileOpenspec}}, adapters.Artifact{})
@@ -31,7 +31,7 @@ func TestResult_finalizeSourcesBreakdown_Sums(t *testing.T) {
 	if totalIndexed != sumBreakdown {
 		t.Errorf("Found total %d != sources_breakdown count sum %d", totalIndexed, sumBreakdown)
 	}
-	if len(r.SourcesBreakdown) != 3 {
-		t.Fatalf("expected 3 breakdown rows, got %d", len(r.SourcesBreakdown))
+	if len(r.SourcesBreakdown) != 4 {
+		t.Fatalf("expected 4 breakdown rows, got %d", len(r.SourcesBreakdown))
 	}
 }

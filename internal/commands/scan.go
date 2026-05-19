@@ -14,6 +14,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/adr"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/sourcecontext"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/discover"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
@@ -88,7 +89,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	defer db.Close()
 
 	ids := idgen.NewFactory()
-	adpts := []adapters.Adapter{&openspec.Adapter{}, &adr.Adapter{}, &markdown.Adapter{}}
+	adpts := []adapters.Adapter{&openspec.Adapter{}, &adr.Adapter{}, &markdown.Adapter{}, &sourcecontext.Adapter{}}
 
 	scanner := scan.New(db, ids, adpts)
 	if verbose && !quiet {

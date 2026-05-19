@@ -14,6 +14,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/adr"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/sourcecontext"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
@@ -592,6 +593,7 @@ func collectIndexedFiles(root string) ([]File, error) {
 		&openspec.Adapter{},
 		&adr.Adapter{},
 		&markdown.Adapter{},
+		&sourcecontext.Adapter{},
 	})
 	if _, err := scanner.Run(context.Background(), root, cfg); err != nil {
 		return nil, fmt.Errorf("scan fixture into indexed eval database: %w", err)

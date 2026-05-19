@@ -58,7 +58,7 @@ func newResult(adapters []string) *Result {
 func (r *Result) finalizeSourcesBreakdown() {
 	// Fixed pipeline list for phase-2 UX and stable JSON. New adapters still
 	// increment Found[adapterName] but need an explicit row here + labels to appear in sources_breakdown.
-	order := []string{"markdown", "openspec", "adr"}
+	order := []string{"markdown", "openspec", "adr", "source_context"}
 	out := make([]SourceBreakdownRow, 0, len(order))
 	for _, st := range order {
 		row := SourceBreakdownRow{

@@ -340,7 +340,7 @@ func TestInferKind(t *testing.T) {
 
 func TestDefaultPaths_NarrowDocs(t *testing.T) {
 	paths := defaultPaths()
-	required := []string{"docs/specs", "docs/plans", "docs/prd", "docs/design", "docs/technical", "_bmad-output", ".specify/memory"}
+	required := []string{".claude/notes", "docs/specs", "docs/plans", "docs/prd", "docs/design", "docs/technical", "_bmad-output", ".specify/memory"}
 	for _, req := range required {
 		found := false
 		for _, p := range paths {

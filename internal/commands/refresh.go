@@ -10,6 +10,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/adr"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/sourcecontext"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/freshness"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
@@ -86,7 +87,7 @@ func runScanQuiet(db *store.DB, repoRoot string) *scan.Result {
 		debugLog("runScanQuiet: LoadRepoConfig error: %v", err)
 	}
 	ids := idgen.NewFactory()
-	adpts := []adapters.Adapter{&openspec.Adapter{}, &adr.Adapter{}, &markdown.Adapter{}}
+	adpts := []adapters.Adapter{&openspec.Adapter{}, &adr.Adapter{}, &markdown.Adapter{}, &sourcecontext.Adapter{}}
 
 	scanner := scan.New(db, ids, adpts)
 	result, err := scanner.Run(context.Background(), repoRoot, cfg)

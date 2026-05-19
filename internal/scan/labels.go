@@ -11,6 +11,8 @@ func SourceTypeDisplayLabel(sourceType string) string {
 		return "OpenSpec"
 	case "adr":
 		return "ADRs"
+	case "source_context":
+		return "Source context"
 	default:
 		return sourceType
 	}

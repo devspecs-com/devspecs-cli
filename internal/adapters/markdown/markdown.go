@@ -196,7 +196,7 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 func defaultPaths() []string {
 	return []string{
 		"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans",
-		"docs/prd", "docs/design", "docs/technical",
+		".claude/notes", "docs/prd", "docs/design", "docs/technical",
 		"_bmad-output", ".specify/memory",
 	}
 }
@@ -296,6 +296,7 @@ func isDefaultNestedMarkdownDir(rel string) bool {
 	for _, suffix := range []string{
 		"docs/specs",
 		"docs/plans",
+		".claude/notes",
 		"docs/prd",
 		"docs/design",
 		"docs/technical",
