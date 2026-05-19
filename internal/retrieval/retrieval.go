@@ -290,18 +290,31 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 	if productBackgroundIntent {
 		switch {
 		case sourceFile && !explicitSourceIntent:
-			score -= 30.0
+			score = -100.0
 		case role == "prd" && profile.pathTitleCoreMatches >= 2:
-			score += 3.0
-		case role == "prd" && profile.pathTitleCoreMatches < 2 && profile.coreTerms >= 3:
-			score -= 4.0
-		case role == "prd" && profile.pathTitleCoreMatches == 0:
-			score -= 2.0
+			score += 12.0
+			if hasUnrequestedProductSurface(pathLower, titleLower, queryLower) {
+				score -= 10.0
+			}
+		case role == "prd":
+			score -= 20.0
+			if hasUnrequestedProductSurface(pathLower, titleLower, queryLower) {
+				score -= 10.0
+			}
+		case role == "adr" && isDurableBackgroundDecision(c, pathLower, titleLower, bodyLower, profile):
+			score += 14.0
+			if hasUnrequestedProductSurface(pathLower, titleLower, queryLower) {
+				score -= 24.0
+			}
 		case role == "adr":
-			score += 3.0
+			score = -100.0
 		case role == "plan" || role == "agent_note":
-			score -= 5.0
-		case role != "prd":
+			score = -100.0
+		case strings.HasPrefix(role, "openspec_"):
+			score = -100.0
+		case role == "rfc":
+			score = -100.0
+		default:
 			score -= 8.0
 		}
 	}
@@ -464,6 +477,54 @@ func hasExplicitSourceIntent(queryLower string) bool {
 
 func hasProductBackgroundIntent(queryLower string) bool {
 	return containsAny(queryLower, "prd", "product", "background", "requirements", "user outcome", "user story", "customer access")
+}
+
+func hasUnrequestedProductSurface(pathLower, titleLower, queryLower string) bool {
+	pathTitle := pathLower + " " + titleLower
+	for _, surface := range []string{
+		"admin", "auth", "cookie", "override", "overrides", "portal", "analytics", "dashboard",
+		"support", "invoice", "invoices", "search", "pricing", "packaging",
+		"observability", "runbook", "session", "token",
+	} {
+		if containsPathTitleToken(pathTitle, surface) && !strings.Contains(queryLower, surface) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPathTitleToken(s, token string) bool {
+	for _, part := range splitIdentifierLikeText(s) {
+		if part == token {
+			return true
+		}
+	}
+	return false
+}
+
+func splitIdentifierLikeText(s string) []string {
+	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !(unicode.IsLetter(r) || unicode.IsDigit(r))
+	})
+}
+
+func isDurableBackgroundDecision(c Candidate, pathLower, titleLower, bodyLower string, profile matchProfile) bool {
+	if fileRole(c.Path) != "adr" || profile.coreMatches < 2 {
+		return false
+	}
+	status := strings.ToLower(strings.TrimSpace(c.Status))
+	if status != "" && status != "accepted" && !strings.Contains(bodyLower, "status: accepted") {
+		return false
+	}
+	pathTitle := pathLower + " " + titleLower
+	if containsAny(pathTitle, "source", "boundary") {
+		return true
+	}
+	return containsAny(bodyLower,
+		"authoritative",
+		"idempotency boundary",
+		"consistency boundary",
+	)
 }
 
 func hasPlanIntent(queryLower string) bool {

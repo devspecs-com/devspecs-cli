@@ -133,19 +133,38 @@ func TestWeightedFilesRetrieverV0_LifecycleIntentPrefersStaleDecision(t *testing
 	}
 }
 
-func TestWeightedFilesRetrieverV0_ProductBackgroundDownranksSourceFiles(t *testing.T) {
+func TestWeightedFilesRetrieverV0_ProductBackgroundAnchorsNamedSubject(t *testing.T) {
 	candidates := []Candidate{
 		{Path: "docs/prd/billing-entitlements-v1.md", Body: "Product requirements for billing entitlements and customer access."},
+		{Path: "docs/prd/billing-analytics-v1.md", Body: "Product background for billing analytics, customers, access, entitlement convergence, and support."},
+		{Path: "docs/prd/customer-portal-v2.md", Body: "Product background for customer portal billing access and entitlements."},
+		{Path: "docs/adr/0001-use-stripe-as-billing-source.md", Status: "accepted", Body: "Stripe is the authoritative billing source. customer_id joins Stripe to entitlement records and access checks."},
+		{Path: "docs/adr/0002-webhook-idempotency-boundary.md", Status: "accepted", Body: "The idempotency boundary for billing webhooks prevents entitlement_sync replay from creating confusing customer access state."},
+		{Path: "docs/adr/0004-admin-billing-overrides.md", Status: "accepted", Body: "Admin billing overrides mention customer access and entitlement materialization, but are a separate support feature."},
 		{Path: "services/api/src/billing/entitlements.ts", Body: "customer access billing entitlements implementation code"},
 		{Path: "docs/plans/customer-access-notes.md", Body: "customer access support notes"},
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "product background for billing entitlements and customer access")
-	if !containsCandidatePath(got, "docs/prd/billing-entitlements-v1.md") {
-		t.Fatalf("missing PRD: %#v", CandidatePaths(got))
+	for _, want := range []string{
+		"docs/prd/billing-entitlements-v1.md",
+		"docs/adr/0001-use-stripe-as-billing-source.md",
+		"docs/adr/0002-webhook-idempotency-boundary.md",
+	} {
+		if !containsCandidatePath(got, want) {
+			t.Fatalf("missing %s: %#v", want, CandidatePaths(got))
+		}
 	}
-	if containsCandidatePath(got, "services/api/src/billing/entitlements.ts") {
-		t.Fatalf("source file should not be selected for product background: %#v", CandidatePaths(got))
+	for _, unwanted := range []string{
+		"docs/prd/billing-analytics-v1.md",
+		"docs/prd/customer-portal-v2.md",
+		"docs/adr/0004-admin-billing-overrides.md",
+		"services/api/src/billing/entitlements.ts",
+		"docs/plans/customer-access-notes.md",
+	} {
+		if containsCandidatePath(got, unwanted) {
+			t.Fatalf("%s should not be selected for product background: %#v", unwanted, CandidatePaths(got))
+		}
 	}
 }
 
