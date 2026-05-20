@@ -26,6 +26,10 @@ type Candidate struct {
 	// MarkdownPaths and MarkdownRules apply when AdapterName is "markdown".
 	MarkdownPaths []string
 	MarkdownRules []config.SourceRule
+	// DiscoveryScore and DiscoveryReasons explain why broad/experimental
+	// candidate discovery admitted this file into the adapter pipeline.
+	DiscoveryScore   float64
+	DiscoveryReasons []string
 }
 
 // Artifact holds the parsed metadata for an artifact.

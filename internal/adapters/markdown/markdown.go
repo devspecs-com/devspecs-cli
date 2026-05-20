@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/todoparse"
@@ -21,12 +23,30 @@ type Adapter struct{}
 
 func (a *Adapter) Name() string { return "markdown" }
 
+const (
+	intentCandidateMinScore    = 4.0
+	intentCandidateHeaderBytes = 32768
+	intentCandidateMaxFiles    = 2000
+)
+
+type discoveryEvidence struct {
+	score   float64
+	reasons []string
+}
+
+type intentMarkdownCandidate struct {
+	absPath string
+	relPath string
+	score   float64
+	reasons []string
+}
+
 func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.RepoConfig) ([]adapters.Candidate, error) {
 	paths, rules, useDefaultCoverage := markdownSource(cfg)
 
 	var candidates []adapters.Candidate
 	seen := make(map[string]bool)
-	addCandidate := func(absPath string) {
+	addCandidate := func(absPath string, evidence discoveryEvidence) {
 		rel, err := filepath.Rel(repoRoot, absPath)
 		if err != nil {
 			return
@@ -40,11 +60,14 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 		}
 		seen[rel] = true
 		candidates = append(candidates, adapters.Candidate{
-			PrimaryPath:   absPath,
-			RelPath:       rel,
-			AdapterName:   "markdown",
-			MarkdownPaths: paths,
-			MarkdownRules: rules,
+			PrimaryPath:    absPath,
+			RelPath:        rel,
+			AdapterName:    "markdown",
+			MarkdownPaths:  paths,
+			MarkdownRules:  rules,
+			DiscoveryScore: evidence.score,
+			DiscoveryReasons: append([]string(nil),
+				evidence.reasons...),
 		})
 	}
 
@@ -55,7 +78,10 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 			continue
 		}
 		for _, absPath := range entries {
-			addCandidate(absPath)
+			addCandidate(absPath, discoveryEvidence{
+				score:   10,
+				reasons: []string{"configured_markdown_path"},
+			})
 		}
 	}
 
@@ -63,7 +89,10 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 		entries, err := walkNestedDefaultMarkdownFiles(ctx, repoRoot)
 		if err == nil {
 			for _, absPath := range entries {
-				addCandidate(absPath)
+				addCandidate(absPath, discoveryEvidence{
+					score:   8,
+					reasons: []string{"default_nested_markdown_convention"},
+				})
 			}
 		}
 	}
@@ -72,7 +101,22 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 	for _, pattern := range rootGlobs() {
 		matches, _ := filepath.Glob(filepath.Join(repoRoot, pattern))
 		for _, absPath := range matches {
-			addCandidate(absPath)
+			addCandidate(absPath, discoveryEvidence{
+				score:   8,
+				reasons: []string{"root_markdown_glob:" + pattern},
+			})
+		}
+	}
+
+	if cfg != nil && cfg.Experiments.IntentCandidateDiscovery {
+		entries, err := walkIntentMarkdownCandidates(ctx, repoRoot)
+		if err == nil {
+			for _, entry := range entries {
+				addCandidate(entry.absPath, discoveryEvidence{
+					score:   entry.score,
+					reasons: entry.reasons,
+				})
+			}
 		}
 	}
 
@@ -278,6 +322,326 @@ func walkNestedDefaultMarkdownFiles(ctx context.Context, repoRoot string) ([]str
 		return nil
 	})
 	return files, err
+}
+
+func walkIntentMarkdownCandidates(ctx context.Context, repoRoot string) ([]intentMarkdownCandidate, error) {
+	m := ignore.FromContext(ctx)
+	var candidates []intentMarkdownCandidate
+	err := filepath.Walk(repoRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		rel, rerr := filepath.Rel(repoRoot, path)
+		if rerr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+		if m != nil && m.ShouldSkip(rel, info.IsDir()) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() {
+			if isBuiltinIgnoredDir(info.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(strings.ToLower(info.Name()), ".md") {
+			return nil
+		}
+		score, reasons := scoreIntentMarkdownCandidate(path, rel)
+		if score < intentCandidateMinScore {
+			return nil
+		}
+		candidates = append(candidates, intentMarkdownCandidate{
+			absPath: path,
+			relPath: rel,
+			score:   score,
+			reasons: reasons,
+		})
+		return nil
+	})
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].score != candidates[j].score {
+			return candidates[i].score > candidates[j].score
+		}
+		return candidates[i].relPath < candidates[j].relPath
+	})
+	if len(candidates) > intentCandidateMaxFiles {
+		candidates = candidates[:intentCandidateMaxFiles]
+	}
+	return candidates, err
+}
+
+func scoreIntentMarkdownCandidate(absPath, relPath string) (float64, []string) {
+	score, reasons := scoreIntentPath(relPath)
+	header := readIntentHeader(absPath)
+	if header != "" {
+		contentScore, contentReasons := scoreIntentContent(header)
+		score += contentScore
+		reasons = append(reasons, contentReasons...)
+	}
+	reasons = append(reasons, fmt.Sprintf("intent_candidate_score:%.2f", score))
+	return score, reasons
+}
+
+func scoreIntentPath(relPath string) (float64, []string) {
+	segments := strings.Split(filepath.ToSlash(relPath), "/")
+	base := strings.TrimSuffix(filepath.Base(relPath), filepath.Ext(relPath))
+	lowerBase := strings.ToLower(base)
+	filenameTokens := intentTokens(base)
+	filenameSet := stringSet(filenameTokens)
+	var dirTokens []string
+	if len(segments) > 1 {
+		for _, segment := range segments[:len(segments)-1] {
+			dirTokens = append(dirTokens, intentTokens(segment)...)
+		}
+	}
+	dirSet := stringSet(dirTokens)
+
+	tokenWeights := map[string]float64{
+		"adr":            4.5,
+		"rfc":            4.5,
+		"plan":           3.5,
+		"design":         3.5,
+		"proposal":       3.5,
+		"decision":       3.5,
+		"requirement":    3.2,
+		"architecture":   2.4,
+		"spec":           2.2,
+		"implementation": 1.8,
+		"migration":      1.8,
+		"rollout":        1.8,
+		"task":           1.7,
+		"story":          1.7,
+		"epic":           1.7,
+		"milestone":      1.6,
+		"roadmap":        1.6,
+		"risk":           1.4,
+	}
+
+	allTokens := stringSet(append(append([]string{}, filenameTokens...), dirTokens...))
+	var score float64
+	var reasons []string
+	if isAgentEntrypointMarkdownBase(lowerBase) {
+		score += 4.5
+		reasons = append(reasons, "intent_agent_entrypoint_filename:"+lowerBase)
+	}
+	for token, weight := range tokenWeights {
+		if !allTokens[token] {
+			continue
+		}
+		score += weight
+		reasons = append(reasons, "intent_path_token:"+token)
+		if filenameSet[token] {
+			score += 1.0
+			reasons = append(reasons, "intent_filename_token:"+token)
+		}
+		if dirSet[token] {
+			score += 0.75
+			reasons = append(reasons, "intent_directory_token:"+token)
+		}
+	}
+
+	switch {
+	case len(segments) == 1 && lowerBase == "readme":
+		score -= 4.0
+		reasons = append(reasons, "intent_negative:root_readme")
+	case lowerBase == "readme":
+		score -= 1.0
+		reasons = append(reasons, "intent_negative:readme")
+	}
+	for _, token := range []string{"changelog", "license", "security", "contributing", "conduct", "release", "news", "template", "prompt"} {
+		if allTokens[token] {
+			score -= 1.5
+			reasons = append(reasons, "intent_negative:"+token)
+		}
+	}
+	return score, reasons
+}
+
+func isAgentEntrypointMarkdownBase(base string) bool {
+	switch strings.Trim(base, " _.") {
+	case "agents", "claude", "cursor", "codex", "gemini", "copilot", "memento":
+		return true
+	default:
+		return false
+	}
+}
+
+func scoreIntentContent(content string) (float64, []string) {
+	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	headingWeights := map[string]float64{
+		"goal":                 1.4,
+		"non goal":             1.4,
+		"context":              1.2,
+		"background":           1.0,
+		"decision":             1.8,
+		"alternative":          1.5,
+		"implementation plan":  1.8,
+		"task":                 1.2,
+		"acceptance criterion": 1.6,
+		"risk":                 1.3,
+		"rollout":              1.3,
+		"open question":        1.3,
+		"requirement":          1.5,
+		"proposal":             1.4,
+		"design":               1.4,
+	}
+	var score float64
+	var reasons []string
+	seen := map[string]bool{}
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(trimmed), "do not edit") ||
+			strings.Contains(strings.ToLower(trimmed), "generated file") {
+			score -= 2.0
+			reasons = append(reasons, "intent_negative:generated_marker")
+			continue
+		}
+		if !strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		heading := normalizeIntentPhrase(strings.TrimLeft(trimmed, "# "))
+		for phrase, weight := range headingWeights {
+			if seen[phrase] || !strings.Contains(heading, phrase) {
+				continue
+			}
+			seen[phrase] = true
+			score += weight
+			reasons = append(reasons, "intent_heading:"+strings.ReplaceAll(phrase, " ", "_"))
+		}
+	}
+	return score, reasons
+}
+
+func readIntentHeader(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	buf := make([]byte, intentCandidateHeaderBytes)
+	n, _ := file.Read(buf)
+	if n <= 0 {
+		return ""
+	}
+	return string(buf[:n])
+}
+
+func intentTokens(value string) []string {
+	var raw []string
+	for _, part := range splitIntentTokenParts(value) {
+		token := normalizeIntentToken(part)
+		if token != "" {
+			raw = append(raw, token)
+		}
+	}
+	return uniqueStrings(raw)
+}
+
+func splitIntentTokenParts(value string) []string {
+	var parts []string
+	var b strings.Builder
+	var prev rune
+	flush := func() {
+		if b.Len() > 0 {
+			parts = append(parts, b.String())
+			b.Reset()
+		}
+	}
+	for _, r := range value {
+		if r == '/' || r == '\\' || r == '_' || r == '-' || r == '.' || unicode.IsSpace(r) {
+			flush()
+			prev = 0
+			continue
+		}
+		if prev != 0 && unicode.IsLower(prev) && unicode.IsUpper(r) {
+			flush()
+		}
+		b.WriteRune(r)
+		prev = r
+	}
+	flush()
+	return parts
+}
+
+func normalizeIntentToken(value string) string {
+	token := strings.ToLower(strings.TrimSpace(value))
+	token = strings.Trim(token, " _-.")
+	if len(token) < 2 {
+		return ""
+	}
+	switch token {
+	case "plans", "planning", "planned":
+		return "plan"
+	case "designs":
+		return "design"
+	case "proposals":
+		return "proposal"
+	case "decisions":
+		return "decision"
+	case "requirements":
+		return "requirement"
+	case "specs", "specification", "specifications":
+		return "spec"
+	case "architectural":
+		return "architecture"
+	case "stories":
+		return "story"
+	case "tasks":
+		return "task"
+	case "agents":
+		return "agent"
+	case "risks":
+		return "risk"
+	case "goals":
+		return "goal"
+	case "criteria":
+		return "criterion"
+	case "alternatives":
+		return "alternative"
+	case "questions":
+		return "question"
+	}
+	if strings.HasPrefix(token, "plan") {
+		return "plan"
+	}
+	return token
+}
+
+func normalizeIntentPhrase(value string) string {
+	tokens := intentTokens(value)
+	return strings.Join(tokens, " ")
+}
+
+func stringSet(values []string) map[string]bool {
+	out := make(map[string]bool, len(values))
+	for _, value := range values {
+		out[value] = true
+	}
+	return out
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 func isBuiltinIgnoredDir(name string) bool {

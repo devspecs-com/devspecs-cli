@@ -315,6 +315,67 @@ func TestScan_PersistsClassifierMetadata(t *testing.T) {
 	}
 }
 
+func TestScan_ExperimentalIntentDiscoveryIndexesCompoundPlanningDir(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	docDir := filepath.Join(tmp, "repo", "docs", "exec-plans", "active")
+	os.MkdirAll(docDir, 0o755)
+	content := "# Cache Warmup\n\n## Goals\n\n## Implementation Plan\n\n- [ ] Add cache warmer\n"
+	os.WriteFile(filepath.Join(docDir, "cache-warmup.md"), []byte(content), 0o644)
+
+	dbPath := filepath.Join(home, "devspecs.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	ids := idgen.NewFactory()
+	s := New(db, ids, []adapters.Adapter{&markdown.Adapter{}})
+	repoRoot := filepath.Join(tmp, "repo")
+	if result, err := s.Run(context.Background(), repoRoot, nil); err != nil {
+		t.Fatal(err)
+	} else if result.Found["markdown"] != 0 {
+		t.Fatalf("baseline scan found %d markdown artifacts, want 0", result.Found["markdown"])
+	}
+
+	cfg := config.WithIntentCandidateDiscovery(nil, true)
+	result, err := s.Run(context.Background(), repoRoot, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Found["markdown"] != 1 {
+		t.Fatalf("experimental scan found %d markdown artifacts, want 1", result.Found["markdown"])
+	}
+
+	var sourcePath, ex string
+	err = db.QueryRow(`SELECT s.path, COALESCE(rv.extracted_json, '')
+		FROM sources s
+		JOIN artifacts a ON a.id = s.artifact_id
+		JOIN artifact_revisions rv ON rv.id = a.current_revision_id
+		WHERE s.source_type = 'markdown'
+		LIMIT 1`).Scan(&sourcePath, &ex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sourcePath != "docs/exec-plans/active/cache-warmup.md" {
+		t.Fatalf("source path = %q", sourcePath)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(ex), &got); err != nil {
+		t.Fatal(err)
+	}
+	classifier := got["classifier"].(map[string]any)
+	reasons, ok := classifier["discovery_reasons"].([]any)
+	if !ok || len(reasons) == 0 {
+		t.Fatalf("missing discovery reasons in classifier metadata: %#v", classifier)
+	}
+	if !anyStringHasPrefix(reasons, "intent_path_token:plan") {
+		t.Fatalf("expected plan discovery reason, got %#v", reasons)
+	}
+}
+
 func extractedJSONRoundTrip(m map[string]any) (map[string]any, error) {
 	b, err := json.Marshal(m)
 	if err != nil {
@@ -325,6 +386,16 @@ func extractedJSONRoundTrip(m map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func anyStringHasPrefix(values []any, prefix string) bool {
+	for _, value := range values {
+		s, ok := value.(string)
+		if ok && strings.HasPrefix(s, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func testdataSamplesRoot(t *testing.T) string {

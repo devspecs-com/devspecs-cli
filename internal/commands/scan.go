@@ -28,19 +28,20 @@ import (
 // NewScanCmd creates the ds scan command.
 func NewScanCmd() *cobra.Command {
 	var (
-		path      string
-		verbose   bool
-		asJSON    bool
-		quiet     bool
-		ifChanged bool
-		rebuild   bool
+		path                        string
+		verbose                     bool
+		asJSON                      bool
+		quiet                       bool
+		ifChanged                   bool
+		rebuild                     bool
+		experimentalIntentDiscovery bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "scan",
 		Short: "Scan repository for specs, plans, and ADRs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild)
+			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery)
 		},
 	}
 
@@ -50,10 +51,11 @@ func NewScanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress human scan summary and empty-scan hints (redundant when --json is set)")
 	cmd.Flags().BoolVar(&ifChanged, "if-changed", false, "Only scan if source paths were touched in the last commit")
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "Remove the global index database and create a fresh index (requires re-scan)")
+	cmd.Flags().BoolVar(&experimentalIntentDiscovery, "experimental-intent-discovery", false, "Opt into broad scored markdown intent candidate discovery")
 	return cmd
 }
 
-func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild bool) error {
+func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery bool) error {
 	repoRoot, err := resolveRepoRoot(path)
 	if err != nil {
 		return err
@@ -62,6 +64,9 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	cfg, err := config.LoadRepoConfig(repoRoot)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+	if experimentalIntentDiscovery {
+		cfg = config.WithIntentCandidateDiscovery(cfg, true)
 	}
 
 	if ifChanged && !sourcePathsChanged(repoRoot, cfg) {

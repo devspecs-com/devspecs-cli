@@ -118,6 +118,65 @@ func TestDiscover_CustomConfigDoesNotAddNestedDefaults(t *testing.T) {
 	}
 }
 
+func TestDiscover_ExperimentalIntentDiscoveryFindsGenericCompoundPlanningDirs(t *testing.T) {
+	tmp := t.TempDir()
+	writeMarkdown(t, tmp, "docs/exec-plans/active/cache-warmup.md", "# Cache Warmup\n\n## Goals\n\n## Implementation Plan\n")
+	writeMarkdown(t, tmp, "docs/designDocs/auth-boundary.md", "# Auth Boundary\n\n## Context\n\n## Alternatives\n")
+	writeMarkdown(t, tmp, "docs/project_planning/migration.md", "# Migration\n\n## Rollout\n")
+	writeMarkdown(t, tmp, ".github/AGENTS.md", "# Agent Rules\n\n## Rules\n")
+	writeMarkdown(t, tmp, "examples/agent/browser_agent/build_in_prompt/browser_agent_task_decomposition_prompt.md", "# Browser Automation Task Decomposition\n\n## Objective\n")
+	writeMarkdown(t, tmp, "README.md", "# Project\n")
+	writeMarkdown(t, tmp, "CHANGELOG.md", "# Changelog\n")
+	writeMarkdown(t, tmp, ".github/pull_request_template.md", "# Pull Request\n")
+
+	a := &Adapter{}
+	baseline, err := a.Discover(context.Background(), tmp, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baselinePaths := candidateRelPaths(baseline)
+	if stringSliceContains(baselinePaths, "docs/exec-plans/active/cache-warmup.md") {
+		t.Fatalf("baseline unexpectedly discovered exec-plans path: %v", baselinePaths)
+	}
+
+	candidates, err := a.Discover(context.Background(), tmp, config.WithIntentCandidateDiscovery(nil, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := candidateRelPaths(candidates)
+	for _, want := range []string{
+		"docs/exec-plans/active/cache-warmup.md",
+		"docs/designDocs/auth-boundary.md",
+		"docs/project_planning/migration.md",
+		".github/AGENTS.md",
+	} {
+		if !stringSliceContains(got, want) {
+			t.Fatalf("missing experimental intent candidate %q in %v", want, got)
+		}
+	}
+	for _, noisy := range []string{
+		"README.md",
+		"CHANGELOG.md",
+		".github/pull_request_template.md",
+		"examples/agent/browser_agent/build_in_prompt/browser_agent_task_decomposition_prompt.md",
+	} {
+		if stringSliceContains(got, noisy) {
+			t.Fatalf("experimental discovery should not admit noisy maintenance doc %q in %v", noisy, got)
+		}
+	}
+
+	candidate := findCandidate(candidates, "docs/exec-plans/active/cache-warmup.md")
+	if candidate.DiscoveryScore < intentCandidateMinScore {
+		t.Fatalf("discovery score = %.2f, want >= %.2f", candidate.DiscoveryScore, intentCandidateMinScore)
+	}
+	if !hasReasonPrefix(candidate.DiscoveryReasons, "intent_path_token:plan") {
+		t.Fatalf("expected plan path-token reason, got %#v", candidate.DiscoveryReasons)
+	}
+	if !hasReasonPrefix(candidate.DiscoveryReasons, "intent_heading:implementation_plan") {
+		t.Fatalf("expected implementation-plan heading reason, got %#v", candidate.DiscoveryReasons)
+	}
+}
+
 func TestParse_FrontmatterOverrides(t *testing.T) {
 	tmp := t.TempDir()
 	content := "---\ntitle: Custom Title\nkind: spec\nstatus: draft\n---\n# Ignored H1\n\nBody here.\n"
@@ -797,6 +856,36 @@ func candidateRelPaths(candidates []adapters.Candidate) []string {
 		out[i] = filepath.ToSlash(c.RelPath)
 	}
 	return out
+}
+
+func writeMarkdown(t *testing.T, root, rel, content string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func findCandidate(candidates []adapters.Candidate, rel string) adapters.Candidate {
+	rel = filepath.ToSlash(rel)
+	for _, candidate := range candidates {
+		if filepath.ToSlash(candidate.RelPath) == rel {
+			return candidate
+		}
+	}
+	return adapters.Candidate{}
+}
+
+func hasReasonPrefix(reasons []string, prefix string) bool {
+	for _, reason := range reasons {
+		if strings.HasPrefix(reason, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDiscover_IgnoredSubtreeExcluded(t *testing.T) {

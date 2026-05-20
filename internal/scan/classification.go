@@ -25,9 +25,12 @@ func attachClassifierMetadata(repoRoot string, c adapters.Candidate, art adapter
 		art.Extracted = map[string]any{}
 	}
 	payload := map[string]any{
-		"evaluator":        classify.EvaluatorDeclarativeDocumentModelsV0,
-		"profile":          cfg.Profile,
-		"config_version":   cfg.Version,
+		"evaluator":       classify.EvaluatorDeclarativeDocumentModelsV0,
+		"profile":         cfg.Profile,
+		"config_version":  cfg.Version,
+		"discovery_score": c.DiscoveryScore,
+		"discovery_reasons": append([]string(nil),
+			c.DiscoveryReasons...),
 		"input_scope":      string(classify.ScopeDocument),
 		"input_path":       relPath,
 		"winner":           classificationPayload(resolution.Winner),

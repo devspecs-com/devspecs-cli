@@ -11,8 +11,15 @@ import (
 
 // RepoConfig represents the .devspecs/config.yaml file in a repository.
 type RepoConfig struct {
-	Version int            `yaml:"version"`
-	Sources []SourceConfig `yaml:"sources"`
+	Version     int              `yaml:"version"`
+	Sources     []SourceConfig   `yaml:"sources"`
+	Experiments ExperimentConfig `yaml:"experiments,omitempty"`
+}
+
+// ExperimentConfig holds opt-in scan/indexing experiments. These switches are
+// intentionally explicit so evals can compare baseline and experiment runs.
+type ExperimentConfig struct {
+	IntentCandidateDiscovery bool `yaml:"intent_candidate_discovery,omitempty"`
 }
 
 // SourceConfig defines a source type and its discovery paths.
@@ -47,6 +54,33 @@ func DefaultRepoConfig() *RepoConfig {
 			{Type: "source_context"},
 		},
 	}
+}
+
+// WithIntentCandidateDiscovery returns a config copy with the intent candidate
+// discovery experiment set. A nil input starts from the default repo config.
+func WithIntentCandidateDiscovery(cfg *RepoConfig, enabled bool) *RepoConfig {
+	out := CloneRepoConfig(cfg)
+	out.Experiments.IntentCandidateDiscovery = enabled
+	return out
+}
+
+// CloneRepoConfig returns a deep-enough copy for scan-time option mutation.
+func CloneRepoConfig(cfg *RepoConfig) *RepoConfig {
+	if cfg == nil {
+		cfg = DefaultRepoConfig()
+	}
+	out := *cfg
+	out.Sources = make([]SourceConfig, len(cfg.Sources))
+	for i, src := range cfg.Sources {
+		out.Sources[i] = src
+		out.Sources[i].Paths = append([]string(nil), src.Paths...)
+		out.Sources[i].Rules = make([]SourceRule, len(src.Rules))
+		for j, rule := range src.Rules {
+			out.Sources[i].Rules[j] = rule
+			out.Sources[i].Rules[j].Tags = append([]string(nil), rule.Tags...)
+		}
+	}
+	return &out
 }
 
 // RepoConfigPath returns the path to the repo config file for the given root.
