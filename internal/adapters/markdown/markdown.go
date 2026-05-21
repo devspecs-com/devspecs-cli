@@ -108,7 +108,7 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 		}
 	}
 
-	if cfg != nil && cfg.Experiments.IntentCandidateDiscovery {
+	if cfg != nil && cfg.Experiments.IntentCandidateDiscoveryEnabled(false) {
 		entries, err := walkIntentMarkdownCandidates(ctx, repoRoot)
 		if err == nil {
 			for _, entry := range entries {

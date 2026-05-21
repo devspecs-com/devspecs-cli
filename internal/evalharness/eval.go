@@ -596,6 +596,7 @@ func collectIndexedFiles(root string) ([]File, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load fixture repo config: %w", err)
 	}
+	cfg = config.WithDefaultIntentCandidateDiscovery(cfg, true)
 	scanner := scan.New(db, idgen.NewFactory(), []adapters.Adapter{
 		&openspec.Adapter{},
 		&adr.Adapter{},

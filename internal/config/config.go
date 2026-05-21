@@ -19,7 +19,7 @@ type RepoConfig struct {
 // ExperimentConfig holds opt-in scan/indexing experiments. These switches are
 // intentionally explicit so evals can compare baseline and experiment runs.
 type ExperimentConfig struct {
-	IntentCandidateDiscovery bool `yaml:"intent_candidate_discovery,omitempty"`
+	IntentCandidateDiscovery *bool `yaml:"intent_candidate_discovery,omitempty"`
 }
 
 // SourceConfig defines a source type and its discovery paths.
@@ -60,7 +60,17 @@ func DefaultRepoConfig() *RepoConfig {
 // discovery experiment set. A nil input starts from the default repo config.
 func WithIntentCandidateDiscovery(cfg *RepoConfig, enabled bool) *RepoConfig {
 	out := CloneRepoConfig(cfg)
-	out.Experiments.IntentCandidateDiscovery = enabled
+	out.Experiments.IntentCandidateDiscovery = boolPtr(enabled)
+	return out
+}
+
+// WithDefaultIntentCandidateDiscovery enables broad intent discovery only when
+// the repo config did not explicitly opt in or out.
+func WithDefaultIntentCandidateDiscovery(cfg *RepoConfig, enabled bool) *RepoConfig {
+	out := CloneRepoConfig(cfg)
+	if out.Experiments.IntentCandidateDiscovery == nil {
+		out.Experiments.IntentCandidateDiscovery = boolPtr(enabled)
+	}
 	return out
 }
 
@@ -70,6 +80,9 @@ func CloneRepoConfig(cfg *RepoConfig) *RepoConfig {
 		cfg = DefaultRepoConfig()
 	}
 	out := *cfg
+	if cfg.Experiments.IntentCandidateDiscovery != nil {
+		out.Experiments.IntentCandidateDiscovery = boolPtr(*cfg.Experiments.IntentCandidateDiscovery)
+	}
 	out.Sources = make([]SourceConfig, len(cfg.Sources))
 	for i, src := range cfg.Sources {
 		out.Sources[i] = src
@@ -81,6 +94,17 @@ func CloneRepoConfig(cfg *RepoConfig) *RepoConfig {
 		}
 	}
 	return &out
+}
+
+func (e ExperimentConfig) IntentCandidateDiscoveryEnabled(defaultValue bool) bool {
+	if e.IntentCandidateDiscovery == nil {
+		return defaultValue
+	}
+	return *e.IntentCandidateDiscovery
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 // RepoConfigPath returns the path to the repo config file for the given root.

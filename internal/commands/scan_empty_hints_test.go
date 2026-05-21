@@ -30,6 +30,8 @@ func writeMisconfiguredSources(t *testing.T, repoRoot string) {
 	t.Helper()
 	cfgDir := filepath.Join(repoRoot, ".devspecs")
 	cfg := `version: 1
+experiments:
+  intent_candidate_discovery: false
 sources:
   - type: openspec
     path: z_missing_openspec

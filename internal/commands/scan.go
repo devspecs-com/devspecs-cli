@@ -51,7 +51,7 @@ func NewScanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress human scan summary and empty-scan hints (redundant when --json is set)")
 	cmd.Flags().BoolVar(&ifChanged, "if-changed", false, "Only scan if source paths were touched in the last commit")
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "Remove the global index database and create a fresh index (requires re-scan)")
-	cmd.Flags().BoolVar(&experimentalIntentDiscovery, "experimental-intent-discovery", false, "Opt into broad scored markdown intent candidate discovery")
+	cmd.Flags().BoolVar(&experimentalIntentDiscovery, "experimental-intent-discovery", false, "Deprecated: broad scored markdown intent candidate discovery is enabled by default")
 	return cmd
 }
 
@@ -65,6 +65,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	cfg = config.WithDefaultIntentCandidateDiscovery(cfg, true)
 	if experimentalIntentDiscovery {
 		cfg = config.WithIntentCandidateDiscovery(cfg, true)
 	}
