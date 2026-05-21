@@ -29,6 +29,11 @@ const (
 	roleTasks          = "tasks"
 	roleSpecDelta      = "spec_delta"
 	roleCapabilitySpec = "capability_spec"
+
+	openSpecRoleSignalPath                = "path"
+	openSpecRoleSignalContentDeltaHeading = "content_delta_heading"
+	openSpecRoleSignalPathAndContent      = "path_and_content_delta_heading"
+	openSpecRoleMismatchCapabilityDelta   = "path_capability_content_delta"
 )
 
 // Adapter discovers and parses OpenSpec collections, change bundles, and child files.
@@ -367,6 +372,7 @@ func parseCapabilitySpec(c adapters.Candidate) (adapters.Artifact, []adapters.So
 	}
 	content := string(data)
 	relPath := filepath.ToSlash(c.RelPath)
+	roleDecision := inferSpecFileRole(relPath, roleCapabilitySpec, content)
 	layoutGroup := filepath.ToSlash(filepath.Dir(relPath))
 	capability := capabilityForSpecRel(relPath)
 	title := extractH1(content)
@@ -374,12 +380,17 @@ func parseCapabilitySpec(c adapters.Candidate) (adapters.Artifact, []adapters.So
 		title = humanize(capability) + " Specification"
 	}
 	basePath := basePathForRel(relPath)
-	extracted := openSpecExtracted(scopeFile, roleCapabilitySpec, "", capability, basePath, layoutGroup, false)
+	extracted := openSpecExtracted(scopeFile, roleDecision.Role, "", capability, basePath, layoutGroup, false)
+	addOpenSpecRoleDecision(extracted, roleDecision)
+	subtype := config.SubtypeOpenspecCapabilitySpec
+	if roleDecision.Role == roleSpecDelta {
+		subtype = config.SubtypeOpenspecChild
+	}
 
 	art := adapters.Artifact{
 		SourceIdentity: relPath + "|openspec",
 		Kind:           config.KindSpec,
-		Subtype:        config.SubtypeOpenspecCapabilitySpec,
+		Subtype:        subtype,
 		Title:          title,
 		Status:         inferStatus(content),
 		PrimaryPath:    c.PrimaryPath,
@@ -408,6 +419,11 @@ func parseChangeChild(c adapters.Candidate, role string) (adapters.Artifact, []a
 	if role == "" {
 		role = roleForRelPath(relPath)
 	}
+	roleDecision := openSpecRoleDecision{}
+	if strings.HasSuffix(relPath, "/spec.md") {
+		roleDecision = inferSpecFileRole(relPath, role, content)
+		role = roleDecision.Role
+	}
 	changeDir := changeDirForPath(c.PrimaryPath)
 	changeID := filepath.Base(changeDir)
 	repoRoot := repoRootForCandidate(c)
@@ -429,6 +445,7 @@ func parseChangeChild(c adapters.Candidate, role string) (adapters.Artifact, []a
 		}
 	}
 	extracted := openSpecExtracted(scopeFile, role, changeID, capability, basePathForRel(layoutGroup), layoutGroup, archived)
+	addOpenSpecRoleDecision(extracted, roleDecision)
 
 	art := adapters.Artifact{
 		SourceIdentity: relPath + "|openspec",
@@ -678,6 +695,127 @@ func openSpecExtracted(scope, openSpecRole, changeID, capability, basePath, layo
 		out["openspec_archived"] = true
 	}
 	return out
+}
+
+type openSpecRoleDecision struct {
+	Role       string
+	PathRole   string
+	Signal     string
+	Confidence string
+	Mismatch   string
+}
+
+func inferSpecFileRole(relPath, pathRole, content string) openSpecRoleDecision {
+	if pathRole == "" {
+		pathRole = roleForRelPath(relPath)
+	}
+	decision := openSpecRoleDecision{
+		Role:       pathRole,
+		PathRole:   pathRole,
+		Signal:     openSpecRoleSignalPath,
+		Confidence: "high",
+	}
+	if pathRole != roleCapabilitySpec && pathRole != roleSpecDelta {
+		return decision
+	}
+	hasDeltaHeading := hasOpenSpecDeltaRequirementsHeading(content)
+	switch {
+	case pathRole == roleCapabilitySpec && hasDeltaHeading:
+		decision.Role = roleSpecDelta
+		decision.Signal = openSpecRoleSignalContentDeltaHeading
+		decision.Confidence = "medium"
+		decision.Mismatch = openSpecRoleMismatchCapabilityDelta
+	case pathRole == roleSpecDelta && hasDeltaHeading:
+		decision.Signal = openSpecRoleSignalPathAndContent
+	}
+	return decision
+}
+
+func addOpenSpecRoleDecision(extracted map[string]any, decision openSpecRoleDecision) {
+	if decision.Role == "" {
+		return
+	}
+	extracted["openspec_path_role"] = decision.PathRole
+	extracted["openspec_role_signal"] = decision.Signal
+	extracted["openspec_role_confidence"] = decision.Confidence
+	if decision.Mismatch != "" {
+		extracted["openspec_role_mismatch"] = decision.Mismatch
+	}
+}
+
+func hasOpenSpecDeltaRequirementsHeading(content string) bool {
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	inFence := false
+	fenceMarker := ""
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if marker, ok := markdownFenceMarker(line); ok {
+			if !inFence {
+				inFence = true
+				fenceMarker = marker
+				continue
+			}
+			if strings.HasPrefix(line, fenceMarker) {
+				inFence = false
+				fenceMarker = ""
+			}
+			continue
+		}
+		if inFence {
+			continue
+		}
+		heading, ok := markdownHeadingText(line)
+		if !ok {
+			continue
+		}
+		if isOpenSpecDeltaRequirementsHeading(heading) {
+			return true
+		}
+	}
+	return false
+}
+
+func markdownFenceMarker(line string) (string, bool) {
+	switch {
+	case strings.HasPrefix(line, "```"):
+		return "```", true
+	case strings.HasPrefix(line, "~~~"):
+		return "~~~", true
+	default:
+		return "", false
+	}
+}
+
+func markdownHeadingText(line string) (string, bool) {
+	if !strings.HasPrefix(line, "#") {
+		return "", false
+	}
+	level := 0
+	for level < len(line) && line[level] == '#' {
+		level++
+	}
+	if level == 0 || level > 6 || level >= len(line) || line[level] != ' ' {
+		return "", false
+	}
+	heading := strings.TrimSpace(line[level:])
+	heading = strings.TrimSpace(strings.TrimRight(heading, "#"))
+	return heading, heading != ""
+}
+
+func isOpenSpecDeltaRequirementsHeading(heading string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(heading))
+	normalized = strings.TrimSuffix(normalized, ":")
+	normalized = strings.Join(strings.Fields(normalized), " ")
+	switch normalized {
+	case "added requirements", "added requirement",
+		"modified requirements", "modified requirement",
+		"removed requirements", "removed requirement",
+		"renamed requirements", "renamed requirement",
+		"deprecated requirements", "deprecated requirement":
+		return true
+	default:
+		return false
+	}
 }
 
 func appendParseResult(dst *todoparse.ParseResult, src todoparse.ParseResult) {

@@ -265,3 +265,118 @@ func TestOpenSpec_Parse_titleHumanizeFallback(t *testing.T) {
 		t.Fatal("expected humanized title from change id")
 	}
 }
+
+func TestOpenSpec_CapabilitySpecPathStaysCanonical(t *testing.T) {
+	tmp := t.TempDir()
+	relPath := "openspec/specs/billing/spec.md"
+	specPath := writeOpenSpecTestFile(t, tmp, relPath, "# Billing\n\n## Requirements\n\n### Requirement: Checkout\n\nThe system SHALL process payments.\n")
+
+	a := &Adapter{}
+	art, _, _, err := a.Parse(context.Background(), adapters.Candidate{
+		PrimaryPath:   specPath,
+		RelPath:       relPath,
+		AdapterName:   "openspec",
+		ArtifactScope: scopeFile,
+		Role:          roleCapabilitySpec,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art.Subtype != config.SubtypeOpenspecCapabilitySpec {
+		t.Fatalf("subtype = %q, want %q", art.Subtype, config.SubtypeOpenspecCapabilitySpec)
+	}
+	if art.Extracted["openspec_role"] != roleCapabilitySpec {
+		t.Fatalf("openspec_role = %#v, want %q", art.Extracted["openspec_role"], roleCapabilitySpec)
+	}
+	if art.Extracted["openspec_role_mismatch"] != nil {
+		t.Fatalf("unexpected role mismatch metadata: %#v", art.Extracted)
+	}
+}
+
+func TestOpenSpec_CapabilitySpecWithDeltaHeadingReassigned(t *testing.T) {
+	tmp := t.TempDir()
+	relPath := "openspec/specs/billing/spec.md"
+	specPath := writeOpenSpecTestFile(t, tmp, relPath, "# Billing\n\n## ADDED Requirements\n\n### Requirement: Refunds\n\nThe system SHALL support refunds.\n")
+
+	a := &Adapter{}
+	art, _, _, err := a.Parse(context.Background(), adapters.Candidate{
+		PrimaryPath:   specPath,
+		RelPath:       relPath,
+		AdapterName:   "openspec",
+		ArtifactScope: scopeFile,
+		Role:          roleCapabilitySpec,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art.Subtype != config.SubtypeOpenspecChild {
+		t.Fatalf("subtype = %q, want %q", art.Subtype, config.SubtypeOpenspecChild)
+	}
+	if art.Extracted["openspec_role"] != roleSpecDelta {
+		t.Fatalf("openspec_role = %#v, want %q", art.Extracted["openspec_role"], roleSpecDelta)
+	}
+	if art.Extracted["openspec_path_role"] != roleCapabilitySpec {
+		t.Fatalf("openspec_path_role = %#v, want %q", art.Extracted["openspec_path_role"], roleCapabilitySpec)
+	}
+	if art.Extracted["openspec_role_mismatch"] != openSpecRoleMismatchCapabilityDelta {
+		t.Fatalf("openspec_role_mismatch = %#v, want %q", art.Extracted["openspec_role_mismatch"], openSpecRoleMismatchCapabilityDelta)
+	}
+}
+
+func TestOpenSpec_DeltaHeadingInsideFenceDoesNotReassign(t *testing.T) {
+	tmp := t.TempDir()
+	relPath := "openspec/specs/billing/spec.md"
+	specPath := writeOpenSpecTestFile(t, tmp, relPath, "# Billing\n\n```md\n## ADDED Requirements\n```\n\n## Requirements\n\n### Requirement: Checkout\n\nThe system SHALL process payments.\n")
+
+	a := &Adapter{}
+	art, _, _, err := a.Parse(context.Background(), adapters.Candidate{
+		PrimaryPath:   specPath,
+		RelPath:       relPath,
+		AdapterName:   "openspec",
+		ArtifactScope: scopeFile,
+		Role:          roleCapabilitySpec,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art.Extracted["openspec_role"] != roleCapabilitySpec {
+		t.Fatalf("openspec_role = %#v, want %q", art.Extracted["openspec_role"], roleCapabilitySpec)
+	}
+	if art.Subtype != config.SubtypeOpenspecCapabilitySpec {
+		t.Fatalf("subtype = %q, want %q", art.Subtype, config.SubtypeOpenspecCapabilitySpec)
+	}
+}
+
+func TestOpenSpec_ChangeSpecPathStaysDeltaWithoutDeltaHeading(t *testing.T) {
+	tmp := t.TempDir()
+	relPath := "openspec/changes/add-billing/specs/billing/spec.md"
+	specPath := writeOpenSpecTestFile(t, tmp, relPath, "# Billing\n\n## Requirements\n\n### Requirement: Checkout\n\nThe system SHALL process payments.\n")
+
+	a := &Adapter{}
+	art, _, _, err := a.Parse(context.Background(), adapters.Candidate{
+		PrimaryPath: specPath,
+		RelPath:     relPath,
+		AdapterName: "openspec",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art.Subtype != config.SubtypeOpenspecChild {
+		t.Fatalf("subtype = %q, want %q", art.Subtype, config.SubtypeOpenspecChild)
+	}
+	if art.Extracted["openspec_role"] != roleSpecDelta {
+		t.Fatalf("openspec_role = %#v, want %q", art.Extracted["openspec_role"], roleSpecDelta)
+	}
+}
+
+func writeOpenSpecTestFile(t *testing.T, repoRoot, relPath, content string) string {
+	t.Helper()
+	path := filepath.Join(repoRoot, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
