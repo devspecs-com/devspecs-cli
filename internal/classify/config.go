@@ -248,9 +248,19 @@ func DefaultPipelineConfig() PipelineConfig {
 						Scope:           ScopeDocument,
 						PathContainsAny: []string{"adr", "adrs", "decision-record"},
 					}),
+					evidence("adr_path_title_signal", 0.12, ReasonPathHint, "ADR path and title both signal a decision record.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						PathContainsAny: []string{"adr", "adrs", "decision-record"},
+						TitleAny:        []string{"adr", "architecture decision", "decision record"},
+					}),
 					evidence("adr_status_frontmatter", 0.16, ReasonFrontmatter, "ADR status is declared in frontmatter.", EvidenceMatch{
 						Scope:             ScopeDocument,
 						FrontmatterExists: []string{"status"},
+					}),
+					evidence("adr_metadata_status_body", 0.08, ReasonStatusSignal, "ADR metadata section declares a decision status.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						HeadingsAny:     []string{"metadata"},
+						BodyContainsAny: []string{"status:"},
 					}),
 					evidence("adr_decision_heading", 0.17, ReasonHeadingMatch, "ADR includes a decision heading.", EvidenceMatch{
 						Scope:       ScopeDocument,
@@ -313,6 +323,18 @@ func DefaultPipelineConfig() PipelineConfig {
 						Scope:           ScopeDocument,
 						PathContainsAny: []string{"rfc", "rfcs", "proposal", "proposals"},
 					}),
+					evidence("rfc_filename_signal", 0.20, ReasonPathHint, "RFC filename signal is present.", EvidenceMatch{
+						Scope:       ScopeDocument,
+						FilenameAny: []string{"rfc"},
+					}),
+					evidence("rfc_design_dir_signal", 0.22, ReasonPathHint, "Design proposal path signal is present.", EvidenceMatch{
+						Scope:     ScopeDocument,
+						PathGlobs: []string{"design/*.md", "design/**/*.md"},
+					}),
+					evidence("rfc_nested_design_dir_signal", 0.22, ReasonPathHint, "Nested design proposal path signal is present.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						PathContainsAny: []string{"/design/"},
+					}),
 					evidence("rfc_enhancement_path_signal", 0.34, ReasonPathHint, "Enhancement/KEP/TEP/SIP/SHIP path signal is present.", EvidenceMatch{
 						Scope:           ScopeDocument,
 						PathContainsAny: []string{"enhancements/", "/enhancements/", "keps/", "/keps/", "teps/", "/teps/", "oseps/", "/oseps/", "ships/", "/ships/", "sips/", "/sips/", "docs/design/", "docs/proposals/"},
@@ -323,7 +345,7 @@ func DefaultPipelineConfig() PipelineConfig {
 					}),
 					evidence("rfc_design_sections", 0.23, ReasonHeadingMatch, "RFC/proposal design sections are present.", EvidenceMatch{
 						Scope:       ScopeDocument,
-						HeadingsAny: []string{"summary", "abstract", "motivation", "proposal", "detailed design", "alternatives", "risks", "rollout", "open questions"},
+						HeadingsAny: []string{"summary", "abstract", "motivation", "proposal", "detailed design", "technical design", "design considerations", "alternatives", "risks", "rollout", "open questions", "request for feedback"},
 					}),
 					evidence("rfc_engineering_shape", 0.18, ReasonHeadingMatch, "RFC/proposal has problem and proposal structure.", EvidenceMatch{
 						Scope:       ScopeDocument,
@@ -381,6 +403,11 @@ func DefaultPipelineConfig() PipelineConfig {
 					evidence("prd_product_sections", 0.18, ReasonHeadingMatch, "Product requirement sections are present.", EvidenceMatch{
 						Scope:           ScopeDocument,
 						SectionRolesAny: []string{"product", "requirements"},
+					}),
+					evidence("prd_title_requirement_sections", 0.20, ReasonHeadingMatch, "PRD title and requirement sections are present.", EvidenceMatch{
+						Scope:       ScopeDocument,
+						TitleAny:    []string{"prd", "product requirements", "requirements"},
+						HeadingsAny: []string{"functional requirements", "non-functional requirements", "user stories", "scope", "out of scope", "goals & objectives", "success metrics"},
 					}),
 				},
 				NegativeEvidence: []EvidenceRule{

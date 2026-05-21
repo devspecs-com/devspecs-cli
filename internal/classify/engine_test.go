@@ -128,6 +128,66 @@ func TestClassifyCandidateRecognizesEnhancementProposalAsRFC(t *testing.T) {
 	}
 }
 
+func TestClassifyCandidateRecognizesDesignDirProposalAsRFC(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+	resolution := ClassifyCandidate(Candidate{
+		Path:  "design/002-secret-sync.md",
+		Scope: ScopeDocument,
+		Body: strings.Join([]string{
+			"# Secret Sync",
+			"",
+			"## Summary",
+			"",
+			"Allow generated secrets to be synchronized back into selected providers.",
+			"",
+			"## Motivation",
+			"",
+			"Operators need durable provider copies for failover.",
+			"",
+			"## Proposal",
+			"",
+			"Add a controller and reconcile provider writes from cluster state.",
+			"",
+			"## Alternatives",
+			"",
+			"Use a separate infrastructure tool.",
+		}, "\n"),
+	}, cfg)
+	if resolution.Winner.Classifier != ModelRFC {
+		t.Fatalf("design-dir proposal got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
+	}
+}
+
+func TestClassifyCandidateRecognizesRootRFCWithTechnicalDesign(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+	resolution := ClassifyCandidate(Candidate{
+		Path:  "RFC.MD",
+		Scope: ScopeDocument,
+		Body: strings.Join([]string{
+			"# Request for Comments (RFC)",
+			"",
+			"## Overview",
+			"",
+			"This RFC requests feedback on the extension architecture.",
+			"",
+			"## Technical Design",
+			"",
+			"Split the implementation into background, content, and popup components.",
+			"",
+			"## Design Considerations",
+			"",
+			"Minimize permissions and preserve browser compatibility.",
+			"",
+			"## Request for Feedback",
+			"",
+			"Comments are welcome on architecture and edge cases.",
+		}, "\n"),
+	}, cfg)
+	if resolution.Winner.Classifier != ModelRFC {
+		t.Fatalf("root RFC got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
+	}
+}
+
 func TestClassifyCandidatePrefersRFCForGovernedProposalWithPlanShape(t *testing.T) {
 	cfg := DefaultPipelineConfig()
 	resolution := ClassifyCandidate(Candidate{
@@ -170,6 +230,37 @@ func TestClassifyCandidatePrefersRFCForGovernedProposalWithPlanShape(t *testing.
 	}
 }
 
+func TestClassifyCandidateRecognizesADRMetadataStatusBody(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+	resolution := ClassifyCandidate(Candidate{
+		Path:  "docs/adrs/ADR-014-hybrid-scraping-strategy.md",
+		Scope: ScopeDocument,
+		Body: strings.Join([]string{
+			"# ADR-014: Hybrid Scraping Strategy Implementation",
+			"",
+			"## Metadata",
+			"",
+			"**Status:** Accepted",
+			"",
+			"## Context",
+			"",
+			"The scraper needs a simpler strategy for structured and unstructured sources.",
+			"",
+			"## Decision Drivers",
+			"",
+			"- Maintenance cost",
+			"- Extraction reliability",
+			"",
+			"## Decision",
+			"",
+			"Adopt a two-tier strategy using a library-first structured scraper plus an AI fallback.",
+		}, "\n"),
+	}, cfg)
+	if resolution.Winner.Classifier != ModelADR {
+		t.Fatalf("ADR metadata status got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelADR, resolution.Winner.Confidence, resolution.Alternatives)
+	}
+}
+
 func TestClassifyCandidateRecognizesPlainPRDFilenameAndBody(t *testing.T) {
 	cfg := DefaultPipelineConfig()
 	resolution := ClassifyCandidate(Candidate{
@@ -197,6 +288,45 @@ func TestClassifyCandidateRecognizesPlainPRDFilenameAndBody(t *testing.T) {
 	}, cfg)
 	if resolution.Winner.Classifier != ModelPRD {
 		t.Fatalf("plain PRD got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelPRD, resolution.Winner.Confidence, resolution.Alternatives)
+	}
+}
+
+func TestClassifyCandidatePrefersPRDTitleRequirementSectionsOverPlanPath(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+	resolution := ClassifyCandidate(Candidate{
+		Path:  "plans/x-search-skill-integration.md",
+		Scope: ScopeDocument,
+		Body: strings.Join([]string{
+			"# PRD: Integrate x-search skill for research",
+			"",
+			"## Overview",
+			"",
+			"Add a skill for real-time product and developer discourse research.",
+			"",
+			"## Goals & Objectives",
+			"",
+			"Enable research from an existing agent workflow.",
+			"",
+			"## User Stories",
+			"",
+			"- As a developer, I want to search discourse, so that I can understand feedback.",
+			"",
+			"## Functional Requirements",
+			"",
+			"- The CLI supports search, profile, and thread commands.",
+			"",
+			"## Success Metrics",
+			"",
+			"- Valid searches return markdown output.",
+			"",
+			"## Implementation Plan",
+			"",
+			"- [ ] Port the command",
+			"- [ ] Validate output",
+		}, "\n"),
+	}, cfg)
+	if resolution.Winner.Classifier != ModelPRD {
+		t.Fatalf("PRD in plans path got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelPRD, resolution.Winner.Confidence, resolution.Alternatives)
 	}
 }
 
