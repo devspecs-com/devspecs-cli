@@ -26,6 +26,8 @@ const (
 	SubmodelPlanImplementation = "plan.implementation_plan"
 	SubmodelPlanMigration      = "plan.migration_plan"
 	SubmodelPlanRollout        = "plan.rollout_plan"
+	SubmodelPlanRoadmap        = "plan.roadmap"
+	SubmodelPlanStoryArtifact  = "plan.story_artifact"
 	SubmodelAgentContinuation  = "agent_note.continuation_note"
 	SubmodelAgentFollowup      = "agent_note.followup_note"
 	SubmodelAgentBlocker       = "agent_note.blocker_note"
@@ -403,7 +405,7 @@ func DefaultPipelineConfig() PipelineConfig {
 				Scopes:    []Scope{ScopeDocument},
 				Kind:      "plan",
 				Authority: AuthorityWorkingPlan,
-				PathHints: []string{"plans/**", "docs/plans/**"},
+				PathHints: []string{"plans/**", "docs/plans/**", "roadmap.md", "plan.md", "docs/stories/**", "**/*.story.md"},
 				Evidence: []EvidenceRule{
 					evidence("plan_dated_filename", 0.12, ReasonLifecycleSignal, "Plan has dated filename or path token.", EvidenceMatch{
 						Scope:         ScopeDocument,
@@ -411,11 +413,11 @@ func DefaultPipelineConfig() PipelineConfig {
 					}),
 					evidence("plan_title_signal", 0.12, ReasonHeadingMatch, "Plan title signal is present.", EvidenceMatch{
 						Scope:    ScopeDocument,
-						TitleAny: []string{"plan", "implementation", "migration", "rollout"},
+						TitleAny: []string{"plan", "implementation", "migration", "rollout", "roadmap"},
 					}),
 					evidence("plan_path_signal", 0.08, ReasonPathHint, "Plan path signal is present.", EvidenceMatch{
 						Scope:           ScopeDocument,
-						PathContainsAny: []string{"plan", "plans"},
+						PathContainsAny: []string{"plan", "plans", "roadmap"},
 					}),
 					evidence("plan_checklist", 0.15, ReasonHeadingMatch, "Plan includes checklist/task items.", EvidenceMatch{
 						Scope:        ScopeDocument,
@@ -424,11 +426,24 @@ func DefaultPipelineConfig() PipelineConfig {
 					evidence("plan_work_sections", 0.16, ReasonHeadingMatch, "Plan includes implementation, task, risk, or open-question sections.", EvidenceMatch{
 						Scope:           ScopeDocument,
 						SectionRolesAny: []string{"tasks", "risk", "open_questions"},
-						HeadingsAny:     []string{"implementation", "phases", "tasks", "risks", "open questions", "deferred"},
+						HeadingsAny:     []string{"implementation", "phases", "tasks", "risks", "open questions", "deferred", "milestones"},
 					}),
 					evidence("plan_work_language", 0.12, ReasonHeadingMatch, "Plan includes step, sequence, phase, or task language.", EvidenceMatch{
 						Scope:           ScopeDocument,
 						BodyContainsAny: []string{"step", "sequence", "phase", "task", "todo", "next"},
+					}),
+					evidence("plan_story_path_signal", 0.14, ReasonPathHint, "Story artifact path signal is present.", EvidenceMatch{
+						Scope:     ScopeDocument,
+						PathGlobs: []string{"docs/stories/**", "**/*.story.md"},
+					}),
+					evidence("plan_story_sections", 0.22, ReasonHeadingMatch, "Story artifact work sections are present.", EvidenceMatch{
+						Scope:       ScopeDocument,
+						PathGlobs:   []string{"docs/stories/**", "**/*.story.md"},
+						HeadingsAny: []string{"story", "acceptance criteria", "tasks", "tasks / subtasks", "dev notes", "qa results", "dev agent record"},
+					}),
+					evidence("plan_speckit_child_path", 0.14, ReasonPathHint, "Spec Kit plan/task path signal is present.", EvidenceMatch{
+						Scope:     ScopeDocument,
+						PathGlobs: []string{"specs/**/plan.md", "specs/**/tasks.md"},
 					}),
 				},
 				NegativeEvidence: []EvidenceRule{
@@ -468,6 +483,26 @@ func DefaultPipelineConfig() PipelineConfig {
 							}),
 						},
 					},
+					"roadmap": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("plan_roadmap_family", 0.24, ReasonFamilyEvidence, "Roadmap family evidence is present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								FilenameAny: []string{"roadmap"},
+								HeadingsAny: []string{"roadmap", "milestones", "timeline", "now", "next", "later"},
+							}),
+						},
+					},
+					"story_artifact": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("plan_story_artifact_family", 0.28, ReasonFamilyEvidence, "Story-artifact family evidence is present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								PathGlobs:   []string{"docs/stories/**", "**/*.story.md"},
+								HeadingsAny: []string{"story", "acceptance criteria", "tasks", "tasks / subtasks", "dev notes", "qa results", "dev agent record"},
+							}),
+						},
+					},
 				},
 			},
 			ModelAgentNote: {
@@ -487,7 +522,7 @@ func DefaultPipelineConfig() PipelineConfig {
 					}),
 					evidence("agent_note_handoff_terms", 0.20, ReasonHeadingMatch, "Agent handoff or continuation language is present.", EvidenceMatch{
 						Scope:           ScopeDocument,
-						BodyContainsAny: []string{"follow-up", "follow up", "handoff", "resume", "next step", "blocked", "blocker", "stopped after"},
+						BodyContainsAny: []string{"follow-up", "follow up", "handoff", "resume", "next step", "next steps", "blocked", "blocker", "stopped after", "source of truth", "current progress"},
 					}),
 				},
 				NegativeEvidence: []EvidenceRule{
@@ -561,6 +596,8 @@ func DocumentedModelIDs() []string {
 		SubmodelPlanImplementation,
 		SubmodelPlanMigration,
 		SubmodelPlanRollout,
+		SubmodelPlanRoadmap,
+		SubmodelPlanStoryArtifact,
 		ModelAgentNote,
 		SubmodelAgentContinuation,
 		SubmodelAgentFollowup,
@@ -603,6 +640,8 @@ func MissingDocumentedModels(cfg PipelineConfig) []string {
 		{ModelPlan, "implementation_plan", SubmodelPlanImplementation},
 		{ModelPlan, "migration_plan", SubmodelPlanMigration},
 		{ModelPlan, "rollout_plan", SubmodelPlanRollout},
+		{ModelPlan, "roadmap", SubmodelPlanRoadmap},
+		{ModelPlan, "story_artifact", SubmodelPlanStoryArtifact},
 		{ModelAgentNote, "continuation_note", SubmodelAgentContinuation},
 		{ModelAgentNote, "followup_note", SubmodelAgentFollowup},
 		{ModelAgentNote, "blocker_note", SubmodelAgentBlocker},

@@ -63,14 +63,18 @@ func FromPath(relPath string) string {
 		return ProfileBmad
 	}
 
-	dir := filepath.ToSlash(filepath.Dir(norm))
-	base := filepath.Base(norm)
-	if base == "spec.md" && strings.HasPrefix(dir, "specs/") && len(dir) > len("specs/") {
+	if isSpecKitFeaturePath(norm) || strings.HasPrefix(norm, ".specify/") {
 		return ProfileSpeckit
 	}
 
 	if strings.Contains(norm, ".cursor/plans/") {
 		return ProfileCursorPlan
+	}
+	if strings.Contains(norm, ".claude/") {
+		return ProfileClaude
+	}
+	if strings.Contains(norm, ".codex/") {
+		return ProfileCodex
 	}
 
 	return ProfileGeneric
@@ -115,9 +119,7 @@ func LayoutGroup(relPath string) string {
 	}
 
 	dir := filepath.ToSlash(filepath.Dir(norm))
-	base := filepath.Base(norm)
-	if base == "spec.md" && strings.HasPrefix(dir, "specs/") && len(dir) > len("specs/") {
-		// specs/001-feature[/...]
+	if isSpecKitFeaturePath(norm) {
 		rest := strings.TrimPrefix(dir, "specs/")
 		if idx := strings.Index(rest, "/"); idx >= 0 {
 			return "specs/" + rest[:idx]
@@ -126,4 +128,13 @@ func LayoutGroup(relPath string) string {
 	}
 
 	return ""
+}
+
+func isSpecKitFeaturePath(relPath string) bool {
+	norm := strings.Trim(filepath.ToSlash(relPath), "/")
+	if !strings.HasPrefix(norm, "specs/") {
+		return false
+	}
+	parts := strings.Split(norm, "/")
+	return len(parts) >= 3 && parts[1] != "" && strings.HasSuffix(strings.ToLower(parts[len(parts)-1]), ".md")
 }

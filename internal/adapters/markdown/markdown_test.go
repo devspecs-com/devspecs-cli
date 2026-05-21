@@ -32,6 +32,27 @@ func TestDiscover_DefaultPaths(t *testing.T) {
 	}
 }
 
+func TestDiscover_RootStandardIntentDocs(t *testing.T) {
+	tmp := t.TempDir()
+	for _, rel := range []string{"ROADMAP.md", "PLAN.md", "DESIGN.md", "ARCHITECTURE.md", "README.md"} {
+		writeMarkdown(t, tmp, rel, "# "+strings.TrimSuffix(rel, ".md")+"\n\n- [ ] follow-up\n")
+	}
+
+	a := &Adapter{}
+	candidates, err := a.Discover(context.Background(), tmp, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"ROADMAP.md", "PLAN.md", "DESIGN.md", "ARCHITECTURE.md"} {
+		if findCandidate(candidates, rel).RelPath == "" {
+			t.Fatalf("missing root intent doc %s in %#v", rel, candidateRelPaths(candidates))
+		}
+	}
+	if findCandidate(candidates, "README.md").RelPath != "" {
+		t.Fatalf("root README should not be included by standard intent globs: %#v", candidateRelPaths(candidates))
+	}
+}
+
 func TestDiscover_ConfigPaths(t *testing.T) {
 	tmp := t.TempDir()
 	customDir := filepath.Join(tmp, "my-plans")
@@ -612,7 +633,9 @@ func TestPathGeneratorForExtract(t *testing.T) {
 	}{
 		{"_bmad-output/planning-artifacts/prd.md", "bmad-method"},
 		{"specs/001-x/spec.md", "speckit"},
+		{"specs/001-x/plan.md", "speckit"},
 		{".cursor/plans/foo.plan.md", "cursor-plan"},
+		{".codex/plans/PLAN.md", "codex"},
 		{"plans/nested/spec.md", ""},
 	}
 	for _, tt := range tests {
@@ -689,6 +712,36 @@ func TestDiscover_SampleFixture_Specify(t *testing.T) {
 	}
 	if g, _ := art.Extracted["generator"].(string); g != "speckit" {
 		t.Fatalf("extracted generator: want speckit, got %q", g)
+	}
+}
+
+func TestDiscover_SampleFixture_SpecifyChildrenShareLayout(t *testing.T) {
+	root := filepath.Join(testSamplesRoot(t), "specify")
+	a := &Adapter{}
+	candidates, err := a.Discover(context.Background(), root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantLayout := filepath.ToSlash(filepath.Join("specs", "001-discover-related-specs"))
+	for _, rel := range []string{
+		filepath.ToSlash(filepath.Join("specs", "001-discover-related-specs", "plan.md")),
+		filepath.ToSlash(filepath.Join("specs", "001-discover-related-specs", "tasks.md")),
+		filepath.ToSlash(filepath.Join("specs", "001-discover-related-specs", "research.md")),
+	} {
+		candidate := findCandidate(candidates, rel)
+		if candidate.PrimaryPath == "" {
+			t.Fatalf("missing Spec Kit child %s", rel)
+		}
+		art, _, _, err := a.Parse(context.Background(), candidate)
+		if err != nil {
+			t.Fatalf("parse %s: %v", rel, err)
+		}
+		if art.FormatProfile != format.ProfileSpeckit {
+			t.Fatalf("%s format_profile: want %q got %q", rel, format.ProfileSpeckit, art.FormatProfile)
+		}
+		if art.LayoutGroup != wantLayout {
+			t.Fatalf("%s layout_group: want %q got %q", rel, wantLayout, art.LayoutGroup)
+		}
 	}
 }
 

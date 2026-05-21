@@ -2592,3 +2592,65 @@ classifier_cases:
       reduction_notes: "Full OpenSpec change bundle preserved under original repository-relative layout."
     notes: "Real OpenSpec change bundle promoted as a container case; child files retain proposal/design/tasks/spec-delta roles."
 
+  - id: "mined-bmad-like-story-db8b468cc3dd"
+    path: "samples/repos/ALLiDoizCode__Permaweb-MCP/docs/stories/1.1.story.md"
+    scope: document
+    expected:
+      classifier: plan
+      scope: document
+      kind: plan
+      family: plan.story_artifact
+      authority: working_plan
+      should_index: true
+    provenance:
+      source_url: "https://github.com/ALLiDoizCode/Permaweb-MCP/blob/e1a0ddb470726c49ca55491d35774eddddb13aeb/docs/stories/1.1.story.md"
+      repository: "ALLiDoizCode/Permaweb-MCP"
+      commit_sha: "e1a0ddb470726c49ca55491d35774eddddb13aeb"
+      license: "MIT"
+      original_path: "docs/stories/1.1.story.md"
+      format_label: "BMAD_LIKE_STORY"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real story-shaped artifact promoted as plan.story_artifact; this does not claim official BMAD provenance."
+
+  - id: "mined-bmad-like-story-9c11fc2a9907"
+    path: "samples/repos/ALLiDoizCode__Permaweb-MCP/docs/stories/11.5.story.md"
+    scope: document
+    expected:
+      classifier: plan
+      scope: document
+      kind: plan
+      family: plan.story_artifact
+      authority: working_plan
+      should_index: true
+    provenance:
+      source_url: "https://github.com/ALLiDoizCode/Permaweb-MCP/blob/e1a0ddb470726c49ca55491d35774eddddb13aeb/docs/stories/11.5.story.md"
+      repository: "ALLiDoizCode/Permaweb-MCP"
+      commit_sha: "e1a0ddb470726c49ca55491d35774eddddb13aeb"
+      license: "MIT"
+      original_path: "docs/stories/11.5.story.md"
+      format_label: "BMAD_LIKE_STORY"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real story-shaped artifact promoted as plan.story_artifact; this does not claim official BMAD provenance."
+
+  - id: "mined-bmad-like-story-037dad223c7a"
+    path: "samples/repos/ALLiDoizCode__Permaweb-MCP/docs/stories/4.1.story.md"
+    scope: document
+    expected:
+      classifier: plan
+      scope: document
+      kind: plan
+      family: plan.story_artifact
+      authority: working_plan
+      should_index: true
+    provenance:
+      source_url: "https://github.com/ALLiDoizCode/Permaweb-MCP/blob/e1a0ddb470726c49ca55491d35774eddddb13aeb/docs/stories/4.1.story.md"
+      repository: "ALLiDoizCode/Permaweb-MCP"
+      commit_sha: "e1a0ddb470726c49ca55491d35774eddddb13aeb"
+      license: "MIT"
+      original_path: "docs/stories/4.1.story.md"
+      format_label: "BMAD_LIKE_STORY"
+      can_commit_file: true
+      reduction_notes: "Miner metadata frontmatter removed; original markdown content preserved."
+    notes: "Real story-shaped artifact promoted as plan.story_artifact; this does not claim official BMAD provenance."

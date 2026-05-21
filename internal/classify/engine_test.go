@@ -200,6 +200,82 @@ func TestClassifyCandidateRecognizesPlainPRDFilenameAndBody(t *testing.T) {
 	}
 }
 
+func TestClassifyCandidateRecognizesRoadmapAsPlanFamily(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+	resolution := ClassifyCandidate(Candidate{
+		Path:  "ROADMAP.md",
+		Scope: ScopeDocument,
+		Body:  "# Roadmap\n\nHigh-level product direction.\n\n## Milestones\n\n- [ ] Foundation\n- [ ] GA\n",
+	}, cfg)
+	if resolution.Winner.Classifier != ModelPlan {
+		t.Fatalf("roadmap got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelPlan, resolution.Winner.Confidence, resolution.Alternatives)
+	}
+	if resolution.Winner.Family != SubmodelPlanRoadmap {
+		t.Fatalf("roadmap family got %q want %q", resolution.Winner.Family, SubmodelPlanRoadmap)
+	}
+}
+
+func TestClassifyCandidateRecognizesBMADLikeStoryAsPlanFamily(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+	resolution := ClassifyCandidate(Candidate{
+		Path:  "docs/stories/1.1.story.md",
+		Scope: ScopeDocument,
+		Body: strings.Join([]string{
+			"# Story 1.1: Simplify Memory Tools",
+			"",
+			"## Status",
+			"",
+			"Done",
+			"",
+			"## Story",
+			"",
+			"**As a** developer, **I want** focused tools, **so that** the platform stays maintainable.",
+			"",
+			"## Acceptance Criteria",
+			"",
+			"1. Keep only the core tools.",
+			"",
+			"## Tasks / Subtasks",
+			"",
+			"- [x] Remove obsolete commands",
+			"- [x] Update tests",
+			"",
+			"## Dev Notes",
+			"",
+			"Use the existing service layer.",
+		}, "\n"),
+	}, cfg)
+	if resolution.Winner.Classifier != ModelPlan {
+		t.Fatalf("story got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelPlan, resolution.Winner.Confidence, resolution.Alternatives)
+	}
+	if resolution.Winner.Family != SubmodelPlanStoryArtifact {
+		t.Fatalf("story family got %q want %q", resolution.Winner.Family, SubmodelPlanStoryArtifact)
+	}
+}
+
+func TestClassifyCandidateRecognizesCodexPlanAsAgentNote(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+	resolution := ClassifyCandidate(Candidate{
+		Path:  ".codex/plans/PLAN.md",
+		Scope: ScopeDocument,
+		Body: strings.Join([]string{
+			"# 80/20 Related Specs",
+			"",
+			"## Summary",
+			"",
+			"Source of truth for the current implementation slice.",
+			"",
+			"## Next Steps",
+			"",
+			"- [ ] Add schema migration",
+			"- [ ] Wire command tests",
+		}, "\n"),
+	}, cfg)
+	if resolution.Winner.Classifier != ModelAgentNote {
+		t.Fatalf("codex plan got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelAgentNote, resolution.Winner.Confidence, resolution.Alternatives)
+	}
+}
+
 func TestClassifyCandidateFallsBackWhenEvidenceIsWeakOrAmbiguous(t *testing.T) {
 	cfg := DefaultPipelineConfig()
 	resolution := ClassifyCandidate(Candidate{

@@ -55,10 +55,14 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 		if m := ignore.FromContext(ctx); m != nil && m.ShouldSkip(rel, false) {
 			return
 		}
-		if seen[rel] {
+		seenKey := rel
+		if os.PathSeparator == '\\' {
+			seenKey = strings.ToLower(seenKey)
+		}
+		if seen[seenKey] {
 			return
 		}
-		seen[rel] = true
+		seen[seenKey] = true
 		candidates = append(candidates, adapters.Candidate{
 			PrimaryPath:    absPath,
 			RelPath:        rel,
@@ -95,6 +99,13 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 				})
 			}
 		}
+	}
+
+	for _, absPath := range rootStandardMarkdownFiles(repoRoot) {
+		addCandidate(absPath, discoveryEvidence{
+			score:   8,
+			reasons: []string{"root_standard_intent_doc"},
+		})
 	}
 
 	// Root-level glob patterns
@@ -240,7 +251,8 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 func defaultPaths() []string {
 	return []string{
 		"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans",
-		".claude/notes", "docs/prd", "rfcs", "rfc", "docs/rfcs", "docs/rfc",
+		".claude/notes", ".claude/plans", ".codex/plans", ".codex/notes",
+		"docs/prd", "rfcs", "rfc", "docs/rfcs", "docs/rfc",
 		"docs/design", "docs/technical",
 		"_bmad-output", ".specify/memory",
 	}
@@ -251,6 +263,35 @@ func rootGlobs() []string {
 		"*.spec.md", "*.plan.md", "*.prd.md",
 		"*.rfc.md", "*.design.md", "*.contract.md", "*.requirements.md",
 	}
+}
+
+func rootStandardMarkdownFiles(repoRoot string) []string {
+	standard := map[string]bool{
+		"ROADMAP.md":      true,
+		"PLAN.md":         true,
+		"DESIGN.md":       true,
+		"ARCHITECTURE.md": true,
+		"PRD.md":          true,
+		"RFC.md":          true,
+		"SPEC.md":         true,
+		"REQUIREMENTS.md": true,
+	}
+	entries, err := os.ReadDir(repoRoot)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !standard[entry.Name()] {
+			continue
+		}
+		out = append(out, filepath.Join(repoRoot, entry.Name()))
+	}
+	sort.Strings(out)
+	return out
 }
 
 func walkMarkdownFiles(ctx context.Context, repoRoot, dir string) ([]string, error) {
@@ -776,7 +817,7 @@ func inferKindSubtype(relPath string) (kind, subtype string) {
 		return config.KindRequirements, config.SubtypePRD
 	case isRFCPath(lower):
 		return config.KindDesign, ""
-	case strings.Contains(lower, "plan"):
+	case strings.Contains(lower, "plan") || strings.Contains(lower, "roadmap") || isStoryPath(lower):
 		return config.KindPlan, ""
 	case strings.Contains(lower, "spec"):
 		return config.KindSpec, ""
@@ -789,6 +830,14 @@ func inferKindSubtype(relPath string) (kind, subtype string) {
 	default:
 		return config.KindMarkdownArtifact, ""
 	}
+}
+
+func isStoryPath(relPath string) bool {
+	relPath = strings.Trim(filepath.ToSlash(strings.ToLower(relPath)), "/")
+	base := filepath.Base(relPath)
+	return strings.HasSuffix(base, ".story.md") ||
+		strings.Contains(relPath, "/stories/") ||
+		strings.Contains(relPath, "/story/")
 }
 
 func isRFCPath(relPath string) bool {
@@ -833,9 +882,7 @@ func pathGeneratorForExtract(relPath string) string {
 		return "bmad-method"
 	}
 
-	dir := filepath.ToSlash(filepath.Dir(norm))
-	base := filepath.Base(norm)
-	if base == "spec.md" && strings.HasPrefix(dir, "specs/") && len(dir) > len("specs/") {
+	if format.FromPath(norm) == format.ProfileSpeckit {
 		return "speckit"
 	}
 
@@ -845,6 +892,9 @@ func pathGeneratorForExtract(relPath string) string {
 
 	if strings.Contains(norm, ".claude/") {
 		return "claude"
+	}
+	if strings.Contains(norm, ".codex/") {
+		return "codex"
 	}
 
 	return ""

@@ -70,6 +70,8 @@ func ScanHintCandidates(repoRoot string, m *ignore.Matcher) []HintCandidate {
 		".cursor/plans",
 		"_bmad-output",
 		".specify/memory",
+		".claude/plans",
+		".codex/plans",
 		"plans",
 		"docs/specs",
 		"docs/plans",

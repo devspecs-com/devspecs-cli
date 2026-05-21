@@ -580,7 +580,7 @@ samples:
   - id: "mined-bmad-like-story-db8b468cc3dd"
     type: "bmad_like_story"
     path: "samples/repos/ALLiDoizCode__Permaweb-MCP/docs/stories/1.1.story.md"
-    classifier_case: false
+    classifier_case: true
     source_url: "https://github.com/ALLiDoizCode/Permaweb-MCP/blob/e1a0ddb470726c49ca55491d35774eddddb13aeb/docs/stories/1.1.story.md"
     repository: "ALLiDoizCode/Permaweb-MCP"
     commit_sha: "e1a0ddb470726c49ca55491d35774eddddb13aeb"
@@ -592,7 +592,7 @@ samples:
   - id: "mined-bmad-like-story-9c11fc2a9907"
     type: "bmad_like_story"
     path: "samples/repos/ALLiDoizCode__Permaweb-MCP/docs/stories/11.5.story.md"
-    classifier_case: false
+    classifier_case: true
     source_url: "https://github.com/ALLiDoizCode/Permaweb-MCP/blob/e1a0ddb470726c49ca55491d35774eddddb13aeb/docs/stories/11.5.story.md"
     repository: "ALLiDoizCode/Permaweb-MCP"
     commit_sha: "e1a0ddb470726c49ca55491d35774eddddb13aeb"
@@ -604,7 +604,7 @@ samples:
   - id: "mined-bmad-like-story-037dad223c7a"
     type: "bmad_like_story"
     path: "samples/repos/ALLiDoizCode__Permaweb-MCP/docs/stories/4.1.story.md"
-    classifier_case: false
+    classifier_case: true
     source_url: "https://github.com/ALLiDoizCode/Permaweb-MCP/blob/e1a0ddb470726c49ca55491d35774eddddb13aeb/docs/stories/4.1.story.md"
     repository: "ALLiDoizCode/Permaweb-MCP"
     commit_sha: "e1a0ddb470726c49ca55491d35774eddddb13aeb"

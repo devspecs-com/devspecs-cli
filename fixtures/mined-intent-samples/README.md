@@ -14,7 +14,7 @@ The fixture preserves repository-relative paths under `samples/repos/<owner>__<r
 - `adr`: selected 24/24, classifier cases 24
 - `api_spec`: selected 4/4, classifier cases 0
 - `bmad`: selected 17/17, classifier cases 0
-- `bmad_like_story`: selected 16/16, classifier cases 0
+- `bmad_like_story`: selected 16/16, classifier cases 3
 - `openspec_bundle`: selected 30/732, classifier cases 30
 - `prd`: selected 13/13, classifier cases 13
 - `rfc`: selected 42/42, classifier cases 42
@@ -27,4 +27,4 @@ Run:
 go run ./cmd/ds eval ./fixtures/mined-intent-samples --classifier --no-save
 ```
 
-BMAD, BMAD-like story, and API spec samples are included in the manifest but are not classifier assertions yet because the deterministic classifier does not currently expose those as first-class model labels.
+BMAD and API spec samples are included in the manifest but are not classifier assertions yet because the deterministic classifier does not currently expose those as first-class model labels. BMAD-like story samples are asserted as `plan.story_artifact`, without claiming official BMAD provenance.
