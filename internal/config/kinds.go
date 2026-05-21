@@ -19,9 +19,13 @@ const (
 
 // Known subtypes per kind (empty subtype is always allowed).
 const (
-	SubtypeADR            = "adr"
-	SubtypeOpenspecChange = "openspec_change"
-	SubtypePRD            = "prd"
+	SubtypeADR                    = "adr"
+	SubtypeOpenspecChange         = "openspec_change"
+	SubtypeOpenspecCollection     = "openspec_collection"
+	SubtypeOpenspecChangeBundle   = "openspec_change_bundle"
+	SubtypeOpenspecChild          = "openspec_child"
+	SubtypeOpenspecCapabilitySpec = "openspec_capability_spec"
+	SubtypePRD                    = "prd"
 )
 
 var validKinds = map[string]struct{}{
@@ -41,7 +45,11 @@ var allowedSubtypes = map[string]map[string]struct{}{
 		SubtypeADR: {},
 	},
 	KindSpec: {
-		SubtypeOpenspecChange: {},
+		SubtypeOpenspecChange:         {},
+		SubtypeOpenspecCollection:     {},
+		SubtypeOpenspecChangeBundle:   {},
+		SubtypeOpenspecChild:          {},
+		SubtypeOpenspecCapabilitySpec: {},
 	},
 	KindRequirements: {
 		SubtypePRD: {},

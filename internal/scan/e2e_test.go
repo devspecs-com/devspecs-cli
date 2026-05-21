@@ -45,10 +45,10 @@ func TestE2E_SpecExample(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Should find 4 artifacts total: 2 OpenSpec child files, 1 ADR, 1 plan.
+	// Should find 6 artifacts total: OpenSpec collection, bundle, 2 child files, 1 ADR, 1 plan.
 	totalNew := result.New
-	if totalNew != 4 {
-		t.Errorf("expected 4 new artifacts, got %d (found: %v)", totalNew, result.Found)
+	if totalNew != 6 {
+		t.Errorf("expected 6 new artifacts, got %d (found: %v)", totalNew, result.Found)
 	}
 
 	// Verify kinds
@@ -60,8 +60,8 @@ func TestE2E_SpecExample(t *testing.T) {
 	for _, a := range arts {
 		kinds[a.Kind]++
 	}
-	if kinds["spec"] != 2 {
-		t.Errorf("expected 2 specs, got %d", kinds["spec"])
+	if kinds["spec"] != 4 {
+		t.Errorf("expected 4 specs, got %d", kinds["spec"])
 	}
 	if kinds["decision"] != 1 {
 		t.Errorf("expected 1 decision, got %d", kinds["decision"])
@@ -75,12 +75,12 @@ func TestE2E_SpecExample(t *testing.T) {
 		if a.Kind == "decision" && a.Subtype == "adr" && a.Status != "accepted" {
 			t.Errorf("ADR status: want 'accepted', got %q", a.Status)
 		}
-		if a.Kind == "spec" && a.Subtype == "openspec_change" && a.Status != "proposed" {
+		if a.Kind == "spec" && (a.Subtype == "openspec_child" || a.Subtype == "openspec_change_bundle") && a.Status != "proposed" {
 			t.Errorf("OpenSpec status: want 'proposed', got %q", a.Status)
 		}
 	}
 
-	// Verify todos extracted (4 aggregated on proposal, 4 from tasks artifact, 3 from plan).
+	// Verify todos extracted (4 from bundle, 4 from tasks artifact, 3 from plan).
 	var todoCount int
 	db.QueryRow("SELECT COUNT(*) FROM artifact_todos").Scan(&todoCount)
 	if todoCount != 11 {

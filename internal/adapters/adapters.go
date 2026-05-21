@@ -23,6 +23,10 @@ type Candidate struct {
 	// FormatProfile and LayoutGroup may be set by adapters; scan persists them on Source rows.
 	FormatProfile string
 	LayoutGroup   string
+	// ArtifactScope and Role are optional adapter hints for hierarchical
+	// artifact families such as OpenSpec collections, bundles, and children.
+	ArtifactScope string
+	Role          string
 	// MarkdownPaths and MarkdownRules apply when AdapterName is "markdown".
 	MarkdownPaths []string
 	MarkdownRules []config.SourceRule

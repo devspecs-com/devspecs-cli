@@ -133,6 +133,42 @@ func TestWeightedFilesRetrieverV0_LifecycleIntentPrefersStaleDecision(t *testing
 	}
 }
 
+func TestWeightedFilesRetrieverV0_ExpandsOpenSpecParentBundle(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:       "bundle_1",
+			Path:     "openspec/changes/add-sso",
+			Title:    "Add SSO",
+			Body:     "OpenSpec bundle for add-sso.",
+			Metadata: map[string]string{"artifact_scope": "bundle", "openspec_role": "change_bundle"},
+		},
+		{
+			ID:    "tasks_1",
+			Path:  "openspec/changes/add-sso/tasks.md",
+			Title: "Tasks",
+			Body:  "Tasks for add-sso OAuth provider setup.",
+			Metadata: map[string]string{
+				"artifact_scope":    "file",
+				"openspec_role":     "tasks",
+				"link_contained_by": "artifact:bundle_1",
+			},
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "resume OAuth provider tasks")
+	if !containsCandidatePath(got, "openspec/changes/add-sso/tasks.md") {
+		t.Fatalf("missing tasks child: %#v", CandidatePaths(got))
+	}
+	if !containsCandidatePath(got, "openspec/changes/add-sso") {
+		t.Fatalf("missing expanded parent bundle: %#v", CandidatePaths(got))
+	}
+	for _, candidate := range got {
+		if candidate.Path == "openspec/changes/add-sso" && candidate.Metadata["retrieval_expansion_reason"] != "openspec_parent_bundle" {
+			t.Fatalf("parent bundle expansion reason = %#v", candidate.Metadata)
+		}
+	}
+}
+
 func TestWeightedFilesRetrieverV0_ProductBackgroundAnchorsNamedSubject(t *testing.T) {
 	candidates := []Candidate{
 		{Path: "docs/prd/billing-entitlements-v1.md", Body: "Product requirements for billing entitlements and customer access."},

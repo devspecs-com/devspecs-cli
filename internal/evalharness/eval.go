@@ -17,6 +17,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/sourcecontext"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
+	"github.com/devspecs-com/devspecs-cli/internal/openspecmetrics"
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/scan"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
@@ -169,15 +170,16 @@ type BaselineMetrics struct {
 }
 
 type Diagnostics struct {
-	ExpectedRelevantCount          int              `json:"expected_relevant_count"`
-	ExpectedAvailableCount         int              `json:"expected_available_count"`
-	ExpectedMissingFromCorpusCount int              `json:"expected_missing_from_corpus_count"`
-	MissedAfterDiscoveryCount      int              `json:"missed_after_discovery_count"`
-	DiscoveryCoverage              float64          `json:"discovery_coverage"`
-	RetrievalCoverageOfDiscovered  float64          `json:"retrieval_coverage_of_discovered"`
-	ExpectedMissingFromCorpus      []string         `json:"expected_missing_from_corpus,omitempty"`
-	MissedAfterDiscovery           []string         `json:"missed_after_discovery,omitempty"`
-	RoleSummaries                  []RoleDiagnostic `json:"role_summaries,omitempty"`
+	ExpectedRelevantCount          int                      `json:"expected_relevant_count"`
+	ExpectedAvailableCount         int                      `json:"expected_available_count"`
+	ExpectedMissingFromCorpusCount int                      `json:"expected_missing_from_corpus_count"`
+	MissedAfterDiscoveryCount      int                      `json:"missed_after_discovery_count"`
+	DiscoveryCoverage              float64                  `json:"discovery_coverage"`
+	RetrievalCoverageOfDiscovered  float64                  `json:"retrieval_coverage_of_discovered"`
+	ExpectedMissingFromCorpus      []string                 `json:"expected_missing_from_corpus,omitempty"`
+	MissedAfterDiscovery           []string                 `json:"missed_after_discovery,omitempty"`
+	RoleSummaries                  []RoleDiagnostic         `json:"role_summaries,omitempty"`
+	OpenSpec                       *openspecmetrics.Metrics `json:"openspec,omitempty"`
 }
 
 type RoleDiagnostic struct {
@@ -420,6 +422,11 @@ func Run(fixture string, opts Options) (*Result, error) {
 	}
 	result.Summary = summarize(result.Cases)
 	result.Diagnostics = summarizeDiagnostics(result.Cases)
+	if corpusSource == CorpusSourceSQLiteIndex {
+		if metrics := openSpecMetricsFromFiles(fixtureAbs, files); metrics != nil {
+			result.Diagnostics.OpenSpec = metrics
+		}
+	}
 	result.Summary.FailedThresholdCount += len(CheckSummaryThresholds(result, opts))
 	return result, nil
 }
@@ -614,20 +621,23 @@ func collectIndexedFiles(root string) ([]File, error) {
 		seen[rel] = true
 
 		var body string
+		var extractedJSON string
 		if art.CurrentRevID != "" {
 			if rev, err := db.GetRevision(art.CurrentRevID); err == nil && rev != nil {
 				body = rev.Body
+				extractedJSON = rev.ExtractedJSON
 			}
 		}
 		todos, _ := db.GetTodosForArtifact(art.ID)
 		files = append(files, File{
-			ID:      art.ID,
-			Path:    filepath.ToSlash(rel),
-			Kind:    art.Kind,
-			Subtype: art.Subtype,
-			Title:   art.Title,
-			Status:  art.Status,
-			Body:    renderIndexedArtifactContent(art, sources, todos, body),
+			ID:       art.ID,
+			Path:     filepath.ToSlash(rel),
+			Kind:     art.Kind,
+			Subtype:  art.Subtype,
+			Title:    art.Title,
+			Status:   art.Status,
+			Body:     renderIndexedArtifactContent(art, sources, todos, body),
+			Metadata: indexedArtifactMetadata(sources, extractedJSON),
 		})
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
@@ -679,6 +689,54 @@ func renderIndexedArtifactContent(art store.ArtifactRow, sources []store.SourceR
 		fmt.Fprintf(&b, "\n%s", strings.TrimRight(body, "\r\n"))
 	}
 	return b.String()
+}
+
+func indexedArtifactMetadata(sources []store.SourceRow, extractedJSON string) map[string]string {
+	metadata := map[string]string{}
+	if len(sources) > 0 {
+		metadata["source_type"] = sources[0].SourceType
+		metadata["source_identity"] = sources[0].SourceIdentity
+	}
+	var payload struct {
+		ArtifactScope string `json:"artifact_scope"`
+		OpenSpecRole  string `json:"openspec_role"`
+	}
+	if strings.TrimSpace(extractedJSON) != "" {
+		if err := json.Unmarshal([]byte(extractedJSON), &payload); err == nil {
+			if payload.ArtifactScope != "" {
+				metadata["artifact_scope"] = payload.ArtifactScope
+			}
+			if payload.OpenSpecRole != "" {
+				metadata["openspec_role"] = payload.OpenSpecRole
+			}
+		}
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
+}
+
+func openSpecMetricsFromFiles(repoRoot string, files []File) *openspecmetrics.Metrics {
+	artifacts := make([]openspecmetrics.Artifact, 0, len(files))
+	for _, f := range files {
+		artifact := openspecmetrics.Artifact{
+			Path:    f.Path,
+			Subtype: f.Subtype,
+		}
+		if f.Metadata != nil {
+			artifact.SourceType = f.Metadata["source_type"]
+			artifact.SourceIdentity = f.Metadata["source_identity"]
+			artifact.ArtifactScope = f.Metadata["artifact_scope"]
+			artifact.OpenSpecRole = f.Metadata["openspec_role"]
+		}
+		artifacts = append(artifacts, artifact)
+	}
+	metrics := openspecmetrics.Analyze(repoRoot, artifacts)
+	if !metrics.HasData() {
+		return nil
+	}
+	return &metrics
 }
 
 func shouldIgnore(rel string, isDir bool) bool {
@@ -1075,15 +1133,15 @@ func ensureRoleDiagnostic(roles map[string]*RoleDiagnostic, role string) *RoleDi
 func diagnosticRole(path string) string {
 	path = strings.ToLower(filepath.ToSlash(path))
 	switch {
-	case strings.HasPrefix(path, "openspec/specs/") && strings.HasSuffix(path, "/spec.md"):
+	case isOpenSpecDiagnosticPath(path) && strings.Contains(path, "/specs/") && !strings.Contains(path, "/changes/") && strings.HasSuffix(path, "/spec.md"):
 		return "openspec_base_spec"
-	case strings.HasPrefix(path, "openspec/") && strings.HasSuffix(path, "/proposal.md"):
+	case isOpenSpecDiagnosticPath(path) && strings.HasSuffix(path, "/proposal.md"):
 		return "openspec_proposal"
-	case strings.HasPrefix(path, "openspec/") && strings.HasSuffix(path, "/design.md"):
+	case isOpenSpecDiagnosticPath(path) && strings.HasSuffix(path, "/design.md"):
 		return "openspec_design"
-	case strings.HasPrefix(path, "openspec/") && strings.HasSuffix(path, "/tasks.md"):
+	case isOpenSpecDiagnosticPath(path) && strings.HasSuffix(path, "/tasks.md"):
 		return "openspec_tasks"
-	case strings.HasPrefix(path, "openspec/") && strings.Contains(path, "/specs/") && strings.HasSuffix(path, "/spec.md"):
+	case isOpenSpecDiagnosticPath(path) && strings.Contains(path, "/changes/") && strings.Contains(path, "/specs/") && strings.HasSuffix(path, "/spec.md"):
 		return "openspec_spec_delta"
 	case strings.HasPrefix(path, "docs/adr/") || strings.HasPrefix(path, "docs/adrs/") || strings.Contains(path, "/docs/adr/") || strings.Contains(path, "/docs/adrs/"):
 		return "adr"
@@ -1104,6 +1162,14 @@ func diagnosticRole(path string) string {
 	default:
 		return "source"
 	}
+}
+
+func isOpenSpecDiagnosticPath(path string) bool {
+	path = strings.Trim(filepath.ToSlash(path), "/")
+	if path == "openspec" || strings.HasPrefix(path, "openspec/") || strings.HasSuffix(path, "/openspec") {
+		return true
+	}
+	return strings.Contains(path, "/openspec/")
 }
 
 func applyThresholds(cr *CaseResult, opts Options) {
@@ -1328,6 +1394,22 @@ func FormatText(r *Result) string {
 				role.MissedAfterDiscovery,
 				role.IrrelevantRetrieved)
 		}
+	}
+	if r.Diagnostics.OpenSpec != nil {
+		openSpec := r.Diagnostics.OpenSpec
+		indexedExpectedBundles := openSpec.ExpectedBundles - len(openSpec.MissingBundles)
+		if indexedExpectedBundles < 0 {
+			indexedExpectedBundles = 0
+		}
+		indexedExpectedChildren := openSpec.ExpectedChildArtifacts - len(openSpec.MissingChildRoles)
+		if indexedExpectedChildren < 0 {
+			indexedExpectedChildren = 0
+		}
+		fmt.Fprintln(&b, "- OpenSpec:")
+		fmt.Fprintf(&b, "  - Bundle recall: %s\n", recallText(indexedExpectedBundles, openSpec.ExpectedBundles, openSpec.BundleRecall))
+		fmt.Fprintf(&b, "  - Child-role recall: %s\n", recallText(indexedExpectedChildren, openSpec.ExpectedChildArtifacts, openSpec.ChildRoleRecall))
+		fmt.Fprintf(&b, "  - Duplicate pressure: %.2f child artifacts per bundle\n", openSpec.DuplicatePressure)
+		fmt.Fprintf(&b, "  - Markdown leakage: %d\n", openSpec.MarkdownLeakage)
 	}
 	fmt.Fprintln(&b)
 

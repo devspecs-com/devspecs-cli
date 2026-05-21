@@ -11,6 +11,7 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/format"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
@@ -376,6 +377,90 @@ func TestScan_ExperimentalIntentDiscoveryIndexesCompoundPlanningDir(t *testing.T
 	}
 }
 
+func TestScan_OpenSpecHierarchyLinksAndMarkdownOwnership(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	repoRoot := filepath.Join(tmp, "repo")
+	changeDir := filepath.Join(repoRoot, "openspec", "changes", "add-sso")
+	nestedChangeDir := filepath.Join(repoRoot, "services", "collector", "openspec", "changes", "add-flow")
+	baseSpecDir := filepath.Join(repoRoot, "openspec", "specs", "auth")
+	deltaSpecDir := filepath.Join(changeDir, "specs", "auth")
+	nestedDeltaSpecDir := filepath.Join(nestedChangeDir, "specs", "flow")
+	for _, dir := range []string{changeDir, nestedChangeDir, baseSpecDir, deltaSpecDir, nestedDeltaSpecDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	os.WriteFile(filepath.Join(changeDir, "proposal.md"), []byte("# Add SSO\n\n## Requirements\n\n- [ ] Users can sign in.\n"), 0o644)
+	os.WriteFile(filepath.Join(changeDir, "design.md"), []byte("# Design\n\nUse OAuth2.\n"), 0o644)
+	os.WriteFile(filepath.Join(changeDir, "tasks.md"), []byte("# Tasks\n\n- [ ] Wire provider.\n"), 0o644)
+	os.WriteFile(filepath.Join(baseSpecDir, "spec.md"), []byte("# Auth Spec\n\n## Requirements\n\n- Password login works.\n"), 0o644)
+	os.WriteFile(filepath.Join(deltaSpecDir, "spec.md"), []byte("# Auth Delta\n\n## MODIFIED Requirements\n\n- SSO login works.\n"), 0o644)
+	os.WriteFile(filepath.Join(nestedChangeDir, "proposal.md"), []byte("# Add Flow\n\n## Why\n\nNested OpenSpec roots should index as OpenSpec.\n"), 0o644)
+	os.WriteFile(filepath.Join(nestedChangeDir, "design.md"), []byte("# Flow Design\n\nUse collector batches.\n"), 0o644)
+	os.WriteFile(filepath.Join(nestedChangeDir, "tasks.md"), []byte("# Flow Tasks\n\n- [ ] Wire collector.\n"), 0o644)
+	os.WriteFile(filepath.Join(nestedDeltaSpecDir, "spec.md"), []byte("# Flow Delta\n\n## ADDED Requirements\n\n- Flow import works.\n"), 0o644)
+
+	dbPath := filepath.Join(home, "devspecs.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	ids := idgen.NewFactory()
+	s := New(db, ids, []adapters.Adapter{&openspec.Adapter{}, &markdown.Adapter{}})
+	cfg := config.WithIntentCandidateDiscovery(nil, true)
+	result, err := s.Run(context.Background(), repoRoot, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Found["openspec"] != 13 {
+		t.Fatalf("openspec found = %d, want 13", result.Found["openspec"])
+	}
+	if result.OpenSpec == nil {
+		t.Fatal("expected OpenSpec metrics")
+	}
+	if result.OpenSpec.BundleRecall != 1 {
+		t.Fatalf("OpenSpec bundle recall = %.3f, metrics=%#v", result.OpenSpec.BundleRecall, result.OpenSpec)
+	}
+	if result.OpenSpec.ChildRoleRecall != 1 {
+		t.Fatalf("OpenSpec child-role recall = %.3f, metrics=%#v", result.OpenSpec.ChildRoleRecall, result.OpenSpec)
+	}
+	if result.OpenSpec.DuplicatePressure != 4 {
+		t.Fatalf("OpenSpec duplicate pressure = %.3f, metrics=%#v", result.OpenSpec.DuplicatePressure, result.OpenSpec)
+	}
+	if result.OpenSpec.MarkdownLeakage != 0 {
+		t.Fatalf("OpenSpec markdown leakage = %d, metrics=%#v", result.OpenSpec.MarkdownLeakage, result.OpenSpec)
+	}
+
+	var markdownOpenSpec int
+	err = db.QueryRow(`SELECT COUNT(*)
+		FROM sources
+		WHERE source_type = 'markdown' AND (path LIKE 'openspec/%' OR path LIKE '%/openspec/%')`).Scan(&markdownOpenSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if markdownOpenSpec != 0 {
+		t.Fatalf("OpenSpec markdown files should be owned by openspec adapter, got %d markdown sources", markdownOpenSpec)
+	}
+
+	collectionID := mustArtifactIDBySourceIdentity(t, db, "openspec|openspec_collection")
+	nestedCollectionID := mustArtifactIDBySourceIdentity(t, db, "services/collector/openspec|openspec_collection")
+	bundleID := mustArtifactIDBySourceIdentity(t, db, "openspec/changes/add-sso|openspec_bundle")
+	nestedBundleID := mustArtifactIDBySourceIdentity(t, db, "services/collector/openspec/changes/add-flow|openspec_bundle")
+	proposalID := mustArtifactIDBySourceIdentity(t, db, "openspec/changes/add-sso/proposal.md|openspec")
+	deltaID := mustArtifactIDBySourceIdentity(t, db, "openspec/changes/add-sso/specs/auth/spec.md|openspec")
+	capabilityID := mustArtifactIDBySourceIdentity(t, db, "openspec/specs/auth/spec.md|openspec")
+
+	assertLinkExists(t, db, collectionID, linkContains, "artifact:"+bundleID)
+	assertLinkExists(t, db, nestedCollectionID, linkContains, "artifact:"+nestedBundleID)
+	assertLinkExists(t, db, bundleID, linkContains, "artifact:"+proposalID)
+	assertLinkExists(t, db, proposalID, linkContainedBy, "artifact:"+bundleID)
+	assertLinkExists(t, db, deltaID, linkUpdates, "artifact:"+capabilityID)
+}
+
 func extractedJSONRoundTrip(m map[string]any) (map[string]any, error) {
 	b, err := json.Marshal(m)
 	if err != nil {
@@ -396,6 +481,28 @@ func anyStringHasPrefix(values []any, prefix string) bool {
 		}
 	}
 	return false
+}
+
+func mustArtifactIDBySourceIdentity(t *testing.T, db *store.DB, sourceIdentity string) string {
+	t.Helper()
+	var id string
+	err := db.QueryRow(`SELECT artifact_id FROM sources WHERE source_identity = ?`, sourceIdentity).Scan(&id)
+	if err != nil {
+		t.Fatalf("artifact source_identity %q: %v", sourceIdentity, err)
+	}
+	return id
+}
+
+func assertLinkExists(t *testing.T, db *store.DB, artifactID, linkType, target string) {
+	t.Helper()
+	var count int
+	err := db.QueryRow(`SELECT COUNT(*) FROM links WHERE artifact_id = ? AND link_type = ? AND target = ?`, artifactID, linkType, target).Scan(&count)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("link %s %s -> %s count = %d, want 1", artifactID, linkType, target, count)
+	}
 }
 
 func testdataSamplesRoot(t *testing.T) string {

@@ -146,6 +146,18 @@ func TestRun_DefaultUsesIndexedCorpus(t *testing.T) {
 	if result.Diagnostics.MissedAfterDiscoveryCount == 0 {
 		t.Fatalf("expected remaining retrieval gaps after discovery: %#v", result.Diagnostics)
 	}
+	if result.Diagnostics.OpenSpec == nil {
+		t.Fatalf("expected OpenSpec structural diagnostics: %#v", result.Diagnostics)
+	}
+	if result.Diagnostics.OpenSpec.BundleRecall != 1 {
+		t.Fatalf("expected complete OpenSpec bundle recall, got %#v", result.Diagnostics.OpenSpec)
+	}
+	if result.Diagnostics.OpenSpec.ChildRoleRecall != 1 {
+		t.Fatalf("expected complete OpenSpec child-role recall, got %#v", result.Diagnostics.OpenSpec)
+	}
+	if result.Diagnostics.OpenSpec.MarkdownLeakage != 0 {
+		t.Fatalf("expected no OpenSpec markdown leakage, got %#v", result.Diagnostics.OpenSpec)
+	}
 }
 
 func TestRun_ThresholdFailure(t *testing.T) {

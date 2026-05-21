@@ -177,6 +177,25 @@ func TestDiscover_ExperimentalIntentDiscoveryFindsGenericCompoundPlanningDirs(t 
 	}
 }
 
+func TestDiscover_ExperimentalIntentDiscoverySkipsNestedOpenSpecRoots(t *testing.T) {
+	tmp := t.TempDir()
+	writeMarkdown(t, tmp, "services/collector/openspec/changes/add-flow/proposal.md", "# Add Flow\n\n## Proposal\n")
+	writeMarkdown(t, tmp, "services/collector/docs/plans/add-flow.md", "# Add Flow Plan\n\n## Implementation Plan\n")
+
+	a := &Adapter{}
+	candidates, err := a.Discover(context.Background(), tmp, config.WithIntentCandidateDiscovery(nil, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := candidateRelPaths(candidates)
+	if stringSliceContains(got, "services/collector/openspec/changes/add-flow/proposal.md") {
+		t.Fatalf("nested OpenSpec files should not be generic markdown candidates: %v", got)
+	}
+	if !stringSliceContains(got, "services/collector/docs/plans/add-flow.md") {
+		t.Fatalf("expected nearby non-OpenSpec planning doc to remain discoverable: %v", got)
+	}
+}
+
 func TestParse_FrontmatterOverrides(t *testing.T) {
 	tmp := t.TempDir()
 	content := "---\ntitle: Custom Title\nkind: spec\nstatus: draft\n---\n# Ignored H1\n\nBody here.\n"

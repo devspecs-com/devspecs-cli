@@ -78,6 +78,15 @@ func (s *Scanner) Run(ctx context.Context, repoRoot string, cfg *config.RepoConf
 		}
 	}
 
+	if err := s.syncOpenSpecLinks(repoID, now); err != nil {
+		return nil, fmt.Errorf("sync openspec links: %w", err)
+	}
+	if metrics, err := s.computeOpenSpecMetrics(repoRoot, repoID); err != nil {
+		return nil, fmt.Errorf("compute openspec metrics: %w", err)
+	} else {
+		result.OpenSpec = metrics
+	}
+
 	s.recordScanMeta(repoID, repoRoot, now)
 	result.finalizeSourcesBreakdown()
 	return result, nil

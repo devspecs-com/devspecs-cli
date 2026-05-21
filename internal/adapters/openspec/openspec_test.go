@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
@@ -37,11 +38,14 @@ func TestOpenSpec_ProposalDetected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != 3 {
-		t.Fatalf("expected 3 candidates, got %d", len(candidates))
+	if len(candidates) != 5 {
+		t.Fatalf("expected 5 candidates, got %d", len(candidates))
 	}
 	if candidates[0].AdapterName != "openspec" {
 		t.Errorf("expected adapter 'openspec', got %q", candidates[0].AdapterName)
+	}
+	if candidates[0].ArtifactScope != scopeCollection || candidates[1].ArtifactScope != scopeBundle {
+		t.Fatalf("expected collection then bundle candidates, got %#v", candidates[:2])
 	}
 }
 
@@ -62,8 +66,8 @@ func TestOpenSpec_ParseExtractsTitleAndCriteria(t *testing.T) {
 	if art.Title != "Add SSO Login" {
 		t.Errorf("title: want 'Add SSO Login', got %q", art.Title)
 	}
-	if art.Kind != "spec" || art.Subtype != "openspec_change" {
-		t.Errorf("kind/subtype: want spec/openspec_change, got %q/%q", art.Kind, art.Subtype)
+	if art.Kind != "spec" || art.Subtype != config.SubtypeOpenspecChild {
+		t.Errorf("kind/subtype: want spec/%s, got %q/%q", config.SubtypeOpenspecChild, art.Kind, art.Subtype)
 	}
 	if art.Status != "proposed" {
 		t.Errorf("status: want 'proposed', got %q", art.Status)
@@ -76,8 +80,8 @@ func TestOpenSpec_ParseExtractsTitleAndCriteria(t *testing.T) {
 			t.Errorf("criteria kind: want %q, got %q", todoparse.KindAcceptance, c.CriteriaKind)
 		}
 	}
-	if len(pr.Todos) != 3 {
-		t.Errorf("expected 3 todos from tasks.md, got %d", len(pr.Todos))
+	if len(pr.Todos) != 0 {
+		t.Errorf("proposal should not duplicate tasks.md todos, got %d", len(pr.Todos))
 	}
 	if len(sources) != 1 {
 		t.Errorf("expected 1 source, got %d", len(sources))
@@ -89,16 +93,54 @@ func TestOpenSpec_ParseExtractsTitleAndCriteria(t *testing.T) {
 	if art.LayoutGroup != wantLayout || sources[0].LayoutGroup != wantLayout {
 		t.Errorf("layout_group: want %q, art=%q src=%q", wantLayout, art.LayoutGroup, sources[0].LayoutGroup)
 	}
+	if art.Extracted["artifact_scope"] != scopeFile || art.Extracted["openspec_role"] != roleProposal {
+		t.Fatalf("missing OpenSpec extracted scope/role: %#v", art.Extracted)
+	}
 }
 
-func TestOpenSpec_TasksFeedTodoTable(t *testing.T) {
+func TestOpenSpec_ParseChangeBundleAggregatesChildren(t *testing.T) {
 	tmp := setupOpenSpecRepo(t)
-	proposalPath := filepath.Join(tmp, "openspec", "changes", "add-sso", "proposal.md")
-	relPath := "openspec/changes/add-sso/proposal.md"
+	changeDir := filepath.Join(tmp, "openspec", "changes", "add-sso")
+
+	a := &Adapter{}
+	art, sources, pr, err := a.Parse(context.Background(), adapters.Candidate{
+		PrimaryPath:   changeDir,
+		RelPath:       "openspec/changes/add-sso",
+		AdapterName:   "openspec",
+		ArtifactScope: scopeBundle,
+		Role:          roleChangeBundle,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art.Subtype != config.SubtypeOpenspecChangeBundle {
+		t.Fatalf("subtype = %q", art.Subtype)
+	}
+	if art.Title != "Add SSO Login" {
+		t.Fatalf("bundle title = %q", art.Title)
+	}
+	if !strings.Contains(art.Body, "## Proposal") || !strings.Contains(art.Body, "## Tasks") {
+		t.Fatalf("bundle body missing child sections:\n%s", art.Body)
+	}
+	if len(sources) != 4 {
+		t.Fatalf("sources = %d, want bundle + 3 children", len(sources))
+	}
+	if len(pr.Todos) != 3 || len(pr.Criteria) != 2 {
+		t.Fatalf("parse result todos=%d criteria=%d, want 3/2", len(pr.Todos), len(pr.Criteria))
+	}
+	if art.Extracted["artifact_scope"] != scopeBundle || art.Extracted["openspec_role"] != roleChangeBundle {
+		t.Fatalf("missing bundle extracted metadata: %#v", art.Extracted)
+	}
+}
+
+func TestOpenSpec_TasksChildFeedsTodoTable(t *testing.T) {
+	tmp := setupOpenSpecRepo(t)
+	tasksPath := filepath.Join(tmp, "openspec", "changes", "add-sso", "tasks.md")
+	relPath := "openspec/changes/add-sso/tasks.md"
 
 	a := &Adapter{}
 	_, _, pr, err := a.Parse(context.Background(), adapters.Candidate{
-		PrimaryPath: proposalPath,
+		PrimaryPath: tasksPath,
 		RelPath:     relPath,
 		AdapterName: "openspec",
 	})
@@ -108,8 +150,8 @@ func TestOpenSpec_TasksFeedTodoTable(t *testing.T) {
 	if len(pr.Todos) != 3 {
 		t.Fatalf("expected 3 todos from tasks.md, got %d", len(pr.Todos))
 	}
-	if len(pr.Criteria) != 2 {
-		t.Fatalf("expected 2 criteria from proposal, got %d", len(pr.Criteria))
+	if len(pr.Criteria) != 0 {
+		t.Fatalf("expected 0 criteria from tasks.md, got %d", len(pr.Criteria))
 	}
 	todos := pr.Todos
 	if todos[0].Text != "Implement OAuth2 flow" || todos[0].Done {
@@ -159,8 +201,8 @@ func TestOpenSpec_ConfigCustomPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != 1 {
-		t.Fatalf("expected 1 candidate, got %d", len(candidates))
+	if len(candidates) != 3 {
+		t.Fatalf("expected 3 candidates, got %d", len(candidates))
 	}
 }
 

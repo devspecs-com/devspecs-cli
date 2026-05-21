@@ -104,7 +104,7 @@ type TagRow struct {
 
 // ListArtifacts returns artifacts filtered by the given parameters.
 func (db *DB) ListArtifacts(fp FilterParams) ([]ArtifactRow, error) {
-	query := `SELECT a.id, a.repo_id, COALESCE(a.short_id,''), a.kind, COALESCE(a.subtype,''), a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at FROM artifacts a`
+	query := `SELECT DISTINCT a.id, a.repo_id, COALESCE(a.short_id,''), a.kind, COALESCE(a.subtype,''), a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at FROM artifacts a`
 	var joins []string
 	var conditions []string
 	var args []any
@@ -241,7 +241,7 @@ func (db *DB) GetRevision(id string) (*RevisionRow, error) {
 // GetSourcesForArtifact returns all sources for an artifact.
 func (db *DB) GetSourcesForArtifact(artifactID string) ([]SourceRow, error) {
 	rows, err := db.Query(
-		"SELECT id, artifact_id, source_type, COALESCE(path,''), source_identity, COALESCE(format_profile,''), COALESCE(layout_group,'') FROM sources WHERE artifact_id = ?",
+		"SELECT id, artifact_id, source_type, COALESCE(path,''), source_identity, COALESCE(format_profile,''), COALESCE(layout_group,'') FROM sources WHERE artifact_id = ? ORDER BY path, id",
 		artifactID,
 	)
 	if err != nil {
@@ -263,7 +263,7 @@ func (db *DB) GetSourcesForArtifact(artifactID string) ([]SourceRow, error) {
 // GetLinksForArtifact returns all links for an artifact.
 func (db *DB) GetLinksForArtifact(artifactID string) ([]LinkRow, error) {
 	rows, err := db.Query(
-		"SELECT id, artifact_id, link_type, target, created_at FROM links WHERE artifact_id = ?",
+		"SELECT id, artifact_id, link_type, target, created_at FROM links WHERE artifact_id = ? ORDER BY link_type, target",
 		artifactID,
 	)
 	if err != nil {

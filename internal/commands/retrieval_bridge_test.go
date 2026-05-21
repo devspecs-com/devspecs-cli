@@ -52,3 +52,41 @@ func TestArtifactCandidateIncludesClassifierMetadata(t *testing.T) {
 		t.Fatalf("classifier_authority = %#v", candidate.Metadata["classifier_authority"])
 	}
 }
+
+func TestArtifactCandidateIncludesHierarchyMetadataAndLinks(t *testing.T) {
+	extracted := `{
+		"mode": "intent",
+		"role": "authoritative",
+		"artifact_scope": "bundle",
+		"source_standard": "openspec",
+		"openspec_role": "change_bundle",
+		"openspec_change_id": "add-sso",
+		"layout_group": "openspec/changes/add-sso"
+	}`
+	candidate := artifactCandidateWithLinks(
+		store.ArtifactRow{
+			ID:           "bundle_1",
+			RepoID:       "repo_1",
+			ShortID:      "DS-2",
+			Kind:         "spec",
+			Subtype:      "openspec_change_bundle",
+			Title:        "Add SSO",
+			Status:       "proposed",
+			CurrentRevID: "rev_1",
+		},
+		[]store.SourceRow{{Path: "openspec/changes/add-sso"}},
+		[]store.LinkRow{{LinkType: "contains", Target: "artifact:child_1"}},
+		nil,
+		"# Add SSO",
+		extracted,
+	)
+	if candidate.Metadata["artifact_scope"] != "bundle" {
+		t.Fatalf("artifact_scope = %#v", candidate.Metadata["artifact_scope"])
+	}
+	if candidate.Metadata["openspec_role"] != "change_bundle" {
+		t.Fatalf("openspec_role = %#v", candidate.Metadata["openspec_role"])
+	}
+	if candidate.Metadata["link_contains"] != "artifact:child_1" {
+		t.Fatalf("link_contains = %#v", candidate.Metadata["link_contains"])
+	}
+}

@@ -78,6 +78,9 @@ func ExplainCandidates(candidates []Candidate, query string) []Reason {
 
 func IsPlanningIntentPath(path string) bool {
 	path = strings.ToLower(filepath.ToSlash(path))
+	if isOpenSpecPath(path) {
+		return true
+	}
 	for _, prefix := range []string{"openspec/", "docs/adr/", "docs/adrs/", "docs/plans/", "docs/prd/", "docs/prds/", "docs/rfcs/", "docs/rfc/", "rfcs/", "rfc/", ".cursor/", ".claude/"} {
 		if strings.HasPrefix(path, prefix) {
 			return true
@@ -123,6 +126,7 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string) []Candidate {
 	for _, sf := range scoredCandidates {
 		out = append(out, sf.candidate)
 	}
+	out = expandOpenSpecLinks(out, candidates, queryLower, limit)
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
 }
@@ -216,6 +220,13 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 			score += 4.0
 		} else if explicitSourceIntent {
 			score -= 2.0
+		}
+	case "openspec_bundle":
+		if containsAny(queryLower, "proposal", "design", "task", "tasks", "spec", "implement", "implementation", "agent context", "resume", "continue") {
+			score += 3.0
+		}
+		if profile.identifierMatches > 0 {
+			score += 4.0
 		}
 	case "openspec_design":
 		if containsAny(queryLower, "design", "rationale", "why", "context", "implement", "implementation", "agent context") {
@@ -443,7 +454,7 @@ func bodyHitCap(role string, sourceFile bool, term string) int {
 	switch role {
 	case "plan", "agent_note", "prd":
 		return 3
-	case "adr", "rfc", "openspec_design", "openspec_tasks", "openspec_spec", "openspec_proposal":
+	case "adr", "rfc", "openspec_bundle", "openspec_design", "openspec_tasks", "openspec_spec", "openspec_proposal":
 		return 5
 	default:
 		return 4
@@ -559,13 +570,17 @@ func candidateIsStale(c Candidate, pathLower, bodyLower string) bool {
 func fileRole(path string) string {
 	path = strings.ToLower(filepath.ToSlash(path))
 	switch {
-	case strings.Contains(path, "/specs/") && strings.HasSuffix(path, "/spec.md"):
+	case isOpenSpecPath(path) && (path == "openspec" || strings.HasSuffix(path, "/openspec")):
+		return "openspec_collection"
+	case isOpenSpecChangePath(path) && !strings.HasSuffix(path, ".md"):
+		return "openspec_bundle"
+	case isOpenSpecPath(path) && strings.Contains(path, "/specs/") && strings.HasSuffix(path, "/spec.md"):
 		return "openspec_spec"
-	case strings.HasPrefix(path, "openspec/") && strings.HasSuffix(path, "/design.md"):
+	case isOpenSpecPath(path) && strings.HasSuffix(path, "/design.md"):
 		return "openspec_design"
-	case strings.HasPrefix(path, "openspec/") && strings.HasSuffix(path, "/tasks.md"):
+	case isOpenSpecPath(path) && strings.HasSuffix(path, "/tasks.md"):
 		return "openspec_tasks"
-	case strings.HasPrefix(path, "openspec/") && strings.HasSuffix(path, "/proposal.md"):
+	case isOpenSpecPath(path) && strings.HasSuffix(path, "/proposal.md"):
 		return "openspec_proposal"
 	case strings.HasPrefix(path, "docs/adr/") || strings.HasPrefix(path, "docs/adrs/"):
 		return "adr"
@@ -582,6 +597,19 @@ func fileRole(path string) string {
 	default:
 		return ""
 	}
+}
+
+func isOpenSpecPath(path string) bool {
+	path = strings.Trim(strings.ToLower(filepath.ToSlash(path)), "/")
+	if path == "openspec" || strings.HasPrefix(path, "openspec/") || strings.HasSuffix(path, "/openspec") {
+		return true
+	}
+	return strings.Contains(path, "/openspec/")
+}
+
+func isOpenSpecChangePath(path string) bool {
+	path = strings.Trim(strings.ToLower(filepath.ToSlash(path)), "/")
+	return isOpenSpecPath(path) && strings.Contains(path, "/changes/")
 }
 
 func containsAny(s string, needles ...string) bool {
@@ -732,6 +760,9 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 	titleLower := strings.ToLower(c.Title)
 	bodyLower := strings.ToLower(c.Body)
 	var reasons []string
+	if c.Metadata != nil && c.Metadata["retrieval_expansion_reason"] != "" {
+		reasons = append(reasons, "relationship expansion: "+c.Metadata["retrieval_expansion_reason"])
+	}
 	for term := range terms {
 		if term == "" {
 			continue
@@ -766,7 +797,7 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 		if containsAny(queryLower, "rfc", "request for comments", "proposal", "alternative", "alternatives", "motivation", "drawback", "drawbacks", "design") {
 			reasons = append(reasons, "authority/query-intent signal: RFC")
 		}
-	case "openspec_design", "openspec_tasks", "openspec_spec", "openspec_proposal":
+	case "openspec_bundle", "openspec_design", "openspec_tasks", "openspec_spec", "openspec_proposal":
 		if containsAny(queryLower, "design", "context", "implement", "implementation", "agent context", "resume", "continue", "spec") {
 			reasons = append(reasons, "OpenSpec change artifact candidate")
 		}
@@ -782,6 +813,151 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 		reasons = append(reasons, "selected by retriever score")
 	}
 	return uniqueStrings(reasons)
+}
+
+func expandOpenSpecLinks(selected []Candidate, universe []Candidate, queryLower string, limit int) []Candidate {
+	if len(selected) == 0 {
+		return selected
+	}
+	if limit <= 0 {
+		limit = len(selected)
+	}
+	max := limit + 3
+	if max < len(selected) {
+		max = len(selected)
+	}
+	byTarget := map[string]Candidate{}
+	for _, c := range universe {
+		if c.ID == "" {
+			continue
+		}
+		byTarget["artifact:"+c.ID] = c
+	}
+	seen := map[string]bool{}
+	out := make([]Candidate, 0, max)
+	for _, c := range selected {
+		key := candidateIdentity(c)
+		seen[key] = true
+		out = append(out, c)
+	}
+	addTarget := func(target, reason string) {
+		if len(out) >= max {
+			return
+		}
+		c, ok := byTarget[target]
+		if !ok {
+			return
+		}
+		key := candidateIdentity(c)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		if c.Metadata == nil {
+			c.Metadata = map[string]string{}
+		} else {
+			c.Metadata = copyMetadata(c.Metadata)
+		}
+		c.Metadata["retrieval_expansion_reason"] = reason
+		out = append(out, c)
+	}
+
+	for _, c := range selected {
+		if c.Metadata == nil {
+			continue
+		}
+		for _, target := range metadataTargets(c.Metadata, "link_contained_by") {
+			addTarget(target, "openspec_parent_bundle")
+		}
+		if shouldExpandOpenSpecCompanions(queryLower) {
+			for _, target := range metadataTargets(c.Metadata, "link_openspec_companion") {
+				peer, ok := byTarget[target]
+				if !ok || !wantedOpenSpecRole(peer, queryLower) {
+					continue
+				}
+				addTarget(target, "openspec_companion")
+			}
+		}
+		if containsAny(queryLower, "requirement", "requirements", "spec", "capability", "update", "delta") {
+			for _, target := range metadataTargets(c.Metadata, "link_updates") {
+				addTarget(target, "openspec_updated_capability")
+			}
+		}
+		if fileRole(c.Path) == "openspec_bundle" || c.Metadata["artifact_scope"] == "bundle" {
+			for _, target := range metadataTargets(c.Metadata, "link_contains") {
+				child, ok := byTarget[target]
+				if !ok || !wantedOpenSpecRole(child, queryLower) {
+					continue
+				}
+				addTarget(target, "openspec_bundle_child")
+			}
+		}
+	}
+	return out
+}
+
+func metadataTargets(metadata map[string]string, key string) []string {
+	value := strings.TrimSpace(metadata[key])
+	if value == "" {
+		return nil
+	}
+	var out []string
+	for _, target := range strings.Split(value, "\n") {
+		target = strings.TrimSpace(target)
+		if target != "" {
+			out = append(out, target)
+		}
+	}
+	return out
+}
+
+func wantedOpenSpecRole(c Candidate, queryLower string) bool {
+	role := ""
+	if c.Metadata != nil {
+		role = c.Metadata["openspec_role"]
+	}
+	if role == "" {
+		role = fileRole(c.Path)
+	}
+	switch {
+	case containsAny(queryLower, "task", "tasks", "todo", "resume", "continue"):
+		return role == "tasks" || role == "openspec_tasks" || role == "proposal" || role == "openspec_proposal"
+	case containsAny(queryLower, "design", "rationale", "why"):
+		return role == "design" || role == "openspec_design" || role == "proposal" || role == "openspec_proposal"
+	case containsAny(queryLower, "requirement", "requirements", "spec", "capability", "delta"):
+		return role == "spec_delta" || role == "capability_spec" || role == "openspec_spec" || role == "proposal" || role == "openspec_proposal"
+	default:
+		return role == "proposal" || role == "design" || role == "tasks" ||
+			role == "openspec_proposal" || role == "openspec_design" || role == "openspec_tasks"
+	}
+}
+
+func shouldExpandOpenSpecCompanions(queryLower string) bool {
+	return containsAny(queryLower,
+		"agent context",
+		"continue",
+		"context",
+		"implement",
+		"implementation",
+		"resume",
+		"task",
+		"tasks",
+	)
+}
+
+func candidateIdentity(c Candidate) string {
+	if c.ID != "" {
+		return c.ID
+	}
+	return c.Path
+}
+
+func copyMetadata(metadata map[string]string) map[string]string {
+	out := make(map[string]string, len(metadata)+1)
+	for key, value := range metadata {
+		out[key] = value
+	}
+	return out
 }
 
 func uniqueStrings(items []string) []string {

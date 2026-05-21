@@ -300,6 +300,12 @@ func walkNestedDefaultMarkdownFiles(ctx context.Context, repoRoot string) ([]str
 		if rel == "." {
 			return nil
 		}
+		if isOpenSpecOwnedPath(rel) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if m != nil && m.ShouldSkip(rel, info.IsDir()) {
 			if info.IsDir() {
 				return filepath.SkipDir
@@ -340,6 +346,12 @@ func walkIntentMarkdownCandidates(ctx context.Context, repoRoot string) ([]inten
 		}
 		rel = filepath.ToSlash(rel)
 		if rel == "." {
+			return nil
+		}
+		if isOpenSpecOwnedPath(rel) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if m != nil && m.ShouldSkip(rel, info.IsDir()) {
@@ -673,6 +685,14 @@ func isDefaultNestedMarkdownDir(rel string) bool {
 		}
 	}
 	return false
+}
+
+func isOpenSpecOwnedPath(rel string) bool {
+	rel = strings.Trim(filepath.ToSlash(rel), "/")
+	if rel == "openspec" || strings.HasPrefix(rel, "openspec/") || strings.HasSuffix(rel, "/openspec") {
+		return true
+	}
+	return strings.Contains(rel, "/openspec/")
 }
 
 func sameStrings(a, b []string) bool {

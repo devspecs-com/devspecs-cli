@@ -21,6 +21,7 @@ func loadRetrievalCandidates(db *store.DB, fp store.FilterParams) ([]retrieval.C
 	candidates := make([]retrieval.Candidate, 0, len(artifacts))
 	for _, art := range artifacts {
 		sources, _ := db.GetSourcesForArtifact(art.ID)
+		links, _ := db.GetLinksForArtifact(art.ID)
 		todos, _ := db.GetTodosForArtifact(art.ID)
 		var body string
 		var extractedJSON string
@@ -30,12 +31,16 @@ func loadRetrievalCandidates(db *store.DB, fp store.FilterParams) ([]retrieval.C
 				extractedJSON = rev.ExtractedJSON
 			}
 		}
-		candidates = append(candidates, artifactCandidate(art, sources, todos, body, extractedJSON))
+		candidates = append(candidates, artifactCandidateWithLinks(art, sources, links, todos, body, extractedJSON))
 	}
 	return candidates, nil
 }
 
 func artifactCandidate(art store.ArtifactRow, sources []store.SourceRow, todos []store.TodoRow, body, extractedJSON string) retrieval.Candidate {
+	return artifactCandidateWithLinks(art, sources, nil, todos, body, extractedJSON)
+}
+
+func artifactCandidateWithLinks(art store.ArtifactRow, sources []store.SourceRow, links []store.LinkRow, todos []store.TodoRow, body, extractedJSON string) retrieval.Candidate {
 	sourcePath := firstSourcePath(sources)
 	path := sourcePath
 	if path == "" {
@@ -58,6 +63,12 @@ func artifactCandidate(art store.ArtifactRow, sources []store.SourceRow, todos [
 	for key, value := range classifierCandidateMetadata(extractedJSON) {
 		metadata[key] = value
 	}
+	for key, value := range artifactExtractedCandidateMetadata(extractedJSON) {
+		metadata[key] = value
+	}
+	for key, value := range linkCandidateMetadata(links) {
+		metadata[key] = value
+	}
 	return retrieval.Candidate{
 		ID:       art.ID,
 		Path:     filepath.ToSlash(path),
@@ -69,6 +80,65 @@ func artifactCandidate(art store.ArtifactRow, sources []store.SourceRow, todos [
 		Body:     renderRetrievalCandidateBody(art, sources, todos, body),
 		Metadata: metadata,
 	}
+}
+
+func artifactExtractedCandidateMetadata(extractedJSON string) map[string]string {
+	if strings.TrimSpace(extractedJSON) == "" {
+		return nil
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(extractedJSON), &payload); err != nil {
+		return nil
+	}
+	keys := []string{
+		"mode",
+		"role",
+		"artifact_scope",
+		"source_standard",
+		"openspec_role",
+		"openspec_base_path",
+		"openspec_change_id",
+		"openspec_capability",
+		"layout_group",
+	}
+	out := map[string]string{}
+	for _, key := range keys {
+		value, ok := payload[key]
+		if !ok {
+			continue
+		}
+		text := strings.TrimSpace(fmt.Sprint(value))
+		if text != "" {
+			out[key] = text
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func linkCandidateMetadata(links []store.LinkRow) map[string]string {
+	if len(links) == 0 {
+		return nil
+	}
+	grouped := map[string][]string{}
+	for _, link := range links {
+		linkType := strings.TrimSpace(link.LinkType)
+		target := strings.TrimSpace(link.Target)
+		if linkType == "" || target == "" {
+			continue
+		}
+		grouped[linkType] = append(grouped[linkType], target)
+	}
+	if len(grouped) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for linkType, targets := range grouped {
+		out["link_"+strings.ReplaceAll(linkType, "-", "_")] = strings.Join(uniqueStrings(targets), "\n")
+	}
+	return out
 }
 
 func classifierCandidateMetadata(extractedJSON string) map[string]string {
@@ -193,4 +263,17 @@ func shortCandidateID(c retrieval.Candidate) string {
 		return c.ID[:8]
 	}
 	return c.ID
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
