@@ -630,6 +630,7 @@ func collectIndexedFiles(root string) ([]File, error) {
 			}
 		}
 		todos, _ := db.GetTodosForArtifact(art.ID)
+		links, _ := db.GetLinksForArtifact(art.ID)
 		files = append(files, File{
 			ID:       art.ID,
 			Path:     filepath.ToSlash(rel),
@@ -638,7 +639,7 @@ func collectIndexedFiles(root string) ([]File, error) {
 			Title:    art.Title,
 			Status:   art.Status,
 			Body:     renderIndexedArtifactContent(art, sources, todos, body),
-			Metadata: indexedArtifactMetadata(sources, extractedJSON),
+			Metadata: indexedArtifactMetadata(sources, links, extractedJSON),
 		})
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
@@ -692,11 +693,14 @@ func renderIndexedArtifactContent(art store.ArtifactRow, sources []store.SourceR
 	return b.String()
 }
 
-func indexedArtifactMetadata(sources []store.SourceRow, extractedJSON string) map[string]string {
+func indexedArtifactMetadata(sources []store.SourceRow, links []store.LinkRow, extractedJSON string) map[string]string {
 	metadata := map[string]string{}
 	if len(sources) > 0 {
 		metadata["source_type"] = sources[0].SourceType
 		metadata["source_identity"] = sources[0].SourceIdentity
+	}
+	for key, value := range indexedLinkMetadata(links) {
+		metadata[key] = value
 	}
 	var payload struct {
 		ArtifactScope string `json:"artifact_scope"`
@@ -716,6 +720,44 @@ func indexedArtifactMetadata(sources []store.SourceRow, extractedJSON string) ma
 		return nil
 	}
 	return metadata
+}
+
+func indexedLinkMetadata(links []store.LinkRow) map[string]string {
+	if len(links) == 0 {
+		return nil
+	}
+	grouped := map[string][]string{}
+	for _, link := range links {
+		linkType := strings.TrimSpace(link.LinkType)
+		target := strings.TrimSpace(link.Target)
+		if linkType == "" || target == "" {
+			continue
+		}
+		grouped[linkType] = append(grouped[linkType], target)
+	}
+	if len(grouped) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for linkType, targets := range grouped {
+		key := "link_" + strings.ReplaceAll(linkType, "-", "_")
+		out[key] = strings.Join(uniqueNonEmptyStrings(targets), "\n")
+	}
+	return out
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
 }
 
 func openSpecMetricsFromFiles(repoRoot string, files []File) *openspecmetrics.Metrics {

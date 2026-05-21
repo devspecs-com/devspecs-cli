@@ -206,6 +206,8 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 	case "adr":
 		if containsAny(queryLower, "adr", "decision", "boundary", "why", "architecture", "rationale", "superseded", "stale") {
 			score += 3.0
+		} else if planIntent && profile.coreMatches >= 2 {
+			score += 3.0
 		} else if productBackgroundIntent {
 			score += 1.5
 		}
@@ -222,11 +224,13 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 			score -= 2.0
 		}
 	case "openspec_bundle":
-		if containsAny(queryLower, "proposal", "design", "task", "tasks", "spec", "implement", "implementation", "agent context", "resume", "continue") {
-			score += 3.0
-		}
-		if profile.identifierMatches > 0 {
-			score += 4.0
+		if hasOpenSpecStructureIntent(queryLower) {
+			score += 5.0
+			if profile.identifierMatches > 0 {
+				score += 4.0
+			}
+		} else {
+			score = -100.0
 		}
 	case "openspec_design":
 		if containsAny(queryLower, "design", "rationale", "why", "context", "implement", "implementation", "agent context") {
@@ -234,6 +238,9 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 		}
 		if containsAny(queryLower, "implement", "implementation", "agent context") {
 			score += 6.0
+		}
+		if hasRFCIntent(queryLower) && profile.coreMatches >= 2 {
+			score += 3.0
 		}
 		if profile.identifierMatches > 0 {
 			score += 4.0
@@ -245,6 +252,9 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 		if containsAny(queryLower, "implement", "implementation", "agent context") {
 			score += 6.0
 		}
+		if !hasOpenSpecChildRoleIntent(queryLower) {
+			score -= 6.0
+		}
 		if profile.identifierMatches > 0 {
 			score += 4.0
 		}
@@ -253,6 +263,9 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 			score += 2.0
 		} else if containsAny(queryLower, "implement", "implementation", "agent context") {
 			score -= 1.5
+		}
+		if !hasOpenSpecChildRoleIntent(queryLower) {
+			score -= 6.0
 		}
 	case "openspec_proposal":
 		if containsAny(queryLower, "proposal", "context", "implement", "implementation", "resume", "continue", "agent context", "rfc") {
@@ -270,10 +283,10 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 	if sourceFile {
 		if explicitSourceIntent || containsAny(queryLower, "implement", "implementation", "handler") || hasIdentifierTerm(terms) {
 			score += 2.0
-		} else if profile.pathTitleCoreMatches >= 2 {
+		} else if profile.pathTitleCoreMatches > 0 {
 			score += 2.0
 		} else {
-			score -= 2.0
+			score -= 6.0
 		}
 		if containsAny(queryLower, "boundary") && profile.pathTitleCoreMatches >= 2 {
 			score += 3.0
@@ -281,6 +294,9 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 		if hasQueryWord(queryLower, "session") && strings.Contains(pathLower, "/session.") {
 			score += 5.0
 		}
+	}
+	if planIntent && !productBackgroundIntent && role == "prd" {
+		score -= 4.0
 	}
 	if planIntent && !explicitSourceIntent {
 		if sourceFile {
@@ -292,7 +308,7 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 	}
 	if hasRFCIntent(queryLower) && !explicitSourceIntent {
 		if role == "agent_note" {
-			score -= 6.0
+			score -= 12.0
 		}
 		if sourceFile && strings.Contains(pathLower, "/migrations/") {
 			score -= 8.0
@@ -364,8 +380,13 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 			}
 		}
 	}
-	if strings.Contains(pathLower, "scratch/") || strings.Contains(pathLower, "old-") || strings.Contains(pathLower, "legacy") {
+	if strings.Contains(pathLower, "scratch/") && !hasQueryWord(queryLower, "scratch") {
+		score -= 30.0
+	} else if strings.Contains(pathLower, "old-") || strings.Contains(pathLower, "legacy") {
 		score -= 4.0
+	}
+	if hasUnrequestedContextSurface(pathLower, titleLower, queryLower) {
+		score -= 5.0
 	}
 	if lifecycleIntent && candidateIsStale(c, pathLower, bodyLower) && profile.coreTerms >= 3 && profile.coreMatches < 2 {
 		score -= 8.0
@@ -504,6 +525,18 @@ func hasUnrequestedProductSurface(pathLower, titleLower, queryLower string) bool
 	return false
 }
 
+func hasUnrequestedContextSurface(pathLower, titleLower, queryLower string) bool {
+	pathTitle := pathLower + " " + titleLower
+	for _, surface := range []string{
+		"admin", "override", "overrides", "portal", "dashboard", "observability", "support",
+	} {
+		if containsPathTitleToken(pathTitle, surface) && !strings.Contains(queryLower, surface) {
+			return true
+		}
+	}
+	return false
+}
+
 func containsPathTitleToken(s, token string) bool {
 	for _, part := range splitIdentifierLikeText(s) {
 		if part == token {
@@ -548,6 +581,39 @@ func hasPlanIntent(queryLower string) bool {
 func hasRFCIntent(queryLower string) bool {
 	return hasQueryWord(queryLower, "rfc") ||
 		containsAny(queryLower, "request for comments", "proposal", "alternatives")
+}
+
+func hasOpenSpecStructureIntent(queryLower string) bool {
+	return hasQueryWord(queryLower, "openspec") ||
+		hasQueryWord(queryLower, "bundle") ||
+		hasQueryWord(queryLower, "bundles") ||
+		hasQueryWord(queryLower, "change") ||
+		hasQueryWord(queryLower, "changes") ||
+		hasQueryWord(queryLower, "collection") ||
+		hasQueryWord(queryLower, "collections")
+}
+
+func shouldIncludeOpenSpecParent(queryLower string) bool {
+	return hasOpenSpecStructureIntent(queryLower)
+}
+
+func hasOpenSpecChildRoleIntent(queryLower string) bool {
+	return containsAny(queryLower,
+		"task",
+		"tasks",
+		"todo",
+		"implement",
+		"implementation",
+		"agent context",
+		"resume",
+		"continue",
+		"spec",
+		"delta",
+		"requirement",
+		"requirements",
+		"acceptance",
+		"boundary",
+	)
 }
 
 func hasLifecycleIntent(queryLower string) bool {
@@ -866,8 +932,10 @@ func expandOpenSpecLinks(selected []Candidate, universe []Candidate, queryLower 
 		if c.Metadata == nil {
 			continue
 		}
-		for _, target := range metadataTargets(c.Metadata, "link_contained_by") {
-			addTarget(target, "openspec_parent_bundle")
+		if shouldIncludeOpenSpecParent(queryLower) {
+			for _, target := range metadataTargets(c.Metadata, "link_contained_by") {
+				addTarget(target, "openspec_parent_bundle")
+			}
 		}
 		if shouldExpandOpenSpecCompanions(queryLower) {
 			for _, target := range metadataTargets(c.Metadata, "link_openspec_companion") {
@@ -921,7 +989,9 @@ func wantedOpenSpecRole(c Candidate, queryLower string) bool {
 	}
 	switch {
 	case containsAny(queryLower, "task", "tasks", "todo", "resume", "continue"):
-		return role == "tasks" || role == "openspec_tasks" || role == "proposal" || role == "openspec_proposal"
+		return role == "tasks" || role == "openspec_tasks" ||
+			role == "design" || role == "openspec_design" ||
+			role == "proposal" || role == "openspec_proposal"
 	case containsAny(queryLower, "design", "rationale", "why"):
 		return role == "design" || role == "openspec_design" || role == "proposal" || role == "openspec_proposal"
 	case containsAny(queryLower, "requirement", "requirements", "spec", "capability", "delta"):
