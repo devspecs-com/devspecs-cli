@@ -254,9 +254,6 @@ func defaultPaths() []string {
 		".claude/notes", ".claude/plans", ".codex/plans", ".codex/notes",
 		"docs/prd", "rfcs", "rfc", "docs/rfcs", "docs/rfc",
 		"roadmaps", "docs/roadmaps",
-		"proposals", "docs/proposals", "enhancements", "docs/enhancements",
-		"keps", "docs/keps", "teps", "docs/teps", "beps", "docs/beps",
-		"sips", "docs/sips", "ships", "docs/ships", "oseps", "docs/oseps",
 		"docs/design", "docs/design-docs", "design-docs", "docs/technical",
 		"architecture", "docs/architecture",
 		"_bmad-output", ".specify/memory",
@@ -504,7 +501,11 @@ func scoreIntentPath(relPath string) (float64, []string) {
 		if !allTokens[token] {
 			continue
 		}
-		score += weight
+		effectiveWeight := weight
+		if isProposalFamilyPathToken(token) && dirSet[token] && !filenameSet[token] {
+			effectiveWeight = 2.1
+		}
+		score += effectiveWeight
 		reasons = append(reasons, "intent_path_token:"+token)
 		if filenameSet[token] {
 			score += 1.0
@@ -524,13 +525,50 @@ func scoreIntentPath(relPath string) (float64, []string) {
 		score -= 1.0
 		reasons = append(reasons, "intent_negative:readme")
 	}
-	for _, token := range []string{"changelog", "license", "security", "contributing", "conduct", "release", "news", "template", "prompt"} {
+	if lowerBase == "skill" {
+		score -= 6.0
+		reasons = append(reasons, "intent_negative:skill_file")
+	}
+	if hasProposalSupportPath(segments) {
+		score -= 4.0
+		reasons = append(reasons, "intent_negative:proposal_support_path")
+	}
+	for _, token := range []string{"changelog", "license", "security", "contributing", "conduct", "release", "news", "template", "prompt", "skill", "reference", "guide", "tutorial", "example", "fixture", "sample"} {
 		if allTokens[token] {
 			score -= 1.5
 			reasons = append(reasons, "intent_negative:"+token)
 		}
 	}
 	return score, reasons
+}
+
+func isProposalFamilyPathToken(token string) bool {
+	switch token {
+	case "bep", "enhancement", "kep", "osep", "proposal", "ship", "sip", "tep":
+		return true
+	default:
+		return false
+	}
+}
+
+func hasProposalSupportPath(segments []string) bool {
+	if len(segments) < 3 {
+		return false
+	}
+	hasProposalFamily := false
+	hasSupportSegment := false
+	for _, segment := range segments[:len(segments)-1] {
+		for _, token := range intentTokens(segment) {
+			if isProposalFamilyPathToken(token) {
+				hasProposalFamily = true
+			}
+			switch token {
+			case "asset", "context", "example", "experiment", "fixture", "idea", "legacy", "reference", "research", "sample", "script", "template", "update":
+				hasSupportSegment = true
+			}
+		}
+	}
+	return hasProposalFamily && hasSupportSegment
 }
 
 func isAgentEntrypointMarkdownBase(base string) bool {
@@ -697,6 +735,8 @@ func normalizeIntentToken(value string) string {
 		return "task"
 	case "agents":
 		return "agent"
+	case "skills":
+		return "skill"
 	case "risks":
 		return "risk"
 	case "goals":
@@ -719,6 +759,24 @@ func normalizeIntentToken(value string) string {
 		return "milestone"
 	case "timelines":
 		return "timeline"
+	case "guides":
+		return "guide"
+	case "tutorials":
+		return "tutorial"
+	case "examples":
+		return "example"
+	case "fixtures":
+		return "fixture"
+	case "samples":
+		return "sample"
+	case "assets":
+		return "asset"
+	case "ideas":
+		return "idea"
+	case "scripts":
+		return "script"
+	case "updates":
+		return "update"
 	}
 	if strings.HasPrefix(token, "plan") {
 		return "plan"
@@ -775,22 +833,6 @@ func isDefaultNestedMarkdownDir(rel string) bool {
 		"docs/rfc",
 		"roadmaps",
 		"docs/roadmaps",
-		"proposals",
-		"docs/proposals",
-		"enhancements",
-		"docs/enhancements",
-		"keps",
-		"docs/keps",
-		"teps",
-		"docs/teps",
-		"beps",
-		"docs/beps",
-		"sips",
-		"docs/sips",
-		"ships",
-		"docs/ships",
-		"oseps",
-		"docs/oseps",
 		"docs/design",
 		"docs/design-docs",
 		"design-docs",

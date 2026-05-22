@@ -80,7 +80,6 @@ func TestDiscover_DefaultNestedDocsIntentDirs(t *testing.T) {
 	nestedPlan := filepath.Join(tmp, "apps", "desktop", "docs", "plans")
 	nestedPRD := filepath.Join(tmp, "services", "api", "docs", "prd")
 	nestedRFC := filepath.Join(tmp, "packages", "api", "docs", "rfcs")
-	nestedProposal := filepath.Join(tmp, "services", "api", "docs", "proposals")
 	nestedArchitecture := filepath.Join(tmp, "platform", "docs", "architecture")
 	nestedDesignDocs := filepath.Join(tmp, "runtime", "docs", "design-docs")
 	if err := os.MkdirAll(nestedPlan, 0o755); err != nil {
@@ -92,9 +91,6 @@ func TestDiscover_DefaultNestedDocsIntentDirs(t *testing.T) {
 	if err := os.MkdirAll(nestedRFC, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(nestedProposal, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.MkdirAll(nestedArchitecture, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +100,6 @@ func TestDiscover_DefaultNestedDocsIntentDirs(t *testing.T) {
 	os.WriteFile(filepath.Join(nestedPlan, "pnpm-migration.md"), []byte("# PNPM Migration\n"), 0o644)
 	os.WriteFile(filepath.Join(nestedPRD, "billing.md"), []byte("# Billing PRD\n"), 0o644)
 	os.WriteFile(filepath.Join(nestedRFC, "token-boundary.md"), []byte("# Token Boundary RFC\n"), 0o644)
-	os.WriteFile(filepath.Join(nestedProposal, "search-index.md"), []byte("# Search Index Proposal\n"), 0o644)
 	os.WriteFile(filepath.Join(nestedArchitecture, "system-boundaries.md"), []byte("# System Boundaries Architecture\n"), 0o644)
 	os.WriteFile(filepath.Join(nestedDesignDocs, "worker-runtime.md"), []byte("# Worker Runtime Design\n"), 0o644)
 
@@ -118,7 +113,6 @@ func TestDiscover_DefaultNestedDocsIntentDirs(t *testing.T) {
 		"apps/desktop/docs/plans/pnpm-migration.md",
 		"services/api/docs/prd/billing.md",
 		"packages/api/docs/rfcs/token-boundary.md",
-		"services/api/docs/proposals/search-index.md",
 		"platform/docs/architecture/system-boundaries.md",
 		"runtime/docs/design-docs/worker-runtime.md",
 	} {
@@ -245,7 +239,10 @@ func TestDiscover_ProposalFamilyDirectoryIndexes(t *testing.T) {
 		"",
 		"## Unresolved Questions",
 	}, "\n"))
+	writeMarkdown(t, tmp, "docs/proposals/search-index.md", "# Search Index Proposal\n\n## Summary\n\n## Motivation\n\n## Proposal\n")
 	writeMarkdown(t, tmp, "docs/roadmaps/2026-platform.md", "# Platform Roadmap\n\n## Milestones\n\n## Timeline\n")
+	writeMarkdown(t, tmp, "beps/docs/proposals/BEP-001-exceptions/legacy-ignore/context/go.md", "# Go Error Handling Survey\n")
+	writeMarkdown(t, tmp, "library/methodologies/bmad-method/skills/architecture-design/SKILL.md", "# Architecture Design Skill\n")
 	writeMarkdown(t, tmp, "docs/release-notes/v1.md", "# Release Notes\n\n## Highlights\n")
 	writeMarkdown(t, tmp, ".github/pull_request_template.md", "# Pull Request\n")
 	writeMarkdown(t, tmp, "README.md", "# Project\n\n## Architecture\n")
@@ -259,6 +256,7 @@ func TestDiscover_ProposalFamilyDirectoryIndexes(t *testing.T) {
 	for _, want := range []string{
 		"beps/0013-ai-skills/README.md",
 		"enhancements/sig-node/2008-checkpointing/README.md",
+		"docs/proposals/search-index.md",
 		"docs/roadmaps/2026-platform.md",
 	} {
 		if !stringSliceContains(got, want) {
@@ -267,6 +265,8 @@ func TestDiscover_ProposalFamilyDirectoryIndexes(t *testing.T) {
 	}
 	for _, noisy := range []string{
 		"docs/release-notes/v1.md",
+		"beps/docs/proposals/BEP-001-exceptions/legacy-ignore/context/go.md",
+		"library/methodologies/bmad-method/skills/architecture-design/SKILL.md",
 		".github/pull_request_template.md",
 		"README.md",
 	} {
@@ -555,8 +555,6 @@ func TestDefaultPaths_NarrowDocs(t *testing.T) {
 		".claude/notes", ".claude/plans", ".codex/plans", ".codex/notes",
 		"docs/specs", "docs/plans", "docs/prd", "docs/rfcs", "rfcs",
 		"roadmaps", "docs/roadmaps",
-		"proposals", "docs/proposals", "enhancements", "docs/enhancements",
-		"keps", "teps", "beps", "sips", "ships", "oseps",
 		"docs/design", "docs/design-docs", "design-docs", "docs/technical",
 		"architecture", "docs/architecture", "_bmad-output", ".specify/memory",
 	}
@@ -575,6 +573,11 @@ func TestDefaultPaths_NarrowDocs(t *testing.T) {
 	for _, p := range paths {
 		if p == "docs" {
 			t.Error("defaultPaths() should not include bare top-level docs/ (use docs/specs, docs/plans, …)")
+		}
+		for _, broadProposalRoot := range []string{"proposals", "docs/proposals", "enhancements", "docs/enhancements", "beps", "docs/beps"} {
+			if p == broadProposalRoot {
+				t.Errorf("defaultPaths() should not recursively include broad proposal root %q; use scored discovery", p)
+			}
 		}
 	}
 }
