@@ -83,6 +83,9 @@ type firstIndexRetrievalReport struct {
 	DevSpecsTokens                   int     `json:"devspecs_tokens"`
 	FullPlanningTokens               int     `json:"full_planning_tokens"`
 	SavedInputTokensVsFullPlanning   int     `json:"saved_input_tokens_vs_full_planning"`
+	PackedSectionArtifactCount       int     `json:"packed_section_artifact_count,omitempty"`
+	PackedSectionCount               int     `json:"packed_section_count,omitempty"`
+	FullFileArtifactCount            int     `json:"full_file_artifact_count,omitempty"`
 	InputUSDPer1M                    float64 `json:"input_usd_per_1m,omitempty"`
 	EstimatedInputUSDSaved           float64 `json:"estimated_input_usd_saved,omitempty"`
 	PlanningArtifactFiles            int     `json:"planning_artifact_files"`
@@ -477,9 +480,13 @@ func capFirstIndexWeakSpots(in []firstIndexWeakSpot, limit int) []firstIndexWeak
 
 func buildFirstIndexRetrievalReport(r *evalharness.Result, inputUSDPer1M float64) firstIndexRetrievalReport {
 	var devspecsTokens, fullPlanningTokens int
+	var packedSectionArtifacts, packedSections, fullFileArtifacts int
 	for _, c := range r.Cases {
 		devspecsTokens += c.DevSpecsTokens
 		fullPlanningTokens += c.FullPlanningTokens
+		packedSectionArtifacts += len(c.PackedSectionArtifacts)
+		packedSections += c.PackedSectionCount
+		fullFileArtifacts += c.FullFileArtifactCount
 	}
 	savedTokens := fullPlanningTokens - devspecsTokens
 	if savedTokens < 0 {
@@ -513,6 +520,9 @@ func buildFirstIndexRetrievalReport(r *evalharness.Result, inputUSDPer1M float64
 		DevSpecsTokens:                   devspecsTokens,
 		FullPlanningTokens:               fullPlanningTokens,
 		SavedInputTokensVsFullPlanning:   savedTokens,
+		PackedSectionArtifactCount:       packedSectionArtifacts,
+		PackedSectionCount:               packedSections,
+		FullFileArtifactCount:            fullFileArtifacts,
 		InputUSDPer1M:                    inputUSDPer1M,
 		EstimatedInputUSDSaved:           estimatedSaved,
 		PlanningArtifactFiles:            r.Corpus.PlanningArtifacts.Files,
@@ -674,6 +684,11 @@ func formatFirstIndexBatchReportText(report *firstIndexBatchReport) string {
 			retrieval.ContextSufficiencyPassed,
 			retrieval.ContextSufficiencyCases,
 			firstIndexPct(retrieval.DiscoveryCoverage))
+		if retrieval.PackedSectionArtifactCount > 0 {
+			fmt.Fprintf(&b, "  Section packing: %d artifacts / %d sections\n",
+				retrieval.PackedSectionArtifactCount,
+				retrieval.PackedSectionCount)
+		}
 	}
 	fmt.Fprintln(&b)
 
@@ -762,6 +777,12 @@ func formatFirstIndexReportText(report *firstIndexReport) string {
 	}
 	fmt.Fprintf(&b, "- DevSpecs context tokens: %s\n", firstIndexComma(report.Retrieval.DevSpecsTokens))
 	fmt.Fprintf(&b, "- Full planning tokens: %s\n", firstIndexComma(report.Retrieval.FullPlanningTokens))
+	if report.Retrieval.PackedSectionArtifactCount > 0 {
+		fmt.Fprintf(&b, "- Section packing: %d artifacts / %d sections; %d full-file markdown artifacts\n",
+			report.Retrieval.PackedSectionArtifactCount,
+			report.Retrieval.PackedSectionCount,
+			report.Retrieval.FullFileArtifactCount)
+	}
 	fmt.Fprintf(&b, "- Planning corpus: %d files / %s tokens\n", report.Retrieval.PlanningArtifactFiles, firstIndexComma(report.Retrieval.PlanningArtifactTokens))
 	fmt.Fprintf(&b, "- Full candidate corpus: %d files / %s tokens\n", report.Retrieval.FullCandidateCorpusFiles, firstIndexComma(report.Retrieval.FullCandidateCorpusTokens))
 	fmt.Fprintf(&b, "- Expected artifacts available: %d/%d = %s\n",

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
@@ -220,6 +221,9 @@ type CaseResult struct {
 	BackgroundRecall              float64           `json:"background_recall"`
 	ArtifactsIncluded             []string          `json:"artifacts_included"`
 	ArtifactReasons               []ArtifactReason  `json:"artifact_reasons"`
+	PackedSectionArtifacts        []string          `json:"packed_section_artifacts,omitempty"`
+	PackedSectionCount            int               `json:"packed_section_count,omitempty"`
+	FullFileArtifactCount         int               `json:"full_file_artifact_count,omitempty"`
 	RelevantIncluded              []string          `json:"relevant_included"`
 	IrrelevantIncluded            []string          `json:"irrelevant_included"`
 	ArtifactPrecision             float64           `json:"artifact_precision"`
@@ -414,6 +418,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 		cr.TokenReductionVsAllMarkdown = tokenReduction(cr.DevSpecsTokens, cr.AllMarkdownTokens)
 		cr.TokenReductionVsFullCandidate = tokenReduction(cr.DevSpecsTokens, cr.FullCandidateCorpusTokens)
 		cr.TokenReductionVsQueryFile = tokenReduction(cr.DevSpecsTokens, cr.QueryFileBaselineTokens)
+		applyPackingMetrics(&cr, devspecsFiles)
 		applyArtifactMetrics(&cr, c)
 		applyDiscoveryDiagnostics(&cr, c, corpusPaths)
 		cr.ContextSufficiency = evaluateSufficiency(c.SuccessCriteria, devContext, cr.ArtifactsIncluded)
@@ -999,6 +1004,21 @@ func baselineMetrics(name, scope string, includesSource bool, files []File, expe
 		Artifacts:                rel,
 		RelevantIncluded:         relevant,
 		IrrelevantCount:          len(rel) - relevant,
+	}
+}
+
+func applyPackingMetrics(cr *CaseResult, files []File) {
+	for _, f := range files {
+		if f.Metadata != nil && f.Metadata["section_pack_mode"] == "sections" {
+			cr.PackedSectionArtifacts = append(cr.PackedSectionArtifacts, f.Path)
+			if count, err := strconv.Atoi(strings.TrimSpace(f.Metadata["section_pack_count"])); err == nil {
+				cr.PackedSectionCount += count
+			}
+			continue
+		}
+		if strings.EqualFold(filepath.Ext(f.Path), ".md") || strings.EqualFold(filepath.Ext(f.Path), ".mdx") {
+			cr.FullFileArtifactCount++
+		}
 	}
 }
 

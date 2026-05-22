@@ -1,6 +1,7 @@
 package retrieval
 
 import (
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -133,6 +134,7 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string) []Candidate {
 		out = append(out, sf.candidate)
 	}
 	out = expandOpenSpecLinks(out, candidates, queryLower, limit)
+	out = packCandidateSections(out, queryLower, terms)
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
 }
@@ -714,6 +716,449 @@ func isExampleSegment(segment string) bool {
 	default:
 		return false
 	}
+}
+
+type markdownSection struct {
+	HeadingPath        string
+	HeadingDepth       int
+	StartLine          int
+	EndLine            int
+	Body               string
+	Frontmatter        map[string]string
+	Tasks              []string
+	AcceptanceCriteria []string
+	Links              []string
+}
+
+type scoredMarkdownSection struct {
+	section markdownSection
+	score   float64
+}
+
+func packCandidateSections(candidates []Candidate, queryLower string, terms map[string]float64) []Candidate {
+	if len(candidates) == 0 {
+		return candidates
+	}
+	out := make([]Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		out = append(out, packCandidateSection(candidate, queryLower, terms))
+	}
+	return out
+}
+
+func packCandidateSection(c Candidate, queryLower string, terms map[string]float64) Candidate {
+	if !isMarkdownCandidatePath(c.Path) || len(c.Body) < 2400 || IsSourceContextCandidate(c) {
+		return c
+	}
+	sections := extractMarkdownSections(c.Body)
+	if len(sections) < 3 {
+		return c
+	}
+	selected := selectMarkdownSections(sections, queryLower, terms)
+	if len(selected) == 0 || len(selected) >= len(sections) {
+		return c
+	}
+	packedBody := renderPackedSections(c, selected, len(sections), terms)
+	if len(packedBody) == 0 || len(packedBody) >= int(float64(len(c.Body))*0.88) {
+		return c
+	}
+	if c.Metadata == nil {
+		c.Metadata = map[string]string{}
+	} else {
+		c.Metadata = copyMetadata(c.Metadata)
+	}
+	headings := make([]string, 0, len(selected))
+	for _, selectedSection := range selected {
+		headings = append(headings, selectedSection.section.HeadingPath)
+	}
+	c.Metadata["section_pack_mode"] = "sections"
+	c.Metadata["section_pack_count"] = strconv.Itoa(len(selected))
+	c.Metadata["section_pack_total"] = strconv.Itoa(len(sections))
+	c.Metadata["section_pack_headings"] = strings.Join(headings, "\n")
+	c.Body = packedBody
+	return c
+}
+
+func isMarkdownCandidatePath(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".md", ".mdx":
+		return true
+	default:
+		return false
+	}
+}
+
+func extractMarkdownSections(body string) []markdownSection {
+	body = strings.ReplaceAll(body, "\r\n", "\n")
+	body = strings.ReplaceAll(body, "\r", "\n")
+	lines := strings.Split(body, "\n")
+	frontmatter, startIndex := parseFrontmatter(lines)
+	type headingState struct {
+		depth int
+		title string
+	}
+	var stack []headingState
+	var sections []markdownSection
+	var current *markdownSection
+	var contentStart int
+	inCode := false
+	finalize := func(endLine int) {
+		if current == nil {
+			return
+		}
+		if endLine < contentStart {
+			current.EndLine = current.StartLine
+			current.Body = ""
+		} else {
+			current.EndLine = endLine
+			current.Body = strings.TrimRight(strings.Join(lines[contentStart-1:endLine], "\n"), "\r\n")
+		}
+		current.Tasks = extractTaskLines(current.Body)
+		current.AcceptanceCriteria = extractAcceptanceLines(current.HeadingPath, current.Body)
+		current.Links = extractMarkdownLinks(current.Body)
+		sections = append(sections, *current)
+		current = nil
+	}
+	for i := startIndex; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if isMarkdownFence(trimmed) {
+			inCode = !inCode
+		}
+		if inCode {
+			continue
+		}
+		depth, title, ok := parseMarkdownHeading(line)
+		if !ok {
+			continue
+		}
+		lineNo := i + 1
+		finalize(lineNo - 1)
+		for len(stack) > 0 && stack[len(stack)-1].depth >= depth {
+			stack = stack[:len(stack)-1]
+		}
+		stack = append(stack, headingState{depth: depth, title: title})
+		pathParts := make([]string, len(stack))
+		for j, item := range stack {
+			pathParts[j] = item.title
+		}
+		current = &markdownSection{
+			HeadingPath:  strings.Join(pathParts, " > "),
+			HeadingDepth: depth,
+			StartLine:    lineNo,
+			Frontmatter:  copyStringMap(frontmatter),
+		}
+		contentStart = lineNo + 1
+	}
+	finalize(len(lines))
+	return sections
+}
+
+func parseFrontmatter(lines []string) (map[string]string, int) {
+	if len(lines) == 0 {
+		return nil, 0
+	}
+	delimiter := strings.TrimSpace(lines[0])
+	if delimiter != "---" && delimiter != "+++" {
+		return nil, 0
+	}
+	frontmatter := map[string]string{}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == delimiter {
+			if len(frontmatter) == 0 {
+				frontmatter = nil
+			}
+			return frontmatter, i + 1
+		}
+		key, value, ok := parseFrontmatterLine(lines[i])
+		if ok {
+			frontmatter[key] = value
+		}
+	}
+	return nil, 0
+}
+
+func parseFrontmatterLine(line string) (string, string, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return "", "", false
+	}
+	separator := strings.Index(line, ":")
+	if separator < 0 {
+		separator = strings.Index(line, "=")
+	}
+	if separator <= 0 {
+		return "", "", false
+	}
+	key := strings.TrimSpace(line[:separator])
+	value := strings.Trim(strings.TrimSpace(line[separator+1:]), `"'`)
+	if key == "" || value == "" {
+		return "", "", false
+	}
+	return key, value, true
+}
+
+func parseMarkdownHeading(line string) (int, string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "#") {
+		return 0, "", false
+	}
+	depth := 0
+	for depth < len(trimmed) && trimmed[depth] == '#' {
+		depth++
+	}
+	if depth == 0 || depth > 6 || depth >= len(trimmed) || trimmed[depth] != ' ' {
+		return 0, "", false
+	}
+	title := strings.TrimSpace(trimmed[depth:])
+	title = strings.TrimSpace(strings.TrimRight(title, "#"))
+	if title == "" {
+		return 0, "", false
+	}
+	return depth, title, true
+}
+
+func isMarkdownFence(trimmed string) bool {
+	return strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
+}
+
+func extractTaskLines(body string) []string {
+	var out []string
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if strings.HasPrefix(lower, "- [ ]") || strings.HasPrefix(lower, "- [x]") ||
+			strings.HasPrefix(lower, "* [ ]") || strings.HasPrefix(lower, "* [x]") {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func extractAcceptanceLines(headingPath, body string) []string {
+	if !containsAny(strings.ToLower(headingPath), "acceptance", "criteria", "requirement") &&
+		!containsAny(strings.ToLower(body), "acceptance criteria", "acceptance criterion") {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") || strings.Contains(strings.ToLower(trimmed), "acceptance") {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func extractMarkdownLinks(body string) []string {
+	var out []string
+	rest := body
+	for {
+		start := strings.Index(rest, "](")
+		if start < 0 {
+			break
+		}
+		after := rest[start+2:]
+		end := strings.Index(after, ")")
+		if end < 0 {
+			break
+		}
+		target := strings.TrimSpace(after[:end])
+		if target != "" {
+			out = append(out, target)
+		}
+		rest = after[end+1:]
+	}
+	return uniqueStrings(out)
+}
+
+func selectMarkdownSections(sections []markdownSection, queryLower string, terms map[string]float64) []scoredMarkdownSection {
+	scored := make([]scoredMarkdownSection, 0, len(sections))
+	for _, section := range sections {
+		score := scoreMarkdownSection(section, queryLower, terms)
+		if score > 0 {
+			scored = append(scored, scoredMarkdownSection{section: section, score: score})
+		}
+	}
+	if len(scored) == 0 {
+		return nil
+	}
+	sort.Slice(scored, func(i, j int) bool {
+		if scored[i].score == scored[j].score {
+			return scored[i].section.StartLine < scored[j].section.StartLine
+		}
+		return scored[i].score > scored[j].score
+	})
+	if scored[0].score < 2.2 {
+		return nil
+	}
+	limit := 3
+	if containsAny(queryLower, "agent context", "implement", "implementation", "resume", "continue") {
+		limit = 4
+	}
+	if limit > len(scored) {
+		limit = len(scored)
+	}
+	threshold := scored[0].score * 0.35
+	if threshold < 1.2 {
+		threshold = 1.2
+	}
+	selected := make([]scoredMarkdownSection, 0, limit)
+	for _, section := range scored {
+		if len(selected) >= limit {
+			break
+		}
+		if len(selected) > 0 && section.score < threshold {
+			continue
+		}
+		selected = append(selected, section)
+	}
+	sort.Slice(selected, func(i, j int) bool {
+		return selected[i].section.StartLine < selected[j].section.StartLine
+	})
+	return selected
+}
+
+func scoreMarkdownSection(section markdownSection, queryLower string, terms map[string]float64) float64 {
+	headingLower := strings.ToLower(section.HeadingPath)
+	bodyLower := strings.ToLower(section.Body)
+	score := 0.0
+	for term, weight := range terms {
+		if term == "" {
+			continue
+		}
+		if strings.Contains(headingLower, term) {
+			score += 4.0 * weight
+		}
+		hits := strings.Count(bodyLower, term)
+		if hits > 4 {
+			hits = 4
+		}
+		score += float64(hits) * weight
+	}
+	if len(section.Tasks) > 0 && containsAny(queryLower, "task", "tasks", "todo", "implement", "implementation", "resume", "continue") {
+		score += 1.4
+	}
+	if len(section.AcceptanceCriteria) > 0 && containsAny(queryLower, "acceptance", "criteria", "requirement", "requirements", "prd", "product") {
+		score += 1.2
+	}
+	switch {
+	case containsAny(queryLower, "decision", "adr", "why", "rationale") && containsAny(headingLower, "decision", "rationale", "consequences"):
+		score += 1.5
+	case containsAny(queryLower, "design", "architecture") && containsAny(headingLower, "design", "architecture", "overview"):
+		score += 1.5
+	case containsAny(queryLower, "alternative", "alternatives", "rfc") && containsAny(headingLower, "alternative", "alternatives", "drawback", "drawbacks"):
+		score += 1.2
+	case containsAny(queryLower, "scope", "requirement", "requirements") && containsAny(headingLower, "scope", "requirement", "requirements"):
+		score += 1.2
+	}
+	return score
+}
+
+func renderPackedSections(c Candidate, selected []scoredMarkdownSection, totalSections int, terms map[string]float64) string {
+	source := c.Source
+	if source == "" {
+		source = c.Path
+	}
+	var b strings.Builder
+	fmtSectionHeader := func(s scoredMarkdownSection) {
+		fmt.Fprintf(&b, "### %s\n", s.section.HeadingPath)
+		fmt.Fprintf(&b, "Source: %s\n", source)
+		fmt.Fprintf(&b, "Lines: %d-%d\n\n", s.section.StartLine, s.section.EndLine)
+	}
+	fmt.Fprintf(&b, "Section-packed artifact\n")
+	fmt.Fprintf(&b, "Source: %s\n", source)
+	fmt.Fprintf(&b, "Selected sections: %d/%d\n", len(selected), totalSections)
+	if fm := frontmatterSummary(selected); fm != "" {
+		fmt.Fprintf(&b, "Frontmatter: %s\n", fm)
+	}
+	for _, section := range selected {
+		fmt.Fprintln(&b)
+		fmtSectionHeader(section)
+		fmt.Fprintf(&b, "%s\n", sectionExcerpt(section.section, terms, 2200))
+	}
+	return strings.TrimRight(b.String(), "\r\n")
+}
+
+func sectionExcerpt(section markdownSection, terms map[string]float64, maxChars int) string {
+	body := strings.TrimSpace(section.Body)
+	if len(body) <= maxChars {
+		return body
+	}
+	lines := strings.Split(body, "\n")
+	selected := map[int]bool{}
+	for i, line := range lines {
+		lineLower := strings.ToLower(line)
+		if sectionLineMatches(lineLower, terms) || isTaskLikeLine(lineLower) {
+			for j := i - 1; j <= i+1; j++ {
+				if j >= 0 && j < len(lines) {
+					selected[j] = true
+				}
+			}
+		}
+	}
+	if len(selected) == 0 {
+		return strings.TrimSpace(body[:maxChars]) + "\n..."
+	}
+	var indexes []int
+	for idx := range selected {
+		indexes = append(indexes, idx)
+	}
+	sort.Ints(indexes)
+	var b strings.Builder
+	last := -2
+	for _, idx := range indexes {
+		if b.Len() >= maxChars {
+			break
+		}
+		if last >= 0 && idx > last+1 {
+			b.WriteString("...\n")
+		}
+		b.WriteString(lines[idx])
+		b.WriteByte('\n')
+		last = idx
+	}
+	out := strings.TrimSpace(b.String())
+	if len(out) > maxChars {
+		out = strings.TrimSpace(out[:maxChars]) + "\n..."
+	}
+	return out
+}
+
+func sectionLineMatches(lineLower string, terms map[string]float64) bool {
+	for term := range terms {
+		if term != "" && strings.Contains(lineLower, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func isTaskLikeLine(lineLower string) bool {
+	lineLower = strings.TrimSpace(lineLower)
+	return strings.HasPrefix(lineLower, "- [ ]") ||
+		strings.HasPrefix(lineLower, "- [x]") ||
+		strings.HasPrefix(lineLower, "* [ ]") ||
+		strings.HasPrefix(lineLower, "* [x]")
+}
+
+func frontmatterSummary(selected []scoredMarkdownSection) string {
+	if len(selected) == 0 || len(selected[0].section.Frontmatter) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(selected[0].section.Frontmatter))
+	for key := range selected[0].section.Frontmatter {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if len(keys) > 4 {
+		keys = keys[:4]
+	}
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+"="+selected[0].section.Frontmatter[key])
+	}
+	return strings.Join(parts, ", ")
 }
 
 func selectScoredCandidates(candidates []scoredCandidate, queryLower string, limit int) []scoredCandidate {
@@ -1839,6 +2284,9 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 	if c.Metadata != nil && c.Metadata["retrieval_expansion_reason"] != "" {
 		reasons = append(reasons, "relationship expansion: "+c.Metadata["retrieval_expansion_reason"])
 	}
+	if c.Metadata != nil && c.Metadata["section_pack_mode"] == "sections" {
+		reasons = append(reasons, "section-packed context: "+strings.ReplaceAll(c.Metadata["section_pack_headings"], "\n", "; "))
+	}
 	for term := range terms {
 		if term == "" {
 			continue
@@ -2055,6 +2503,17 @@ func candidateIdentity(c Candidate) string {
 func copyMetadata(metadata map[string]string) map[string]string {
 	out := make(map[string]string, len(metadata)+1)
 	for key, value := range metadata {
+		out[key] = value
+	}
+	return out
+}
+
+func copyStringMap(items map[string]string) map[string]string {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(items))
+	for key, value := range items {
 		out[key] = value
 	}
 	return out

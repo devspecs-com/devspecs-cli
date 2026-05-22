@@ -1,6 +1,9 @@
 package retrieval
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestWeightedFilesRetrieverV0_RetrievesAndExplainsCandidates(t *testing.T) {
 	candidates := []Candidate{
@@ -677,6 +680,93 @@ func TestWeightedFilesRetrieverV0_CollapsesTemplateInstanceVariant(t *testing.T)
 	}
 	if !containsCandidatePath(got, "docs/product/billing-prd.md") {
 		t.Fatalf("missing concrete PRD instance: %#v", CandidatePaths(got))
+	}
+}
+
+func TestExtractMarkdownSectionsTracksStructureAndSignals(t *testing.T) {
+	body := strings.Join([]string{
+		"---",
+		"status: accepted",
+		"owner = platform",
+		"---",
+		"# Root",
+		"Intro with [design link](docs/design.md).",
+		"## Plan",
+		"- [ ] Wire the billing worker",
+		"### Acceptance Criteria",
+		"- Must preserve idempotency",
+		"```go",
+		"# Not A Heading",
+		"```",
+	}, "\n")
+
+	sections := extractMarkdownSections(body)
+	if len(sections) != 3 {
+		t.Fatalf("sections = %#v", sections)
+	}
+	if sections[1].HeadingPath != "Root > Plan" {
+		t.Fatalf("nested heading path = %q", sections[1].HeadingPath)
+	}
+	if sections[1].Frontmatter["status"] != "accepted" || sections[1].Frontmatter["owner"] != "platform" {
+		t.Fatalf("frontmatter not inherited: %#v", sections[1].Frontmatter)
+	}
+	if len(sections[1].Tasks) != 1 || !strings.Contains(sections[1].Tasks[0], "billing worker") {
+		t.Fatalf("tasks = %#v", sections[1].Tasks)
+	}
+	if len(sections[2].AcceptanceCriteria) == 0 {
+		t.Fatalf("missing acceptance criteria: %#v", sections[2])
+	}
+	if strings.Contains(sections[2].HeadingPath, "Not A Heading") {
+		t.Fatalf("code fence heading leaked into section path: %#v", sections)
+	}
+	if len(sections[0].Links) != 1 || sections[0].Links[0] != "docs/design.md" {
+		t.Fatalf("links = %#v", sections[0].Links)
+	}
+}
+
+func TestPackCandidateSectionsSelectsRelevantLargeSections(t *testing.T) {
+	body := strings.Join([]string{
+		"# Overview",
+		strings.Repeat("general background without requested identifiers\n", 45),
+		"# Billing Boundary",
+		"The stripe_event_id idempotency rule controls webhook replay protection.",
+		"The worker stores stripe_event_id before side effects.",
+		"# Appendix",
+		strings.Repeat("irrelevant appendix sentence\n", 45),
+	}, "\n")
+	candidate := Candidate{
+		Path:  "docs/rfcs/webhook-replay.md",
+		Title: "Webhook Replay",
+		Body:  body,
+	}
+
+	got := packCandidateSection(candidate, "stripe_event_id idempotency", expandedTerms("stripe_event_id idempotency"))
+	if got.Metadata["section_pack_mode"] != "sections" {
+		t.Fatalf("expected section-packed candidate, metadata=%#v body=%s", got.Metadata, got.Body)
+	}
+	if !strings.Contains(got.Body, "### Billing Boundary") {
+		t.Fatalf("packed body missing selected heading: %s", got.Body)
+	}
+	if !strings.Contains(got.Body, "Source: docs/rfcs/webhook-replay.md") || !strings.Contains(got.Body, "Lines:") {
+		t.Fatalf("packed body missing source/line citation: %s", got.Body)
+	}
+	if strings.Contains(got.Body, "irrelevant appendix sentence") {
+		t.Fatalf("packed body retained unrelated appendix: %s", got.Body)
+	}
+}
+
+func TestPackCandidateSectionsFallsBackForShortFiles(t *testing.T) {
+	candidate := Candidate{
+		Path: "docs/adr/0001.md",
+		Body: "# Decision\n\nUse stripe_event_id for idempotency.",
+	}
+
+	got := packCandidateSection(candidate, "stripe_event_id idempotency", expandedTerms("stripe_event_id idempotency"))
+	if got.Metadata != nil && got.Metadata["section_pack_mode"] != "" {
+		t.Fatalf("short file should not be section packed: %#v", got.Metadata)
+	}
+	if got.Body != candidate.Body {
+		t.Fatalf("body changed for short file")
 	}
 }
 
