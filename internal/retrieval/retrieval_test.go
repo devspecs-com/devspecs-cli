@@ -476,6 +476,99 @@ func TestWeightedFilesRetrieverV0_KeepsRoadmapPathSignal(t *testing.T) {
 	}
 }
 
+func TestWeightedFilesRetrieverV0_AuthorityPriorDoesNotCreateUnrelatedMatches(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "docs/prd/billing-entitlements.md",
+			Kind:  "requirements",
+			Title: "Billing Entitlements",
+			Body:  "Product requirements for billing entitlements.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "oauth provider session handoff")
+	if len(got) != 0 {
+		t.Fatalf("authority prior should not rescue unrelated canonical docs: %#v", CandidatePaths(got))
+	}
+}
+
+func TestWeightedFilesRetrieverV0_AuthorityPriorRanksCanonicalCurrentArtifacts(t *testing.T) {
+	query := "architecture design for API boundary"
+	terms := expandedTerms(query)
+	queryLower := "architecture design for api boundary"
+	canonical := Candidate{
+		Path:     "docs/architecture/design.md",
+		Kind:     "design",
+		Title:    "Architecture Design",
+		Body:     "API boundary design.",
+		Metadata: map[string]string{"classifier_model": "rfc", "classifier_confidence": "0.900"},
+	}
+	archived := Candidate{
+		Path:     "docs/archive/architecture/design.md",
+		Kind:     "design",
+		Title:    "Architecture Design",
+		Body:     "API boundary design.",
+		Metadata: map[string]string{"classifier_model": "rfc", "classifier_confidence": "0.900"},
+	}
+
+	canonicalScore := scoreCandidate(canonical, terms, queryLower) + authorityPrior(canonical, candidateRole(canonical), queryLower).score
+	archivedScore := scoreCandidate(archived, terms, queryLower) + authorityPrior(archived, candidateRole(archived), queryLower).score
+	if canonicalScore <= archivedScore {
+		t.Fatalf("canonical score %.2f should beat archived score %.2f", canonicalScore, archivedScore)
+	}
+}
+
+func TestExplainCandidatesIncludesAuthorityPriorReason(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:     "docs/adr/0001-billing-source.md",
+			Kind:     "decision",
+			Subtype:  "adr",
+			Status:   "accepted",
+			Title:    "Billing Source",
+			Body:     "Decision: billing source is authoritative.",
+			Metadata: map[string]string{"classifier_model": "adr", "classifier_confidence": "0.920"},
+		},
+	}
+
+	reasons := ExplainCandidates(candidates, "why billing source decision")
+	if len(reasons) != 1 {
+		t.Fatalf("reasons = %#v", reasons)
+	}
+	if !reasonContains(reasons[0].Reasons, "authority prior: canonical ADR path") {
+		t.Fatalf("missing authority reason: %#v", reasons[0].Reasons)
+	}
+}
+
+func TestExplainCandidatesIncludesClassifierAuthorityPrior(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:     "docs/migration-context.md",
+			Kind:     "plan",
+			Title:    "Roadmap",
+			Body:     "Roadmap for API migration.",
+			Metadata: map[string]string{"classifier_authority": "working_plan"},
+		},
+	}
+
+	reasons := ExplainCandidates(candidates, "api migration roadmap")
+	if len(reasons) != 1 {
+		t.Fatalf("reasons = %#v", reasons)
+	}
+	if !reasonContains(reasons[0].Reasons, "authority prior: classifier working-plan authority") {
+		t.Fatalf("missing classifier authority reason: %#v", reasons[0].Reasons)
+	}
+}
+
+func reasonContains(reasons []string, want string) bool {
+	for _, reason := range reasons {
+		if reason == want {
+			return true
+		}
+	}
+	return false
+}
+
 func containsCandidatePath(candidates []Candidate, path string) bool {
 	for _, c := range candidates {
 		if c.Path == path {

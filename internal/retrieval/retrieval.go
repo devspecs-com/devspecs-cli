@@ -3,6 +3,7 @@ package retrieval
 import (
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -103,13 +104,17 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string) []Candidate {
 	queryLower := strings.ToLower(query)
 	var scoredCandidates []scoredCandidate
 	for _, c := range candidates {
-		score := scoreCandidate(c, terms, queryLower)
-		if score >= 4.0 {
+		baseScore := scoreCandidate(c, terms, queryLower)
+		if baseScore >= 4.0 {
+			role := candidateRole(c)
+			prior := authorityPrior(c, role, queryLower)
 			scoredCandidates = append(scoredCandidates, scoredCandidate{
 				candidate:  c,
-				score:      score,
+				score:      baseScore + prior.score,
+				baseScore:  baseScore,
+				authority:  prior,
 				profile:    candidateMatchProfile(c, queryLower),
-				role:       candidateRole(c),
+				role:       role,
 				sourceFile: IsSourceContextCandidate(c),
 			})
 		}
@@ -134,9 +139,220 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string) []Candidate {
 type scoredCandidate struct {
 	candidate  Candidate
 	score      float64
+	baseScore  float64
+	authority  authorityPriorResult
 	profile    matchProfile
 	role       string
 	sourceFile bool
+}
+
+type authorityPriorResult struct {
+	score   float64
+	reasons []string
+}
+
+func authorityPrior(c Candidate, role, queryLower string) authorityPriorResult {
+	pathLower := strings.ToLower(filepath.ToSlash(c.Path))
+	status := strings.ToLower(strings.TrimSpace(c.Status))
+	if status == "" {
+		status = metadataLower(c, "classifier_status")
+	}
+	lifecycle := metadataLower(c, "classifier_lifecycle")
+	var result authorityPriorResult
+	add := func(delta float64, reason string) {
+		if delta == 0 || reason == "" {
+			return
+		}
+		result.score += delta
+		result.reasons = append(result.reasons, reason)
+	}
+
+	switch role {
+	case "adr":
+		if hasPathSegment(pathLower, "adr") || hasPathSegment(pathLower, "adrs") || strings.Contains(pathLower, "/architecture/decisions/") {
+			add(1.2, "authority prior: canonical ADR path")
+		}
+		if status == "accepted" || strings.Contains(strings.ToLower(c.Body), "status: accepted") {
+			add(0.5, "authority prior: accepted decision")
+		}
+	case "prd":
+		if strings.Contains(pathLower, "/product-specs/") ||
+			hasPathSegment(pathLower, "prd") ||
+			hasPathSegment(pathLower, "prds") ||
+			strings.Contains(pathLower, "product-requirement") ||
+			strings.Contains(pathLower, "product_requirement") {
+			add(1.2, "authority prior: canonical product requirements path")
+		}
+	case "rfc":
+		if hasPathSegment(pathLower, "rfc") ||
+			hasPathSegment(pathLower, "rfcs") ||
+			hasPathSegment(pathLower, "proposals") ||
+			hasPathSegment(pathLower, "enhancements") {
+			add(0.9, "authority prior: canonical RFC/proposal path")
+		}
+	case "design":
+		if hasPathSegment(pathLower, "architecture") ||
+			hasPathSegment(pathLower, "design") ||
+			hasPathSegment(pathLower, "design-docs") ||
+			strings.Contains(pathLower, "/docs/design") {
+			add(0.8, "authority prior: canonical design path")
+		}
+	case "plan":
+		if hasPathSegment(pathLower, "plans") ||
+			hasPathSegment(pathLower, "roadmaps") ||
+			strings.HasSuffix(pathLower, "roadmap.md") ||
+			strings.HasSuffix(pathLower, "plan.md") {
+			add(0.7, "authority prior: canonical plan path")
+		}
+		if status == "active" || status == "in_progress" || status == "draft" {
+			add(0.3, "authority prior: active planning status")
+		}
+	case "openspec_bundle", "openspec_design", "openspec_tasks", "openspec_spec", "openspec_proposal":
+		if isOpenSpecPath(pathLower) {
+			add(1.0, "authority prior: OpenSpec structure")
+		}
+		if c.Metadata != nil && c.Metadata["artifact_scope"] != "" {
+			add(0.3, "authority prior: structured artifact scope")
+		}
+	case "agent_instruction", "protocol", "skill":
+		if hasNonIntentModeIntent(queryLower, "protocol") {
+			if pathDepth(pathLower) == 0 {
+				add(0.8, "authority prior: repository-level protocol")
+			} else if queryMentionsInstructionPathSubject(queryLower, pathLower) {
+				add(0.4, "authority prior: named module protocol")
+			}
+		}
+	case "template":
+		if hasNonIntentModeIntent(queryLower, "template") {
+			add(0.7, "authority prior: requested template artifact")
+		}
+	case "model":
+		if hasNonIntentModeIntent(queryLower, "model") {
+			add(0.7, "authority prior: requested model artifact")
+		}
+	}
+
+	if conf := classifierConfidence(c); conf >= 0.75 {
+		add(0.7, "authority prior: high classifier confidence")
+	} else if conf >= 0.55 {
+		add(0.35, "authority prior: classifier confidence")
+	}
+	switch metadataLower(c, "classifier_authority") {
+	case "high_current_intent":
+		add(0.45, "authority prior: classifier high-current intent")
+	case "high_decision":
+		add(0.45, "authority prior: classifier high-decision authority")
+	case "design_proposal":
+		add(0.3, "authority prior: classifier design/proposal authority")
+	case "product_background":
+		add(0.25, "authority prior: classifier product background authority")
+	case "working_plan":
+		add(0.25, "authority prior: classifier working-plan authority")
+	case "handoff_note":
+		if role == "agent_note" || containsAny(queryLower, "agent", "resume", "continue", "handoff", "followup", "follow-up") {
+			add(0.2, "authority prior: classifier handoff-note authority")
+		}
+	}
+	if role != "" && role != "agent_note" {
+		switch role {
+		case "adr", "prd", "rfc", "design", "plan",
+			"openspec_bundle", "openspec_design", "openspec_tasks", "openspec_spec", "openspec_proposal":
+			add(0.4, "authority prior: recognized artifact role "+role)
+		}
+	}
+
+	if status == "superseded" || status == "stale" || status == "deprecated" ||
+		lifecycle == "superseded" || lifecycle == "stale" || lifecycle == "deprecated" || lifecycle == "obsolete" {
+		if !hasLifecycleIntent(queryLower) {
+			add(-0.8, "authority prior: stale or superseded")
+		}
+	}
+	if lifecycle == "archived" && !containsAny(queryLower, "archive", "archived", "historical", "history") {
+		add(-0.5, "authority prior: archived lifecycle")
+	}
+	if hasArchivePath(pathLower) && !containsAny(queryLower, "archive", "archived", "historical", "history") {
+		add(-0.7, "authority prior: archive path")
+	}
+	if hasGeneratedPath(pathLower) && !containsAny(queryLower, "generated", "reference") {
+		add(-0.6, "authority prior: generated/reference path")
+	}
+	if hasTemplatePath(pathLower) && !hasNonIntentModeIntent(queryLower, "template") && !strings.Contains(queryLower, "template") {
+		add(-0.6, "authority prior: template path")
+	}
+	if hasExamplePath(pathLower) && !containsAny(queryLower, "example", "sample", "demo") {
+		add(-0.5, "authority prior: example path")
+	}
+	if isLikelyUnrequestedLocalizedPath(pathLower, queryLower) {
+		add(-0.5, "authority prior: unrequested language mirror")
+	}
+	if strings.Contains(filepath.Base(pathLower), "readme") && !strings.Contains(queryLower, "readme") {
+		add(-0.25, "authority prior: broad README surface")
+	}
+
+	result.reasons = uniqueStrings(result.reasons)
+	return result
+}
+
+func classifierConfidence(c Candidate) float64 {
+	value := metadataLower(c, "classifier_confidence")
+	if value == "" {
+		return 0
+	}
+	confidence, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0
+	}
+	return confidence
+}
+
+func metadataLower(c Candidate, key string) string {
+	if c.Metadata == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(c.Metadata[key]))
+}
+
+func hasPathSegment(path, segment string) bool {
+	path = strings.Trim(strings.ToLower(filepath.ToSlash(path)), "/")
+	segment = strings.ToLower(strings.Trim(segment, "/"))
+	if path == "" || segment == "" {
+		return false
+	}
+	for _, part := range strings.Split(path, "/") {
+		if part == segment {
+			return true
+		}
+	}
+	return false
+}
+
+func hasArchivePath(pathLower string) bool {
+	return hasPathSegment(pathLower, "archive") ||
+		hasPathSegment(pathLower, "archives") ||
+		hasPathSegment(pathLower, "archived")
+}
+
+func hasGeneratedPath(pathLower string) bool {
+	return hasPathSegment(pathLower, "generated") ||
+		hasPathSegment(pathLower, "gen") ||
+		hasPathSegment(pathLower, "references") ||
+		hasPathSegment(pathLower, "reference") ||
+		strings.Contains(pathLower, "documentation-full")
+}
+
+func hasTemplatePath(pathLower string) bool {
+	return hasPathSegment(pathLower, "template") ||
+		hasPathSegment(pathLower, "templates") ||
+		strings.Contains(pathLower, "template")
+}
+
+func hasExamplePath(pathLower string) bool {
+	return hasPathSegment(pathLower, "example") ||
+		hasPathSegment(pathLower, "examples") ||
+		hasPathSegment(pathLower, "sample") ||
+		hasPathSegment(pathLower, "samples") ||
+		hasPathSegment(pathLower, "demo") ||
+		hasPathSegment(pathLower, "demos")
 }
 
 func selectScoredCandidates(candidates []scoredCandidate, queryLower string, limit int) []scoredCandidate {
@@ -1315,6 +1531,14 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 	case "template":
 		if hasNonIntentModeIntent(queryLower, "template") {
 			reasons = append(reasons, "template/query-intent signal")
+		}
+	}
+	if prior := authorityPrior(c, role, queryLower); prior.score != 0 {
+		for _, reason := range prior.reasons {
+			reasons = append(reasons, reason)
+			if len(reasons) >= 5 {
+				break
+			}
 		}
 	}
 	if strings.Contains(bodyLower, "status: superseded") || strings.Contains(bodyLower, "status: stale") || strings.Contains(pathLower, "superseded") {

@@ -12,7 +12,10 @@
     "Title": "Golden Plan",
     "UpdatedAt": "\u003cMASKED\u003e",
     "reasons": [
-      "query term match in title: golden"
+      "query term match in title: golden",
+      "authority prior: canonical plan path",
+      "authority prior: active planning status",
+      "authority prior: recognized artifact role plan"
     ],
     "retriever": "eval_weighted_files_v0",
     "source_path": "plan.md"
