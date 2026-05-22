@@ -147,6 +147,73 @@ func TestWeightedFilesRetrieverV0_DemotesNonIntentLanesUnlessRequested(t *testin
 	}
 }
 
+func TestWeightedFilesRetrieverV0_DoesNotBackfillWeakBodyOnlyMarkdown(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "docs/design-docs/langfuse-trace-association.md",
+			Title: "Langfuse Trace Association",
+			Body:  "Design for Langfuse trace association across ask and runtime generations.",
+		},
+		{
+			Path:     "AGENTS.md",
+			Title:    "Agent Instructions",
+			Subtype:  "agent_instruction",
+			Body:     "Langfuse trace association rules for ask runtime generations.",
+			Metadata: map[string]string{"classifier_mode": "protocol"},
+		},
+		{
+			Path:  "docs/billing-subscription-design.md",
+			Title: "Billing Subscription Design",
+			Body:  "Ask runtime workers share the same tree for unrelated billing subscription flows.",
+		},
+		{
+			Path:  "docs/shared-admin-table-component.md",
+			Title: "Shared Admin Table Component",
+			Body:  "Runtime views share the same tree for admin tables.",
+		},
+		{
+			Path:  "docs/engineering-baseline.md",
+			Title: "Engineering Baseline",
+			Body:  "Fix ask runtime defaults shared by unrelated engineering tasks.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "fix Langfuse trace association so ask and runtime generations share the same trace tree")
+	if !containsCandidatePath(got, "docs/design-docs/langfuse-trace-association.md") {
+		t.Fatalf("missing anchored design doc: %#v", CandidatePaths(got))
+	}
+	for _, unwanted := range []string{
+		"AGENTS.md",
+		"docs/billing-subscription-design.md",
+		"docs/shared-admin-table-component.md",
+		"docs/engineering-baseline.md",
+	} {
+		if containsCandidatePath(got, unwanted) {
+			t.Fatalf("%s should not backfill body-only retrieval: %#v", unwanted, CandidatePaths(got))
+		}
+	}
+}
+
+func TestWeightedFilesRetrieverV0_KeepsSmallCandidateSets(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "ROADMAP.md",
+			Title: "CloudNativePG Roadmap",
+			Body:  "Roadmap and contributor prioritization.",
+		},
+		{
+			Path:  "docs/src/architecture.md",
+			Title: "Architecture",
+			Body:  "The operator performs direct pod management without StatefulSets and coordinates instance manager failover.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "CloudNativePG operator architecture direct pod management no StatefulSets instance manager failover")
+	if !containsCandidatePath(got, "docs/src/architecture.md") {
+		t.Fatalf("missing architecture doc from small candidate set: %#v", CandidatePaths(got))
+	}
+}
+
 func TestWeightedFilesRetrieverV0_ResumeIntentKeepsMatchingDecisionContext(t *testing.T) {
 	candidates := []Candidate{
 		{Path: "docs/plans/2026-05-01-entitlement-sync-plan.md", Body: "Current progress for entitlement_sync hardening and billing-webhook-hardening."},

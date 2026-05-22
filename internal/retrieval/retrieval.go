@@ -101,15 +101,17 @@ func IsSourceContextCandidate(c Candidate) bool {
 func retrieveWeightedFilesV0(candidates []Candidate, query string) []Candidate {
 	terms := expandedTerms(query)
 	queryLower := strings.ToLower(query)
-	type scored struct {
-		candidate Candidate
-		score     float64
-	}
-	var scoredCandidates []scored
+	var scoredCandidates []scoredCandidate
 	for _, c := range candidates {
 		score := scoreCandidate(c, terms, queryLower)
 		if score >= 4.0 {
-			scoredCandidates = append(scoredCandidates, scored{candidate: c, score: score})
+			scoredCandidates = append(scoredCandidates, scoredCandidate{
+				candidate:  c,
+				score:      score,
+				profile:    candidateMatchProfile(c, queryLower),
+				role:       fileRole(c.Path),
+				sourceFile: IsSourceContextCandidate(c),
+			})
 		}
 	}
 	sort.Slice(scoredCandidates, func(i, j int) bool {
@@ -119,9 +121,7 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string) []Candidate {
 		return scoredCandidates[i].score > scoredCandidates[j].score
 	})
 	limit := retrievalLimit(queryLower, terms)
-	if len(scoredCandidates) > limit {
-		scoredCandidates = scoredCandidates[:limit]
-	}
+	scoredCandidates = selectScoredCandidates(scoredCandidates, queryLower, limit)
 	out := make([]Candidate, 0, len(scoredCandidates))
 	for _, sf := range scoredCandidates {
 		out = append(out, sf.candidate)
@@ -129,6 +129,104 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string) []Candidate {
 	out = expandOpenSpecLinks(out, candidates, queryLower, limit)
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
+}
+
+type scoredCandidate struct {
+	candidate  Candidate
+	score      float64
+	profile    matchProfile
+	role       string
+	sourceFile bool
+}
+
+func selectScoredCandidates(candidates []scoredCandidate, queryLower string, limit int) []scoredCandidate {
+	if len(candidates) <= limit {
+		if len(candidates) <= 3 {
+			return candidates
+		}
+		if hasAnchoredCandidate(candidates) {
+			return filterWeakBodyOnlyBackfill(candidates, queryLower)
+		}
+		return candidates
+	}
+	if !hasAnchoredCandidate(candidates) {
+		return candidates[:limit]
+	}
+	selected := make([]scoredCandidate, 0, limit)
+	for _, candidate := range candidates {
+		if isWeakBodyOnlyBackfill(candidate, queryLower) {
+			continue
+		}
+		selected = append(selected, candidate)
+		if len(selected) == limit {
+			return selected
+		}
+	}
+	if len(selected) == 0 {
+		return candidates[:limit]
+	}
+	return selected
+}
+
+func hasAnchoredCandidate(candidates []scoredCandidate) bool {
+	for _, candidate := range candidates {
+		if isAnchoredCandidate(candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAnchoredCandidate(candidate scoredCandidate) bool {
+	if candidate.profile.pathTitleCoreMatches > 0 || candidate.profile.identifierMatches > 0 {
+		return true
+	}
+	if candidate.sourceFile && candidate.profile.coreMatches > 0 {
+		return true
+	}
+	switch candidate.role {
+	case "adr", "prd", "rfc", "openspec_design", "openspec_tasks", "openspec_spec", "openspec_proposal":
+		return candidate.profile.coreMatches >= 2
+	default:
+		return false
+	}
+}
+
+func filterWeakBodyOnlyBackfill(candidates []scoredCandidate, queryLower string) []scoredCandidate {
+	out := make([]scoredCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if isWeakBodyOnlyBackfill(candidate, queryLower) {
+			continue
+		}
+		out = append(out, candidate)
+	}
+	if len(out) == 0 {
+		return candidates
+	}
+	return out
+}
+
+func isWeakBodyOnlyBackfill(candidate scoredCandidate, queryLower string) bool {
+	if candidate.profile.coreTerms < 3 {
+		return false
+	}
+	if candidate.profile.pathTitleCoreMatches > 0 || candidate.profile.identifierMatches > 0 {
+		return false
+	}
+	if candidate.sourceFile {
+		return false
+	}
+	if mode := nonIntentCandidateMode(candidate.candidate); mode != "" && !hasNonIntentModeIntent(queryLower, mode) {
+		return true
+	}
+	if strings.HasPrefix(candidate.role, "openspec_") || candidate.role == "adr" || candidate.role == "prd" || candidate.role == "rfc" {
+		return false
+	}
+	pathLower := strings.ToLower(filepath.ToSlash(candidate.candidate.Path))
+	return isBroadMarkdownRole(candidate.role) ||
+		candidate.role == "" ||
+		strings.HasPrefix(pathLower, "docs/") ||
+		strings.Contains(pathLower, "/docs/")
 }
 
 func retrievalLimit(queryLower string, terms map[string]float64) int {
@@ -443,10 +541,11 @@ func coreQueryTerms(queryLower string) []string {
 	generic := map[string]bool{
 		"adr": true, "architecture": true, "background": true, "code": true,
 		"context": true, "decision": true, "design": true, "file": true,
-		"implement": true, "implementation": true, "note": true, "notes": true,
+		"fix": true, "implement": true, "implementation": true, "note": true, "notes": true,
 		"plan": true, "prd": true, "product": true, "proposal": true,
 		"requirements": true, "rfc": true, "source": true, "spec": true,
-		"task": true, "tasks": true,
+		"task": true, "tasks": true, "same": true, "share": true, "shared": true,
+		"use": true, "using": true,
 	}
 	var out []string
 	for _, term := range meaningfulTerms(queryLower) {
