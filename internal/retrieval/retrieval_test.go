@@ -358,6 +358,124 @@ func TestWeightedFilesRetrieverV0_ProductBackgroundAnchorsNamedSubject(t *testin
 	}
 }
 
+func TestWeightedFilesRetrieverV0_BridgesArtifactPhrasesToAcronyms(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:     "agents/prd.agent.md",
+			Title:    "Create PRD Chat Mode",
+			Subtype:  "agent_instruction",
+			Body:     "Generate Product Requirements Documents with user stories and acceptance criteria.",
+			Metadata: map[string]string{"classifier_mode": "protocol"},
+		},
+		{
+			Path:     "agents/atlassian-requirements-to-jira.agent.md",
+			Title:    "Requirements to Jira",
+			Subtype:  "agent_instruction",
+			Body:     "Convert requirements into Jira issues.",
+			Metadata: map[string]string{"classifier_mode": "protocol"},
+		},
+		{
+			Path:     "skills/reference/documentation-full.md",
+			Title:    "Documentation Reference",
+			Subtype:  "skill",
+			Body:     "Generic product documentation with users and acceptance examples.",
+			Metadata: map[string]string{"classifier_mode": "protocol"},
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "agent instructions for generating a product requirements document with user stories and acceptance criteria")
+	if !containsCandidatePath(got, "agents/prd.agent.md") {
+		t.Fatalf("missing PRD agent via product requirements document bridge: %#v", CandidatePaths(got))
+	}
+	if containsCandidatePath(got, "skills/reference/documentation-full.md") {
+		t.Fatalf("generic documentation should not beat PRD path/title match: %#v", CandidatePaths(got))
+	}
+}
+
+func TestWeightedFilesRetrieverV0_UsesClassifierRoleForDesignDocs(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:     "docs/docs/en/architecture/design.md",
+			Kind:     "design",
+			Title:    "Architecture Design",
+			Body:     "Master Worker API Alert DAO modules and distributed architecture.",
+			Metadata: map[string]string{"classifier_model": "rfc", "classifier_kind": "design"},
+		},
+		{
+			Path:     "CLAUDE.md",
+			Subtype:  "agent_instruction",
+			Title:    "Repository Instructions",
+			Body:     "Master Worker API Alert DAO modules and distributed architecture instructions.",
+			Metadata: map[string]string{"classifier_mode": "protocol"},
+		},
+		{
+			Path:     "module/CLAUDE.md",
+			Subtype:  "agent_instruction",
+			Title:    "Module Instructions",
+			Body:     "Master Worker API Alert DAO module implementation instructions.",
+			Metadata: map[string]string{"classifier_mode": "protocol"},
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "architecture design for master worker api alert and dao modules")
+	if !containsCandidatePath(got, "docs/docs/en/architecture/design.md") {
+		t.Fatalf("missing classified architecture design doc: %#v", CandidatePaths(got))
+	}
+	for _, unwanted := range []string{"CLAUDE.md", "module/CLAUDE.md"} {
+		if containsCandidatePath(got, unwanted) {
+			t.Fatalf("%s should not appear for non-protocol design query: %#v", unwanted, CandidatePaths(got))
+		}
+	}
+}
+
+func TestWeightedFilesRetrieverV0_PrefersRepositoryWideInstructionsWhenRequested(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:     "CLAUDE.md",
+			Subtype:  "agent_instruction",
+			Title:    "Repository Instructions",
+			Body:     "Project-wide Claude Code development guidance.",
+			Metadata: map[string]string{"classifier_mode": "protocol"},
+		},
+		{
+			Path:     "service/CLAUDE.md",
+			Subtype:  "agent_instruction",
+			Title:    "Service Instructions",
+			Body:     "Service-specific Claude Code development guidance.",
+			Metadata: map[string]string{"classifier_mode": "protocol"},
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "Claude Code repository instructions and development guidance")
+	if !containsCandidatePath(got, "CLAUDE.md") {
+		t.Fatalf("missing shallow repository instructions: %#v", CandidatePaths(got))
+	}
+	if containsCandidatePath(got, "service/CLAUDE.md") {
+		t.Fatalf("nested instructions should not backfill repository-wide instruction query: %#v", CandidatePaths(got))
+	}
+}
+
+func TestWeightedFilesRetrieverV0_KeepsRoadmapPathSignal(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "docs/roadmap.md",
+			Kind:  "plan",
+			Title: "Roadmap",
+			Body:  "Roadmap for realtime multimodal voice agents, tool invocation, and production readiness.",
+		},
+	}
+
+	query := "roadmap for realtime multimodal voice agents, tool invocation, and production readiness"
+	score := scoreCandidate(candidates[0], expandedTerms(query), query)
+	if score < 4.0 {
+		t.Fatalf("roadmap score = %.2f, want retrievable", score)
+	}
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, query)
+	if !containsCandidatePath(got, "docs/roadmap.md") {
+		t.Fatalf("missing roadmap path signal: %#v", CandidatePaths(got))
+	}
+}
+
 func containsCandidatePath(candidates []Candidate, path string) bool {
 	for _, c := range candidates {
 		if c.Path == path {

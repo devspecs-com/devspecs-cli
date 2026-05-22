@@ -109,7 +109,7 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string) []Candidate {
 				candidate:  c,
 				score:      score,
 				profile:    candidateMatchProfile(c, queryLower),
-				role:       fileRole(c.Path),
+				role:       candidateRole(c),
 				sourceFile: IsSourceContextCandidate(c),
 			})
 		}
@@ -234,8 +234,12 @@ func retrievalLimit(queryLower string, terms map[string]float64) int {
 	switch {
 	case hasExplicitSourceIntent(queryLower):
 		limit = 5
+	case hasNonIntentModeIntent(queryLower, "protocol") || hasNonIntentModeIntent(queryLower, "template"):
+		limit = 5
 	case containsAny(queryLower, "rfc", "request for comments", "proposal", "alternatives"):
 		limit = 5
+	case containsAny(queryLower, "architecture", "design document", "technical design", "system design"):
+		limit = 6
 	case strings.Contains(queryLower, "implementation context") || strings.Contains(queryLower, "agent context") || strings.Contains(queryLower, "implement"):
 		limit = 6
 	case strings.Contains(queryLower, "resume") || strings.Contains(queryLower, "continue"):
@@ -259,7 +263,7 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 	bodyLower := strings.ToLower(c.Body)
 	score := 0.0
 	sourceFile := IsSourceContextCandidate(c)
-	role := fileRole(c.Path)
+	role := candidateRole(c)
 	profile := candidateMatchProfile(c, queryLower)
 	explicitSourceIntent := hasExplicitSourceIntent(queryLower)
 	planIntent := hasPlanIntent(queryLower)
@@ -285,6 +289,18 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 
 	if IsPlanningIntentPath(c.Path) {
 		score += 1.0
+	}
+	if isLikelyUnrequestedLocalizedPath(pathLower, queryLower) {
+		score -= 5.0
+	}
+	if hasQueryWord(queryLower, "architecture") && strings.Contains(filepath.ToSlash(pathLower), "/architecture/") {
+		score += 2.0
+	}
+	if hasQueryWord(queryLower, "design") && strings.HasSuffix(filepath.ToSlash(pathLower), "/design.md") {
+		score += 6.0
+	}
+	if strings.Contains(filepath.Base(pathLower), "metadata") && !hasQueryWord(queryLower, "metadata") {
+		score -= 4.0
 	}
 	if profile.coreTerms > 0 {
 		switch {
@@ -318,6 +334,15 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 	case "rfc":
 		if containsAny(queryLower, "rfc", "request for comments", "proposal", "alternative", "alternatives", "motivation", "drawback", "drawbacks", "design") {
 			score += 4.0
+		} else if explicitSourceIntent {
+			score -= 2.0
+		}
+	case "design":
+		if containsAny(queryLower, "architecture", "design", "technical", "system", "overview", "proposal") {
+			score += 4.0
+			if profile.pathTitleCoreMatches > 0 {
+				score += 2.0
+			}
 		} else if explicitSourceIntent {
 			score -= 2.0
 		}
@@ -376,6 +401,40 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 	case "agent_note":
 		if containsAny(queryLower, "resume", "continue", "followup", "follow-up", "agent", "notes") && profile.coreMatches > 0 {
 			score += 2.0
+		}
+	case "agent_instruction", "protocol", "skill":
+		if hasNonIntentModeIntent(queryLower, "protocol") {
+			score += 3.0
+			if profile.pathTitleCoreMatches > 0 {
+				score += 4.0
+			}
+			if hasRepositoryInstructionIntent(queryLower) {
+				if pathDepth(pathLower) == 0 {
+					score += 8.0
+				} else if !queryMentionsInstructionPathSubject(queryLower, pathLower) {
+					score = -100.0
+				}
+			}
+		} else {
+			score = -100.0
+		}
+	case "template":
+		if hasNonIntentModeIntent(queryLower, "template") {
+			score += 5.0
+			if profile.pathTitleCoreMatches > 0 {
+				score += 3.0
+			}
+		} else {
+			score -= 10.0
+		}
+	case "model":
+		if hasNonIntentModeIntent(queryLower, "model") {
+			score += 4.0
+			if profile.pathTitleCoreMatches > 0 || profile.identifierMatches > 0 {
+				score += 3.0
+			}
+		} else {
+			score -= 10.0
 		}
 	}
 	if sourceFile {
@@ -540,12 +599,15 @@ func candidateMatchProfile(c Candidate, queryLower string) matchProfile {
 func coreQueryTerms(queryLower string) []string {
 	generic := map[string]bool{
 		"adr": true, "architecture": true, "background": true, "code": true,
-		"context": true, "decision": true, "design": true, "file": true,
-		"fix": true, "implement": true, "implementation": true, "note": true, "notes": true,
+		"context": true, "decision": true, "design": true, "document": true,
+		"documents": true, "documentation": true, "file": true,
+		"fix": true, "generate": true, "generating": true, "create": true,
+		"creating": true, "implement": true, "implementation": true,
+		"instruction": true, "instructions": true, "note": true, "notes": true,
 		"plan": true, "prd": true, "product": true, "proposal": true,
 		"requirements": true, "rfc": true, "source": true, "spec": true,
 		"task": true, "tasks": true, "same": true, "share": true, "shared": true,
-		"use": true, "using": true,
+		"use": true, "using": true, "user": true, "users": true,
 	}
 	var out []string
 	for _, term := range meaningfulTerms(queryLower) {
@@ -610,7 +672,11 @@ func hasExplicitSourceIntent(queryLower string) bool {
 }
 
 func hasProductBackgroundIntent(queryLower string) bool {
-	return containsAny(queryLower, "prd", "product", "background", "requirements", "user outcome", "user story", "customer access")
+	return hasQueryWord(queryLower, "prd") ||
+		hasQueryWord(queryLower, "product") ||
+		hasQueryWord(queryLower, "background") ||
+		hasQueryWord(queryLower, "requirements") ||
+		containsAny(queryLower, "user outcome", "user story", "customer access", "product requirement")
 }
 
 func hasUnrequestedProductSurface(pathLower, titleLower, queryLower string) bool {
@@ -727,6 +793,9 @@ func nonIntentCandidateMode(c Candidate) string {
 			}
 		}
 	}
+	if isAgentInstructionPath(c.Path) {
+		return "protocol"
+	}
 	switch strings.ToLower(strings.TrimSpace(c.Subtype)) {
 	case "agent_instruction", "skill", "maintainer_policy", "ownership_policy",
 		"governance_policy", "contribution_policy", "security_policy", "procedure",
@@ -739,6 +808,22 @@ func nonIntentCandidateMode(c Candidate) string {
 	default:
 		return ""
 	}
+}
+
+func hasRepositoryInstructionIntent(queryLower string) bool {
+	return containsAny(queryLower,
+		"repository instructions",
+		"repository guidance",
+		"repo instructions",
+		"repo guidance",
+		"project instructions",
+		"project guidance",
+		"project-wide",
+		"project wide",
+		"global instructions",
+		"development guidance",
+	) || (containsAny(queryLower, "claude", "codex", "agent instructions") &&
+		containsAny(queryLower, "repository", "repo", "project"))
 }
 
 func hasNonIntentModeIntent(queryLower, mode string) bool {
@@ -811,11 +896,180 @@ func fileRole(path string) string {
 		return "rfc"
 	case strings.Contains(path, "/plans/") || strings.HasPrefix(path, "plans/"):
 		return "plan"
-	case strings.HasPrefix(path, ".cursor/") || strings.HasPrefix(path, ".claude/"):
+	case isAgentInstructionPath(path):
+		return "agent_instruction"
+	case strings.HasPrefix(path, ".cursor/") || strings.HasPrefix(path, ".claude/") || strings.HasPrefix(path, ".codex/"):
 		return "agent_note"
 	default:
 		return ""
 	}
+}
+
+func candidateRole(c Candidate) string {
+	pathRole := fileRole(c.Path)
+	if strings.HasPrefix(pathRole, "openspec_") {
+		return pathRole
+	}
+	if role := classifierRole(c); role != "" {
+		return role
+	}
+	if role := kindSubtypeRole(c); role != "" {
+		return role
+	}
+	return pathRole
+}
+
+func classifierRole(c Candidate) string {
+	if c.Metadata == nil {
+		return ""
+	}
+	model := strings.ToLower(strings.TrimSpace(c.Metadata["classifier_model"]))
+	subtype := strings.ToLower(strings.TrimSpace(c.Metadata["classifier_subtype"]))
+	family := strings.ToLower(strings.TrimSpace(c.Metadata["classifier_family"]))
+	switch model {
+	case "adr", "prd", "rfc", "plan", "agent_note":
+		return model
+	case "openspec":
+		return ""
+	case "protocol":
+		switch subtype {
+		case "agent_instruction":
+			return "agent_instruction"
+		case "skill":
+			return "skill"
+		default:
+			return "protocol"
+		}
+	case "template":
+		return "template"
+	case "model":
+		return "model"
+	}
+	if strings.HasPrefix(family, "protocol.agent_instruction") {
+		return "agent_instruction"
+	}
+	if strings.HasPrefix(family, "protocol.skill") {
+		return "skill"
+	}
+	if strings.HasPrefix(family, "template.") {
+		return "template"
+	}
+	return ""
+}
+
+func kindSubtypeRole(c Candidate) string {
+	kind := strings.ToLower(strings.TrimSpace(c.Kind))
+	subtype := strings.ToLower(strings.TrimSpace(c.Subtype))
+	switch {
+	case kind == "decision" && subtype == "adr":
+		return "adr"
+	case kind == "requirements" && subtype == "prd":
+		return "prd"
+	case kind == "plan":
+		return "plan"
+	case kind == "design":
+		return "design"
+	case subtype == "agent_instruction":
+		return "agent_instruction"
+	case subtype == "skill":
+		return "skill"
+	case isProtocolSubtype(subtype):
+		return "protocol"
+	case isTemplateSubtype(subtype):
+		return "template"
+	case isModelSubtype(subtype):
+		return "model"
+	default:
+		return ""
+	}
+}
+
+func isProtocolSubtype(subtype string) bool {
+	switch subtype {
+	case "maintainer_policy", "ownership_policy", "governance_policy",
+		"contribution_policy", "security_policy", "procedure", "runbook", "standard":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTemplateSubtype(subtype string) bool {
+	switch subtype {
+	case "document_template", "prompt_template", "issue_template", "pull_request_template":
+		return true
+	default:
+		return false
+	}
+}
+
+func isModelSubtype(subtype string) bool {
+	switch subtype {
+	case "api_contract", "schema_model", "configuration", "workflow_definition":
+		return true
+	default:
+		return false
+	}
+}
+
+func isAgentInstructionPath(path string) bool {
+	path = strings.ToLower(filepath.ToSlash(path))
+	base := filepath.Base(path)
+	switch base {
+	case "claude.md", "agents.md", "agent.md", "gemini.md", "memento.md", ".cursorrules":
+		return true
+	}
+	return strings.HasSuffix(path, ".agent.md") ||
+		strings.HasSuffix(path, ".instructions.md") ||
+		strings.Contains(path, "/agents/") ||
+		strings.Contains(path, "/instructions/")
+}
+
+func pathDepth(path string) int {
+	path = strings.Trim(filepath.ToSlash(path), "/")
+	if path == "" {
+		return 0
+	}
+	return strings.Count(path, "/")
+}
+
+func queryMentionsInstructionPathSubject(queryLower, pathLower string) bool {
+	pathLower = strings.Trim(filepath.ToSlash(pathLower), "/")
+	if pathLower == "" {
+		return false
+	}
+	parts := strings.Split(pathLower, "/")
+	if len(parts) <= 1 {
+		return true
+	}
+	for _, part := range parts[:len(parts)-1] {
+		for _, token := range splitIdentifierLikeText(part) {
+			if len(token) >= 3 && strings.Contains(queryLower, token) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isLikelyUnrequestedLocalizedPath(pathLower, queryLower string) bool {
+	if containsAny(queryLower, "chinese", "japanese", "korean", "french", "german", "spanish", "portuguese", "russian") ||
+		hasQueryWord(queryLower, "zh") ||
+		hasQueryWord(queryLower, "ja") ||
+		hasQueryWord(queryLower, "ko") ||
+		hasQueryWord(queryLower, "fr") ||
+		hasQueryWord(queryLower, "de") ||
+		hasQueryWord(queryLower, "es") ||
+		hasQueryWord(queryLower, "pt") ||
+		hasQueryWord(queryLower, "ru") {
+		return false
+	}
+	for _, marker := range []string{"/zh/", "/zh-cn/", "/zh-tw/", "/ja/", "/ko/", "/fr/", "/de/", "/es/", "/pt/", "/ru/"} {
+		if strings.Contains(pathLower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func isOpenSpecPath(path string) bool {
@@ -860,6 +1114,7 @@ func hasIdentifierTerm(terms map[string]float64) bool {
 
 func expandedTerms(query string) map[string]float64 {
 	terms := map[string]float64{}
+	queryLower := strings.ToLower(query)
 	for _, term := range meaningfulTerms(query) {
 		terms[term] = 1.0
 	}
@@ -867,6 +1122,36 @@ func expandedTerms(query string) map[string]float64 {
 		if _, ok := terms[roleTerm]; ok {
 			terms[roleTerm] = 0.35
 		}
+	}
+	for _, genericTerm := range []string{
+		"acceptance", "criteria", "create", "creating", "document", "documents",
+		"documentation", "generate", "generating", "instruction", "instructions",
+		"requirement", "requirements", "user", "users",
+	} {
+		if _, ok := terms[genericTerm]; ok {
+			terms[genericTerm] = 0.25
+		}
+	}
+	add := func(term string, weight float64) {
+		if current, ok := terms[term]; !ok || current < weight {
+			terms[term] = weight
+		}
+	}
+	if containsAny(queryLower, "product requirements document") ||
+		(containsAny(queryLower, "product requirement", "product requirements") && containsAny(queryLower, "document", "doc", "spec", "specification")) {
+		add("prd", 2.5)
+		add("product", 0.8)
+		add("requirements", 0.7)
+	}
+	if containsAny(queryLower, "architecture decision record") {
+		add("adr", 2.5)
+		add("decision", 0.8)
+	}
+	if containsAny(queryLower, "implementation plan", "migration plan", "rollout plan") {
+		add("plan", 1.4)
+	}
+	if containsAny(queryLower, "design document", "technical design document", "architecture design document") {
+		add("design", 1.2)
 	}
 	for term := range terms {
 		if !strings.ContainsAny(term, "_.-") {
@@ -881,11 +1166,6 @@ func expandedTerms(query string) map[string]float64 {
 	has := func(term string) bool {
 		_, ok := terms[term]
 		return ok
-	}
-	add := func(term string, weight float64) {
-		if current, ok := terms[term]; !ok || current < weight {
-			terms[term] = weight
-		}
 	}
 	if has("entitlement") && has("sync") {
 		add("entitlement_sync", 2.0)
@@ -1002,7 +1282,7 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 			break
 		}
 	}
-	role := fileRole(c.Path)
+	role := candidateRole(c)
 	switch role {
 	case "adr":
 		if containsAny(queryLower, "adr", "decision", "boundary", "why", "architecture", "rationale", "superseded", "stale") {
@@ -1016,6 +1296,10 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 		if containsAny(queryLower, "rfc", "request for comments", "proposal", "alternative", "alternatives", "motivation", "drawback", "drawbacks", "design") {
 			reasons = append(reasons, "authority/query-intent signal: RFC")
 		}
+	case "design":
+		if containsAny(queryLower, "architecture", "design", "technical", "system", "overview") {
+			reasons = append(reasons, "design/query-intent signal")
+		}
 	case "openspec_bundle", "openspec_design", "openspec_tasks", "openspec_spec", "openspec_proposal":
 		if containsAny(queryLower, "design", "context", "implement", "implementation", "agent context", "resume", "continue", "spec") {
 			reasons = append(reasons, "OpenSpec change artifact candidate")
@@ -1023,6 +1307,14 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 	case "plan", "agent_note":
 		if containsAny(queryLower, "plan", "resume", "continue", "notes", "followup", "follow-up", "agent") {
 			reasons = append(reasons, "planning/query-intent signal")
+		}
+	case "agent_instruction", "protocol", "skill":
+		if hasNonIntentModeIntent(queryLower, "protocol") {
+			reasons = append(reasons, "protocol/query-intent signal")
+		}
+	case "template":
+		if hasNonIntentModeIntent(queryLower, "template") {
+			reasons = append(reasons, "template/query-intent signal")
 		}
 	}
 	if strings.Contains(bodyLower, "status: superseded") || strings.Contains(bodyLower, "status: stale") || strings.Contains(pathLower, "superseded") {
