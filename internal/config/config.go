@@ -13,11 +13,19 @@ import (
 type RepoConfig struct {
 	Version     int              `yaml:"version"`
 	Sources     []SourceConfig   `yaml:"sources"`
+	Artifacts   ArtifactConfig   `yaml:"artifacts,omitempty"`
 	Experiments ExperimentConfig `yaml:"experiments,omitempty"`
 }
 
-// ExperimentConfig holds opt-in scan/indexing experiments. These switches are
-// intentionally explicit so evals can compare baseline and experiment runs.
+// ArtifactConfig holds canonical opt-in artifact sources that can be expensive
+// or noisy on large repositories.
+type ArtifactConfig struct {
+	TestCases    *bool `yaml:"test_cases,omitempty"`
+	CodeComments *bool `yaml:"code_comments,omitempty"`
+}
+
+// ExperimentConfig holds legacy opt-in scan/indexing experiments. New callers
+// should prefer ArtifactConfig; these fields remain for config compatibility.
 type ExperimentConfig struct {
 	IntentCandidateDiscovery *bool `yaml:"intent_candidate_discovery,omitempty"`
 	TestCaseArtifacts        *bool `yaml:"test_case_artifacts,omitempty"`
@@ -81,7 +89,14 @@ func WithDefaultIntentCandidateDiscovery(cfg *RepoConfig, enabled bool) *RepoCon
 // WithTestCaseArtifacts returns a config copy with test-case artifact indexing set.
 func WithTestCaseArtifacts(cfg *RepoConfig, enabled bool) *RepoConfig {
 	out := CloneRepoConfig(cfg)
-	out.Experiments.TestCaseArtifacts = boolPtr(enabled)
+	out.Artifacts.TestCases = boolPtr(enabled)
+	return out
+}
+
+// WithCodeCommentArtifacts returns a config copy with code-comment artifact indexing set.
+func WithCodeCommentArtifacts(cfg *RepoConfig, enabled bool) *RepoConfig {
+	out := CloneRepoConfig(cfg)
+	out.Artifacts.CodeComments = boolPtr(enabled)
 	return out
 }
 
@@ -96,6 +111,12 @@ func CloneRepoConfig(cfg *RepoConfig) *RepoConfig {
 	}
 	if cfg.Experiments.TestCaseArtifacts != nil {
 		out.Experiments.TestCaseArtifacts = boolPtr(*cfg.Experiments.TestCaseArtifacts)
+	}
+	if cfg.Artifacts.TestCases != nil {
+		out.Artifacts.TestCases = boolPtr(*cfg.Artifacts.TestCases)
+	}
+	if cfg.Artifacts.CodeComments != nil {
+		out.Artifacts.CodeComments = boolPtr(*cfg.Artifacts.CodeComments)
 	}
 	out.Sources = make([]SourceConfig, len(cfg.Sources))
 	for i, src := range cfg.Sources {
@@ -122,6 +143,20 @@ func (e ExperimentConfig) TestCaseArtifactsEnabled(defaultValue bool) bool {
 		return defaultValue
 	}
 	return *e.TestCaseArtifacts
+}
+
+func (c RepoConfig) TestCaseArtifactsEnabled(defaultValue bool) bool {
+	if c.Artifacts.TestCases != nil {
+		return *c.Artifacts.TestCases
+	}
+	return c.Experiments.TestCaseArtifactsEnabled(defaultValue)
+}
+
+func (c RepoConfig) CodeCommentArtifactsEnabled(defaultValue bool) bool {
+	if c.Artifacts.CodeComments == nil {
+		return defaultValue
+	}
+	return *c.Artifacts.CodeComments
 }
 
 func boolPtr(value bool) *bool {

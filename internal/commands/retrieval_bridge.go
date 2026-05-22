@@ -88,14 +88,14 @@ func candidatePathFromSources(sources []store.SourceRow) string {
 			continue
 		}
 		path := filepath.ToSlash(src.Path)
-		if src.SourceType != "test_case" {
+		if src.SourceType != "test_case" && src.SourceType != "code_comment" {
 			return path
 		}
 		parts := strings.Split(src.SourceIdentity, "|")
 		if len(parts) >= 3 && strings.TrimSpace(parts[2]) != "" {
 			return path + "#L" + strings.TrimSpace(parts[2])
 		}
-		return path + "#test-case"
+		return path + "#" + src.SourceType
 	}
 	return ""
 }
@@ -123,6 +123,7 @@ func artifactExtractedCandidateMetadata(extractedJSON string) map[string]string 
 		"source_line_range",
 		"test_name",
 		"parent_title",
+		"comment_role",
 	}
 	out := map[string]string{}
 	for _, key := range keys {

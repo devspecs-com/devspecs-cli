@@ -140,8 +140,8 @@ type firstIndexWeakSpot struct {
 	Message string `json:"message"`
 }
 
-func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed bool, commandUnderTest string, experimentalTestCases bool, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull float64) (evalharness.Options, error) {
-	opts := evalharness.Options{JSON: asJSON, TestCaseArtifacts: experimentalTestCases}
+func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed bool, commandUnderTest string, includeTests, includeCodeComments bool, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull float64) (evalharness.Options, error) {
+	opts := evalharness.Options{JSON: asJSON, TestCaseArtifacts: includeTests, CodeCommentArtifacts: includeCodeComments}
 	if filesystem {
 		opts.CorpusSource = evalharness.CorpusSourceFilesystemFixture
 	} else if indexed {
@@ -157,7 +157,7 @@ func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed b
 		}
 		opts.CommandUnderTest = normalized
 		opts.CommandRunner = func(fixtureAbs string, cases []evalharness.CaseSpec) (map[string]evalharness.CommandCaseOutput, error) {
-			return runLiveCommandEval(normalized, fixtureAbs, cases, experimentalTestCases)
+			return runLiveCommandEval(normalized, fixtureAbs, cases, includeTests, includeCodeComments)
 		}
 	}
 	if cmd.Flags().Changed("min-recall") {

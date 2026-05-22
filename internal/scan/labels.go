@@ -15,6 +15,8 @@ func SourceTypeDisplayLabel(sourceType string) string {
 		return "Source context"
 	case "test_case":
 		return "Test cases"
+	case "code_comment":
+		return "Code comments"
 	default:
 		return sourceType
 	}

@@ -47,3 +47,15 @@ func TestResult_finalizeSourcesBreakdown_IncludesTestCasesWhenEnabled(t *testing
 		t.Fatalf("last row = %#v", last)
 	}
 }
+
+func TestResult_finalizeSourcesBreakdown_IncludesCodeCommentsWhenEnabled(t *testing.T) {
+	r := newResult([]string{"markdown", "openspec", "adr", "source_context", "code_comment"})
+	r.finalizeSourcesBreakdown()
+	if len(r.SourcesBreakdown) != 5 {
+		t.Fatalf("expected 5 breakdown rows, got %d", len(r.SourcesBreakdown))
+	}
+	last := r.SourcesBreakdown[len(r.SourcesBreakdown)-1]
+	if last.SourceType != "code_comment" || last.Label != "Code comments" {
+		t.Fatalf("last row = %#v", last)
+	}
+}

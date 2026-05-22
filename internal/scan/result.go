@@ -64,6 +64,9 @@ func (r *Result) finalizeSourcesBreakdown() {
 	if _, enabled := r.Found["test_case"]; enabled || r.sourcesAgg["test_case"] != nil {
 		order = append(order, "test_case")
 	}
+	if _, enabled := r.Found["code_comment"]; enabled || r.sourcesAgg["code_comment"] != nil {
+		order = append(order, "code_comment")
+	}
 	out := make([]SourceBreakdownRow, 0, len(order))
 	for _, st := range order {
 		row := SourceBreakdownRow{

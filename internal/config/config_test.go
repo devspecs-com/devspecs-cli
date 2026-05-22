@@ -77,6 +77,29 @@ func TestLoadRepoConfig_Valid(t *testing.T) {
 	}
 }
 
+func TestArtifactConfig_RoundTripAndLegacyFallback(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := WithCodeCommentArtifacts(WithTestCaseArtifacts(DefaultRepoConfig(), true), true)
+	if err := WriteRepoConfig(tmp, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadRepoConfig(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.TestCaseArtifactsEnabled(false) {
+		t.Fatal("test case artifacts should be enabled")
+	}
+	if !loaded.CodeCommentArtifactsEnabled(false) {
+		t.Fatal("code comment artifacts should be enabled")
+	}
+
+	legacy := &RepoConfig{Experiments: ExperimentConfig{TestCaseArtifacts: boolPtr(true)}}
+	if !legacy.TestCaseArtifactsEnabled(false) {
+		t.Fatal("legacy experiment key should still enable test cases")
+	}
+}
+
 func TestLoadRepoConfig_Invalid(t *testing.T) {
 	tmp := t.TempDir()
 	dir := filepath.Join(tmp, ".devspecs")

@@ -8,6 +8,7 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/adr"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/codecomment"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/sourcecontext"
@@ -89,8 +90,11 @@ func runScanQuiet(db *store.DB, repoRoot string) *scan.Result {
 	}
 	ids := idgen.NewFactory()
 	adpts := []adapters.Adapter{&openspec.Adapter{}, &adr.Adapter{}, &markdown.Adapter{}, &sourcecontext.Adapter{}}
-	if cfg != nil && cfg.Experiments.TestCaseArtifactsEnabled(false) {
+	if cfg != nil && cfg.TestCaseArtifactsEnabled(false) {
 		adpts = append(adpts, &testcase.Adapter{})
+	}
+	if cfg != nil && cfg.CodeCommentArtifactsEnabled(false) {
+		adpts = append(adpts, &codecomment.Adapter{})
 	}
 
 	scanner := scan.New(db, ids, adpts)

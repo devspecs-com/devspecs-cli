@@ -97,7 +97,7 @@ func IsPlanningIntentPath(path string) bool {
 }
 
 func IsSourceContextCandidate(c Candidate) bool {
-	if isTestCaseCandidate(c) {
+	if isTestCaseCandidate(c) || isCodeCommentCandidate(c) {
 		return false
 	}
 	return !strings.EqualFold(filepath.Ext(c.Path), ".md") && !IsPlanningIntentPath(c.Path)
@@ -132,6 +132,7 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string) []Candidate {
 	limit := retrievalLimit(queryLower, terms)
 	scoredCandidates = collapseVariantCandidates(scoredCandidates, queryLower)
 	scoredCandidates = selectScoredCandidates(scoredCandidates, queryLower, limit)
+	scoredCandidates = enforceSupportingArtifactBudgets(scoredCandidates, queryLower, terms)
 	out := make([]Candidate, 0, len(scoredCandidates))
 	for _, sf := range scoredCandidates {
 		out = append(out, sf.candidate)
@@ -203,6 +204,9 @@ func AuthorityCues(c Candidate) []string {
 	}
 	if isTestCaseCandidate(c) {
 		cues = append(cues, "test behavior")
+	}
+	if isCodeCommentCandidate(c) {
+		cues = append(cues, "code rationale")
 	}
 	if count := metadataLower(c, "variant_collapsed_count"); count != "" && count != "0" {
 		cues = append(cues, "variants collapsed")
@@ -295,6 +299,10 @@ func authorityPrior(c Candidate, role, queryLower string) authorityPriorResult {
 	case "test_case":
 		if hasTestBehaviorIntent(queryLower) {
 			add(0.6, "authority prior: behavioral test signal")
+		}
+	case "code_comment":
+		if hasCodeCommentIntent(queryLower) {
+			add(0.45, "authority prior: implementation rationale signal")
 		}
 	}
 
@@ -1200,6 +1208,42 @@ func selectScoredCandidates(candidates []scoredCandidate, queryLower string, lim
 	return selected
 }
 
+func enforceSupportingArtifactBudgets(candidates []scoredCandidate, queryLower string, terms map[string]float64) []scoredCandidate {
+	testBudget := 0
+	switch {
+	case hasTestBehaviorIntent(queryLower):
+		testBudget = 4
+	case hasExplicitSourceIntent(queryLower) || hasIdentifierTerm(terms):
+		testBudget = 2
+	}
+	commentBudget := 0
+	switch {
+	case hasCodeCommentIntent(queryLower):
+		commentBudget = 3
+	case hasExplicitSourceIntent(queryLower) || hasIdentifierTerm(terms):
+		commentBudget = 2
+	}
+	testCount := 0
+	commentCount := 0
+	out := make([]scoredCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		switch candidate.role {
+		case "test_case":
+			if testCount >= testBudget {
+				continue
+			}
+			testCount++
+		case "code_comment":
+			if commentCount >= commentBudget {
+				continue
+			}
+			commentCount++
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
 func hasAnchoredCandidate(candidates []scoredCandidate) bool {
 	for _, candidate := range candidates {
 		if isAnchoredCandidate(candidate) {
@@ -1267,7 +1311,9 @@ func retrievalLimit(queryLower string, terms map[string]float64) int {
 	case hasExplicitSourceIntent(queryLower):
 		limit = 5
 	case hasTestBehaviorIntent(queryLower):
-		limit = 7
+		limit = 5
+	case hasCodeCommentIntent(queryLower):
+		limit = 5
 	case hasNonIntentModeIntent(queryLower, "protocol") || hasNonIntentModeIntent(queryLower, "template"):
 		limit = 5
 	case containsAny(queryLower, "rfc", "request for comments", "proposal", "alternatives"):
@@ -1480,7 +1526,19 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 				score += float64(profile.identifierMatches) * 1.5
 			}
 		} else {
-			score -= 6.0
+			score = -100.0
+		}
+	case "code_comment":
+		if hasCodeCommentIntent(queryLower) || explicitSourceIntent || profile.identifierMatches > 0 {
+			score += 2.0
+			if profile.pathTitleCoreMatches > 0 {
+				score += 2.0
+			}
+			if profile.identifierMatches > 0 {
+				score += float64(profile.identifierMatches) * 1.2
+			}
+		} else {
+			score = -100.0
 		}
 	}
 	if sourceFile {
@@ -1685,6 +1743,8 @@ func bodyHitCap(role string, sourceFile bool, term string) int {
 	switch role {
 	case "test_case":
 		return 4
+	case "code_comment":
+		return 3
 	case "plan", "agent_note", "prd":
 		return 3
 	case "adr", "rfc", "openspec_bundle", "openspec_design", "openspec_tasks", "openspec_spec", "openspec_proposal":
@@ -1727,6 +1787,17 @@ func hasTestBehaviorIntent(queryLower string) bool {
 		"validation", "retry", "retries", "idempotent", "idempotency",
 		"auth", "permission", "permissions", "billing", "analytics",
 		"bug", "error", "exception", "failure", "protected",
+	)
+}
+
+func hasCodeCommentIntent(queryLower string) bool {
+	return containsAny(queryLower,
+		"code comment", "code comments", "comment says", "comments say",
+		"implementation rationale", "implementation reason", "why does the code",
+		"why is this implemented", "why is it implemented", "source rationale",
+		"invariant", "invariants", "assumption", "assumptions", "workaround",
+		"workarounds", "constraint", "constraints", "compatibility", "legacy",
+		"temporary", "todo", "fixme", "hack",
 	)
 }
 
@@ -1969,7 +2040,7 @@ func candidateRole(c Candidate) string {
 	if strings.HasPrefix(pathRole, "openspec_") {
 		return pathRole
 	}
-	if role := kindSubtypeRole(c); role == "test_case" {
+	if role := kindSubtypeRole(c); role == "test_case" || role == "code_comment" {
 		return role
 	}
 	if role := classifierRole(c); role != "" {
@@ -2025,6 +2096,8 @@ func kindSubtypeRole(c Candidate) string {
 	switch {
 	case kind == "source_context" && subtype == "test_case":
 		return "test_case"
+	case kind == "source_context" && subtype == "code_comment":
+		return "code_comment"
 	case kind == "decision" && subtype == "adr":
 		return "adr"
 	case kind == "requirements" && subtype == "prd":
@@ -2056,6 +2129,16 @@ func isTestCaseCandidate(c Candidate) bool {
 		return false
 	}
 	return strings.EqualFold(c.Metadata["source_type"], "test_case")
+}
+
+func isCodeCommentCandidate(c Candidate) bool {
+	if strings.EqualFold(c.Subtype, "code_comment") {
+		return true
+	}
+	if c.Metadata == nil {
+		return false
+	}
+	return strings.EqualFold(c.Metadata["source_type"], "code_comment")
 }
 
 func isProtocolSubtype(subtype string) bool {
@@ -2396,6 +2479,10 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 	case "test_case":
 		if hasTestBehaviorIntent(queryLower) {
 			reasons = append(reasons, "test-case behavior signal")
+		}
+	case "code_comment":
+		if hasCodeCommentIntent(queryLower) {
+			reasons = append(reasons, "code-comment rationale signal")
 		}
 	}
 	if prior := authorityPrior(c, role, queryLower); prior.score != 0 {

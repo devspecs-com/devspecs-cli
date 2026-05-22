@@ -12,6 +12,7 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/adr"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/codecomment"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/sourcecontext"
@@ -36,14 +37,15 @@ func NewScanCmd() *cobra.Command {
 		ifChanged                   bool
 		rebuild                     bool
 		experimentalIntentDiscovery bool
-		experimentalTestCases       bool
+		includeTests                bool
+		includeCodeComments         bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "scan",
 		Short: "Scan repository for specs, plans, and ADRs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalTestCases)
+			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, includeTests, includeCodeComments)
 		},
 	}
 
@@ -54,11 +56,14 @@ func NewScanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&ifChanged, "if-changed", false, "Only scan if source paths were touched in the last commit")
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "Remove the global index database and create a fresh index (requires re-scan)")
 	cmd.Flags().BoolVar(&experimentalIntentDiscovery, "experimental-intent-discovery", false, "Deprecated: broad scored markdown intent candidate discovery is enabled by default")
-	cmd.Flags().BoolVar(&experimentalTestCases, "experimental-test-cases", false, "Experimental: index executable test cases as behavioral intent artifacts")
+	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Index executable test cases as behavioral intent artifacts")
+	cmd.Flags().BoolVar(&includeTests, "experimental-test-cases", false, "Deprecated alias for --include-tests")
+	cmd.Flags().BoolVar(&includeCodeComments, "include-code-comments", false, "Index high-signal code comments as implementation intent artifacts")
+	_ = cmd.Flags().MarkDeprecated("experimental-test-cases", "use --include-tests")
 	return cmd
 }
 
-func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalTestCases bool) error {
+func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, includeTests, includeCodeComments bool) error {
 	repoRoot, err := resolveRepoRoot(path)
 	if err != nil {
 		return err
@@ -72,8 +77,11 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	if experimentalIntentDiscovery {
 		cfg = config.WithIntentCandidateDiscovery(cfg, true)
 	}
-	if experimentalTestCases {
+	if includeTests {
 		cfg = config.WithTestCaseArtifacts(cfg, true)
+	}
+	if includeCodeComments {
+		cfg = config.WithCodeCommentArtifacts(cfg, true)
 	}
 
 	if ifChanged && !sourcePathsChanged(repoRoot, cfg) {
@@ -102,8 +110,11 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 
 	ids := idgen.NewFactory()
 	adpts := []adapters.Adapter{&openspec.Adapter{}, &adr.Adapter{}, &markdown.Adapter{}, &sourcecontext.Adapter{}}
-	if cfg.Experiments.TestCaseArtifactsEnabled(false) {
+	if cfg.TestCaseArtifactsEnabled(false) {
 		adpts = append(adpts, &testcase.Adapter{})
+	}
+	if cfg.CodeCommentArtifactsEnabled(false) {
+		adpts = append(adpts, &codecomment.Adapter{})
 	}
 
 	scanner := scan.New(db, ids, adpts)
@@ -241,7 +252,10 @@ func sourcePathsChanged(repoRoot string, cfg *config.RepoConfig) bool {
 
 	for _, f := range changedFiles {
 		f = filepath.ToSlash(f)
-		if cfg.Experiments.TestCaseArtifactsEnabled(false) && looksLikeTestArtifactPath(f) {
+		if cfg.TestCaseArtifactsEnabled(false) && looksLikeTestArtifactPath(f) {
+			return true
+		}
+		if cfg.CodeCommentArtifactsEnabled(false) && looksLikeCodeCommentArtifactPath(f) {
 			return true
 		}
 		// Root-level spec/plan files always count
@@ -257,6 +271,16 @@ func sourcePathsChanged(repoRoot string, cfg *config.RepoConfig) bool {
 		}
 	}
 	return false
+}
+
+func looksLikeCodeCommentArtifactPath(rel string) bool {
+	rel = strings.ToLower(filepath.ToSlash(rel))
+	switch filepath.Ext(rel) {
+	case ".go", ".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".rb", ".php", ".java", ".kt", ".kts", ".rs":
+		return true
+	default:
+		return false
+	}
 }
 
 func looksLikeTestArtifactPath(rel string) bool {

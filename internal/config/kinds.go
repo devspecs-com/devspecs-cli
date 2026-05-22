@@ -45,6 +45,7 @@ const (
 	SubtypeIssueTemplate          = "issue_template"
 	SubtypePullRequestTemplate    = "pull_request_template"
 	SubtypeTestCase               = "test_case"
+	SubtypeCodeComment            = "code_comment"
 )
 
 var validKinds = map[string]struct{}{
@@ -94,7 +95,8 @@ var allowedSubtypes = map[string]map[string]struct{}{
 		SubtypePullRequestTemplate: {},
 	},
 	KindSourceContext: {
-		SubtypeTestCase: {},
+		SubtypeTestCase:    {},
+		SubtypeCodeComment: {},
 	},
 }
 

@@ -45,9 +45,10 @@ Do not infer implementation facts, drift, or correctness from tests in v0. The m
 
 The feature must be independently measurable:
 
-- repo config experiment: `test_case_artifacts`
-- scan flag: `--experimental-test-cases`
-- eval flag: `--experimental-test-cases`
+- canonical repo config: `artifacts.test_cases`
+- legacy repo config alias: `experiments.test_case_artifacts`
+- scan flag: `--include-tests`
+- eval flag: `--include-tests`
 
 Default behavior remains unchanged unless the experiment is enabled.
 
@@ -62,10 +63,10 @@ Test artifacts are supporting context.
 
 ## Auditable Success Criteria
 
-- `ds scan --experimental-test-cases` indexes individual test cases with `kind=source_context`, `subtype=test_case`.
+- `ds scan --include-tests` indexes individual test cases with `kind=source_context`, `subtype=test_case`, `mode=intent`.
 - `ds find` can retrieve test cases by test title, symbol, or assertion vocabulary.
 - Retrieved test-case context includes source path and line range.
-- Eval can run with and without `--experimental-test-cases`.
+- Eval can run with and without `--include-tests`.
 - Real-repo eval reports precision, recall, must-have recall, context sufficiency, token count, and test-case artifact count.
 - Existing eval without the flag is unchanged.
 - Unit tests cover Go, Python, JS/TS, Ruby, and PHP extraction heuristics.

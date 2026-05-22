@@ -190,6 +190,73 @@ func TestWeightedFilesRetrieverV0_UsesTestCasesForBehaviorQueries(t *testing.T) 
 	}
 }
 
+func TestWeightedFilesRetrieverV0_DoesNotUseTestCasesForOrdinaryRoadmapQueries(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "docs/roadmap.md",
+			Title: "Roadmap",
+			Body:  "Roadmap for realtime multimodal voice agents and production readiness.",
+		},
+		{
+			Path:    "tests/voice_test.py#L20",
+			Kind:    "source_context",
+			Subtype: "test_case",
+			Title:   "test_realtime_voice_agents",
+			Body:    "Test: test_realtime_voice_agents\nSource: tests/voice_test.py\n",
+			Metadata: map[string]string{
+				"source_type": "test_case",
+			},
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "roadmap for realtime multimodal voice agents")
+	if !containsCandidatePath(got, "docs/roadmap.md") {
+		t.Fatalf("missing roadmap: %#v", CandidatePaths(got))
+	}
+	if containsCandidatePath(got, "tests/voice_test.py#L20") {
+		t.Fatalf("test case should not appear in ordinary roadmap retrieval: %#v", CandidatePaths(got))
+	}
+}
+
+func TestWeightedFilesRetrieverV0_UsesCodeCommentsForRationaleQueries(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:    "services/billing/webhook.go#L18",
+			Kind:    "source_context",
+			Subtype: "code_comment",
+			Title:   "Invariant: stripe_event_id must always be checked before applying credits.",
+			Body:    "Comment: Invariant: stripe_event_id must always be checked before applying credits.\nSource: services/billing/webhook.go\nRole: invariant\n",
+			Metadata: map[string]string{
+				"source_type":  "code_comment",
+				"comment_role": "invariant",
+			},
+		},
+		{
+			Path:  "docs/plans/billing-hardening.md",
+			Title: "Billing Hardening Plan",
+			Body:  "Plan for webhook processing and credit application.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "implementation rationale for stripe_event_id invariant in code")
+	if !containsCandidatePath(got, "services/billing/webhook.go#L18") {
+		t.Fatalf("missing code-comment candidate: %#v", CandidatePaths(got))
+	}
+	reasons := ExplainCandidates(got, "implementation rationale for stripe_event_id invariant in code")
+	var found bool
+	for _, reason := range reasons {
+		if reason.Path == "services/billing/webhook.go#L18" {
+			found = true
+			if !reasonContains(reason.Reasons, "code-comment rationale signal") {
+				t.Fatalf("missing code-comment reason: %#v", reason.Reasons)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("missing reasons for code-comment candidate: %#v", reasons)
+	}
+}
+
 func TestWeightedFilesRetrieverV0_DoesNotBackfillWeakBodyOnlyMarkdown(t *testing.T) {
 	candidates := []Candidate{
 		{

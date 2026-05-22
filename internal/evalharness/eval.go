@@ -13,6 +13,7 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/adr"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/codecomment"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/sourcecontext"
@@ -81,18 +82,19 @@ func (ApproxTokenCounter) Profile() TokenizerProfile {
 }
 
 type Options struct {
-	JSON              bool
-	MinRecall         *float64
-	MinMeanRecall     *float64
-	MinMustRecall     *float64
-	MinSufficiency    *float64
-	MinReductionFull  *float64
-	CorpusSource      string
-	CommandUnderTest  string
-	CommandRunner     CommandRunner
-	TokenCounter      TokenCounter
-	Retriever         retrieval.Retriever
-	TestCaseArtifacts bool
+	JSON                 bool
+	MinRecall            *float64
+	MinMeanRecall        *float64
+	MinMustRecall        *float64
+	MinSufficiency       *float64
+	MinReductionFull     *float64
+	CorpusSource         string
+	CommandUnderTest     string
+	CommandRunner        CommandRunner
+	TokenCounter         TokenCounter
+	Retriever            retrieval.Retriever
+	TestCaseArtifacts    bool
+	CodeCommentArtifacts bool
 }
 
 type CommandRunner func(fixtureAbs string, cases []CaseSpec) (map[string]CommandCaseOutput, error)
@@ -227,6 +229,7 @@ type CaseResult struct {
 	PackedSectionCount            int               `json:"packed_section_count,omitempty"`
 	FullFileArtifactCount         int               `json:"full_file_artifact_count,omitempty"`
 	TestCaseArtifactCount         int               `json:"test_case_artifact_count,omitempty"`
+	CodeCommentArtifactCount      int               `json:"code_comment_artifact_count,omitempty"`
 	RelevantIncluded              []string          `json:"relevant_included"`
 	IrrelevantIncluded            []string          `json:"irrelevant_included"`
 	ArtifactPrecision             float64           `json:"artifact_precision"`
@@ -608,14 +611,20 @@ func collectIndexedFiles(root string, opts Options) ([]File, error) {
 	if opts.TestCaseArtifacts {
 		cfg = config.WithTestCaseArtifacts(cfg, true)
 	}
+	if opts.CodeCommentArtifacts {
+		cfg = config.WithCodeCommentArtifacts(cfg, true)
+	}
 	adpts := []adapters.Adapter{
 		&openspec.Adapter{},
 		&adr.Adapter{},
 		&markdown.Adapter{},
 		&sourcecontext.Adapter{},
 	}
-	if cfg.Experiments.TestCaseArtifactsEnabled(false) {
+	if cfg.TestCaseArtifactsEnabled(false) {
 		adpts = append(adpts, &testcase.Adapter{})
+	}
+	if cfg.CodeCommentArtifactsEnabled(false) {
+		adpts = append(adpts, &codecomment.Adapter{})
 	}
 	scanner := scan.New(db, idgen.NewFactory(), adpts)
 	if _, err := scanner.Run(context.Background(), root, cfg); err != nil {
@@ -665,7 +674,10 @@ func indexedArtifactRel(art store.ArtifactRow, sources []store.SourceRow) string
 	for _, src := range sources {
 		if strings.TrimSpace(src.Path) != "" {
 			if src.SourceType == "test_case" {
-				return indexedTestCaseRel(src)
+				return indexedLineScopedRel(src, "test_case")
+			}
+			if src.SourceType == "code_comment" {
+				return indexedLineScopedRel(src, "code_comment")
 			}
 			return filepath.ToSlash(src.Path)
 		}
@@ -676,7 +688,7 @@ func indexedArtifactRel(art store.ArtifactRow, sources []store.SourceRow) string
 	return art.ID
 }
 
-func indexedTestCaseRel(src store.SourceRow) string {
+func indexedLineScopedRel(src store.SourceRow, fallback string) string {
 	path := filepath.ToSlash(strings.TrimSpace(src.Path))
 	parts := strings.Split(src.SourceIdentity, "|")
 	if len(parts) >= 3 && strings.TrimSpace(parts[2]) != "" {
@@ -689,9 +701,9 @@ func indexedTestCaseRel(src store.SourceRow) string {
 		path = filepath.ToSlash(strings.TrimSpace(src.SourceIdentity))
 	}
 	if path == "" {
-		return "test_case"
+		return fallback
 	}
-	return path + "#test-case"
+	return path + "#" + fallback
 }
 
 func renderIndexedArtifactContent(art store.ArtifactRow, sources []store.SourceRow, todos []store.TodoRow, body string) string {
@@ -746,6 +758,7 @@ func indexedArtifactMetadata(sources []store.SourceRow, links []store.LinkRow, e
 		Framework       string   `json:"framework"`
 		TestName        string   `json:"test_name"`
 		ParentTitle     string   `json:"parent_title"`
+		CommentRole     string   `json:"comment_role"`
 		SourceLineRange string   `json:"source_line_range"`
 		Symbols         []string `json:"symbols"`
 		AssertionTerms  []string `json:"assertion_terms"`
@@ -772,6 +785,9 @@ func indexedArtifactMetadata(sources []store.SourceRow, links []store.LinkRow, e
 			}
 			if payload.ParentTitle != "" {
 				metadata["parent_title"] = payload.ParentTitle
+			}
+			if payload.CommentRole != "" {
+				metadata["comment_role"] = payload.CommentRole
 			}
 			if payload.SourceLineRange != "" {
 				metadata["source_line_range"] = payload.SourceLineRange
@@ -1075,6 +1091,9 @@ func applyPackingMetrics(cr *CaseResult, files []File) {
 		if isTestCaseFile(f) {
 			cr.TestCaseArtifactCount++
 		}
+		if isCodeCommentFile(f) {
+			cr.CodeCommentArtifactCount++
+		}
 		if f.Metadata != nil && f.Metadata["section_pack_mode"] == "sections" {
 			cr.PackedSectionArtifacts = append(cr.PackedSectionArtifacts, f.Path)
 			if count, err := strconv.Atoi(strings.TrimSpace(f.Metadata["section_pack_count"])); err == nil {
@@ -1096,6 +1115,16 @@ func isTestCaseFile(f File) bool {
 		return false
 	}
 	return f.Metadata["source_type"] == "test_case"
+}
+
+func isCodeCommentFile(f File) bool {
+	if f.Subtype == config.SubtypeCodeComment {
+		return true
+	}
+	if f.Metadata == nil {
+		return false
+	}
+	return f.Metadata["source_type"] == "code_comment"
 }
 
 func applyArtifactMetrics(cr *CaseResult, spec CaseSpec) {

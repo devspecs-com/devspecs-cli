@@ -96,7 +96,7 @@ func TestScan_QuietWithJSON_WritesJSONSuppressesHuman(t *testing.T) {
 	}
 }
 
-func TestScanExperimentalTestCasesIndexesTestUnits(t *testing.T) {
+func TestScanIncludeTestsIndexesTestUnits(t *testing.T) {
 	repoDir := setupE2ERepo(t)
 	testDir := filepath.Join(repoDir, "tests")
 	if err := os.MkdirAll(testDir, 0o755); err != nil {
@@ -108,7 +108,7 @@ func TestScanExperimentalTestCasesIndexesTestUnits(t *testing.T) {
 	NewInitCmd().Execute()
 
 	scanCmd := NewScanCmd()
-	scanCmd.SetArgs([]string{"--json", "--experimental-test-cases"})
+	scanCmd.SetArgs([]string{"--json", "--include-tests"})
 	buf := &bytes.Buffer{}
 	scanCmd.SetOut(buf)
 	if err := scanCmd.Execute(); err != nil {
@@ -139,6 +139,52 @@ func TestScanExperimentalTestCasesIndexesTestUnits(t *testing.T) {
 	}
 	if !sawBreakdown {
 		t.Fatalf("missing test_case source breakdown: %#v", out.SourcesBreakdown)
+	}
+}
+
+func TestScanIncludeCodeCommentsIndexesIntentComments(t *testing.T) {
+	repoDir := setupE2ERepo(t)
+	srcDir := filepath.Join(repoDir, "services", "billing")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "webhook.go"), []byte("package billing\n\n// Invariant: stripe_event_id must always be checked before applying credits.\nfunc applyCredit() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	NewInitCmd().Execute()
+
+	scanCmd := NewScanCmd()
+	scanCmd.SetArgs([]string{"--json", "--include-code-comments"})
+	buf := &bytes.Buffer{}
+	scanCmd.SetOut(buf)
+	if err := scanCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out struct {
+		Found            map[string]int `json:"Found"`
+		SourcesBreakdown []struct {
+			SourceType string `json:"source_type"`
+			Count      int    `json:"count"`
+		} `json:"sources_breakdown"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Found["code_comment"] != 1 {
+		t.Fatalf("code_comment found = %d, want 1: %s", out.Found["code_comment"], buf.String())
+	}
+	var sawBreakdown bool
+	for _, row := range out.SourcesBreakdown {
+		if row.SourceType == "code_comment" {
+			sawBreakdown = true
+			if row.Count != 1 {
+				t.Fatalf("code_comment breakdown count = %d, want 1", row.Count)
+			}
+		}
+	}
+	if !sawBreakdown {
+		t.Fatalf("missing code_comment source breakdown: %#v", out.SourcesBreakdown)
 	}
 }
 

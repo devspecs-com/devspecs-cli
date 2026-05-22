@@ -29,7 +29,7 @@ type Adapter struct{}
 func (a *Adapter) Name() string { return sourceType }
 
 func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.RepoConfig) ([]adapters.Candidate, error) {
-	if cfg != nil && !cfg.Experiments.TestCaseArtifactsEnabled(false) {
+	if cfg != nil && !cfg.TestCaseArtifactsEnabled(false) {
 		return nil, nil
 	}
 	var candidates []adapters.Candidate
