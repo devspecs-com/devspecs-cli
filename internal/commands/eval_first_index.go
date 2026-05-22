@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,6 +27,17 @@ type firstIndexReport struct {
 	Summary              firstIndexNorthStarSummary   `json:"summary"`
 	Retrieval            firstIndexRetrievalReport    `json:"retrieval"`
 	Classifiers          []firstIndexClassifierReport `json:"classifiers,omitempty"`
+	WeakSpots            []firstIndexWeakSpot         `json:"weak_spots,omitempty"`
+	ThresholdFailures    []string                     `json:"threshold_failures,omitempty"`
+	FailedThresholdCount int                          `json:"failed_threshold_count,omitempty"`
+}
+
+type firstIndexBatchReport struct {
+	GeneratedAt          string                       `json:"generated_at"`
+	FixtureRoot          string                       `json:"fixture_root"`
+	Summary              firstIndexNorthStarSummary   `json:"summary"`
+	Retrievals           []firstIndexRetrievalReport  `json:"retrievals"`
+	ClassifierFixtures   []firstIndexClassifierReport `json:"classifiers,omitempty"`
 	WeakSpots            []firstIndexWeakSpot         `json:"weak_spots,omitempty"`
 	ThresholdFailures    []string                     `json:"threshold_failures,omitempty"`
 	FailedThresholdCount int                          `json:"failed_threshold_count,omitempty"`
@@ -198,6 +210,115 @@ func runFirstIndexReport(fixture string, opts evalharness.Options, reportOpts fi
 	return buildFirstIndexReport(retrievalResult, classifierResults, summaryFailures, reportOpts), nil
 }
 
+func runFirstIndexBatchReport(root string, opts evalharness.Options, reportOpts firstIndexReportOptions) (*firstIndexBatchReport, error) {
+	if reportOpts.GeneratedAt.IsZero() {
+		reportOpts.GeneratedAt = nowUTC()
+	}
+	fixtures, err := discoverFirstIndexBatchFixtures(root)
+	if err != nil {
+		return nil, err
+	}
+	if len(fixtures) == 0 {
+		return nil, fmt.Errorf("no child fixtures containing cases.yaml found under %s", root)
+	}
+
+	retrievalResults := make([]*evalharness.Result, 0, len(fixtures))
+	retrievalReports := make([]firstIndexRetrievalReport, 0, len(fixtures))
+	var summaryFailures []string
+	for _, fixture := range fixtures {
+		result, err := evalharness.Run(fixture, opts)
+		if err != nil {
+			return nil, fmt.Errorf("fixture %s: %w", fixture, err)
+		}
+		failures := evalharness.CheckSummaryThresholds(result, opts)
+		for _, failure := range failures {
+			summaryFailures = append(summaryFailures, fmt.Sprintf("%s: %s", fixture, failure))
+		}
+		if !reportOpts.NoSave {
+			resultsFile, err := saveEvalResult(result, reportOpts.ResultsDir, reportOpts.GeneratedAt)
+			if err != nil {
+				return nil, err
+			}
+			result.ResultsFile = filepath.ToSlash(resultsFile)
+		}
+		retrievalResults = append(retrievalResults, result)
+		retrievalReports = append(retrievalReports, buildFirstIndexRetrievalReport(result, reportOpts.InputUSDPer1M))
+	}
+
+	classifierResults := make([]*classify.EvalResult, 0, len(reportOpts.ClassifierFixtures))
+	for _, classifierFixture := range firstIndexClassifierFixtures("", reportOpts.ClassifierFixtures) {
+		classifierResult, err := classify.RunEval(classifierFixture, classify.EvalOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("classifier fixture %s: %w", classifierFixture, err)
+		}
+		if !reportOpts.NoSave {
+			resultsFile, err := saveClassifierEvalResult(classifierResult, reportOpts.ResultsDir, reportOpts.GeneratedAt)
+			if err != nil {
+				return nil, err
+			}
+			classifierResult.ResultsFile = filepath.ToSlash(resultsFile)
+		}
+		classifierResults = append(classifierResults, classifierResult)
+	}
+
+	return buildFirstIndexBatchReport(root, retrievalResults, retrievalReports, classifierResults, summaryFailures, reportOpts), nil
+}
+
+func discoverFirstIndexBatchFixtures(root string) ([]string, error) {
+	root = filepath.Clean(root)
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, fmt.Errorf("stat fixture root: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("fixture root must be a directory: %s", root)
+	}
+	var roots []string
+	if firstIndexHasCases(root) {
+		roots = append(roots, root)
+	}
+	for _, childRoot := range []string{root, filepath.Join(root, "repos")} {
+		info, err := os.Stat(childRoot)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		entries, err := os.ReadDir(childRoot)
+		if err != nil {
+			return nil, fmt.Errorf("read fixture root %s: %w", childRoot, err)
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			candidate := filepath.Join(childRoot, entry.Name())
+			if firstIndexHasCases(candidate) {
+				roots = append(roots, candidate)
+			}
+		}
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(roots))
+	for _, fixture := range roots {
+		abs, err := filepath.Abs(fixture)
+		if err != nil {
+			return nil, fmt.Errorf("resolve fixture %s: %w", fixture, err)
+		}
+		key := filepath.Clean(abs)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, fixture)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func firstIndexHasCases(fixture string) bool {
+	info, err := os.Stat(filepath.Join(fixture, "cases.yaml"))
+	return err == nil && !info.IsDir()
+}
+
 func firstIndexClassifierFixtures(primary string, explicit []string) []string {
 	if len(explicit) == 0 {
 		if firstIndexHasClassifierCases(primary) {
@@ -262,6 +383,96 @@ func buildFirstIndexReport(retrievalResult *evalharness.Result, classifierResult
 	}
 	report.FailedThresholdCount = retrievalResult.Summary.FailedThresholdCount + len(summaryFailures)
 	return report
+}
+
+func buildFirstIndexBatchReport(root string, retrievalResults []*evalharness.Result, retrievalReports []firstIndexRetrievalReport, classifierResults []*classify.EvalResult, summaryFailures []string, opts firstIndexReportOptions) *firstIndexBatchReport {
+	classifierReports := make([]firstIndexClassifierReport, 0, len(classifierResults))
+	var classifierCases, classifierPassed, ambiguousCases, genericFallbackCases int
+	for _, result := range classifierResults {
+		report := buildFirstIndexClassifierReport(result)
+		classifierReports = append(classifierReports, report)
+		classifierCases += report.Cases
+		classifierPassed += report.PassedCases
+		ambiguousCases += report.AmbiguousCases
+		genericFallbackCases += report.GenericFallbackCases
+	}
+
+	var (
+		cases, contextCases, contextPassed                   int
+		devspecsTokens, fullPlanningTokens, savedTokens      int
+		expectedRelevant, expectedAvailable                  int
+		failedThresholds                                     int
+		weightedReduction, weightedPrecision, weightedRecall float64
+		weightedMust                                         float64
+		weakSpots                                            []firstIndexWeakSpot
+	)
+	for i, result := range retrievalResults {
+		report := retrievalReports[i]
+		n := report.Cases
+		if n == 0 {
+			continue
+		}
+		cases += n
+		contextCases += report.ContextSufficiencyCases
+		contextPassed += report.ContextSufficiencyPassed
+		devspecsTokens += report.DevSpecsTokens
+		fullPlanningTokens += report.FullPlanningTokens
+		savedTokens += report.SavedInputTokensVsFullPlanning
+		expectedRelevant += report.ExpectedRelevantCount
+		expectedAvailable += report.ExpectedAvailableCount
+		failedThresholds += report.FailedPerCaseThresholdCount
+		weightedReduction += report.MeanTokenReductionVsFullPlanning * float64(n)
+		weightedPrecision += report.MeanArtifactPrecision * float64(n)
+		weightedRecall += report.MeanArtifactRecall * float64(n)
+		weightedMust += report.MeanMustHaveRecall * float64(n)
+		weakSpots = append(weakSpots, firstIndexWeakSpots(result, nil)...)
+	}
+
+	summary := firstIndexNorthStarSummary{
+		SavedInputTokensVsFullPlanning: savedTokens,
+		EstimatedInputUSDSaved:         0,
+		ClassifierCases:                classifierCases,
+		ClassifierPassedCases:          classifierPassed,
+	}
+	if cases > 0 {
+		summary.MeanTokenReductionVsFullPlanning = weightedReduction / float64(cases)
+		summary.MeanArtifactPrecision = weightedPrecision / float64(cases)
+		summary.MeanArtifactRecall = weightedRecall / float64(cases)
+		summary.MeanMustHaveRecall = weightedMust / float64(cases)
+	}
+	if contextCases > 0 {
+		summary.ContextSufficiencyPassRate = float64(contextPassed) / float64(contextCases)
+	}
+	if expectedRelevant > 0 {
+		summary.DiscoveryCoverage = float64(expectedAvailable) / float64(expectedRelevant)
+	}
+	if opts.InputUSDPer1M > 0 {
+		summary.EstimatedInputUSDSaved = float64(savedTokens) / 1_000_000.0 * opts.InputUSDPer1M
+	}
+	if classifierCases > 0 {
+		summary.ClassifierAccuracy = float64(classifierPassed) / float64(classifierCases)
+		summary.ClassifierAmbiguityRate = float64(ambiguousCases) / float64(classifierCases)
+		summary.ClassifierGenericFallbackRate = float64(genericFallbackCases) / float64(classifierCases)
+	}
+
+	report := &firstIndexBatchReport{
+		GeneratedAt:        opts.GeneratedAt.UTC().Format(time.RFC3339),
+		FixtureRoot:        root,
+		Summary:            summary,
+		Retrievals:         retrievalReports,
+		ClassifierFixtures: classifierReports,
+		WeakSpots:          capFirstIndexWeakSpots(weakSpots, 16),
+		ThresholdFailures:  append([]string(nil), summaryFailures...),
+	}
+	report.FailedThresholdCount = failedThresholds + len(summaryFailures)
+	return report
+}
+
+func capFirstIndexWeakSpots(in []firstIndexWeakSpot, limit int) []firstIndexWeakSpot {
+	if len(in) <= limit {
+		return in
+	}
+	return append([]firstIndexWeakSpot(nil), in[:limit]...)
 }
 
 func buildFirstIndexRetrievalReport(r *evalharness.Result, inputUSDPer1M float64) firstIndexRetrievalReport {
@@ -404,6 +615,99 @@ func firstIndexWeakSpots(retrievalResult *evalharness.Result, classifierResults 
 
 func formatFirstIndexReportJSON(report *firstIndexReport) ([]byte, error) {
 	return json.MarshalIndent(report, "", "  ")
+}
+
+func formatFirstIndexBatchReportJSON(report *firstIndexBatchReport) ([]byte, error) {
+	return json.MarshalIndent(report, "", "  ")
+}
+
+func formatFirstIndexBatchReportText(report *firstIndexBatchReport) string {
+	var b strings.Builder
+	fmt.Fprintln(&b, "DevSpecs First-Index Batch Eval Report")
+	fmt.Fprintf(&b, "Generated: %s\n\n", report.GeneratedAt)
+
+	totalCases := 0
+	contextCases := 0
+	contextPassed := 0
+	for _, retrieval := range report.Retrievals {
+		totalCases += retrieval.Cases
+		contextCases += retrieval.ContextSufficiencyCases
+		contextPassed += retrieval.ContextSufficiencyPassed
+	}
+
+	fmt.Fprintln(&b, "North Star")
+	fmt.Fprintf(&b, "- Fixtures: %d under %s\n", len(report.Retrievals), report.FixtureRoot)
+	fmt.Fprintf(&b, "- Token reduction: %s mean vs full planning corpus; saved %s input tokens across %d retrieval cases\n",
+		firstIndexPct(report.Summary.MeanTokenReductionVsFullPlanning),
+		firstIndexComma(report.Summary.SavedInputTokensVsFullPlanning),
+		totalCases)
+	if report.Summary.EstimatedInputUSDSaved > 0 {
+		fmt.Fprintf(&b, "- Estimated input cost saved: $%.4f\n", report.Summary.EstimatedInputUSDSaved)
+	}
+	fmt.Fprintf(&b, "- Retrieval: precision %s / recall %s / must-have recall %s\n",
+		firstIndexPct(report.Summary.MeanArtifactPrecision),
+		firstIndexPct(report.Summary.MeanArtifactRecall),
+		firstIndexPct(report.Summary.MeanMustHaveRecall))
+	fmt.Fprintf(&b, "- Sufficiency: %d/%d = %s\n",
+		contextPassed,
+		contextCases,
+		firstIndexPct(report.Summary.ContextSufficiencyPassRate))
+	fmt.Fprintf(&b, "- Discovery: %s\n", firstIndexPct(report.Summary.DiscoveryCoverage))
+	if report.Summary.ClassifierCases > 0 {
+		fmt.Fprintf(&b, "- Classifier: %d/%d = %s; ambiguity %s; generic fallback %s\n",
+			report.Summary.ClassifierPassedCases,
+			report.Summary.ClassifierCases,
+			firstIndexPct(report.Summary.ClassifierAccuracy),
+			firstIndexPct(report.Summary.ClassifierAmbiguityRate),
+			firstIndexPct(report.Summary.ClassifierGenericFallbackRate))
+	}
+	fmt.Fprintln(&b)
+
+	fmt.Fprintln(&b, "Retrieval Fixtures")
+	for _, retrieval := range report.Retrievals {
+		fmt.Fprintf(&b, "- %s: cases %d, precision %s, recall %s, must %s, sufficiency %d/%d, discovery %s\n",
+			retrieval.Fixture,
+			retrieval.Cases,
+			firstIndexPct(retrieval.MeanArtifactPrecision),
+			firstIndexPct(retrieval.MeanArtifactRecall),
+			firstIndexPct(retrieval.MeanMustHaveRecall),
+			retrieval.ContextSufficiencyPassed,
+			retrieval.ContextSufficiencyCases,
+			firstIndexPct(retrieval.DiscoveryCoverage))
+	}
+	fmt.Fprintln(&b)
+
+	if len(report.ClassifierFixtures) > 0 {
+		fmt.Fprintln(&b, "Classifier Fixtures")
+		for _, classifier := range report.ClassifierFixtures {
+			fmt.Fprintf(&b, "- %s: %d/%d = %s\n",
+				classifier.Fixture,
+				classifier.PassedCases,
+				classifier.Cases,
+				firstIndexPct(classifier.Accuracy))
+		}
+		fmt.Fprintln(&b)
+	}
+
+	fmt.Fprintln(&b, "Residual Risks")
+	if len(report.WeakSpots) == 0 && len(report.ThresholdFailures) == 0 {
+		fmt.Fprintln(&b, "- None from this report.")
+		return b.String()
+	}
+	for _, weak := range report.WeakSpots {
+		caseRef := weak.CaseID
+		if weak.Path != "" {
+			caseRef += " (" + weak.Path + ")"
+		}
+		if caseRef == "" {
+			caseRef = weak.Fixture
+		}
+		fmt.Fprintf(&b, "- %s: %s\n", caseRef, weak.Message)
+	}
+	for _, failure := range report.ThresholdFailures {
+		fmt.Fprintf(&b, "- Threshold failure: %s\n", failure)
+	}
+	return b.String()
 }
 
 func formatFirstIndexReportText(report *firstIndexReport) string {

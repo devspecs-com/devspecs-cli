@@ -294,6 +294,98 @@ func TestClassifyCandidateRecognizesADRMetadataStatusBody(t *testing.T) {
 	}
 }
 
+func TestClassifyCandidatePrefersADROverProtocolStandardLanguage(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+	resolution := ClassifyCandidate(Candidate{
+		Path:  "docs/adr/ADR-0050-plan-document-metadata-standard.md",
+		Scope: ScopeDocument,
+		Body: strings.Join([]string{
+			"# ADR 0050 - Plan document metadata standard",
+			"",
+			"- **Status:** Accepted",
+			"",
+			"## Context",
+			"",
+			"Plan files need consistent metadata so contributors can understand ownership and priority.",
+			"",
+			"## Decision",
+			"",
+			"New plan files must include status, date, authors, priority, and dependency fields.",
+			"",
+			"## Consequences",
+			"",
+			"Every new plan must comply with the metadata standard.",
+		}, "\n"),
+	}, cfg)
+	if resolution.Winner.Classifier != ModelADR {
+		t.Fatalf("ADR with standard language got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelADR, resolution.Winner.Confidence, resolution.Alternatives)
+	}
+}
+
+func TestClassifyCandidateRecognizesRFCFilenameWithDesignSections(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+	resolution := ClassifyCandidate(Candidate{
+		Path:  "RFC.MD",
+		Scope: ScopeDocument,
+		Body: strings.Join([]string{
+			"# Request for Comments (RFC)",
+			"",
+			"## Overview",
+			"",
+			"This RFC outlines the technical architecture for a browser extension.",
+			"",
+			"## Technical Design",
+			"",
+			"The service worker checks navigation events and sends messages to content scripts.",
+			"",
+			"## Design Considerations",
+			"",
+			"Permissions, performance, and privacy are the main tradeoffs.",
+			"",
+			"## Request for Feedback",
+			"",
+			"Feedback is requested on the proposed design.",
+		}, "\n"),
+	}, cfg)
+	if resolution.Winner.Classifier != ModelRFC {
+		t.Fatalf("RFC filename got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
+	}
+}
+
+func TestClassifyCandidateRecognizesEnhancementProposalReadme(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+	resolution := ClassifyCandidate(Candidate{
+		Path:  "enhancements/ai-assisted-rules-generation/README.md",
+		Scope: ScopeDocument,
+		Body: strings.Join([]string{
+			"# AI-Assisted Rules Generation",
+			"",
+			"## Summary",
+			"",
+			"This enhancement proposes generating migration rules from documentation.",
+			"",
+			"## Motivation",
+			"",
+			"Creating rules requires both domain knowledge and rule syntax expertise.",
+			"",
+			"## Goals",
+			"",
+			"Lower the barrier to creating rules.",
+			"",
+			"## Non-Goals",
+			"",
+			"Do not replace human review.",
+			"",
+			"## Proposal",
+			"",
+			"Use agent skills and deterministic helpers to draft and validate rules.",
+		}, "\n"),
+	}, cfg)
+	if resolution.Winner.Classifier != ModelRFC {
+		t.Fatalf("enhancement README got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
+	}
+}
+
 func TestClassifyCandidateRecognizesPlainPRDFilenameAndBody(t *testing.T) {
 	cfg := DefaultPipelineConfig()
 	resolution := ClassifyCandidate(Candidate{

@@ -238,6 +238,41 @@ func TestEvalCommand_FirstIndexReportJSONOutput(t *testing.T) {
 	}
 }
 
+func TestEvalCommand_FirstIndexBatchReportJSONOutput(t *testing.T) {
+	root := t.TempDir()
+	writeBatchEvalFixture(t, filepath.Join(root, "repos", "repo-a"), "alpha", "billing retry plan")
+	writeBatchEvalFixture(t, filepath.Join(root, "repos", "repo-b"), "beta", "session auth decision")
+
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{
+		root,
+		"--first-index-report",
+		"--batch-fixtures",
+		"--json",
+		"--no-save",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	summary, ok := got["summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing summary: %#v", got["summary"])
+	}
+	if summary["mean_artifact_recall"].(float64) <= 0 {
+		t.Fatalf("expected positive recall: %#v", summary)
+	}
+	retrievals, ok := got["retrievals"].([]any)
+	if !ok || len(retrievals) != 2 {
+		t.Fatalf("expected two retrieval reports: %#v", got["retrievals"])
+	}
+}
+
 func TestEvalCommand_FilesystemCorpusDiagnosticFlag(t *testing.T) {
 	cmd := NewEvalCmd()
 	cmd.SetArgs([]string{filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"), "--filesystem", "--json", "--no-save"})
@@ -260,6 +295,31 @@ func TestEvalCommand_FilesystemCorpusDiagnosticFlag(t *testing.T) {
 	planning := corpus["planning_artifacts"].(map[string]any)
 	if planning["files"].(float64) == 0 {
 		t.Fatalf("filesystem eval should load planning artifacts: %#v", planning)
+	}
+}
+
+func writeBatchEvalFixture(t *testing.T, root, id, phrase string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, "docs", "plans"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "plans", id+".md"), []byte("# "+phrase+"\n\nThis plan covers "+phrase+" for implementation.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cases := strings.Join([]string{
+		"fixture_version: " + id + "-v0",
+		"eval_stage: real_repo_batch_smoke",
+		"",
+		"cases:",
+		"  - id: " + id + "-case",
+		"    query: \"" + phrase + "\"",
+		"    expected_relevant:",
+		"      - path: docs/plans/" + id + ".md",
+		"        importance: must",
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(root, "cases.yaml"), []byte(cases), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

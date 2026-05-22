@@ -39,6 +39,7 @@ func NewEvalCmd() *cobra.Command {
 		commandUnderTest   string
 		classifierEval     bool
 		firstIndexReport   bool
+		batchFixtures      bool
 		classifierFixtures []string
 		inputUSDPer1M      float64
 	)
@@ -53,6 +54,9 @@ func NewEvalCmd() *cobra.Command {
 			}
 			if classifierEval && firstIndexReport {
 				return fmt.Errorf("--classifier cannot be combined with --first-index-report")
+			}
+			if batchFixtures && !firstIndexReport {
+				return fmt.Errorf("--batch-fixtures requires --first-index-report")
 			}
 			if classifierEval {
 				if strings.TrimSpace(commandUnderTest) != "" {
@@ -86,6 +90,31 @@ func NewEvalCmd() *cobra.Command {
 				return err
 			}
 			if firstIndexReport {
+				if batchFixtures {
+					report, err := runFirstIndexBatchReport(args[0], opts, firstIndexReportOptions{
+						ClassifierFixtures: classifierFixtures,
+						ResultsDir:         resultsDir,
+						NoSave:             noSave,
+						GeneratedAt:        nowUTC(),
+						InputUSDPer1M:      inputUSDPer1M,
+					})
+					if err != nil {
+						return err
+					}
+					if asJSON {
+						data, err := formatFirstIndexBatchReportJSON(report)
+						if err != nil {
+							return err
+						}
+						fmt.Fprintln(cmd.OutOrStdout(), string(data))
+					} else {
+						fmt.Fprint(cmd.OutOrStdout(), formatFirstIndexBatchReportText(report))
+					}
+					if report.FailedThresholdCount > 0 {
+						return fmt.Errorf("eval thresholds failed")
+					}
+					return nil
+				}
 				report, err := runFirstIndexReport(args[0], opts, firstIndexReportOptions{
 					ClassifierFixtures: classifierFixtures,
 					ResultsDir:         resultsDir,
@@ -147,6 +176,7 @@ func NewEvalCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&filesystem, "filesystem", false, "Use raw fixture filesystem corpus instead of the indexed eval corpus")
 	cmd.Flags().BoolVar(&classifierEval, "classifier", false, "Run deterministic classifier evals from classifier_cases.yaml")
 	cmd.Flags().BoolVar(&firstIndexReport, "first-index-report", false, "Run retrieval and classifier evals and emit an auditable first-index report")
+	cmd.Flags().BoolVar(&batchFixtures, "batch-fixtures", false, "With --first-index-report, discover child fixture directories containing cases.yaml and emit one aggregate report")
 	cmd.Flags().StringArrayVar(&classifierFixtures, "classifier-fixture", nil, "Classifier fixture to include in --first-index-report; may be repeated")
 	cmd.Flags().StringVar(&commandUnderTest, "command", "", "Run eval through a live command path: find or resume-query")
 	cmd.Flags().StringVar(&resultsDir, "results-dir", defaultEvalResultsDir, "Directory for timestamped JSON eval result files")

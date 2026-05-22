@@ -368,6 +368,11 @@ func DefaultPipelineConfig() PipelineConfig {
 						Scope:       ScopeDocument,
 						FilenameAny: []string{"rfc"},
 					}),
+					evidence("rfc_filename_title_signal", 0.16, ReasonPathHint, "RFC filename and title signals are both present.", EvidenceMatch{
+						Scope:       ScopeDocument,
+						FilenameAny: []string{"rfc"},
+						TitleAny:    []string{"rfc", "request for comments"},
+					}),
 					evidence("rfc_design_dir_signal", 0.22, ReasonPathHint, "Design proposal path signal is present.", EvidenceMatch{
 						Scope:     ScopeDocument,
 						PathGlobs: []string{"design/*.md", "design/**/*.md"},
@@ -379,6 +384,11 @@ func DefaultPipelineConfig() PipelineConfig {
 					evidence("rfc_enhancement_path_signal", 0.34, ReasonPathHint, "Enhancement/KEP/TEP/SIP/SHIP path signal is present.", EvidenceMatch{
 						Scope:           ScopeDocument,
 						PathContainsAny: []string{"enhancements/", "/enhancements/", "keps/", "/keps/", "teps/", "/teps/", "beps/", "/beps/", "oseps/", "/oseps/", "ships/", "/ships/", "sips/", "/sips/", "docs/design/", "docs/design-docs/", "docs/proposals/", "design-docs/"},
+					}),
+					evidence("rfc_enhancement_structure_signal", 0.18, ReasonPathHint, "Enhancement path and proposal sections are both present.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						PathContainsAny: []string{"enhancements/", "/enhancements/", "keps/", "/keps/", "teps/", "/teps/", "beps/", "/beps/", "oseps/", "/oseps/", "ships/", "/ships/", "sips/", "/sips/"},
+						HeadingsAny:     []string{"summary", "motivation", "proposal", "goals", "non-goals", "user stories"},
 					}),
 					evidence("rfc_governance_frontmatter_status", 0.10, ReasonStatusSignal, "Proposal-style governance frontmatter declares a status.", EvidenceMatch{
 						Scope:             ScopeDocument,
@@ -667,6 +677,13 @@ func DefaultPipelineConfig() PipelineConfig {
 						Scope:           ScopeDocument,
 						HeadingsAny:     []string{"rules", "instructions", "guidelines", "workflow", "procedure", "runbook", "policy", "standard"},
 						BodyContainsAny: []string{"must", "should", "do not", "always", "never"},
+					}),
+				},
+				NegativeEvidence: []EvidenceRule{
+					evidence("protocol_adr_decision_document", 0.45, ReasonPathHint, "ADR path with context and decision sections reduces protocol confidence.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						PathContainsAny: []string{"/adr/", "/adrs/", "adr/", "adrs/"},
+						HeadingsAll:     []string{"context", "decision"},
 					}),
 				},
 				Families: map[string]SubmodelConfig{
