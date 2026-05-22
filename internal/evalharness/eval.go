@@ -16,6 +16,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/sourcecontext"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/testcase"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
 	"github.com/devspecs-com/devspecs-cli/internal/openspecmetrics"
@@ -80,17 +81,18 @@ func (ApproxTokenCounter) Profile() TokenizerProfile {
 }
 
 type Options struct {
-	JSON             bool
-	MinRecall        *float64
-	MinMeanRecall    *float64
-	MinMustRecall    *float64
-	MinSufficiency   *float64
-	MinReductionFull *float64
-	CorpusSource     string
-	CommandUnderTest string
-	CommandRunner    CommandRunner
-	TokenCounter     TokenCounter
-	Retriever        retrieval.Retriever
+	JSON              bool
+	MinRecall         *float64
+	MinMeanRecall     *float64
+	MinMustRecall     *float64
+	MinSufficiency    *float64
+	MinReductionFull  *float64
+	CorpusSource      string
+	CommandUnderTest  string
+	CommandRunner     CommandRunner
+	TokenCounter      TokenCounter
+	Retriever         retrieval.Retriever
+	TestCaseArtifacts bool
 }
 
 type CommandRunner func(fixtureAbs string, cases []CaseSpec) (map[string]CommandCaseOutput, error)
@@ -224,6 +226,7 @@ type CaseResult struct {
 	PackedSectionArtifacts        []string          `json:"packed_section_artifacts,omitempty"`
 	PackedSectionCount            int               `json:"packed_section_count,omitempty"`
 	FullFileArtifactCount         int               `json:"full_file_artifact_count,omitempty"`
+	TestCaseArtifactCount         int               `json:"test_case_artifact_count,omitempty"`
 	RelevantIncluded              []string          `json:"relevant_included"`
 	IrrelevantIncluded            []string          `json:"irrelevant_included"`
 	ArtifactPrecision             float64           `json:"artifact_precision"`
@@ -330,7 +333,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 		return nil, err
 	}
 	corpusSource := defaultString(opts.CorpusSource, CorpusSourceSQLiteIndex)
-	files, err := collectCorpusFiles(fixtureAbs, corpusSource)
+	files, err := collectCorpusFiles(fixtureAbs, corpusSource, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -524,12 +527,12 @@ func normalizeCriteriaPaths(c *SuccessCriteria) {
 
 type File = retrieval.Candidate
 
-func collectCorpusFiles(root, corpusSource string) ([]File, error) {
+func collectCorpusFiles(root, corpusSource string, opts Options) ([]File, error) {
 	switch corpusSource {
 	case "", CorpusSourceFilesystemFixture:
 		return collectFiles(root)
 	case CorpusSourceSQLiteIndex:
-		return collectIndexedFiles(root)
+		return collectIndexedFiles(root, opts)
 	default:
 		return nil, fmt.Errorf("unknown eval corpus source %q", corpusSource)
 	}
@@ -584,7 +587,7 @@ func collectFiles(root string) ([]File, error) {
 	return files, err
 }
 
-func collectIndexedFiles(root string) ([]File, error) {
+func collectIndexedFiles(root string, opts Options) ([]File, error) {
 	tempDir, err := os.MkdirTemp("", "devspecs-eval-index-*")
 	if err != nil {
 		return nil, fmt.Errorf("create indexed eval temp dir: %w", err)
@@ -602,12 +605,19 @@ func collectIndexedFiles(root string) ([]File, error) {
 		return nil, fmt.Errorf("load fixture repo config: %w", err)
 	}
 	cfg = config.WithDefaultIntentCandidateDiscovery(cfg, true)
-	scanner := scan.New(db, idgen.NewFactory(), []adapters.Adapter{
+	if opts.TestCaseArtifacts {
+		cfg = config.WithTestCaseArtifacts(cfg, true)
+	}
+	adpts := []adapters.Adapter{
 		&openspec.Adapter{},
 		&adr.Adapter{},
 		&markdown.Adapter{},
 		&sourcecontext.Adapter{},
-	})
+	}
+	if cfg.Experiments.TestCaseArtifactsEnabled(false) {
+		adpts = append(adpts, &testcase.Adapter{})
+	}
+	scanner := scan.New(db, idgen.NewFactory(), adpts)
 	if _, err := scanner.Run(context.Background(), root, cfg); err != nil {
 		return nil, fmt.Errorf("scan fixture into indexed eval database: %w", err)
 	}
@@ -654,6 +664,9 @@ func collectIndexedFiles(root string) ([]File, error) {
 func indexedArtifactRel(art store.ArtifactRow, sources []store.SourceRow) string {
 	for _, src := range sources {
 		if strings.TrimSpace(src.Path) != "" {
+			if src.SourceType == "test_case" {
+				return indexedTestCaseRel(src)
+			}
 			return filepath.ToSlash(src.Path)
 		}
 	}
@@ -661,6 +674,24 @@ func indexedArtifactRel(art store.ArtifactRow, sources []store.SourceRow) string
 		return strings.TrimSpace(art.Title)
 	}
 	return art.ID
+}
+
+func indexedTestCaseRel(src store.SourceRow) string {
+	path := filepath.ToSlash(strings.TrimSpace(src.Path))
+	parts := strings.Split(src.SourceIdentity, "|")
+	if len(parts) >= 3 && strings.TrimSpace(parts[2]) != "" {
+		if path == "" {
+			path = filepath.ToSlash(strings.TrimSpace(parts[0]))
+		}
+		return path + "#L" + strings.TrimSpace(parts[2])
+	}
+	if path == "" {
+		path = filepath.ToSlash(strings.TrimSpace(src.SourceIdentity))
+	}
+	if path == "" {
+		return "test_case"
+	}
+	return path + "#test-case"
 }
 
 func renderIndexedArtifactContent(art store.ArtifactRow, sources []store.SourceRow, todos []store.TodoRow, body string) string {
@@ -708,8 +739,16 @@ func indexedArtifactMetadata(sources []store.SourceRow, links []store.LinkRow, e
 		metadata[key] = value
 	}
 	var payload struct {
-		ArtifactScope string `json:"artifact_scope"`
-		OpenSpecRole  string `json:"openspec_role"`
+		ArtifactScope   string   `json:"artifact_scope"`
+		OpenSpecRole    string   `json:"openspec_role"`
+		Mode            string   `json:"mode"`
+		Language        string   `json:"language"`
+		Framework       string   `json:"framework"`
+		TestName        string   `json:"test_name"`
+		ParentTitle     string   `json:"parent_title"`
+		SourceLineRange string   `json:"source_line_range"`
+		Symbols         []string `json:"symbols"`
+		AssertionTerms  []string `json:"assertion_terms"`
 	}
 	if strings.TrimSpace(extractedJSON) != "" {
 		if err := json.Unmarshal([]byte(extractedJSON), &payload); err == nil {
@@ -718,6 +757,30 @@ func indexedArtifactMetadata(sources []store.SourceRow, links []store.LinkRow, e
 			}
 			if payload.OpenSpecRole != "" {
 				metadata["openspec_role"] = payload.OpenSpecRole
+			}
+			if payload.Mode != "" {
+				metadata["mode"] = payload.Mode
+			}
+			if payload.Language != "" {
+				metadata["language"] = payload.Language
+			}
+			if payload.Framework != "" {
+				metadata["framework"] = payload.Framework
+			}
+			if payload.TestName != "" {
+				metadata["test_name"] = payload.TestName
+			}
+			if payload.ParentTitle != "" {
+				metadata["parent_title"] = payload.ParentTitle
+			}
+			if payload.SourceLineRange != "" {
+				metadata["source_line_range"] = payload.SourceLineRange
+			}
+			if len(payload.Symbols) > 0 {
+				metadata["symbols"] = strings.Join(payload.Symbols, "\n")
+			}
+			if len(payload.AssertionTerms) > 0 {
+				metadata["assertion_terms"] = strings.Join(payload.AssertionTerms, "\n")
 			}
 		}
 	}
@@ -1009,6 +1072,9 @@ func baselineMetrics(name, scope string, includesSource bool, files []File, expe
 
 func applyPackingMetrics(cr *CaseResult, files []File) {
 	for _, f := range files {
+		if isTestCaseFile(f) {
+			cr.TestCaseArtifactCount++
+		}
 		if f.Metadata != nil && f.Metadata["section_pack_mode"] == "sections" {
 			cr.PackedSectionArtifacts = append(cr.PackedSectionArtifacts, f.Path)
 			if count, err := strconv.Atoi(strings.TrimSpace(f.Metadata["section_pack_count"])); err == nil {
@@ -1020,6 +1086,16 @@ func applyPackingMetrics(cr *CaseResult, files []File) {
 			cr.FullFileArtifactCount++
 		}
 	}
+}
+
+func isTestCaseFile(f File) bool {
+	if f.Subtype == config.SubtypeTestCase {
+		return true
+	}
+	if f.Metadata == nil {
+		return false
+	}
+	return f.Metadata["source_type"] == "test_case"
 }
 
 func applyArtifactMetrics(cr *CaseResult, spec CaseSpec) {

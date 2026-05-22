@@ -34,6 +34,17 @@ type Candidate struct {
 	// candidate discovery admitted this file into the adapter pipeline.
 	DiscoveryScore   float64
 	DiscoveryReasons []string
+	// Unit fields are optional sub-file extraction hints used by adapters that
+	// emit multiple artifacts from one physical file.
+	UnitName       string
+	UnitParent     string
+	UnitBody       string
+	UnitLanguage   string
+	UnitFramework  string
+	UnitStartLine  int
+	UnitEndLine    int
+	UnitSymbols    []string
+	UnitAssertions []string
 }
 
 // Artifact holds the parsed metadata for an artifact.

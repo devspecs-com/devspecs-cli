@@ -150,6 +150,46 @@ func TestWeightedFilesRetrieverV0_DemotesNonIntentLanesUnlessRequested(t *testin
 	}
 }
 
+func TestWeightedFilesRetrieverV0_UsesTestCasesForBehaviorQueries(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:    "services/billing/webhook_test.go#L12",
+			Kind:    "source_context",
+			Subtype: "test_case",
+			Title:   "TestWebhookReplayProtection",
+			Body:    "Test: TestWebhookReplayProtection\nSource: services/billing/webhook_test.go\nSymbols: stripe_event_id, idempotency, webhook\nAssertion vocabulary: require, error\n",
+			Metadata: map[string]string{
+				"source_type":       "test_case",
+				"source_line_range": "12-24",
+			},
+		},
+		{
+			Path:  "docs/plans/billing-hardening.md",
+			Title: "Billing Hardening Plan",
+			Body:  "Plan for customer portal billing tasks unrelated to replay tests.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "what regression tests protect stripe_event_id idempotency?")
+	if !containsCandidatePath(got, "services/billing/webhook_test.go#L12") {
+		t.Fatalf("missing test-case candidate: %#v", CandidatePaths(got))
+	}
+	reasons := ExplainCandidates(got, "what regression tests protect stripe_event_id idempotency?")
+	var found bool
+	for _, reason := range reasons {
+		if reason.Path != "services/billing/webhook_test.go#L12" {
+			continue
+		}
+		found = true
+		if !reasonContains(reason.Reasons, "test-case behavior signal") {
+			t.Fatalf("missing test behavior reason: %#v", reason.Reasons)
+		}
+	}
+	if !found {
+		t.Fatalf("missing reasons for test candidate: %#v", reasons)
+	}
+}
+
 func TestWeightedFilesRetrieverV0_DoesNotBackfillWeakBodyOnlyMarkdown(t *testing.T) {
 	candidates := []Candidate{
 		{

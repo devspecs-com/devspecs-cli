@@ -20,6 +20,7 @@ type RepoConfig struct {
 // intentionally explicit so evals can compare baseline and experiment runs.
 type ExperimentConfig struct {
 	IntentCandidateDiscovery *bool `yaml:"intent_candidate_discovery,omitempty"`
+	TestCaseArtifacts        *bool `yaml:"test_case_artifacts,omitempty"`
 }
 
 // SourceConfig defines a source type and its discovery paths.
@@ -77,6 +78,13 @@ func WithDefaultIntentCandidateDiscovery(cfg *RepoConfig, enabled bool) *RepoCon
 	return out
 }
 
+// WithTestCaseArtifacts returns a config copy with test-case artifact indexing set.
+func WithTestCaseArtifacts(cfg *RepoConfig, enabled bool) *RepoConfig {
+	out := CloneRepoConfig(cfg)
+	out.Experiments.TestCaseArtifacts = boolPtr(enabled)
+	return out
+}
+
 // CloneRepoConfig returns a deep-enough copy for scan-time option mutation.
 func CloneRepoConfig(cfg *RepoConfig) *RepoConfig {
 	if cfg == nil {
@@ -85,6 +93,9 @@ func CloneRepoConfig(cfg *RepoConfig) *RepoConfig {
 	out := *cfg
 	if cfg.Experiments.IntentCandidateDiscovery != nil {
 		out.Experiments.IntentCandidateDiscovery = boolPtr(*cfg.Experiments.IntentCandidateDiscovery)
+	}
+	if cfg.Experiments.TestCaseArtifacts != nil {
+		out.Experiments.TestCaseArtifacts = boolPtr(*cfg.Experiments.TestCaseArtifacts)
 	}
 	out.Sources = make([]SourceConfig, len(cfg.Sources))
 	for i, src := range cfg.Sources {
@@ -104,6 +115,13 @@ func (e ExperimentConfig) IntentCandidateDiscoveryEnabled(defaultValue bool) boo
 		return defaultValue
 	}
 	return *e.IntentCandidateDiscovery
+}
+
+func (e ExperimentConfig) TestCaseArtifactsEnabled(defaultValue bool) bool {
+	if e.TestCaseArtifacts == nil {
+		return defaultValue
+	}
+	return *e.TestCaseArtifacts
 }
 
 func boolPtr(value bool) *bool {

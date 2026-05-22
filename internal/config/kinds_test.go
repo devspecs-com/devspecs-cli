@@ -47,6 +47,9 @@ func TestValidateSubtype(t *testing.T) {
 	if err := ValidateSubtype(KindMarkdownArtifact, SubtypeDocumentTemplate); err != nil {
 		t.Fatal(err)
 	}
+	if err := ValidateSubtype(KindSourceContext, SubtypeTestCase); err != nil {
+		t.Fatal(err)
+	}
 	if err := ValidateSubtype(KindPlan, SubtypeADR); err == nil {
 		t.Fatal("plan should not allow adr")
 	}

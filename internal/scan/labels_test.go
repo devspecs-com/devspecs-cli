@@ -8,6 +8,7 @@ func TestSourceTypeDisplayLabel(t *testing.T) {
 		{"openspec", "OpenSpec"},
 		{"adr", "ADRs"},
 		{"source_context", "Source context"},
+		{"test_case", "Test cases"},
 		{"capture", "capture"},
 	}
 	for _, tc := range tests {

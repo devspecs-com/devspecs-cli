@@ -86,6 +86,7 @@ type firstIndexRetrievalReport struct {
 	PackedSectionArtifactCount       int     `json:"packed_section_artifact_count,omitempty"`
 	PackedSectionCount               int     `json:"packed_section_count,omitempty"`
 	FullFileArtifactCount            int     `json:"full_file_artifact_count,omitempty"`
+	TestCaseArtifactCount            int     `json:"test_case_artifact_count,omitempty"`
 	InputUSDPer1M                    float64 `json:"input_usd_per_1m,omitempty"`
 	EstimatedInputUSDSaved           float64 `json:"estimated_input_usd_saved,omitempty"`
 	PlanningArtifactFiles            int     `json:"planning_artifact_files"`
@@ -139,8 +140,8 @@ type firstIndexWeakSpot struct {
 	Message string `json:"message"`
 }
 
-func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed bool, commandUnderTest string, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull float64) (evalharness.Options, error) {
-	opts := evalharness.Options{JSON: asJSON}
+func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed bool, commandUnderTest string, experimentalTestCases bool, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull float64) (evalharness.Options, error) {
+	opts := evalharness.Options{JSON: asJSON, TestCaseArtifacts: experimentalTestCases}
 	if filesystem {
 		opts.CorpusSource = evalharness.CorpusSourceFilesystemFixture
 	} else if indexed {
@@ -156,7 +157,7 @@ func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed b
 		}
 		opts.CommandUnderTest = normalized
 		opts.CommandRunner = func(fixtureAbs string, cases []evalharness.CaseSpec) (map[string]evalharness.CommandCaseOutput, error) {
-			return runLiveCommandEval(normalized, fixtureAbs, cases)
+			return runLiveCommandEval(normalized, fixtureAbs, cases, experimentalTestCases)
 		}
 	}
 	if cmd.Flags().Changed("min-recall") {
@@ -480,13 +481,14 @@ func capFirstIndexWeakSpots(in []firstIndexWeakSpot, limit int) []firstIndexWeak
 
 func buildFirstIndexRetrievalReport(r *evalharness.Result, inputUSDPer1M float64) firstIndexRetrievalReport {
 	var devspecsTokens, fullPlanningTokens int
-	var packedSectionArtifacts, packedSections, fullFileArtifacts int
+	var packedSectionArtifacts, packedSections, fullFileArtifacts, testCaseArtifacts int
 	for _, c := range r.Cases {
 		devspecsTokens += c.DevSpecsTokens
 		fullPlanningTokens += c.FullPlanningTokens
 		packedSectionArtifacts += len(c.PackedSectionArtifacts)
 		packedSections += c.PackedSectionCount
 		fullFileArtifacts += c.FullFileArtifactCount
+		testCaseArtifacts += c.TestCaseArtifactCount
 	}
 	savedTokens := fullPlanningTokens - devspecsTokens
 	if savedTokens < 0 {
@@ -523,6 +525,7 @@ func buildFirstIndexRetrievalReport(r *evalharness.Result, inputUSDPer1M float64
 		PackedSectionArtifactCount:       packedSectionArtifacts,
 		PackedSectionCount:               packedSections,
 		FullFileArtifactCount:            fullFileArtifacts,
+		TestCaseArtifactCount:            testCaseArtifacts,
 		InputUSDPer1M:                    inputUSDPer1M,
 		EstimatedInputUSDSaved:           estimatedSaved,
 		PlanningArtifactFiles:            r.Corpus.PlanningArtifacts.Files,
@@ -689,6 +692,9 @@ func formatFirstIndexBatchReportText(report *firstIndexBatchReport) string {
 				retrieval.PackedSectionArtifactCount,
 				retrieval.PackedSectionCount)
 		}
+		if retrieval.TestCaseArtifactCount > 0 {
+			fmt.Fprintf(&b, "  Test-case artifacts included: %d\n", retrieval.TestCaseArtifactCount)
+		}
 	}
 	fmt.Fprintln(&b)
 
@@ -782,6 +788,9 @@ func formatFirstIndexReportText(report *firstIndexReport) string {
 			report.Retrieval.PackedSectionArtifactCount,
 			report.Retrieval.PackedSectionCount,
 			report.Retrieval.FullFileArtifactCount)
+	}
+	if report.Retrieval.TestCaseArtifactCount > 0 {
+		fmt.Fprintf(&b, "- Test-case artifacts included: %d\n", report.Retrieval.TestCaseArtifactCount)
 	}
 	fmt.Fprintf(&b, "- Planning corpus: %d files / %s tokens\n", report.Retrieval.PlanningArtifactFiles, firstIndexComma(report.Retrieval.PlanningArtifactTokens))
 	fmt.Fprintf(&b, "- Full candidate corpus: %d files / %s tokens\n", report.Retrieval.FullCandidateCorpusFiles, firstIndexComma(report.Retrieval.FullCandidateCorpusTokens))

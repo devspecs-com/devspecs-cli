@@ -35,3 +35,15 @@ func TestResult_finalizeSourcesBreakdown_Sums(t *testing.T) {
 		t.Fatalf("expected 4 breakdown rows, got %d", len(r.SourcesBreakdown))
 	}
 }
+
+func TestResult_finalizeSourcesBreakdown_IncludesTestCasesWhenEnabled(t *testing.T) {
+	r := newResult([]string{"markdown", "openspec", "adr", "source_context", "test_case"})
+	r.finalizeSourcesBreakdown()
+	if len(r.SourcesBreakdown) != 5 {
+		t.Fatalf("expected 5 breakdown rows, got %d", len(r.SourcesBreakdown))
+	}
+	last := r.SourcesBreakdown[len(r.SourcesBreakdown)-1]
+	if last.SourceType != "test_case" || last.Label != "Test cases" {
+		t.Fatalf("last row = %#v", last)
+	}
+}

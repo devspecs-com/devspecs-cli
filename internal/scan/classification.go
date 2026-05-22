@@ -16,6 +16,9 @@ const classifierExtractKey = "classifier"
 func attachClassifierMetadata(repoRoot string, c adapters.Candidate, art adapters.Artifact) adapters.Artifact {
 	cfg := classify.DefaultPipelineConfig()
 	body := readCandidateBody(c.PrimaryPath, art.Body)
+	if c.AdapterName == "test_case" && strings.TrimSpace(c.UnitBody) != "" {
+		body = c.UnitBody
+	}
 	relPath := filepath.ToSlash(c.RelPath)
 	resolution := classify.ClassifyCandidate(classify.Candidate{
 		Path:  relPath,

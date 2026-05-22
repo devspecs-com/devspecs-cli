@@ -15,6 +15,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/sourcecontext"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/testcase"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/discover"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
@@ -35,13 +36,14 @@ func NewScanCmd() *cobra.Command {
 		ifChanged                   bool
 		rebuild                     bool
 		experimentalIntentDiscovery bool
+		experimentalTestCases       bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "scan",
 		Short: "Scan repository for specs, plans, and ADRs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery)
+			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalTestCases)
 		},
 	}
 
@@ -52,10 +54,11 @@ func NewScanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&ifChanged, "if-changed", false, "Only scan if source paths were touched in the last commit")
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "Remove the global index database and create a fresh index (requires re-scan)")
 	cmd.Flags().BoolVar(&experimentalIntentDiscovery, "experimental-intent-discovery", false, "Deprecated: broad scored markdown intent candidate discovery is enabled by default")
+	cmd.Flags().BoolVar(&experimentalTestCases, "experimental-test-cases", false, "Experimental: index executable test cases as behavioral intent artifacts")
 	return cmd
 }
 
-func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery bool) error {
+func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalTestCases bool) error {
 	repoRoot, err := resolveRepoRoot(path)
 	if err != nil {
 		return err
@@ -68,6 +71,9 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	cfg = config.WithDefaultIntentCandidateDiscovery(cfg, true)
 	if experimentalIntentDiscovery {
 		cfg = config.WithIntentCandidateDiscovery(cfg, true)
+	}
+	if experimentalTestCases {
+		cfg = config.WithTestCaseArtifacts(cfg, true)
 	}
 
 	if ifChanged && !sourcePathsChanged(repoRoot, cfg) {
@@ -96,6 +102,9 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 
 	ids := idgen.NewFactory()
 	adpts := []adapters.Adapter{&openspec.Adapter{}, &adr.Adapter{}, &markdown.Adapter{}, &sourcecontext.Adapter{}}
+	if cfg.Experiments.TestCaseArtifactsEnabled(false) {
+		adpts = append(adpts, &testcase.Adapter{})
+	}
 
 	scanner := scan.New(db, ids, adpts)
 	if verbose && !quiet {
@@ -232,6 +241,9 @@ func sourcePathsChanged(repoRoot string, cfg *config.RepoConfig) bool {
 
 	for _, f := range changedFiles {
 		f = filepath.ToSlash(f)
+		if cfg.Experiments.TestCaseArtifactsEnabled(false) && looksLikeTestArtifactPath(f) {
+			return true
+		}
 		// Root-level spec/plan files always count
 		if strings.HasSuffix(f, ".spec.md") || strings.HasSuffix(f, ".plan.md") {
 			if !strings.Contains(f, "/") {
@@ -245,6 +257,46 @@ func sourcePathsChanged(repoRoot string, cfg *config.RepoConfig) bool {
 		}
 	}
 	return false
+}
+
+func looksLikeTestArtifactPath(rel string) bool {
+	rel = strings.ToLower(filepath.ToSlash(rel))
+	base := filepath.Base(rel)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	switch {
+	case strings.HasSuffix(base, "_test.go"):
+		return true
+	case ext == ".py" && (strings.HasPrefix(base, "test_") || strings.HasSuffix(name, "_test")):
+		return true
+	case ext == ".rb" && strings.HasSuffix(base, "_spec.rb"):
+		return true
+	case ext == ".php" && strings.HasSuffix(base, "test.php"):
+		return true
+	case isJSTestArtifactPath(rel, ext, name):
+		return true
+	}
+	for _, segment := range strings.Split(rel, "/") {
+		switch segment {
+		case "tests", "__tests__", "spec", "cypress", "e2e":
+			return true
+		}
+	}
+	return false
+}
+
+func isJSTestArtifactPath(rel, ext, name string) bool {
+	switch ext {
+	case ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs":
+		return strings.HasSuffix(name, ".test") ||
+			strings.HasSuffix(name, ".spec") ||
+			strings.Contains(rel, "/__tests__/") ||
+			strings.Contains(rel, "/tests/") ||
+			strings.Contains(rel, "/cypress/") ||
+			strings.Contains(rel, "/e2e/")
+	default:
+		return false
+	}
 }
 
 func resolveRepoRoot(path string) (string, error) {

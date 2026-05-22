@@ -97,6 +97,9 @@ func IsPlanningIntentPath(path string) bool {
 }
 
 func IsSourceContextCandidate(c Candidate) bool {
+	if isTestCaseCandidate(c) {
+		return false
+	}
 	return !strings.EqualFold(filepath.Ext(c.Path), ".md") && !IsPlanningIntentPath(c.Path)
 }
 
@@ -198,6 +201,9 @@ func AuthorityCues(c Candidate) []string {
 	case "collection":
 		cues = append(cues, "collection")
 	}
+	if isTestCaseCandidate(c) {
+		cues = append(cues, "test behavior")
+	}
 	if count := metadataLower(c, "variant_collapsed_count"); count != "" && count != "0" {
 		cues = append(cues, "variants collapsed")
 	}
@@ -285,6 +291,10 @@ func authorityPrior(c Candidate, role, queryLower string) authorityPriorResult {
 	case "model":
 		if hasNonIntentModeIntent(queryLower, "model") {
 			add(0.7, "authority prior: requested model artifact")
+		}
+	case "test_case":
+		if hasTestBehaviorIntent(queryLower) {
+			add(0.6, "authority prior: behavioral test signal")
 		}
 	}
 
@@ -1256,6 +1266,8 @@ func retrievalLimit(queryLower string, terms map[string]float64) int {
 	switch {
 	case hasExplicitSourceIntent(queryLower):
 		limit = 5
+	case hasTestBehaviorIntent(queryLower):
+		limit = 7
 	case hasNonIntentModeIntent(queryLower, "protocol") || hasNonIntentModeIntent(queryLower, "template"):
 		limit = 5
 	case containsAny(queryLower, "rfc", "request for comments", "proposal", "alternatives"):
@@ -1458,6 +1470,18 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 		} else {
 			score -= 10.0
 		}
+	case "test_case":
+		if hasTestBehaviorIntent(queryLower) || explicitSourceIntent || profile.identifierMatches > 0 {
+			score += 2.5
+			if profile.pathTitleCoreMatches > 0 {
+				score += 2.0
+			}
+			if profile.identifierMatches > 0 {
+				score += float64(profile.identifierMatches) * 1.5
+			}
+		} else {
+			score -= 6.0
+		}
 	}
 	if sourceFile {
 		if explicitSourceIntent || containsAny(queryLower, "implement", "implementation", "handler") || hasIdentifierTerm(terms) {
@@ -1659,6 +1683,8 @@ func bodyHitCap(role string, sourceFile bool, term string) int {
 		return 5
 	}
 	switch role {
+	case "test_case":
+		return 4
 	case "plan", "agent_note", "prd":
 		return 3
 	case "adr", "rfc", "openspec_bundle", "openspec_design", "openspec_tasks", "openspec_spec", "openspec_proposal":
@@ -1691,6 +1717,17 @@ func hasExplicitSourceIntent(queryLower string) bool {
 		return true
 	}
 	return hasQueryWord(queryLower, "source") || hasQueryWord(queryLower, "file") || hasQueryWord(queryLower, "handler")
+}
+
+func hasTestBehaviorIntent(queryLower string) bool {
+	return containsAny(queryLower,
+		"test", "tests", "testing", "test case", "test cases",
+		"behavior", "behaviour", "expected behavior", "edge case", "edge cases",
+		"regression", "regressions", "assert", "assertion", "assertions",
+		"validation", "retry", "retries", "idempotent", "idempotency",
+		"auth", "permission", "permissions", "billing", "analytics",
+		"bug", "error", "exception", "failure", "protected",
+	)
 }
 
 func hasProductBackgroundIntent(queryLower string) bool {
@@ -1932,6 +1969,9 @@ func candidateRole(c Candidate) string {
 	if strings.HasPrefix(pathRole, "openspec_") {
 		return pathRole
 	}
+	if role := kindSubtypeRole(c); role == "test_case" {
+		return role
+	}
 	if role := classifierRole(c); role != "" {
 		return role
 	}
@@ -1983,6 +2023,8 @@ func kindSubtypeRole(c Candidate) string {
 	kind := strings.ToLower(strings.TrimSpace(c.Kind))
 	subtype := strings.ToLower(strings.TrimSpace(c.Subtype))
 	switch {
+	case kind == "source_context" && subtype == "test_case":
+		return "test_case"
 	case kind == "decision" && subtype == "adr":
 		return "adr"
 	case kind == "requirements" && subtype == "prd":
@@ -2004,6 +2046,16 @@ func kindSubtypeRole(c Candidate) string {
 	default:
 		return ""
 	}
+}
+
+func isTestCaseCandidate(c Candidate) bool {
+	if strings.EqualFold(c.Subtype, "test_case") {
+		return true
+	}
+	if c.Metadata == nil {
+		return false
+	}
+	return strings.EqualFold(c.Metadata["source_type"], "test_case")
 }
 
 func isProtocolSubtype(subtype string) bool {
@@ -2340,6 +2392,10 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 	case "template":
 		if hasNonIntentModeIntent(queryLower, "template") {
 			reasons = append(reasons, "template/query-intent signal")
+		}
+	case "test_case":
+		if hasTestBehaviorIntent(queryLower) {
+			reasons = append(reasons, "test-case behavior signal")
 		}
 	}
 	if prior := authorityPrior(c, role, queryLower); prior.score != 0 {

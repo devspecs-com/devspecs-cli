@@ -26,22 +26,23 @@ var nowUTC = func() time.Time {
 // NewEvalCmd creates the ds eval command.
 func NewEvalCmd() *cobra.Command {
 	var (
-		asJSON             bool
-		minRecall          float64
-		minMeanRecall      float64
-		minMustRecall      float64
-		minSufficiency     float64
-		minReductionFull   float64
-		resultsDir         string
-		noSave             bool
-		indexed            bool
-		filesystem         bool
-		commandUnderTest   string
-		classifierEval     bool
-		firstIndexReport   bool
-		batchFixtures      bool
-		classifierFixtures []string
-		inputUSDPer1M      float64
+		asJSON                bool
+		minRecall             float64
+		minMeanRecall         float64
+		minMustRecall         float64
+		minSufficiency        float64
+		minReductionFull      float64
+		resultsDir            string
+		noSave                bool
+		indexed               bool
+		filesystem            bool
+		commandUnderTest      string
+		classifierEval        bool
+		firstIndexReport      bool
+		batchFixtures         bool
+		experimentalTestCases bool
+		classifierFixtures    []string
+		inputUSDPer1M         float64
 	)
 
 	cmd := &cobra.Command{
@@ -85,7 +86,7 @@ func NewEvalCmd() *cobra.Command {
 				return nil
 			}
 
-			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
+			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, experimentalTestCases, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
 			if err != nil {
 				return err
 			}
@@ -177,6 +178,7 @@ func NewEvalCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&classifierEval, "classifier", false, "Run deterministic classifier evals from classifier_cases.yaml")
 	cmd.Flags().BoolVar(&firstIndexReport, "first-index-report", false, "Run retrieval and classifier evals and emit an auditable first-index report")
 	cmd.Flags().BoolVar(&batchFixtures, "batch-fixtures", false, "With --first-index-report, discover child fixture directories containing cases.yaml and emit one aggregate report")
+	cmd.Flags().BoolVar(&experimentalTestCases, "experimental-test-cases", false, "Experimental: index executable test cases as behavioral intent artifacts during indexed evals")
 	cmd.Flags().StringArrayVar(&classifierFixtures, "classifier-fixture", nil, "Classifier fixture to include in --first-index-report; may be repeated")
 	cmd.Flags().StringVar(&commandUnderTest, "command", "", "Run eval through a live command path: find or resume-query")
 	cmd.Flags().StringVar(&resultsDir, "results-dir", defaultEvalResultsDir, "Directory for timestamped JSON eval result files")
@@ -272,7 +274,7 @@ func normalizeEvalCommand(command string) (string, error) {
 	}
 }
 
-func runLiveCommandEval(command, fixtureAbs string, cases []evalharness.CaseSpec) (map[string]evalharness.CommandCaseOutput, error) {
+func runLiveCommandEval(command, fixtureAbs string, cases []evalharness.CaseSpec, experimentalTestCases bool) (map[string]evalharness.CommandCaseOutput, error) {
 	tempHome, err := os.MkdirTemp("", "devspecs-live-eval-*")
 	if err != nil {
 		return nil, fmt.Errorf("create live command eval home: %w", err)
@@ -301,7 +303,11 @@ func runLiveCommandEval(command, fixtureAbs string, cases []evalharness.CaseSpec
 	defer os.Chdir(oldWd)
 
 	scanCmd := NewScanCmd()
-	scanCmd.SetArgs([]string{"--quiet"})
+	scanArgs := []string{"--quiet"}
+	if experimentalTestCases {
+		scanArgs = append(scanArgs, "--experimental-test-cases")
+	}
+	scanCmd.SetArgs(scanArgs)
 	scanCmd.SetOut(&bytes.Buffer{})
 	scanCmd.SetErr(&bytes.Buffer{})
 	if err := scanCmd.Execute(); err != nil {

@@ -44,6 +44,7 @@ const (
 	SubtypePromptTemplate         = "prompt_template"
 	SubtypeIssueTemplate          = "issue_template"
 	SubtypePullRequestTemplate    = "pull_request_template"
+	SubtypeTestCase               = "test_case"
 )
 
 var validKinds = map[string]struct{}{
@@ -91,6 +92,9 @@ var allowedSubtypes = map[string]map[string]struct{}{
 		SubtypePromptTemplate:      {},
 		SubtypeIssueTemplate:       {},
 		SubtypePullRequestTemplate: {},
+	},
+	KindSourceContext: {
+		SubtypeTestCase: {},
 	},
 }
 

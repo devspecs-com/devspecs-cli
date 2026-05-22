@@ -3,6 +3,8 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -91,5 +93,68 @@ func TestScan_QuietWithJSON_WritesJSONSuppressesHuman(t *testing.T) {
 	}
 	if strings.Contains(out, "Indexed by source") {
 		t.Fatalf("human summary should be suppressed with --quiet, got: %q", out)
+	}
+}
+
+func TestScanExperimentalTestCasesIndexesTestUnits(t *testing.T) {
+	repoDir := setupE2ERepo(t)
+	testDir := filepath.Join(repoDir, "tests")
+	if err := os.MkdirAll(testDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(testDir, "webhook_test.go"), []byte("package tests\n\nfunc TestWebhookReplayProtection(t *testing.T) {\n\trequire.NoError(t, err)\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	NewInitCmd().Execute()
+
+	scanCmd := NewScanCmd()
+	scanCmd.SetArgs([]string{"--json", "--experimental-test-cases"})
+	buf := &bytes.Buffer{}
+	scanCmd.SetOut(buf)
+	if err := scanCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out struct {
+		Found            map[string]int `json:"Found"`
+		SourcesBreakdown []struct {
+			SourceType string `json:"source_type"`
+			Count      int    `json:"count"`
+		} `json:"sources_breakdown"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Found["test_case"] != 1 {
+		t.Fatalf("test_case found = %d, want 1: %s", out.Found["test_case"], buf.String())
+	}
+	var sawBreakdown bool
+	for _, row := range out.SourcesBreakdown {
+		if row.SourceType == "test_case" {
+			sawBreakdown = true
+			if row.Count != 1 {
+				t.Fatalf("test_case breakdown count = %d, want 1", row.Count)
+			}
+		}
+	}
+	if !sawBreakdown {
+		t.Fatalf("missing test_case source breakdown: %#v", out.SourcesBreakdown)
+	}
+}
+
+func TestLooksLikeTestArtifactPath(t *testing.T) {
+	for _, path := range []string{
+		"pkg/webhook_test.go",
+		"tests/test_billing.py",
+		"src/__tests__/billing.spec.ts",
+		"spec/billing_spec.rb",
+		"tests/BillingTest.php",
+	} {
+		if !looksLikeTestArtifactPath(path) {
+			t.Fatalf("%s should be treated as a test artifact path", path)
+		}
+	}
+	if looksLikeTestArtifactPath("docs/plans/billing.md") {
+		t.Fatal("plan markdown should not be treated as a test artifact path")
 	}
 }

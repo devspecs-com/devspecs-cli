@@ -13,6 +13,8 @@ func SourceTypeDisplayLabel(sourceType string) string {
 		return "ADRs"
 	case "source_context":
 		return "Source context"
+	case "test_case":
+		return "Test cases"
 	default:
 		return sourceType
 	}

@@ -42,7 +42,7 @@ func artifactCandidate(art store.ArtifactRow, sources []store.SourceRow, todos [
 
 func artifactCandidateWithLinks(art store.ArtifactRow, sources []store.SourceRow, links []store.LinkRow, todos []store.TodoRow, body, extractedJSON string) retrieval.Candidate {
 	sourcePath := firstSourcePath(sources)
-	path := sourcePath
+	path := candidatePathFromSources(sources)
 	if path == "" {
 		path = art.Title
 	}
@@ -82,6 +82,24 @@ func artifactCandidateWithLinks(art store.ArtifactRow, sources []store.SourceRow
 	}
 }
 
+func candidatePathFromSources(sources []store.SourceRow) string {
+	for _, src := range sources {
+		if strings.TrimSpace(src.Path) == "" {
+			continue
+		}
+		path := filepath.ToSlash(src.Path)
+		if src.SourceType != "test_case" {
+			return path
+		}
+		parts := strings.Split(src.SourceIdentity, "|")
+		if len(parts) >= 3 && strings.TrimSpace(parts[2]) != "" {
+			return path + "#L" + strings.TrimSpace(parts[2])
+		}
+		return path + "#test-case"
+	}
+	return ""
+}
+
 func artifactExtractedCandidateMetadata(extractedJSON string) map[string]string {
 	if strings.TrimSpace(extractedJSON) == "" {
 		return nil
@@ -100,6 +118,11 @@ func artifactExtractedCandidateMetadata(extractedJSON string) map[string]string 
 		"openspec_change_id",
 		"openspec_capability",
 		"layout_group",
+		"language",
+		"framework",
+		"source_line_range",
+		"test_name",
+		"parent_title",
 	}
 	out := map[string]string{}
 	for _, key := range keys {
