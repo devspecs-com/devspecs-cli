@@ -128,6 +128,39 @@ func TestClassifyCandidateRecognizesEnhancementProposalAsRFC(t *testing.T) {
 	}
 }
 
+func TestClassifyCandidateRecognizesProposalFamilyDirectoryIndexAsRFC(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+	resolution := ClassifyCandidate(Candidate{
+		Path:  "beps/0013-ai-skills/README.md",
+		Scope: ScopeDocument,
+		Body: strings.Join([]string{
+			"---",
+			"status: proposed",
+			"---",
+			"# AI Skills",
+			"",
+			"## Summary",
+			"",
+			"Add a skills interface for reusable agent workflows.",
+			"",
+			"## Motivation",
+			"",
+			"Tool authors need a governed proposal before changing runtime behavior.",
+			"",
+			"## Proposal",
+			"",
+			"Store skill manifests in a stable directory and load them during initialization.",
+			"",
+			"## Detailed Design",
+			"",
+			"Describe parsing, validation, and rollout details.",
+		}, "\n"),
+	}, cfg)
+	if resolution.Winner.Classifier != ModelRFC {
+		t.Fatalf("proposal-family README got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
+	}
+}
+
 func TestClassifyCandidateRecognizesDesignDirProposalAsRFC(t *testing.T) {
 	cfg := DefaultPipelineConfig()
 	resolution := ClassifyCandidate(Candidate{

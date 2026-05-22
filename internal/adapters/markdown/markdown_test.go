@@ -80,6 +80,9 @@ func TestDiscover_DefaultNestedDocsIntentDirs(t *testing.T) {
 	nestedPlan := filepath.Join(tmp, "apps", "desktop", "docs", "plans")
 	nestedPRD := filepath.Join(tmp, "services", "api", "docs", "prd")
 	nestedRFC := filepath.Join(tmp, "packages", "api", "docs", "rfcs")
+	nestedProposal := filepath.Join(tmp, "services", "api", "docs", "proposals")
+	nestedArchitecture := filepath.Join(tmp, "platform", "docs", "architecture")
+	nestedDesignDocs := filepath.Join(tmp, "runtime", "docs", "design-docs")
 	if err := os.MkdirAll(nestedPlan, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -89,9 +92,21 @@ func TestDiscover_DefaultNestedDocsIntentDirs(t *testing.T) {
 	if err := os.MkdirAll(nestedRFC, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(nestedProposal, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(nestedArchitecture, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(nestedDesignDocs, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	os.WriteFile(filepath.Join(nestedPlan, "pnpm-migration.md"), []byte("# PNPM Migration\n"), 0o644)
 	os.WriteFile(filepath.Join(nestedPRD, "billing.md"), []byte("# Billing PRD\n"), 0o644)
 	os.WriteFile(filepath.Join(nestedRFC, "token-boundary.md"), []byte("# Token Boundary RFC\n"), 0o644)
+	os.WriteFile(filepath.Join(nestedProposal, "search-index.md"), []byte("# Search Index Proposal\n"), 0o644)
+	os.WriteFile(filepath.Join(nestedArchitecture, "system-boundaries.md"), []byte("# System Boundaries Architecture\n"), 0o644)
+	os.WriteFile(filepath.Join(nestedDesignDocs, "worker-runtime.md"), []byte("# Worker Runtime Design\n"), 0o644)
 
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), tmp, nil)
@@ -103,6 +118,9 @@ func TestDiscover_DefaultNestedDocsIntentDirs(t *testing.T) {
 		"apps/desktop/docs/plans/pnpm-migration.md",
 		"services/api/docs/prd/billing.md",
 		"packages/api/docs/rfcs/token-boundary.md",
+		"services/api/docs/proposals/search-index.md",
+		"platform/docs/architecture/system-boundaries.md",
+		"runtime/docs/design-docs/worker-runtime.md",
 	} {
 		if !stringSliceContains(got, want) {
 			t.Fatalf("missing nested default intent doc %q in %v", want, got)
@@ -195,6 +213,86 @@ func TestDiscover_ExperimentalIntentDiscoveryFindsGenericCompoundPlanningDirs(t 
 	}
 	if !hasReasonPrefix(candidate.DiscoveryReasons, "intent_heading:implementation_plan") {
 		t.Fatalf("expected implementation-plan heading reason, got %#v", candidate.DiscoveryReasons)
+	}
+}
+
+func TestDiscover_ProposalFamilyDirectoryIndexes(t *testing.T) {
+	tmp := t.TempDir()
+	writeMarkdown(t, tmp, "beps/0013-ai-skills/README.md", strings.Join([]string{
+		"---",
+		"status: proposed",
+		"---",
+		"# AI Skills Proposal",
+		"",
+		"## Summary",
+		"",
+		"## Motivation",
+		"",
+		"## Proposal",
+		"",
+		"## Detailed Design",
+		"",
+		"## Drawbacks",
+	}, "\n"))
+	writeMarkdown(t, tmp, "enhancements/sig-node/2008-checkpointing/README.md", strings.Join([]string{
+		"# Node Checkpointing",
+		"",
+		"## Summary",
+		"",
+		"## Motivation",
+		"",
+		"## Proposal",
+		"",
+		"## Unresolved Questions",
+	}, "\n"))
+	writeMarkdown(t, tmp, "docs/roadmaps/2026-platform.md", "# Platform Roadmap\n\n## Milestones\n\n## Timeline\n")
+	writeMarkdown(t, tmp, "docs/release-notes/v1.md", "# Release Notes\n\n## Highlights\n")
+	writeMarkdown(t, tmp, ".github/pull_request_template.md", "# Pull Request\n")
+	writeMarkdown(t, tmp, "README.md", "# Project\n\n## Architecture\n")
+
+	a := &Adapter{}
+	candidates, err := a.Discover(context.Background(), tmp, config.WithIntentCandidateDiscovery(nil, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := candidateRelPaths(candidates)
+	for _, want := range []string{
+		"beps/0013-ai-skills/README.md",
+		"enhancements/sig-node/2008-checkpointing/README.md",
+		"docs/roadmaps/2026-platform.md",
+	} {
+		if !stringSliceContains(got, want) {
+			t.Fatalf("missing proposal/roadmap candidate %q in %v", want, got)
+		}
+	}
+	for _, noisy := range []string{
+		"docs/release-notes/v1.md",
+		".github/pull_request_template.md",
+		"README.md",
+	} {
+		if stringSliceContains(got, noisy) {
+			t.Fatalf("broad discovery admitted noisy doc %q in %v", noisy, got)
+		}
+	}
+
+	for _, rel := range []string{
+		"beps/0013-ai-skills/README.md",
+		"enhancements/sig-node/2008-checkpointing/README.md",
+	} {
+		candidate := findCandidate(candidates, rel)
+		if candidate.DiscoveryScore < intentCandidateMinScore {
+			t.Fatalf("%s discovery score = %.2f, want >= %.2f", rel, candidate.DiscoveryScore, intentCandidateMinScore)
+		}
+	}
+	score, reasons := scoreIntentMarkdownCandidate(
+		filepath.Join(tmp, filepath.FromSlash("beps/0013-ai-skills/README.md")),
+		"beps/0013-ai-skills/README.md",
+	)
+	if score < intentCandidateMinScore {
+		t.Fatalf("proposal-family score = %.2f, want >= %.2f", score, intentCandidateMinScore)
+	}
+	if !hasReasonPrefix(reasons, "intent_heading:proposal") {
+		t.Fatalf("expected proposal heading reason, got %#v", reasons)
 	}
 }
 
@@ -430,6 +528,11 @@ func TestInferKind(t *testing.T) {
 		{"docs/rfcs/0007-auth-session.md", "design"},
 		{"rfcs/session-token-handoff.md", "design"},
 		{"token-boundary.rfc.md", "design"},
+		{"beps/0013-ai-skills/README.md", "design"},
+		{"enhancements/sig-node/2008-checkpointing/README.md", "design"},
+		{"docs/proposals/search-index.md", "design"},
+		{"design-docs/worker-runtime.md", "design"},
+		{"docs/architecture/system-boundaries.md", "design"},
 		{"docs/requirements/auth.md", "requirements"},
 		{"notes/random.md", "markdown_artifact"},
 		{"v0.prd.md", "requirements"},
@@ -448,7 +551,15 @@ func TestInferKind(t *testing.T) {
 
 func TestDefaultPaths_NarrowDocs(t *testing.T) {
 	paths := defaultPaths()
-	required := []string{".claude/notes", "docs/specs", "docs/plans", "docs/prd", "docs/rfcs", "rfcs", "docs/design", "docs/technical", "_bmad-output", ".specify/memory"}
+	required := []string{
+		".claude/notes", ".claude/plans", ".codex/plans", ".codex/notes",
+		"docs/specs", "docs/plans", "docs/prd", "docs/rfcs", "rfcs",
+		"roadmaps", "docs/roadmaps",
+		"proposals", "docs/proposals", "enhancements", "docs/enhancements",
+		"keps", "teps", "beps", "sips", "ships", "oseps",
+		"docs/design", "docs/design-docs", "design-docs", "docs/technical",
+		"architecture", "docs/architecture", "_bmad-output", ".specify/memory",
+	}
 	for _, req := range required {
 		found := false
 		for _, p := range paths {
@@ -468,9 +579,23 @@ func TestDefaultPaths_NarrowDocs(t *testing.T) {
 	}
 }
 
+func TestDefaultRepoConfigMarkdownPathsMatchAdapterDefaults(t *testing.T) {
+	cfg := config.DefaultRepoConfig()
+	var cfgPaths []string
+	for _, src := range cfg.Sources {
+		if src.Type == "markdown" {
+			cfgPaths = src.Paths
+			break
+		}
+	}
+	if !sameStrings(cfgPaths, defaultPaths()) {
+		t.Fatalf("config.DefaultRepoConfig markdown paths drifted from adapter defaults\nconfig:  %#v\nadapter: %#v", cfgPaths, defaultPaths())
+	}
+}
+
 func TestRootGlobs_AllPatterns(t *testing.T) {
 	globs := rootGlobs()
-	expected := []string{"*.spec.md", "*.plan.md", "*.prd.md", "*.rfc.md", "*.design.md", "*.contract.md", "*.requirements.md"}
+	expected := []string{"*.spec.md", "*.plan.md", "*.prd.md", "*.rfc.md", "*.roadmap.md", "*.design.md", "*.contract.md", "*.requirements.md"}
 	if len(globs) != len(expected) {
 		t.Fatalf("expected %d root globs, got %d", len(expected), len(globs))
 	}
@@ -484,6 +609,7 @@ func TestRootGlobs_AllPatterns(t *testing.T) {
 func TestDiscover_RootGlobs(t *testing.T) {
 	tmp := t.TempDir()
 	os.WriteFile(filepath.Join(tmp, "v0.prd.md"), []byte("# PRD"), 0o644)
+	os.WriteFile(filepath.Join(tmp, "platform.roadmap.md"), []byte("# Platform Roadmap"), 0o644)
 	os.WriteFile(filepath.Join(tmp, "api.design.md"), []byte("# Design"), 0o644)
 	os.WriteFile(filepath.Join(tmp, "auth.contract.md"), []byte("# Contract"), 0o644)
 	os.WriteFile(filepath.Join(tmp, "reqs.requirements.md"), []byte("# Reqs"), 0o644)
@@ -493,8 +619,8 @@ func TestDiscover_RootGlobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != 4 {
-		t.Fatalf("expected 4 root glob candidates, got %d", len(candidates))
+	if len(candidates) != 5 {
+		t.Fatalf("expected 5 root glob candidates, got %d", len(candidates))
 	}
 }
 

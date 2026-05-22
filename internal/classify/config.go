@@ -313,7 +313,15 @@ func DefaultPipelineConfig() PipelineConfig {
 				Scopes:    []Scope{ScopeDocument},
 				Kind:      "design",
 				Authority: AuthorityDesignProposal,
-				PathHints: []string{"rfcs/**", "docs/rfcs/**", "docs/proposals/**", "enhancements/**", "keps/**", "teps/**", "oseps/**"},
+				PathHints: []string{
+					"rfcs/**", "rfc/**", "docs/rfcs/**", "docs/rfc/**",
+					"proposals/**", "docs/proposals/**",
+					"enhancements/**", "docs/enhancements/**",
+					"keps/**", "docs/keps/**", "teps/**", "docs/teps/**",
+					"beps/**", "docs/beps/**", "sips/**", "docs/sips/**",
+					"ships/**", "docs/ships/**", "oseps/**", "docs/oseps/**",
+					"design-docs/**", "docs/design-docs/**",
+				},
 				Evidence: []EvidenceRule{
 					evidence("rfc_title_signal", 0.12, ReasonHeadingMatch, "RFC/proposal title signal is present.", EvidenceMatch{
 						Scope:    ScopeDocument,
@@ -321,7 +329,7 @@ func DefaultPipelineConfig() PipelineConfig {
 					}),
 					evidence("rfc_path_signal", 0.08, ReasonPathHint, "RFC/proposal path signal is present.", EvidenceMatch{
 						Scope:           ScopeDocument,
-						PathContainsAny: []string{"rfc", "rfcs", "proposal", "proposals"},
+						PathContainsAny: []string{"rfc", "rfcs", "proposal", "proposals", "enhancement", "enhancements"},
 					}),
 					evidence("rfc_filename_signal", 0.20, ReasonPathHint, "RFC filename signal is present.", EvidenceMatch{
 						Scope:       ScopeDocument,
@@ -337,7 +345,7 @@ func DefaultPipelineConfig() PipelineConfig {
 					}),
 					evidence("rfc_enhancement_path_signal", 0.34, ReasonPathHint, "Enhancement/KEP/TEP/SIP/SHIP path signal is present.", EvidenceMatch{
 						Scope:           ScopeDocument,
-						PathContainsAny: []string{"enhancements/", "/enhancements/", "keps/", "/keps/", "teps/", "/teps/", "oseps/", "/oseps/", "ships/", "/ships/", "sips/", "/sips/", "docs/design/", "docs/proposals/"},
+						PathContainsAny: []string{"enhancements/", "/enhancements/", "keps/", "/keps/", "teps/", "/teps/", "beps/", "/beps/", "oseps/", "/oseps/", "ships/", "/ships/", "sips/", "/sips/", "docs/design/", "docs/design-docs/", "docs/proposals/", "design-docs/"},
 					}),
 					evidence("rfc_governance_frontmatter_status", 0.10, ReasonStatusSignal, "Proposal-style governance frontmatter declares a status.", EvidenceMatch{
 						Scope:             ScopeDocument,
@@ -432,7 +440,7 @@ func DefaultPipelineConfig() PipelineConfig {
 				Scopes:    []Scope{ScopeDocument},
 				Kind:      "plan",
 				Authority: AuthorityWorkingPlan,
-				PathHints: []string{"plans/**", "docs/plans/**", "roadmap.md", "plan.md", "docs/stories/**", "**/*.story.md"},
+				PathHints: []string{"plans/**", "docs/plans/**", "roadmaps/**", "docs/roadmaps/**", "roadmap.md", "*.roadmap.md", "plan.md", "docs/stories/**", "**/*.story.md"},
 				Evidence: []EvidenceRule{
 					evidence("plan_dated_filename", 0.12, ReasonLifecycleSignal, "Plan has dated filename or path token.", EvidenceMatch{
 						Scope:         ScopeDocument,

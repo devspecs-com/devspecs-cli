@@ -253,7 +253,12 @@ func defaultPaths() []string {
 		"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans",
 		".claude/notes", ".claude/plans", ".codex/plans", ".codex/notes",
 		"docs/prd", "rfcs", "rfc", "docs/rfcs", "docs/rfc",
-		"docs/design", "docs/technical",
+		"roadmaps", "docs/roadmaps",
+		"proposals", "docs/proposals", "enhancements", "docs/enhancements",
+		"keps", "docs/keps", "teps", "docs/teps", "beps", "docs/beps",
+		"sips", "docs/sips", "ships", "docs/ships", "oseps", "docs/oseps",
+		"docs/design", "docs/design-docs", "design-docs", "docs/technical",
+		"architecture", "docs/architecture",
 		"_bmad-output", ".specify/memory",
 	}
 }
@@ -261,7 +266,7 @@ func defaultPaths() []string {
 func rootGlobs() []string {
 	return []string{
 		"*.spec.md", "*.plan.md", "*.prd.md",
-		"*.rfc.md", "*.design.md", "*.contract.md", "*.requirements.md",
+		"*.rfc.md", "*.roadmap.md", "*.design.md", "*.contract.md", "*.requirements.md",
 	}
 }
 
@@ -463,12 +468,19 @@ func scoreIntentPath(relPath string) (float64, []string) {
 	tokenWeights := map[string]float64{
 		"adr":            4.5,
 		"rfc":            4.5,
+		"bep":            4.0,
+		"kep":            4.0,
+		"osep":           4.0,
+		"ship":           4.0,
+		"sip":            4.0,
+		"tep":            4.0,
 		"plan":           3.5,
 		"design":         3.5,
 		"proposal":       3.5,
+		"enhancement":    3.4,
 		"decision":       3.5,
 		"requirement":    3.2,
-		"architecture":   2.4,
+		"architecture":   3.1,
 		"spec":           2.2,
 		"implementation": 1.8,
 		"migration":      1.8,
@@ -477,7 +489,7 @@ func scoreIntentPath(relPath string) (float64, []string) {
 		"story":          1.7,
 		"epic":           1.7,
 		"milestone":      1.6,
-		"roadmap":        1.6,
+		"roadmap":        2.6,
 		"risk":           1.4,
 	}
 
@@ -535,11 +547,19 @@ func scoreIntentContent(content string) (float64, []string) {
 	headingWeights := map[string]float64{
 		"goal":                 1.4,
 		"non goal":             1.4,
+		"summary":              1.3,
+		"abstract":             1.3,
+		"motivation":           1.5,
 		"context":              1.2,
 		"background":           1.0,
 		"decision":             1.8,
 		"alternative":          1.5,
+		"drawback":             1.3,
+		"unresolved question":  1.4,
 		"implementation plan":  1.8,
+		"detailed design":      1.5,
+		"technical design":     1.5,
+		"design consideration": 1.4,
 		"task":                 1.2,
 		"acceptance criterion": 1.6,
 		"risk":                 1.3,
@@ -548,6 +568,13 @@ func scoreIntentContent(content string) (float64, []string) {
 		"requirement":          1.5,
 		"proposal":             1.4,
 		"design":               1.4,
+		"architecture":         1.4,
+		"constraint":           1.2,
+		"component":            1.1,
+		"dependency":           1.1,
+		"milestone":            1.3,
+		"timeline":             1.2,
+		"now next later":       1.6,
 	}
 	var score float64
 	var reasons []string
@@ -636,10 +663,26 @@ func normalizeIntentToken(value string) string {
 	switch token {
 	case "plans", "planning", "planned":
 		return "plan"
+	case "roadmaps":
+		return "roadmap"
 	case "designs":
 		return "design"
 	case "proposals":
 		return "proposal"
+	case "enhancements":
+		return "enhancement"
+	case "beps":
+		return "bep"
+	case "keps":
+		return "kep"
+	case "oseps":
+		return "osep"
+	case "ships":
+		return "ship"
+	case "sips":
+		return "sip"
+	case "teps":
+		return "tep"
 	case "decisions":
 		return "decision"
 	case "requirements":
@@ -664,6 +707,18 @@ func normalizeIntentToken(value string) string {
 		return "alternative"
 	case "questions":
 		return "question"
+	case "constraints":
+		return "constraint"
+	case "components":
+		return "component"
+	case "dependencies":
+		return "dependency"
+	case "drawbacks":
+		return "drawback"
+	case "milestones":
+		return "milestone"
+	case "timelines":
+		return "timeline"
 	}
 	if strings.HasPrefix(token, "plan") {
 		return "plan"
@@ -718,8 +773,30 @@ func isDefaultNestedMarkdownDir(rel string) bool {
 		"docs/prd",
 		"docs/rfcs",
 		"docs/rfc",
+		"roadmaps",
+		"docs/roadmaps",
+		"proposals",
+		"docs/proposals",
+		"enhancements",
+		"docs/enhancements",
+		"keps",
+		"docs/keps",
+		"teps",
+		"docs/teps",
+		"beps",
+		"docs/beps",
+		"sips",
+		"docs/sips",
+		"ships",
+		"docs/ships",
+		"oseps",
+		"docs/oseps",
 		"docs/design",
+		"docs/design-docs",
+		"design-docs",
 		"docs/technical",
+		"architecture",
+		"docs/architecture",
 	} {
 		if rel == suffix || strings.HasSuffix(rel, "/"+suffix) {
 			return true
@@ -815,7 +892,7 @@ func inferKindSubtype(relPath string) (kind, subtype string) {
 	switch {
 	case strings.Contains(lower, "prd"):
 		return config.KindRequirements, config.SubtypePRD
-	case isRFCPath(lower):
+	case isRFCProposalPath(lower):
 		return config.KindDesign, ""
 	case strings.Contains(lower, "plan") || strings.Contains(lower, "roadmap") || isStoryPath(lower):
 		return config.KindPlan, ""
@@ -823,7 +900,7 @@ func inferKindSubtype(relPath string) (kind, subtype string) {
 		return config.KindSpec, ""
 	case strings.Contains(lower, "requirement"):
 		return config.KindRequirements, ""
-	case strings.Contains(lower, "design"):
+	case strings.Contains(lower, "design") || strings.Contains(lower, "architecture"):
 		return config.KindDesign, ""
 	case strings.Contains(lower, "contract"):
 		return config.KindContract, ""
@@ -858,6 +935,32 @@ func isRFCPath(relPath string) bool {
 		strings.HasSuffix(base, "-rfc") ||
 		strings.HasSuffix(base, ".rfc") ||
 		strings.Contains(base, "request-for-comments")
+}
+
+func isRFCProposalPath(relPath string) bool {
+	relPath = strings.Trim(filepath.ToSlash(strings.ToLower(relPath)), "/")
+	if relPath == "" {
+		return false
+	}
+	if isRFCPath(relPath) {
+		return true
+	}
+	segments := strings.Split(relPath, "/")
+	for _, segment := range segments[:len(segments)-1] {
+		switch segment {
+		case "proposal", "proposals", "enhancement", "enhancements",
+			"kep", "keps", "tep", "teps", "bep", "beps",
+			"sip", "sips", "ship", "ships", "osep", "oseps",
+			"design", "designs", "design-docs":
+			return true
+		}
+	}
+	base := strings.TrimSuffix(filepath.Base(relPath), filepath.Ext(relPath))
+	return base == "proposal" ||
+		strings.HasPrefix(base, "proposal-") ||
+		strings.HasPrefix(base, "proposal_") ||
+		strings.HasSuffix(base, "-proposal") ||
+		strings.Contains(base, "request-for-feedback")
 }
 
 func inferKind(relPath string) string {
