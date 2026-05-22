@@ -95,6 +95,9 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 			source = c.Path
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", displayID, c.Kind, sub, c.Title, source)
+		if cues := retrieval.AuthorityCues(c); len(cues) > 0 {
+			fmt.Fprintf(w, "\t\t\tCues: %s\t\n", strings.Join(cues, "; "))
+		}
 		if rs := reasons[c.Path]; len(rs) > 0 {
 			fmt.Fprintf(w, "\t\t\tReasons: %s\t\n", strings.Join(rs, "; "))
 		}
@@ -117,6 +120,7 @@ type FindResult struct {
 	LastObservedAt string   `json:"LastObservedAt"`
 	SourcePath     string   `json:"source_path,omitempty"`
 	Retriever      string   `json:"retriever"`
+	AuthorityCues  []string `json:"authority_cues,omitempty"`
 	Reasons        []string `json:"reasons,omitempty"`
 }
 
@@ -137,6 +141,7 @@ func findResults(candidates []retrieval.Candidate, reasons map[string][]string, 
 			LastObservedAt: metadataValue(c, "last_observed_at"),
 			SourcePath:     c.Source,
 			Retriever:      retrieverName,
+			AuthorityCues:  retrieval.AuthorityCues(c),
 			Reasons:        reasons[c.Path],
 		})
 	}

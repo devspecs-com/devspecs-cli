@@ -126,6 +126,7 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string) []Candidate {
 		return scoredCandidates[i].score > scoredCandidates[j].score
 	})
 	limit := retrievalLimit(queryLower, terms)
+	scoredCandidates = collapseVariantCandidates(scoredCandidates, queryLower)
 	scoredCandidates = selectScoredCandidates(scoredCandidates, queryLower, limit)
 	out := make([]Candidate, 0, len(scoredCandidates))
 	for _, sf := range scoredCandidates {
@@ -149,6 +150,59 @@ type scoredCandidate struct {
 type authorityPriorResult struct {
 	score   float64
 	reasons []string
+}
+
+// AuthorityCues returns short trust/caution labels that are safe to show in
+// human or JSON output. It intentionally exposes less detail than retrieval
+// reasons; the detailed factors remain available through ExplainCandidates.
+func AuthorityCues(c Candidate) []string {
+	var cues []string
+	switch metadataLower(c, "classifier_authority") {
+	case "high_current_intent":
+		cues = append(cues, "current intent")
+	case "high_decision":
+		cues = append(cues, "decision authority")
+	case "design_proposal":
+		cues = append(cues, "design/proposal")
+	case "product_background":
+		cues = append(cues, "product background")
+	case "working_plan":
+		cues = append(cues, "working plan")
+	case "handoff_note":
+		cues = append(cues, "handoff note")
+	}
+
+	status := strings.ToLower(strings.TrimSpace(c.Status))
+	if status == "" {
+		status = metadataLower(c, "classifier_status")
+	}
+	lifecycle := metadataLower(c, "classifier_lifecycle")
+	switch {
+	case status == "accepted":
+		cues = append(cues, "accepted")
+	case status == "superseded" || lifecycle == "superseded":
+		cues = append(cues, "superseded")
+	case status == "stale" || lifecycle == "stale":
+		cues = append(cues, "stale")
+	case status == "deprecated" || lifecycle == "deprecated" || lifecycle == "obsolete":
+		cues = append(cues, "deprecated")
+	case lifecycle == "archived":
+		cues = append(cues, "archived")
+	}
+
+	switch metadataLower(c, "artifact_scope") {
+	case "bundle":
+		cues = append(cues, "bundle")
+	case "collection":
+		cues = append(cues, "collection")
+	}
+	if count := metadataLower(c, "variant_collapsed_count"); count != "" && count != "0" {
+		cues = append(cues, "variants collapsed")
+	}
+	if len(cues) > 2 {
+		cues = cues[:2]
+	}
+	return uniqueStrings(cues)
 }
 
 func authorityPrior(c Candidate, role, queryLower string) authorityPriorResult {
@@ -353,6 +407,313 @@ func hasExamplePath(pathLower string) bool {
 		hasPathSegment(pathLower, "samples") ||
 		hasPathSegment(pathLower, "demo") ||
 		hasPathSegment(pathLower, "demos")
+}
+
+type groupedVariantCandidate struct {
+	candidate scoredCandidate
+	variant   variantInfo
+}
+
+func collapseVariantCandidates(candidates []scoredCandidate, queryLower string) []scoredCandidate {
+	if len(candidates) <= 1 {
+		return candidates
+	}
+	groups := map[string][]groupedVariantCandidate{}
+	for _, candidate := range candidates {
+		variant := variantFingerprint(candidate.candidate, queryLower)
+		if variant.key == "" {
+			continue
+		}
+		groups[variant.key] = append(groups[variant.key], groupedVariantCandidate{candidate: candidate, variant: variant})
+	}
+	collapsedPaths := map[string]bool{}
+	keepers := map[string]scoredCandidate{}
+	for key, group := range groups {
+		if len(group) < 2 || !groupHasVariant(group) {
+			continue
+		}
+		keepIndex := 0
+		keepScore := variantSelectionScore(group[0].candidate, group[0].variant, queryLower)
+		for i := 1; i < len(group); i++ {
+			score := variantSelectionScore(group[i].candidate, group[i].variant, queryLower)
+			if score > keepScore || (score == keepScore && group[i].candidate.candidate.Path < group[keepIndex].candidate.candidate.Path) {
+				keepIndex = i
+				keepScore = score
+			}
+		}
+		collapsed := make([]string, 0, len(group)-1)
+		reasons := make([]string, 0, len(group)-1)
+		for i, item := range group {
+			path := item.candidate.candidate.Path
+			if i == keepIndex {
+				continue
+			}
+			if preserveVariantCandidate(item.candidate, item.variant, queryLower) {
+				continue
+			}
+			collapsedPaths[path] = true
+			collapsed = append(collapsed, path)
+			reasons = append(reasons, item.variant.reason)
+		}
+		if len(collapsed) == 0 {
+			continue
+		}
+		keeper := group[keepIndex].candidate
+		keeper.candidate = withVariantMetadata(keeper.candidate, key, group[keepIndex].variant, collapsed, reasons)
+		keepers[keeper.candidate.Path] = keeper
+	}
+	if len(collapsedPaths) == 0 {
+		return candidates
+	}
+	out := make([]scoredCandidate, 0, len(candidates)-len(collapsedPaths))
+	for _, candidate := range candidates {
+		if collapsedPaths[candidate.candidate.Path] {
+			continue
+		}
+		if keeper, ok := keepers[candidate.candidate.Path]; ok {
+			candidate = keeper
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+type variantInfo struct {
+	key    string
+	role   string
+	reason string
+	exact  bool
+}
+
+func variantFingerprint(c Candidate, queryLower string) variantInfo {
+	path := strings.Trim(strings.ToLower(filepath.ToSlash(c.Path)), "/")
+	if path == "" {
+		return variantInfo{}
+	}
+	segments := strings.Split(path, "/")
+	normalized := make([]string, 0, len(segments))
+	roles := map[string]bool{}
+	for _, segment := range segments {
+		switch {
+		case isLocaleSegment(segment):
+			roles["translation"] = true
+			continue
+		case isArchiveSegment(segment):
+			roles["archive"] = true
+			continue
+		case isGeneratedSegment(segment):
+			roles["generated"] = true
+			continue
+		case isTemplateSegment(segment):
+			roles["template"] = true
+			continue
+		case isExampleSegment(segment):
+			roles["example"] = true
+			continue
+		default:
+			normalized = append(normalized, segment)
+		}
+	}
+	role := variantRoleFromMarkers(roles)
+	if role == "" && isAgentInstructionPath(path) && hasRepositoryInstructionIntent(queryLower) {
+		role = "nested-module"
+		normalized = []string{filepath.Base(path)}
+		if pathDepth(path) == 0 {
+			role = "canonical"
+		}
+	}
+	if role == "" {
+		return variantInfo{key: variantBaseKey(c, path), role: "canonical", exact: variantHasExactQueryAnchor(c, queryLower)}
+	}
+	if len(normalized) == 0 {
+		normalized = []string{filepath.Base(path)}
+	}
+	return variantInfo{
+		key:    variantBaseKey(c, strings.Join(normalized, "/")),
+		role:   role,
+		reason: variantReason(role),
+		exact:  variantHasExactQueryAnchor(c, queryLower),
+	}
+}
+
+func variantBaseKey(c Candidate, normalizedPath string) string {
+	role := candidateRole(c)
+	if role == "" {
+		role = strings.ToLower(strings.TrimSpace(c.Kind + ":" + c.Subtype))
+	}
+	if role == "" {
+		role = "unknown"
+	}
+	return role + "|" + normalizedPath
+}
+
+func variantRoleFromMarkers(roles map[string]bool) string {
+	for _, role := range []string{"archive", "generated", "template", "example", "translation"} {
+		if roles[role] {
+			return role
+		}
+	}
+	return ""
+}
+
+func groupHasVariant(group []groupedVariantCandidate) bool {
+	for _, item := range group {
+		if item.variant.role != "canonical" {
+			return true
+		}
+	}
+	return false
+}
+
+func variantSelectionScore(candidate scoredCandidate, variant variantInfo, queryLower string) float64 {
+	score := candidate.score
+	if variant.exact {
+		score += 100
+	}
+	switch variant.role {
+	case "canonical":
+		score += 8
+	case "nested-module":
+		if !queryMentionsInstructionPathSubject(queryLower, strings.ToLower(filepath.ToSlash(candidate.candidate.Path))) {
+			score -= 4
+		}
+	case "translation":
+		if isLikelyUnrequestedLocalizedPath(strings.ToLower(filepath.ToSlash(candidate.candidate.Path)), queryLower) {
+			score -= 3
+		}
+	case "archive":
+		if !hasLifecycleIntent(queryLower) && !containsAny(queryLower, "archive", "archived", "historical", "history") {
+			score -= 5
+		}
+	case "template":
+		if !hasNonIntentModeIntent(queryLower, "template") && !strings.Contains(queryLower, "template") {
+			score -= 4
+		}
+	case "example":
+		if !containsAny(queryLower, "example", "sample", "demo") {
+			score -= 3
+		}
+	case "generated":
+		if !containsAny(queryLower, "generated", "reference") {
+			score -= 3
+		}
+	}
+	return score
+}
+
+func preserveVariantCandidate(candidate scoredCandidate, variant variantInfo, queryLower string) bool {
+	if variant.exact {
+		return true
+	}
+	pathLower := strings.ToLower(filepath.ToSlash(candidate.candidate.Path))
+	switch variant.role {
+	case "canonical":
+		return true
+	case "archive":
+		return hasLifecycleIntent(queryLower) || containsAny(queryLower, "archive", "archived", "historical", "history")
+	case "template":
+		return hasNonIntentModeIntent(queryLower, "template") || strings.Contains(queryLower, "template")
+	case "example":
+		return containsAny(queryLower, "example", "sample", "demo")
+	case "generated":
+		return containsAny(queryLower, "generated", "reference")
+	case "translation":
+		return !isLikelyUnrequestedLocalizedPath(pathLower, queryLower)
+	case "nested-module":
+		return queryMentionsInstructionPathSubject(queryLower, pathLower)
+	default:
+		return false
+	}
+}
+
+func withVariantMetadata(c Candidate, groupID string, kept variantInfo, collapsed, reasons []string) Candidate {
+	if c.Metadata == nil {
+		c.Metadata = map[string]string{}
+	} else {
+		c.Metadata = copyMetadata(c.Metadata)
+	}
+	c.Metadata["variant_group_id"] = groupID
+	c.Metadata["variant_role"] = kept.role
+	c.Metadata["variant_collapsed_count"] = strconv.Itoa(len(collapsed))
+	c.Metadata["variant_collapsed_paths"] = strings.Join(uniqueStrings(collapsed), "\n")
+	c.Metadata["variant_reason"] = strings.Join(uniqueStrings(reasons), "; ")
+	return c
+}
+
+func variantReason(role string) string {
+	switch role {
+	case "archive":
+		return "archive/current variant"
+	case "generated":
+		return "generated/reference variant"
+	case "template":
+		return "template/instance variant"
+	case "example":
+		return "example/sample variant"
+	case "translation":
+		return "localized mirror"
+	case "nested-module":
+		return "nested instruction variant"
+	default:
+		return "variant"
+	}
+}
+
+func variantHasExactQueryAnchor(c Candidate, queryLower string) bool {
+	pathLower := strings.ToLower(filepath.ToSlash(c.Path))
+	titleLower := strings.ToLower(c.Title)
+	if pathLower != "" && strings.Contains(queryLower, pathLower) {
+		return true
+	}
+	if titleLower != "" && len(meaningfulTerms(titleLower)) >= 3 && strings.Contains(queryLower, titleLower) {
+		return true
+	}
+	base := strings.ToLower(filepath.Base(pathLower))
+	baseNoExt := strings.TrimSuffix(base, filepath.Ext(base))
+	if len(baseNoExt) >= 8 && strings.Contains(queryLower, baseNoExt) {
+		return true
+	}
+	return false
+}
+
+func isLocaleSegment(segment string) bool {
+	switch segment {
+	case "en", "en-us", "en-gb", "zh", "zh-cn", "zh-tw", "ja", "ko", "fr", "de", "es", "pt", "pt-br", "ru":
+		return true
+	default:
+		return false
+	}
+}
+
+func isArchiveSegment(segment string) bool {
+	switch segment {
+	case "archive", "archives", "archived", "legacy", "old", "deprecated":
+		return true
+	default:
+		return false
+	}
+}
+
+func isGeneratedSegment(segment string) bool {
+	switch segment {
+	case "generated", "gen", "reference", "references", "docs-generated":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTemplateSegment(segment string) bool {
+	return segment == "template" || segment == "templates"
+}
+
+func isExampleSegment(segment string) bool {
+	switch segment {
+	case "example", "examples", "sample", "samples", "demo", "demos", "fixture", "fixtures":
+		return true
+	default:
+		return false
+	}
 }
 
 func selectScoredCandidates(candidates []scoredCandidate, queryLower string, limit int) []scoredCandidate {

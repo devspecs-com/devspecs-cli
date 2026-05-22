@@ -560,6 +560,126 @@ func TestExplainCandidatesIncludesClassifierAuthorityPrior(t *testing.T) {
 	}
 }
 
+func TestAuthorityCuesAreSparse(t *testing.T) {
+	candidate := Candidate{
+		Status: "accepted",
+		Metadata: map[string]string{
+			"classifier_authority": "high_decision",
+			"artifact_scope":       "bundle",
+		},
+	}
+
+	cues := AuthorityCues(candidate)
+	if len(cues) != 2 {
+		t.Fatalf("cues = %#v", cues)
+	}
+	if cues[0] != "decision authority" || cues[1] != "accepted" {
+		t.Fatalf("cues = %#v", cues)
+	}
+}
+
+func TestWeightedFilesRetrieverV0_CollapsesLocalizedMirror(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "docs/en/architecture/billing-boundary.md",
+			Kind:  "design",
+			Title: "Billing Boundary",
+			Body:  "Architecture design for billing boundary and entitlement sync.",
+		},
+		{
+			Path:  "docs/zh/architecture/billing-boundary.md",
+			Kind:  "design",
+			Title: "Billing Boundary",
+			Body:  "Architecture design for billing boundary and entitlement sync.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "architecture design for billing boundary entitlement sync")
+	if containsCandidatePath(got, "docs/zh/architecture/billing-boundary.md") {
+		t.Fatalf("localized mirror should be collapsed: %#v", CandidatePaths(got))
+	}
+	if !containsCandidatePath(got, "docs/en/architecture/billing-boundary.md") {
+		t.Fatalf("missing default-language candidate: %#v", CandidatePaths(got))
+	}
+}
+
+func TestWeightedFilesRetrieverV0_CollapsesArchiveCurrentVariant(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "docs/architecture/billing-boundary.md",
+			Kind:  "design",
+			Title: "Billing Boundary",
+			Body:  "Architecture design for billing boundary and entitlement sync.",
+		},
+		{
+			Path:  "docs/archive/architecture/billing-boundary.md",
+			Kind:  "design",
+			Title: "Billing Boundary",
+			Body:  "Architecture design for billing boundary and entitlement sync.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "architecture design for billing boundary entitlement sync")
+	if containsCandidatePath(got, "docs/archive/architecture/billing-boundary.md") {
+		t.Fatalf("archive variant should be collapsed: %#v", CandidatePaths(got))
+	}
+	if !containsCandidatePath(got, "docs/architecture/billing-boundary.md") {
+		t.Fatalf("missing current candidate: %#v", CandidatePaths(got))
+	}
+	if got[0].Metadata["variant_collapsed_count"] != "1" {
+		t.Fatalf("missing collapsed metadata: %#v", got[0].Metadata)
+	}
+}
+
+func TestWeightedFilesRetrieverV0_PreservesRequestedArchiveVariant(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "docs/architecture/billing-boundary.md",
+			Kind:  "design",
+			Title: "Billing Boundary",
+			Body:  "Architecture design for billing boundary and entitlement sync.",
+		},
+		{
+			Path:  "docs/archive/architecture/billing-boundary.md",
+			Kind:  "design",
+			Title: "Billing Boundary",
+			Body:  "Architecture design for billing boundary and entitlement sync.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "historical archive docs/archive/architecture/billing-boundary.md")
+	if !containsCandidatePath(got, "docs/archive/architecture/billing-boundary.md") {
+		t.Fatalf("explicitly requested archive variant should remain visible: %#v", CandidatePaths(got))
+	}
+}
+
+func TestWeightedFilesRetrieverV0_CollapsesTemplateInstanceVariant(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:    "docs/product/billing-prd.md",
+			Kind:    "requirements",
+			Subtype: "prd",
+			Title:   "Billing PRD",
+			Body:    "Product requirements for billing entitlement sync.",
+		},
+		{
+			Path:    "docs/templates/product/billing-prd.md",
+			Kind:    "requirements",
+			Subtype: "prd",
+			Title:   "Billing PRD Template",
+			Body:    "Product requirements template for billing entitlement sync.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "billing product requirements entitlement sync")
+	if containsCandidatePath(got, "docs/templates/product/billing-prd.md") {
+		t.Fatalf("template variant should be collapsed for non-template query: %#v", CandidatePaths(got))
+	}
+	if !containsCandidatePath(got, "docs/product/billing-prd.md") {
+		t.Fatalf("missing concrete PRD instance: %#v", CandidatePaths(got))
+	}
+}
+
 func reasonContains(reasons []string, want string) bool {
 	for _, reason := range reasons {
 		if reason == want {

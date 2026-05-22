@@ -209,6 +209,9 @@ func runFocusedResume(cmd *cobra.Command, db *store.DB, repoRoot, query string, 
 		if c.Source != "" {
 			fmt.Fprintf(out, "    Source: %s\n", c.Source)
 		}
+		if cues := retrieval.AuthorityCues(c); len(cues) > 0 {
+			fmt.Fprintf(out, "    Cues: %s\n", strings.Join(cues, "; "))
+		}
 		if rs := reasons[c.Path]; len(rs) > 0 {
 			fmt.Fprintf(out, "    Reasons: %s\n", strings.Join(rs, "; "))
 		}
@@ -235,7 +238,11 @@ func buildFocusedResumeContext(query string, candidates []retrieval.Candidate) s
 		if c.Subtype != "" {
 			fmt.Fprintf(&b, "Subtype: %s\n", c.Subtype)
 		}
-		fmt.Fprintf(&b, "Status: %s\n\n", c.Status)
+		fmt.Fprintf(&b, "Status: %s\n", c.Status)
+		if cues := retrieval.AuthorityCues(c); len(cues) > 0 {
+			fmt.Fprintf(&b, "Authority cues: %s\n", strings.Join(cues, "; "))
+		}
+		fmt.Fprintln(&b)
 		fmt.Fprintf(&b, "```text\n%s\n```\n\n", strings.TrimRight(c.Body, "\r\n"))
 	}
 	return b.String()
@@ -253,6 +260,9 @@ func resumeCandidatesToJSON(candidates []retrieval.Candidate, reasons map[string
 			"status":      c.Status,
 			"source_path": c.Source,
 			"reasons":     reasons[c.Path],
+		}
+		if cues := retrieval.AuthorityCues(c); len(cues) > 0 {
+			item["authority_cues"] = cues
 		}
 		out = append(out, item)
 	}
