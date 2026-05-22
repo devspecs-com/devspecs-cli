@@ -4,9 +4,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/classify"
+	"github.com/devspecs-com/devspecs-cli/internal/config"
 )
 
 const classifierExtractKey = "classifier"
@@ -20,6 +22,9 @@ func attachClassifierMetadata(repoRoot string, c adapters.Candidate, art adapter
 		Scope: classify.ScopeDocument,
 		Body:  body,
 	}, cfg)
+	if c.AdapterName == "markdown" {
+		art = applyNonIntentClassification(art, resolution.Winner)
+	}
 
 	if art.Extracted == nil {
 		art.Extracted = map[string]any{}
@@ -81,6 +86,7 @@ func classificationPayload(cl classify.Classification) map[string]any {
 		"family":           cl.Family,
 		"accepted":         cl.Accepted,
 		"confidence":       cl.Confidence,
+		"mode":             cl.Mode,
 		"kind":             cl.Kind,
 		"subtype":          cl.Subtype,
 		"status":           cl.Status,
@@ -101,12 +107,53 @@ func classificationAlternativesPayload(alternatives []classify.Classification) [
 			"classifier": alternative.Classifier,
 			"confidence": alternative.Confidence,
 			"accepted":   alternative.Accepted,
+			"mode":       alternative.Mode,
 			"subformat":  alternative.Subformat,
 			"family":     alternative.Family,
 			"authority":  alternative.Authority,
 		})
 	}
 	return out
+}
+
+func applyNonIntentClassification(art adapters.Artifact, cl classify.Classification) adapters.Artifact {
+	if !cl.Accepted || cl.Confidence < 0.55 || !isNonIntentMode(cl.Mode) {
+		return art
+	}
+	art.Kind = config.KindMarkdownArtifact
+	if subtype := subtypeFromClassification(cl); subtype != "" {
+		art.Subtype = subtype
+	}
+	if art.Extracted == nil {
+		art.Extracted = map[string]any{}
+	}
+	art.Extracted["mode"] = cl.Mode
+	return art
+}
+
+func isNonIntentMode(mode string) bool {
+	switch mode {
+	case "protocol", "model", "template", "trace":
+		return true
+	default:
+		return false
+	}
+}
+
+func subtypeFromClassification(cl classify.Classification) string {
+	if cl.Subtype != "" {
+		return cl.Subtype
+	}
+	for _, value := range []string{cl.Family, cl.Subformat} {
+		if value == "" {
+			continue
+		}
+		if idx := strings.LastIndex(value, "."); idx >= 0 && idx+1 < len(value) {
+			return value[idx+1:]
+		}
+		return value
+	}
+	return ""
 }
 
 func classifyCandidatePayloads(candidates []classify.Candidate) []map[string]any {

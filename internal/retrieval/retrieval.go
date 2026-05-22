@@ -401,6 +401,9 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 			score -= 5.0
 		}
 	}
+	if mode := nonIntentCandidateMode(c); mode != "" && !hasNonIntentModeIntent(queryLower, mode) {
+		score -= 10.0
+	}
 	return score
 }
 
@@ -614,6 +617,57 @@ func hasOpenSpecChildRoleIntent(queryLower string) bool {
 		"acceptance",
 		"boundary",
 	)
+}
+
+func nonIntentCandidateMode(c Candidate) string {
+	for _, key := range []string{"classifier_mode", "mode"} {
+		if c.Metadata != nil {
+			switch strings.ToLower(strings.TrimSpace(c.Metadata[key])) {
+			case "protocol", "model", "template", "trace":
+				return strings.ToLower(strings.TrimSpace(c.Metadata[key]))
+			}
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Subtype)) {
+	case "agent_instruction", "skill", "maintainer_policy", "ownership_policy",
+		"governance_policy", "contribution_policy", "security_policy", "procedure",
+		"runbook", "standard":
+		return "protocol"
+	case "api_contract", "schema_model", "configuration", "workflow_definition":
+		return "model"
+	case "document_template", "prompt_template", "issue_template", "pull_request_template":
+		return "template"
+	default:
+		return ""
+	}
+}
+
+func hasNonIntentModeIntent(queryLower, mode string) bool {
+	switch mode {
+	case "protocol":
+		return containsAny(queryLower,
+			"instruction", "instructions", "rule", "rules", "policy", "policies",
+			"procedure", "procedures", "runbook", "runbooks", "playbook", "skill",
+			"skills", "standard", "standards", "convention", "conventions",
+			"claude", "agents", "maintainer", "maintainers", "codeowners",
+			"security policy", "contributing",
+		)
+	case "model":
+		return containsAny(queryLower,
+			"schema", "model", "contract", "openapi", "swagger", "graphql",
+			"configuration", "config", "manifest", "workflow", "terraform",
+			"docker", "compose", "yaml", "json",
+		)
+	case "template":
+		return containsAny(queryLower,
+			"template", "templates", "scaffold", "scaffolding", "boilerplate",
+			"issue template", "pull request template", "prompt template",
+		)
+	case "trace":
+		return containsAny(queryLower, "trace", "commit", "pull request", "issue", "transcript", "log")
+	default:
+		return false
+	}
 }
 
 func hasLifecycleIntent(queryLower string) bool {

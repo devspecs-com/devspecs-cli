@@ -157,6 +157,7 @@ func classifierCandidateMetadata(extractedJSON string) map[string]string {
 				Subformat     string  `json:"subformat"`
 				Family        string  `json:"family"`
 				Confidence    float64 `json:"confidence"`
+				Mode          string  `json:"mode"`
 				Kind          string  `json:"kind"`
 				Subtype       string  `json:"subtype"`
 				Status        string  `json:"status"`
@@ -178,6 +179,7 @@ func classifierCandidateMetadata(extractedJSON string) map[string]string {
 		"classifier_config_version":   fmt.Sprintf("%d", payload.Classifier.ConfigVersion),
 		"classifier_model":            payload.Classifier.Winner.Classifier,
 		"classifier_confidence":       fmt.Sprintf("%.3f", payload.Classifier.Winner.Confidence),
+		"classifier_mode":             payload.Classifier.Winner.Mode,
 		"classifier_ambiguous":        fmt.Sprintf("%t", payload.Classifier.Ambiguous),
 		"classifier_fallback_generic": fmt.Sprintf("%t", payload.Classifier.FallbackGeneric),
 		"classifier_kind":             payload.Classifier.Winner.Kind,

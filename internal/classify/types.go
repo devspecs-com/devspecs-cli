@@ -79,6 +79,7 @@ type Classification struct {
 	Family          string         `json:"family,omitempty" yaml:"family,omitempty"`
 	Accepted        bool           `json:"accepted" yaml:"accepted"`
 	Confidence      float64        `json:"confidence" yaml:"confidence"`
+	Mode            string         `json:"mode,omitempty" yaml:"mode,omitempty"`
 	Kind            string         `json:"kind,omitempty" yaml:"kind,omitempty"`
 	Subtype         string         `json:"subtype,omitempty" yaml:"subtype,omitempty"`
 	Status          string         `json:"status,omitempty" yaml:"status,omitempty"`
@@ -121,6 +122,7 @@ const (
 	ReasonContainerChild    ReasonCode = "container_child"
 	ReasonLocalOverride     ReasonCode = "local_override"
 	ReasonGeneratedMarker   ReasonCode = "generated_marker"
+	ReasonTemplateMarker    ReasonCode = "template_marker"
 	ReasonChangelogMarker   ReasonCode = "changelog_marker"
 	ReasonVendoredMarker    ReasonCode = "vendored_marker"
 	ReasonAmbiguous         ReasonCode = "ambiguous"
@@ -148,6 +150,7 @@ func ReasonVocabulary() []ReasonCode {
 		ReasonContainerChild,
 		ReasonLocalOverride,
 		ReasonGeneratedMarker,
+		ReasonTemplateMarker,
 		ReasonChangelogMarker,
 		ReasonVendoredMarker,
 		ReasonAmbiguous,

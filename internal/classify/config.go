@@ -14,23 +14,44 @@ const (
 	ModelPRD             = "prd"
 	ModelPlan            = "plan"
 	ModelAgentNote       = "agent_note"
+	ModelProtocol        = "protocol"
+	ModelStructuredModel = "model"
+	ModelTemplate        = "template"
 	ModelGenericMarkdown = "generic_markdown"
 
-	SubmodelOpenSpecContainer  = "openspec.container"
-	SubmodelOpenSpecDocument   = "openspec.document"
-	SubmodelADRNygard          = "adr.nygard"
-	SubmodelADRMADR            = "adr.madr"
-	SubmodelADRYStatement      = "adr.y_statement"
-	SubmodelRFCSectionPattern  = "rfc.section_pattern"
-	SubmodelPRDProductIntent   = "prd.product_intent"
-	SubmodelPlanImplementation = "plan.implementation_plan"
-	SubmodelPlanMigration      = "plan.migration_plan"
-	SubmodelPlanRollout        = "plan.rollout_plan"
-	SubmodelPlanRoadmap        = "plan.roadmap"
-	SubmodelPlanStoryArtifact  = "plan.story_artifact"
-	SubmodelAgentContinuation  = "agent_note.continuation_note"
-	SubmodelAgentFollowup      = "agent_note.followup_note"
-	SubmodelAgentBlocker       = "agent_note.blocker_note"
+	SubmodelOpenSpecContainer          = "openspec.container"
+	SubmodelOpenSpecDocument           = "openspec.document"
+	SubmodelADRNygard                  = "adr.nygard"
+	SubmodelADRMADR                    = "adr.madr"
+	SubmodelADRYStatement              = "adr.y_statement"
+	SubmodelRFCSectionPattern          = "rfc.section_pattern"
+	SubmodelPRDProductIntent           = "prd.product_intent"
+	SubmodelPlanImplementation         = "plan.implementation_plan"
+	SubmodelPlanMigration              = "plan.migration_plan"
+	SubmodelPlanRollout                = "plan.rollout_plan"
+	SubmodelPlanRoadmap                = "plan.roadmap"
+	SubmodelPlanStoryArtifact          = "plan.story_artifact"
+	SubmodelAgentContinuation          = "agent_note.continuation_note"
+	SubmodelAgentFollowup              = "agent_note.followup_note"
+	SubmodelAgentBlocker               = "agent_note.blocker_note"
+	SubmodelProtocolAgentInstruction   = "protocol.agent_instruction"
+	SubmodelProtocolSkill              = "protocol.skill"
+	SubmodelProtocolMaintainerPolicy   = "protocol.maintainer_policy"
+	SubmodelProtocolOwnershipPolicy    = "protocol.ownership_policy"
+	SubmodelProtocolGovernancePolicy   = "protocol.governance_policy"
+	SubmodelProtocolContributionPolicy = "protocol.contribution_policy"
+	SubmodelProtocolSecurityPolicy     = "protocol.security_policy"
+	SubmodelProtocolProcedure          = "protocol.procedure"
+	SubmodelProtocolRunbook            = "protocol.runbook"
+	SubmodelProtocolStandard           = "protocol.standard"
+	SubmodelModelAPIContract           = "model.api_contract"
+	SubmodelModelSchema                = "model.schema_model"
+	SubmodelModelConfiguration         = "model.configuration"
+	SubmodelModelWorkflow              = "model.workflow_definition"
+	SubmodelTemplateDocument           = "template.document_template"
+	SubmodelTemplatePrompt             = "template.prompt_template"
+	SubmodelTemplateIssue              = "template.issue_template"
+	SubmodelTemplatePullRequest        = "template.pull_request_template"
 )
 
 const (
@@ -79,6 +100,7 @@ type ResolverConfig struct {
 type ModelConfig struct {
 	Enabled             bool                      `json:"enabled" yaml:"enabled"`
 	Scopes              []Scope                   `json:"scopes" yaml:"scopes"`
+	Mode                string                    `json:"mode,omitempty" yaml:"mode,omitempty"`
 	Kind                string                    `json:"kind,omitempty" yaml:"kind,omitempty"`
 	Subtype             string                    `json:"subtype,omitempty" yaml:"subtype,omitempty"`
 	Authority           string                    `json:"authority,omitempty" yaml:"authority,omitempty"`
@@ -193,6 +215,7 @@ func DefaultPipelineConfig() PipelineConfig {
 			ModelOpenSpec: {
 				Enabled:             true,
 				Scopes:              []Scope{ScopeContainer, ScopeDocument},
+				Mode:                "intent",
 				Kind:                "spec",
 				Authority:           AuthorityHighCurrentIntent,
 				FormatProfile:       "openspec",
@@ -236,6 +259,7 @@ func DefaultPipelineConfig() PipelineConfig {
 			ModelADR: {
 				Enabled:   true,
 				Scopes:    []Scope{ScopeDocument},
+				Mode:      "intent",
 				Kind:      "decision",
 				Authority: AuthorityHighDecision,
 				PathHints: []string{"docs/adr/**", "docs/adrs/**", "adr/**", "adrs/**"},
@@ -274,6 +298,14 @@ func DefaultPipelineConfig() PipelineConfig {
 				NegativeEvidence: []EvidenceRule{
 					evidence("adr_changelog_marker", 0.20, ReasonChangelogMarker, "Changelog marker reduces ADR confidence.", EvidenceMatch{MarkersAny: []string{MarkerChangelog}}),
 					evidence("adr_generated_marker", 0.18, ReasonGeneratedMarker, "Generated marker reduces ADR confidence.", EvidenceMatch{MarkersAny: []string{MarkerGenerated}}),
+					evidence("adr_template_path_marker", 0.30, ReasonTemplateMarker, "Template path reduces ADR confidence.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						PathContainsAny: []string{"template/", "/template/", "templates/", "/templates/"},
+					}),
+					evidence("adr_template_filename_marker", 0.30, ReasonTemplateMarker, "Template filename reduces ADR confidence.", EvidenceMatch{
+						Scope:       ScopeDocument,
+						FilenameAny: []string{"template"},
+					}),
 				},
 				Subformats: map[string]SubmodelConfig{
 					"nygard": {
@@ -311,6 +343,7 @@ func DefaultPipelineConfig() PipelineConfig {
 			ModelRFC: {
 				Enabled:   true,
 				Scopes:    []Scope{ScopeDocument},
+				Mode:      "intent",
 				Kind:      "design",
 				Authority: AuthorityDesignProposal,
 				PathHints: []string{
@@ -363,6 +396,14 @@ func DefaultPipelineConfig() PipelineConfig {
 				NegativeEvidence: []EvidenceRule{
 					evidence("rfc_changelog_marker", 0.22, ReasonChangelogMarker, "Changelog marker reduces RFC confidence.", EvidenceMatch{MarkersAny: []string{MarkerChangelog}}),
 					evidence("rfc_generated_marker", 0.18, ReasonGeneratedMarker, "Generated marker reduces RFC confidence.", EvidenceMatch{MarkersAny: []string{MarkerGenerated}}),
+					evidence("rfc_template_path_marker", 0.30, ReasonTemplateMarker, "Template path reduces RFC confidence.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						PathContainsAny: []string{"template/", "/template/", "templates/", "/templates/"},
+					}),
+					evidence("rfc_template_filename_marker", 0.30, ReasonTemplateMarker, "Template filename reduces RFC confidence.", EvidenceMatch{
+						Scope:       ScopeDocument,
+						FilenameAny: []string{"template"},
+					}),
 				},
 				Families: map[string]SubmodelConfig{
 					"section_pattern": {
@@ -379,6 +420,7 @@ func DefaultPipelineConfig() PipelineConfig {
 			ModelPRD: {
 				Enabled:   true,
 				Scopes:    []Scope{ScopeDocument},
+				Mode:      "intent",
 				Kind:      "requirements",
 				Subtype:   "prd",
 				Authority: AuthorityProductBackground,
@@ -421,6 +463,14 @@ func DefaultPipelineConfig() PipelineConfig {
 				NegativeEvidence: []EvidenceRule{
 					evidence("prd_changelog_marker", 0.22, ReasonChangelogMarker, "Changelog marker reduces PRD confidence.", EvidenceMatch{MarkersAny: []string{MarkerChangelog}}),
 					evidence("prd_generated_marker", 0.18, ReasonGeneratedMarker, "Generated marker reduces PRD confidence.", EvidenceMatch{MarkersAny: []string{MarkerGenerated}}),
+					evidence("prd_template_path_marker", 0.35, ReasonTemplateMarker, "Template path reduces PRD confidence.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						PathContainsAny: []string{"template/", "/template/", "templates/", "/templates/"},
+					}),
+					evidence("prd_template_filename_marker", 0.35, ReasonTemplateMarker, "Template filename reduces PRD confidence.", EvidenceMatch{
+						Scope:       ScopeDocument,
+						FilenameAny: []string{"template"},
+					}),
 				},
 				Families: map[string]SubmodelConfig{
 					"product_intent": {
@@ -438,6 +488,7 @@ func DefaultPipelineConfig() PipelineConfig {
 			ModelPlan: {
 				Enabled:   true,
 				Scopes:    []Scope{ScopeDocument},
+				Mode:      "intent",
 				Kind:      "plan",
 				Authority: AuthorityWorkingPlan,
 				PathHints: []string{"plans/**", "docs/plans/**", "roadmaps/**", "docs/roadmaps/**", "roadmap.md", "*.roadmap.md", "plan.md", "docs/stories/**", "**/*.story.md"},
@@ -484,6 +535,14 @@ func DefaultPipelineConfig() PipelineConfig {
 				NegativeEvidence: []EvidenceRule{
 					evidence("plan_generated_marker", 0.24, ReasonGeneratedMarker, "Generated marker reduces plan confidence.", EvidenceMatch{MarkersAny: []string{MarkerGenerated}}),
 					evidence("plan_changelog_marker", 0.22, ReasonChangelogMarker, "Changelog marker reduces plan confidence.", EvidenceMatch{MarkersAny: []string{MarkerChangelog}}),
+					evidence("plan_template_path_marker", 0.30, ReasonTemplateMarker, "Template path reduces plan confidence.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						PathContainsAny: []string{"template/", "/template/", "templates/", "/templates/"},
+					}),
+					evidence("plan_template_filename_marker", 0.30, ReasonTemplateMarker, "Template filename reduces plan confidence.", EvidenceMatch{
+						Scope:       ScopeDocument,
+						FilenameAny: []string{"template"},
+					}),
 				},
 				Families: map[string]SubmodelConfig{
 					"implementation_plan": {
@@ -543,6 +602,7 @@ func DefaultPipelineConfig() PipelineConfig {
 			ModelAgentNote: {
 				Enabled:   true,
 				Scopes:    []Scope{ScopeDocument},
+				Mode:      "intent",
 				Kind:      "plan",
 				Authority: AuthorityHandoffNote,
 				PathHints: []string{".cursor/plans/**", ".claude/**", ".codex/**"},
@@ -596,9 +656,286 @@ func DefaultPipelineConfig() PipelineConfig {
 					},
 				},
 			},
+			ModelProtocol: {
+				Enabled:   true,
+				Scopes:    []Scope{ScopeDocument},
+				Mode:      "protocol",
+				Kind:      "markdown_artifact",
+				Authority: AuthorityNeutral,
+				Evidence: []EvidenceRule{
+					evidence("protocol_instruction_language", 0.14, ReasonHeadingMatch, "Protocol document includes instruction, rule, or workflow language.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						HeadingsAny:     []string{"rules", "instructions", "guidelines", "workflow", "procedure", "runbook", "policy", "standard"},
+						BodyContainsAny: []string{"must", "should", "do not", "always", "never"},
+					}),
+				},
+				Families: map[string]SubmodelConfig{
+					"agent_instruction": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("protocol_agent_instruction_filename", 0.68, ReasonFamilyEvidence, "Agent-instruction filename convention is present.", EvidenceMatch{
+								Scope: ScopeDocument,
+								FilenameAny: []string{
+									"agents.md", "claude.md", "gemini.md", "cursor.md", ".cursorrules", "ai-rules.md",
+								},
+							}),
+							evidence("protocol_agent_instruction_path", 0.58, ReasonFamilyEvidence, "Agent-instruction path convention is present.", EvidenceMatch{
+								Scope: ScopeDocument,
+								PathContainsAny: []string{
+									"/.cursor/rules/", ".cursor/rules/",
+								},
+							}),
+							evidence("protocol_agent_instruction_body", 0.28, ReasonFamilyEvidence, "Agent-instruction body language is present.", EvidenceMatch{
+								Scope:           ScopeDocument,
+								TitleAny:        []string{"project instructions", "agent instructions", "claude instructions", "cursor rules"},
+								HeadingsAny:     []string{"rules", "instructions", "coding standards", "project guidelines", "agent instructions"},
+								BodyContainsAny: []string{"when working in this repo", "follow these rules", "coding standards", "project conventions"},
+							}),
+						},
+					},
+					"skill": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("protocol_skill_filename", 0.68, ReasonFamilyEvidence, "Skill filename convention is present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								FilenameAny: []string{"skill.md", "skills.md"},
+							}),
+							evidence("protocol_skill_path", 0.52, ReasonFamilyEvidence, "Skill path convention is present.", EvidenceMatch{
+								Scope:           ScopeDocument,
+								PathContainsAny: []string{"skills/", "/skills/", ".claude/skills/", ".codex/skills/"},
+							}),
+						},
+					},
+					"maintainer_policy": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("protocol_maintainer_filename", 0.66, ReasonFamilyEvidence, "Maintainer-policy filename convention is present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								FilenameAny: []string{"maintainers", "maintainers.md", "owners.md"},
+							}),
+						},
+					},
+					"ownership_policy": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("protocol_ownership_filename", 0.66, ReasonFamilyEvidence, "Ownership-policy filename convention is present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								FilenameAny: []string{"codeowners", "codeowners.md", "owners"},
+							}),
+						},
+					},
+					"governance_policy": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("protocol_governance_filename", 0.66, ReasonFamilyEvidence, "Governance-policy filename convention is present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								FilenameAny: []string{"governance.md", "governance"},
+							}),
+						},
+					},
+					"contribution_policy": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("protocol_contributing_filename", 0.66, ReasonFamilyEvidence, "Contribution-policy filename convention is present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								FilenameAny: []string{"contributing.md", "contributing"},
+							}),
+						},
+					},
+					"security_policy": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("protocol_security_filename", 0.66, ReasonFamilyEvidence, "Security-policy filename convention is present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								FilenameAny: []string{"security.md", "security"},
+							}),
+						},
+					},
+					"procedure": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("protocol_procedure_signal", 0.48, ReasonFamilyEvidence, "Procedure/how-to signal is present.", EvidenceMatch{
+								Scope:           ScopeDocument,
+								TitleAny:        []string{"procedure", "how to", "how-to", "workflow"},
+								HeadingsAny:     []string{"procedure", "steps", "workflow", "how to", "how-to"},
+								BodyContainsAny: []string{"step 1", "before you begin", "prerequisites"},
+							}),
+						},
+					},
+					"runbook": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("protocol_runbook_signal", 0.62, ReasonFamilyEvidence, "Runbook/playbook signal is present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								FilenameAny: []string{"runbook", "playbook"},
+							}),
+							evidence("protocol_runbook_content", 0.44, ReasonFamilyEvidence, "Runbook/playbook content signal is present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								HeadingsAny: []string{"runbook", "playbook", "mitigation", "escalation"},
+							}),
+						},
+					},
+					"standard": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("protocol_standard_signal", 0.58, ReasonFamilyEvidence, "Standard/convention signal is present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								FilenameAny: []string{"standard", "standards", "convention", "conventions", "guidelines"},
+							}),
+							evidence("protocol_standard_heading", 0.42, ReasonFamilyEvidence, "Standard/convention heading signal is present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								HeadingsAny: []string{"standard", "standards", "convention", "conventions", "guidelines"},
+							}),
+						},
+					},
+				},
+			},
+			ModelStructuredModel: {
+				Enabled:   true,
+				Scopes:    []Scope{ScopeDocument},
+				Mode:      "model",
+				Kind:      "markdown_artifact",
+				Authority: AuthorityNeutral,
+				Evidence: []EvidenceRule{
+					evidence("model_declarative_language", 0.10, ReasonHeadingMatch, "Model document includes declarative schema/configuration language.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						HeadingsAny:     []string{"schema", "contract", "configuration", "manifest", "workflow"},
+						BodyContainsAny: []string{"schema", "configuration", "manifest"},
+					}),
+				},
+				Families: map[string]SubmodelConfig{
+					"api_contract": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("model_api_contract_signal", 0.66, ReasonFamilyEvidence, "API-contract signal is present.", EvidenceMatch{
+								Scope: ScopeDocument,
+								FilenameAny: []string{
+									"openapi", "swagger", "graphql", "api-contract", "api_contract",
+								},
+							}),
+							evidence("model_api_contract_body", 0.54, ReasonFamilyEvidence, "API-contract body signal is present.", EvidenceMatch{
+								Scope:           ScopeDocument,
+								BodyContainsAny: []string{"openapi:", "swagger:", "operationId", "graphql schema", "type Query"},
+							}),
+						},
+					},
+					"schema_model": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("model_schema_signal", 0.64, ReasonFamilyEvidence, "Schema/model signal is present.", EvidenceMatch{
+								Scope: ScopeDocument,
+								FilenameAny: []string{
+									"schema", "schemas", "model", "models", "data-model", "data_model",
+								},
+							}),
+							evidence("model_schema_body", 0.50, ReasonFamilyEvidence, "Schema/model body signal is present.", EvidenceMatch{
+								Scope:           ScopeDocument,
+								BodyContainsAny: []string{"$schema", "json schema", "entity relationship", "data model", "schema version"},
+							}),
+						},
+					},
+					"configuration": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("model_configuration_signal", 0.62, ReasonFamilyEvidence, "Configuration/manifest signal is present.", EvidenceMatch{
+								Scope: ScopeDocument,
+								FilenameAny: []string{
+									"config", "configuration", "settings", "manifest", "docker-compose", "compose",
+								},
+							}),
+						},
+					},
+					"workflow_definition": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("model_workflow_signal", 0.62, ReasonFamilyEvidence, "Workflow-definition signal is present.", EvidenceMatch{
+								Scope: ScopeDocument,
+								PathContainsAny: []string{
+									".github/workflows/", "/workflows/", "workflows/",
+								},
+							}),
+							evidence("model_workflow_filename", 0.50, ReasonFamilyEvidence, "Workflow-definition filename signal is present.", EvidenceMatch{
+								Scope:           ScopeDocument,
+								FilenameAny:     []string{"workflow", "workflows", "pipeline", "ci", "cd"},
+								BodyContainsAny: []string{"github actions", "workflow_dispatch", "jobs:", "pipeline"},
+							}),
+						},
+					},
+				},
+			},
+			ModelTemplate: {
+				Enabled:   true,
+				Scopes:    []Scope{ScopeDocument},
+				Mode:      "template",
+				Kind:      "markdown_artifact",
+				Authority: AuthorityNeutral,
+				Evidence: []EvidenceRule{
+					evidence("template_placeholder_language", 0.16, ReasonHeadingMatch, "Template placeholder language is present.", EvidenceMatch{
+						Scope:           ScopeDocument,
+						BodyContainsAny: []string{"{{", "}}", "[insert", "<placeholder", "replace this", "fill in"},
+					}),
+				},
+				Families: map[string]SubmodelConfig{
+					"pull_request_template": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("template_pr_signal", 0.72, ReasonFamilyEvidence, "Pull-request template convention is present.", EvidenceMatch{
+								Scope:           ScopeDocument,
+								PathContainsAny: []string{".github/pull_request_template", "pull_request_template"},
+							}),
+							evidence("template_pr_filename", 0.72, ReasonFamilyEvidence, "Pull-request template filename convention is present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								FilenameAny: []string{"pull_request_template", "pull-request-template", "pr-template"},
+							}),
+						},
+					},
+					"issue_template": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("template_issue_signal", 0.72, ReasonFamilyEvidence, "Issue template convention is present.", EvidenceMatch{
+								Scope:           ScopeDocument,
+								PathContainsAny: []string{".github/issue_template", "issue_template"},
+							}),
+							evidence("template_issue_filename", 0.72, ReasonFamilyEvidence, "Issue template filename convention is present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								FilenameAny: []string{"issue_template", "issue-template", "bug_report", "feature_request"},
+							}),
+						},
+					},
+					"prompt_template": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("template_prompt_signal", 0.66, ReasonFamilyEvidence, "Prompt-template signal is present.", EvidenceMatch{
+								Scope:           ScopeDocument,
+								PathContainsAny: []string{"prompts/", "/prompts/", "prompt-templates/", "prompt_templates/"},
+							}),
+							evidence("template_prompt_filename", 0.58, ReasonFamilyEvidence, "Prompt-template filename signal is present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								FilenameAny: []string{"prompt-template", "prompt_template"},
+							}),
+						},
+					},
+					"document_template": {
+						Enabled: true,
+						Evidence: []EvidenceRule{
+							evidence("template_document_signal", 0.64, ReasonFamilyEvidence, "Document-template signal is present.", EvidenceMatch{
+								Scope: ScopeDocument,
+								PathContainsAny: []string{
+									"templates/", "/templates/", "template/", "/template/",
+								},
+							}),
+							evidence("template_document_filename", 0.64, ReasonFamilyEvidence, "Document-template filename signal is present.", EvidenceMatch{
+								Scope:       ScopeDocument,
+								FilenameAny: []string{"template", "templates"},
+							}),
+						},
+					},
+				},
+			},
 			ModelGenericMarkdown: {
 				Enabled:   true,
 				Scopes:    []Scope{ScopeDocument},
+				Mode:      "unknown",
 				Kind:      "markdown_artifact",
 				Authority: AuthorityNeutral,
 				Fallback:  true,
@@ -637,6 +974,27 @@ func DocumentedModelIDs() []string {
 		SubmodelAgentContinuation,
 		SubmodelAgentFollowup,
 		SubmodelAgentBlocker,
+		ModelProtocol,
+		SubmodelProtocolAgentInstruction,
+		SubmodelProtocolSkill,
+		SubmodelProtocolMaintainerPolicy,
+		SubmodelProtocolOwnershipPolicy,
+		SubmodelProtocolGovernancePolicy,
+		SubmodelProtocolContributionPolicy,
+		SubmodelProtocolSecurityPolicy,
+		SubmodelProtocolProcedure,
+		SubmodelProtocolRunbook,
+		SubmodelProtocolStandard,
+		ModelStructuredModel,
+		SubmodelModelAPIContract,
+		SubmodelModelSchema,
+		SubmodelModelConfiguration,
+		SubmodelModelWorkflow,
+		ModelTemplate,
+		SubmodelTemplateDocument,
+		SubmodelTemplatePrompt,
+		SubmodelTemplateIssue,
+		SubmodelTemplatePullRequest,
 		ModelGenericMarkdown,
 	}
 }
@@ -654,6 +1012,9 @@ func MissingDocumentedModels(cfg PipelineConfig) []string {
 	needModel(ModelPRD)
 	needModel(ModelPlan)
 	needModel(ModelAgentNote)
+	needModel(ModelProtocol)
+	needModel(ModelStructuredModel)
+	needModel(ModelTemplate)
 	needModel(ModelGenericMarkdown)
 
 	if !hasScope(cfg.Models[ModelOpenSpec], ScopeContainer) {
@@ -680,6 +1041,24 @@ func MissingDocumentedModels(cfg PipelineConfig) []string {
 		{ModelAgentNote, "continuation_note", SubmodelAgentContinuation},
 		{ModelAgentNote, "followup_note", SubmodelAgentFollowup},
 		{ModelAgentNote, "blocker_note", SubmodelAgentBlocker},
+		{ModelProtocol, "agent_instruction", SubmodelProtocolAgentInstruction},
+		{ModelProtocol, "skill", SubmodelProtocolSkill},
+		{ModelProtocol, "maintainer_policy", SubmodelProtocolMaintainerPolicy},
+		{ModelProtocol, "ownership_policy", SubmodelProtocolOwnershipPolicy},
+		{ModelProtocol, "governance_policy", SubmodelProtocolGovernancePolicy},
+		{ModelProtocol, "contribution_policy", SubmodelProtocolContributionPolicy},
+		{ModelProtocol, "security_policy", SubmodelProtocolSecurityPolicy},
+		{ModelProtocol, "procedure", SubmodelProtocolProcedure},
+		{ModelProtocol, "runbook", SubmodelProtocolRunbook},
+		{ModelProtocol, "standard", SubmodelProtocolStandard},
+		{ModelStructuredModel, "api_contract", SubmodelModelAPIContract},
+		{ModelStructuredModel, "schema_model", SubmodelModelSchema},
+		{ModelStructuredModel, "configuration", SubmodelModelConfiguration},
+		{ModelStructuredModel, "workflow_definition", SubmodelModelWorkflow},
+		{ModelTemplate, "document_template", SubmodelTemplateDocument},
+		{ModelTemplate, "prompt_template", SubmodelTemplatePrompt},
+		{ModelTemplate, "issue_template", SubmodelTemplateIssue},
+		{ModelTemplate, "pull_request_template", SubmodelTemplatePullRequest},
 	} {
 		model, ok := cfg.Models[tc.model]
 		if !ok {

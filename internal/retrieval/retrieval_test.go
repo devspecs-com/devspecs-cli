@@ -117,6 +117,36 @@ func TestWeightedFilesRetrieverV0_GenericPlanNeedsCoreEvidence(t *testing.T) {
 	}
 }
 
+func TestWeightedFilesRetrieverV0_DemotesNonIntentLanesUnlessRequested(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "docs/plans/auth-token-rollout.md",
+			Body:  "Current progress for auth token rollout and migration tasks.",
+			Title: "Auth Token Rollout Plan",
+		},
+		{
+			Path:     "CLAUDE.md",
+			Title:    "Claude Instructions",
+			Subtype:  "agent_instruction",
+			Body:     "Auth token rollout rules and instructions for contributors.",
+			Metadata: map[string]string{"classifier_mode": "protocol"},
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "resume auth token rollout")
+	if !containsCandidatePath(got, "docs/plans/auth-token-rollout.md") {
+		t.Fatalf("missing plan: %#v", CandidatePaths(got))
+	}
+	if containsCandidatePath(got, "CLAUDE.md") {
+		t.Fatalf("protocol instructions should not appear in ordinary plan retrieval: %#v", CandidatePaths(got))
+	}
+
+	got = (WeightedFilesRetrieverV0{}).Retrieve(candidates, "claude instructions auth token rollout")
+	if !containsCandidatePath(got, "CLAUDE.md") {
+		t.Fatalf("missing explicitly requested instructions: %#v", CandidatePaths(got))
+	}
+}
+
 func TestWeightedFilesRetrieverV0_ResumeIntentKeepsMatchingDecisionContext(t *testing.T) {
 	candidates := []Candidate{
 		{Path: "docs/plans/2026-05-01-entitlement-sync-plan.md", Body: "Current progress for entitlement_sync hardening and billing-webhook-hardening."},

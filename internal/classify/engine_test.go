@@ -439,6 +439,94 @@ func TestClassifyCandidateRecognizesCodexPlanAsAgentNote(t *testing.T) {
 	}
 }
 
+func TestClassifyCandidateRecognizesSubtypeFirstNonIntentLanes(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+	tests := []struct {
+		name       string
+		path       string
+		body       string
+		classifier string
+		family     string
+		mode       string
+	}{
+		{
+			name:       "claude instructions",
+			path:       "CLAUDE.md",
+			body:       "# Project Instructions\n\n## Rules\n\nAlways run tests. Never rewrite unrelated files.\n",
+			classifier: ModelProtocol,
+			family:     SubmodelProtocolAgentInstruction,
+			mode:       "protocol",
+		},
+		{
+			name:       "skill",
+			path:       ".claude/skills/review/SKILL.md",
+			body:       "# Review Skill\n\nUse this procedure when reviewing code.\n",
+			classifier: ModelProtocol,
+			family:     SubmodelProtocolSkill,
+			mode:       "protocol",
+		},
+		{
+			name:       "maintainers",
+			path:       "MAINTAINERS.md",
+			body:       "# Maintainers\n\nThis file lists maintainers and review rules.\n",
+			classifier: ModelProtocol,
+			family:     SubmodelProtocolMaintainerPolicy,
+			mode:       "protocol",
+		},
+		{
+			name:       "pull request template",
+			path:       ".github/PULL_REQUEST_TEMPLATE.md",
+			body:       "# Pull Request\n\n## Summary\n\n{{ summary }}\n",
+			classifier: ModelTemplate,
+			family:     SubmodelTemplatePullRequest,
+			mode:       "template",
+		},
+		{
+			name:       "prd document template",
+			path:       "docs/templates/prd-template.md",
+			body:       "# Product Requirements Template\n\n## Scope\n\n{{ fill in }}\n\n## User Stories\n\n[insert stories]\n",
+			classifier: ModelTemplate,
+			family:     SubmodelTemplateDocument,
+			mode:       "template",
+		},
+		{
+			name:       "api contract",
+			path:       "docs/contracts/openapi.md",
+			body:       "# OpenAPI Contract\n\n```yaml\nopenapi: 3.1.0\npaths: {}\n```\n",
+			classifier: ModelStructuredModel,
+			family:     SubmodelModelAPIContract,
+			mode:       "model",
+		},
+		{
+			name:       "workflow definition",
+			path:       ".github/workflows/ci.md",
+			body:       "# CI Workflow\n\nDocuments the jobs: section for GitHub Actions.\n",
+			classifier: ModelStructuredModel,
+			family:     SubmodelModelWorkflow,
+			mode:       "model",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resolution := ClassifyCandidate(Candidate{
+				Path:  tc.path,
+				Scope: ScopeDocument,
+				Body:  tc.body,
+			}, cfg)
+			if resolution.Winner.Classifier != tc.classifier {
+				t.Fatalf("classifier got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, tc.classifier, resolution.Winner.Confidence, resolution.Alternatives)
+			}
+			if resolution.Winner.Family != tc.family {
+				t.Fatalf("family got %q want %q", resolution.Winner.Family, tc.family)
+			}
+			if resolution.Winner.Mode != tc.mode {
+				t.Fatalf("mode got %q want %q", resolution.Winner.Mode, tc.mode)
+			}
+		})
+	}
+}
+
 func TestClassifyCandidateFallsBackWhenEvidenceIsWeakOrAmbiguous(t *testing.T) {
 	cfg := DefaultPipelineConfig()
 	resolution := ClassifyCandidate(Candidate{

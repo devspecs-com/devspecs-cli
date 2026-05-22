@@ -24,7 +24,7 @@ func TestDefaultPipelineConfigSupportsDocumentedModels(t *testing.T) {
 	if !hasScope(cfg.Models[ModelOpenSpec], ScopeDocument) {
 		t.Fatal("openspec must support document scope for child artifacts")
 	}
-	for _, id := range []string{ModelADR, ModelRFC, ModelPRD, ModelPlan, ModelAgentNote, ModelGenericMarkdown} {
+	for _, id := range []string{ModelADR, ModelRFC, ModelPRD, ModelPlan, ModelAgentNote, ModelProtocol, ModelStructuredModel, ModelTemplate, ModelGenericMarkdown} {
 		if !hasScope(cfg.Models[id], ScopeDocument) {
 			t.Fatalf("%s must support document scope", id)
 		}
@@ -77,7 +77,7 @@ func TestValidateConfigRejectsBadEvidenceRule(t *testing.T) {
 
 func TestDefaultPipelineConfigUsesDeclarativeEvidenceRules(t *testing.T) {
 	cfg := DefaultPipelineConfig()
-	for _, id := range []string{ModelOpenSpec, ModelADR, ModelRFC, ModelPRD, ModelPlan, ModelAgentNote, ModelGenericMarkdown} {
+	for _, id := range []string{ModelOpenSpec, ModelADR, ModelRFC, ModelPRD, ModelPlan, ModelAgentNote, ModelProtocol, ModelStructuredModel, ModelTemplate, ModelGenericMarkdown} {
 		if len(cfg.Models[id].Evidence) == 0 {
 			t.Fatalf("%s should declare evidence rules", id)
 		}
@@ -87,6 +87,15 @@ func TestDefaultPipelineConfigUsesDeclarativeEvidenceRules(t *testing.T) {
 	}
 	if len(cfg.Models[ModelPRD].Families["product_intent"].Evidence) == 0 {
 		t.Fatal("PRD product-intent family should declare evidence rules")
+	}
+	if len(cfg.Models[ModelProtocol].Families["agent_instruction"].Evidence) == 0 {
+		t.Fatal("protocol agent-instruction family should declare evidence rules")
+	}
+	if len(cfg.Models[ModelTemplate].Families["document_template"].Evidence) == 0 {
+		t.Fatal("template document-template family should declare evidence rules")
+	}
+	if len(cfg.Models[ModelStructuredModel].Families["api_contract"].Evidence) == 0 {
+		t.Fatal("model api-contract family should declare evidence rules")
 	}
 }
 
@@ -101,6 +110,7 @@ func TestReasonVocabularyIncludesPositiveAndNegativeSignals(t *testing.T) {
 		ReasonSubformatEvidence,
 		ReasonFamilyEvidence,
 		ReasonGeneratedMarker,
+		ReasonTemplateMarker,
 		ReasonChangelogMarker,
 		ReasonFallback,
 	} {

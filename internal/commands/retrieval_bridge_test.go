@@ -18,6 +18,7 @@ func TestArtifactCandidateIncludesClassifierMetadata(t *testing.T) {
 				"classifier": "plan",
 				"family": "plan.implementation_plan",
 				"confidence": 0.78,
+				"mode": "intent",
 				"kind": "plan",
 				"status": "active",
 				"authority": "working_plan"
@@ -47,6 +48,9 @@ func TestArtifactCandidateIncludesClassifierMetadata(t *testing.T) {
 	}
 	if candidate.Metadata["classifier_confidence"] != "0.780" {
 		t.Fatalf("classifier_confidence = %#v", candidate.Metadata["classifier_confidence"])
+	}
+	if candidate.Metadata["classifier_mode"] != "intent" {
+		t.Fatalf("classifier_mode = %#v", candidate.Metadata["classifier_mode"])
 	}
 	if candidate.Metadata["classifier_authority"] != "working_plan" {
 		t.Fatalf("classifier_authority = %#v", candidate.Metadata["classifier_authority"])

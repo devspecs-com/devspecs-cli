@@ -26,6 +26,24 @@ const (
 	SubtypeOpenspecChild          = "openspec_child"
 	SubtypeOpenspecCapabilitySpec = "openspec_capability_spec"
 	SubtypePRD                    = "prd"
+	SubtypeAgentInstruction       = "agent_instruction"
+	SubtypeSkill                  = "skill"
+	SubtypeMaintainerPolicy       = "maintainer_policy"
+	SubtypeOwnershipPolicy        = "ownership_policy"
+	SubtypeGovernancePolicy       = "governance_policy"
+	SubtypeContributionPolicy     = "contribution_policy"
+	SubtypeSecurityPolicy         = "security_policy"
+	SubtypeProcedure              = "procedure"
+	SubtypeRunbook                = "runbook"
+	SubtypeStandard               = "standard"
+	SubtypeAPIContract            = "api_contract"
+	SubtypeSchemaModel            = "schema_model"
+	SubtypeConfiguration          = "configuration"
+	SubtypeWorkflowDefinition     = "workflow_definition"
+	SubtypeDocumentTemplate       = "document_template"
+	SubtypePromptTemplate         = "prompt_template"
+	SubtypeIssueTemplate          = "issue_template"
+	SubtypePullRequestTemplate    = "pull_request_template"
 )
 
 var validKinds = map[string]struct{}{
@@ -53,6 +71,26 @@ var allowedSubtypes = map[string]map[string]struct{}{
 	},
 	KindRequirements: {
 		SubtypePRD: {},
+	},
+	KindMarkdownArtifact: {
+		SubtypeAgentInstruction:    {},
+		SubtypeSkill:               {},
+		SubtypeMaintainerPolicy:    {},
+		SubtypeOwnershipPolicy:     {},
+		SubtypeGovernancePolicy:    {},
+		SubtypeContributionPolicy:  {},
+		SubtypeSecurityPolicy:      {},
+		SubtypeProcedure:           {},
+		SubtypeRunbook:             {},
+		SubtypeStandard:            {},
+		SubtypeAPIContract:         {},
+		SubtypeSchemaModel:         {},
+		SubtypeConfiguration:       {},
+		SubtypeWorkflowDefinition:  {},
+		SubtypeDocumentTemplate:    {},
+		SubtypePromptTemplate:      {},
+		SubtypeIssueTemplate:       {},
+		SubtypePullRequestTemplate: {},
 	},
 }
 

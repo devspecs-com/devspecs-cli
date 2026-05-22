@@ -98,6 +98,7 @@ func evaluateModel(id string, model ModelConfig, candidate Candidate, resolver R
 		Family:          qualifyChildModel(id, family),
 		Accepted:        confidence >= resolver.RejectBelow || model.Fallback,
 		Confidence:      confidence,
+		Mode:            model.Mode,
 		Kind:            model.Kind,
 		Subtype:         model.Subtype,
 		Status:          deriveStatus(candidate.Features),

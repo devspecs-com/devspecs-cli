@@ -316,6 +316,59 @@ func TestScan_PersistsClassifierMetadata(t *testing.T) {
 	}
 }
 
+func TestScan_SubtypeFirstNonIntentClassifierQuarantinesAgentInstructions(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	repoRoot := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "# Project Instructions\n\n## Rules\n\nAlways run tests and follow repo conventions.\n"
+	if err := os.WriteFile(filepath.Join(repoRoot, "CLAUDE.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dbPath := filepath.Join(home, "devspecs.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	ids := idgen.NewFactory()
+	s := New(db, ids, []adapters.Adapter{&markdown.Adapter{}})
+	cfg := config.WithIntentCandidateDiscovery(nil, true)
+	if _, err := s.Run(context.Background(), repoRoot, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	var kind, subtype, ex string
+	err = db.QueryRow(`SELECT a.kind, a.subtype, COALESCE(rv.extracted_json, '')
+		FROM artifacts a
+		JOIN sources s ON s.artifact_id = a.id
+		JOIN artifact_revisions rv ON rv.id = a.current_revision_id
+		WHERE s.path = 'CLAUDE.md'`).Scan(&kind, &subtype, &ex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind != config.KindMarkdownArtifact || subtype != config.SubtypeAgentInstruction {
+		t.Fatalf("kind/subtype = %q/%q, want %q/%q", kind, subtype, config.KindMarkdownArtifact, config.SubtypeAgentInstruction)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(ex), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["mode"] != "protocol" {
+		t.Fatalf("mode = %#v", got["mode"])
+	}
+	classifier := got["classifier"].(map[string]any)
+	winner := classifier["winner"].(map[string]any)
+	if winner["classifier"] != "protocol" || winner["mode"] != "protocol" {
+		t.Fatalf("winner = %#v", winner)
+	}
+}
+
 func TestScan_ExperimentalIntentDiscoveryIndexesCompoundPlanningDir(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")
