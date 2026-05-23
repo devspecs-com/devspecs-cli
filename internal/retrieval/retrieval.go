@@ -55,26 +55,31 @@ const EvidenceModeBalanced = "balanced"
 type WeightedFilesRetrieverV0 struct {
 	DisableSectionAware bool
 	EvidenceMode        string
+	ConceptBackfill     bool
 }
 
 func (r WeightedFilesRetrieverV0) Name() string {
+	suffix := ""
+	if r.ConceptBackfill {
+		suffix = "_concept_backfill"
+	}
 	if strings.EqualFold(r.EvidenceMode, EvidenceModeBalanced) {
 		if r.DisableSectionAware {
-			return "eval_weighted_files_v0_evidence_balanced_no_section_retrieval"
+			return "eval_weighted_files_v0_evidence_balanced_no_section_retrieval" + suffix
 		}
-		return "eval_weighted_files_v0_evidence_balanced"
+		return "eval_weighted_files_v0_evidence_balanced" + suffix
 	}
 	if r.DisableSectionAware {
-		return "eval_weighted_files_v0_no_section_retrieval"
+		return "eval_weighted_files_v0_no_section_retrieval" + suffix
 	}
-	return "eval_weighted_files_v0"
+	return "eval_weighted_files_v0" + suffix
 }
 
 func (r WeightedFilesRetrieverV0) Retrieve(candidates []Candidate, query string) []Candidate {
 	if !r.DisableSectionAware {
 		candidates = EnrichCandidatesWithSectionMatches(candidates, query)
 	}
-	return retrieveWeightedFilesV0(candidates, query, r.EvidenceMode)
+	return retrieveWeightedFilesV0(candidates, query, r.EvidenceMode, r.ConceptBackfill)
 }
 
 type Reason struct {
@@ -143,7 +148,7 @@ func IsSourceContextCandidate(c Candidate) bool {
 	return !strings.EqualFold(filepath.Ext(c.Path), ".md") && !IsPlanningIntentPath(c.Path)
 }
 
-func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode string) []Candidate {
+func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode string, conceptBackfill bool) []Candidate {
 	terms := expandedTerms(query)
 	queryLower := strings.ToLower(query)
 	var scoredCandidates []scoredCandidate
@@ -189,6 +194,9 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode 
 		out = append(out, sf.candidate)
 	}
 	out = expandOpenSpecLinks(out, candidates, queryLower, limit)
+	if conceptBackfill {
+		out = applyConceptBackfill(out, candidates, query, queryLower, terms, limit)
+	}
 	out = packCandidateSections(out, queryLower, terms)
 	if !evidenceBalanced {
 		sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
@@ -204,6 +212,567 @@ type scoredCandidate struct {
 	profile    matchProfile
 	role       string
 	sourceFile bool
+}
+
+// ConceptRank is an inspectable deterministic score for the experimental
+// concept backfill lane. It is intentionally sparse: the retriever only uses it
+// for a few high-confidence anchor recoveries after the primary ranked pack.
+type ConceptRank struct {
+	Candidate        Candidate `json:"-"`
+	Path             string    `json:"path"`
+	Score            float64   `json:"score"`
+	MatchedCompacts  []string  `json:"matched_compacts,omitempty"`
+	MatchedPhrases   []string  `json:"matched_phrases,omitempty"`
+	MatchedPathTerms []string  `json:"matched_path_terms,omitempty"`
+}
+
+type conceptQueryProfile struct {
+	queryLower string
+	compacts   []string
+	phrases    []string
+	words      []string
+	testIntent bool
+}
+
+// RankConceptCandidates exposes the deterministic concept scorer for eval
+// diagnostics. It should remain a backfill/inspection aid, not a replacement
+// for the weighted retriever.
+func RankConceptCandidates(candidates []Candidate, query string) []ConceptRank {
+	profile := buildConceptQueryProfile(query)
+	profile = filterNoisyConceptProfile(profile, candidates)
+	if !conceptQueryIsUseful(profile) {
+		return nil
+	}
+	ranks := make([]ConceptRank, 0, len(candidates))
+	for _, c := range candidates {
+		rank := scoreConceptCandidate(c, profile)
+		if rank.Score <= 0 {
+			continue
+		}
+		ranks = append(ranks, rank)
+	}
+	sort.Slice(ranks, func(i, j int) bool {
+		if ranks[i].Score == ranks[j].Score {
+			return ranks[i].Path < ranks[j].Path
+		}
+		return ranks[i].Score > ranks[j].Score
+	})
+	return ranks
+}
+
+func applyConceptBackfill(selected []Candidate, universe []Candidate, query, queryLower string, terms map[string]float64, limit int) []Candidate {
+	_ = limit
+	if len(universe) == 0 {
+		return selected
+	}
+	profile := buildConceptQueryProfile(query)
+	profile = filterNoisyConceptProfile(profile, universe)
+	if !conceptQueryIsUseful(profile) {
+		return selected
+	}
+	slots := conceptBackfillSlots(profile, queryLower, terms)
+	if slots <= 0 {
+		return selected
+	}
+	seen := map[string]bool{}
+	for _, c := range selected {
+		seen[candidateIdentity(c)] = true
+		if c.Path != "" {
+			seen[filepath.ToSlash(c.Path)] = true
+		}
+	}
+	ranks := RankConceptCandidates(universe, query)
+	out := append([]Candidate(nil), selected...)
+	for _, rank := range ranks {
+		if len(out)-len(selected) >= slots {
+			break
+		}
+		if seen[candidateIdentity(rank.Candidate)] || seen[filepath.ToSlash(rank.Path)] {
+			continue
+		}
+		if !passesConceptBackfillThreshold(rank, profile, queryLower) {
+			continue
+		}
+		if candidateIsNoisyConceptBackfill(rank.Candidate, profile, queryLower) {
+			continue
+		}
+		c := withConceptBackfillMetadata(rank.Candidate, rank)
+		seen[candidateIdentity(c)] = true
+		seen[filepath.ToSlash(c.Path)] = true
+		out = append(out, c)
+	}
+	return out
+}
+
+func buildConceptQueryProfile(query string) conceptQueryProfile {
+	queryLower := strings.ToLower(query)
+	words := conceptWords(query)
+	profile := conceptQueryProfile{
+		queryLower: queryLower,
+		compacts:   conceptCompactsFromText(query),
+		phrases:    conceptPhrases(words),
+		words:      words,
+		testIntent: hasTestBehaviorIntent(queryLower),
+	}
+	return profile
+}
+
+func conceptQueryIsUseful(profile conceptQueryProfile) bool {
+	if len(profile.compacts) > 0 {
+		return true
+	}
+	if len(profile.phrases) > 0 && len(profile.words) >= 2 {
+		return true
+	}
+	return len(profile.words) >= 3
+}
+
+func filterNoisyConceptProfile(profile conceptQueryProfile, candidates []Candidate) conceptQueryProfile {
+	if len(candidates) < 8 {
+		return profile
+	}
+	compactDF := map[string]int{}
+	wordPathDF := map[string]int{}
+	for _, c := range candidates {
+		pathText := c.Path + "\n" + c.Source + "\n" + c.Title + "\n" + conceptMetadataText(c) + "\n" + conceptSectionText(c)
+		bodyText := c.Body
+		if len(bodyText) > 4000 {
+			bodyText = bodyText[:4000]
+		}
+		pathNorm := normalizeConceptText(pathText)
+		bodyNorm := normalizeConceptText(bodyText)
+		candidateCompacts := stringSetFromSlice(conceptCompactsFromText(pathText + "\n" + bodyText))
+		for _, compact := range profile.compacts {
+			for _, alt := range conceptCompactAlternates(compact) {
+				if candidateCompacts[alt] || strings.Contains(pathNorm, alt) || strings.Contains(bodyNorm, alt) {
+					compactDF[compact]++
+					break
+				}
+			}
+		}
+		for _, word := range profile.words {
+			if strings.Contains(pathNorm, word) {
+				wordPathDF[word]++
+			}
+		}
+	}
+	noisyWord := map[string]bool{}
+	var compacts []string
+	for _, compact := range profile.compacts {
+		if noisyConceptDF(compactDF[compact], len(candidates)) {
+			for _, part := range splitIdentifierParts(compact) {
+				noisyWord[part] = true
+			}
+			continue
+		}
+		compacts = append(compacts, compact)
+	}
+	var words []string
+	for _, word := range profile.words {
+		if noisyWord[word] || noisyConceptDF(wordPathDF[word], len(candidates)) {
+			continue
+		}
+		words = append(words, word)
+	}
+	profile.compacts = compacts
+	profile.words = words
+	profile.phrases = conceptPhrases(words)
+	return profile
+}
+
+func noisyConceptDF(df, total int) bool {
+	if total <= 0 {
+		return false
+	}
+	return df >= 8 && float64(df)/float64(total) >= 0.20
+}
+
+func scoreConceptCandidate(c Candidate, profile conceptQueryProfile) ConceptRank {
+	pathText := c.Path + "\n" + c.Source + "\n" + c.Title + "\n" + conceptMetadataText(c) + "\n" + conceptSectionText(c)
+	bodyText := c.Body
+	if len(bodyText) > 12000 {
+		bodyText = bodyText[:12000]
+	}
+	pathNorm := normalizeConceptText(pathText)
+	bodyNorm := normalizeConceptText(bodyText)
+	pathCompactSet := stringSetFromSlice(conceptCompactsFromText(pathText))
+	bodyCompactSet := stringSetFromSlice(conceptCompactsFromText(bodyText))
+
+	rank := ConceptRank{Candidate: c, Path: c.Path}
+	role := candidateRole(c)
+	pathOrTitleSignal := false
+	bodyOnlyScore := 0.0
+	for _, compact := range profile.compacts {
+		for _, alt := range conceptCompactAlternates(compact) {
+			switch {
+			case pathCompactSet[alt] || strings.Contains(pathNorm, alt):
+				rank.Score += 45.0
+				rank.MatchedCompacts = append(rank.MatchedCompacts, compact)
+				pathOrTitleSignal = true
+			case bodyCompactSet[alt] || strings.Contains(bodyNorm, alt):
+				add := 34.0
+				if isTestCaseCandidate(c) || IsSourceContextCandidate(c) {
+					add += 8.0
+				}
+				bodyOnlyScore += add
+				rank.MatchedCompacts = append(rank.MatchedCompacts, compact)
+			}
+		}
+	}
+	if bodyOnlyScore > 55.0 {
+		bodyOnlyScore = 55.0
+	}
+	rank.Score += bodyOnlyScore
+
+	for _, phrase := range profile.phrases {
+		phraseScore := 0.0
+		if strings.Contains(pathNorm, phrase) {
+			phraseScore += conceptPhraseScore(phrase, true)
+			pathOrTitleSignal = true
+		}
+		if strings.Contains(bodyNorm, phrase) {
+			phraseScore += conceptPhraseScore(phrase, false)
+		}
+		if phraseScore > 0 {
+			rank.Score += phraseScore
+			rank.MatchedPhrases = append(rank.MatchedPhrases, phrase)
+		}
+	}
+
+	pathTermMatches := 0
+	for _, word := range profile.words {
+		if strings.Contains(pathNorm, word) {
+			pathTermMatches++
+			rank.MatchedPathTerms = append(rank.MatchedPathTerms, word)
+			pathOrTitleSignal = true
+			continue
+		}
+		if strings.Contains(bodyNorm, word) {
+			rank.Score += 0.7
+		}
+	}
+	if pathTermMatches > 0 {
+		termScore := float64(pathTermMatches) * 5.0
+		if termScore > 24.0 {
+			termScore = 24.0
+		}
+		rank.Score += termScore
+	}
+
+	switch {
+	case profile.testIntent && (isTestCaseCandidate(c) || IsSourceContextCandidate(c)):
+		rank.Score += 10.0
+	case hasProductBackgroundIntent(profile.queryLower) && role == "prd":
+		rank.Score += 7.0
+	case hasRFCIntent(profile.queryLower) && (role == "rfc" || role == "design"):
+		rank.Score += 7.0
+	case hasOpenSpecStructureIntent(profile.queryLower) && strings.HasPrefix(role, "openspec_"):
+		rank.Score += 7.0
+	case hasNonIntentModeIntent(profile.queryLower, "protocol") && (role == "agent_instruction" || role == "skill" || role == "protocol"):
+		rank.Score += 7.0
+	case hasNonIntentModeIntent(profile.queryLower, "template") && role == "template":
+		rank.Score += 7.0
+	}
+	if mode := nonIntentCandidateMode(c); mode != "" && !hasNonIntentModeIntent(profile.queryLower, mode) {
+		rank.Score -= 15.0
+	}
+	if !pathOrTitleSignal && len(rank.MatchedCompacts) == 0 {
+		rank.Score -= 12.0
+	}
+	rank.MatchedCompacts = uniqueStrings(rank.MatchedCompacts)
+	rank.MatchedPhrases = uniqueStrings(rank.MatchedPhrases)
+	rank.MatchedPathTerms = uniqueStrings(rank.MatchedPathTerms)
+	return rank
+}
+
+func conceptBackfillSlots(profile conceptQueryProfile, queryLower string, terms map[string]float64) int {
+	switch {
+	case hasIdentifierTerm(terms) || len(profile.compacts) > 0:
+		return 2
+	case profile.testIntent:
+		return 1
+	case hasOpenSpecStructureIntent(queryLower) || hasProductBackgroundIntent(queryLower) || hasRFCIntent(queryLower):
+		return 2
+	case hasNonIntentModeIntent(queryLower, "protocol") || hasNonIntentModeIntent(queryLower, "template") || hasNonIntentModeIntent(queryLower, "model"):
+		return 2
+	default:
+		return 1
+	}
+}
+
+func passesConceptBackfillThreshold(rank ConceptRank, profile conceptQueryProfile, queryLower string) bool {
+	threshold := 38.0
+	if profile.testIntent || len(rank.MatchedCompacts) > 0 {
+		threshold = 32.0
+	}
+	if len(rank.MatchedPhrases) > 0 && len(rank.MatchedPathTerms) >= 2 {
+		threshold = 27.0
+	}
+	if conceptQueryIsBroad(profile, queryLower) {
+		threshold += 10.0
+	}
+	return rank.Score >= threshold
+}
+
+func candidateIsNoisyConceptBackfill(c Candidate, profile conceptQueryProfile, queryLower string) bool {
+	role := candidateRole(c)
+	if role == "model" && !hasNonIntentModeIntent(queryLower, "model") {
+		return true
+	}
+	if (role == "template" || strings.Contains(strings.ToLower(c.Path), "template")) && !hasNonIntentModeIntent(queryLower, "template") {
+		return true
+	}
+	if (role == "agent_instruction" || role == "skill" || role == "protocol") && !hasNonIntentModeIntent(queryLower, "protocol") {
+		return true
+	}
+	if !profile.testIntent && (isTestCaseCandidate(c) || IsSourceContextCandidate(c)) && !hasExplicitSourceIntent(queryLower) && !hasCodeCommentIntent(queryLower) {
+		return true
+	}
+	if len(profile.words) < 2 && len(profile.compacts) == 0 {
+		return true
+	}
+	return false
+}
+
+func withConceptBackfillMetadata(c Candidate, rank ConceptRank) Candidate {
+	if c.Metadata == nil {
+		c.Metadata = map[string]string{}
+	} else {
+		c.Metadata = copyMetadata(c.Metadata)
+	}
+	c.Metadata["retrieval_expansion_reason"] = "concept_backfill"
+	c.Metadata["concept_backfill_score"] = fmt.Sprintf("%.1f", rank.Score)
+	c.Metadata["concept_backfill_matched_compacts_json"] = jsonStringList(rank.MatchedCompacts)
+	c.Metadata["concept_backfill_matched_phrases_json"] = jsonStringList(rank.MatchedPhrases)
+	c.Metadata["concept_backfill_matched_path_terms_json"] = jsonStringList(rank.MatchedPathTerms)
+	return c
+}
+
+func conceptWords(text string) []string {
+	stop := map[string]bool{}
+	for _, term := range []string{
+		"a", "about", "agent", "all", "an", "and", "architecture", "artifact",
+		"behavior", "behaviour", "case", "cases", "code", "context", "cover",
+		"covers", "decision", "design", "doc", "docs", "document", "documents",
+		"find", "for", "how", "implementation", "instructions", "plan", "plans",
+		"product", "proposal", "requirement", "requirements", "source", "spec",
+		"template", "test", "tests", "the", "to", "what", "when", "where",
+		"which", "with",
+	} {
+		stop[term] = true
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, part := range splitIdentifierParts(text) {
+		part = strings.ToLower(strings.TrimSpace(part))
+		if len(part) < 3 || stop[part] || seen[part] {
+			continue
+		}
+		seen[part] = true
+		out = append(out, part)
+	}
+	return out
+}
+
+func conceptCompactsFromText(text string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, token := range conceptRawTokens(text) {
+		parts := splitIdentifierParts(token)
+		if len(parts) == 0 {
+			continue
+		}
+		compact := strings.Join(parts, "")
+		if len(compact) < 8 || seen[compact] || conceptCompactIsGeneric(compact) {
+			continue
+		}
+		if !conceptTokenHasIdentifierShape(token, parts) {
+			continue
+		}
+		seen[compact] = true
+		out = append(out, compact)
+	}
+	return out
+}
+
+func conceptRawTokens(text string) []string {
+	var tokens []string
+	var b strings.Builder
+	flush := func() {
+		if b.Len() == 0 {
+			return
+		}
+		tokens = append(tokens, b.String())
+		b.Reset()
+	}
+	for _, r := range text {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' || r == '.' {
+			b.WriteRune(r)
+			continue
+		}
+		flush()
+	}
+	flush()
+	return tokens
+}
+
+func conceptTokenHasIdentifierShape(token string, parts []string) bool {
+	if looksLikeCompactTestIdentifier(strings.ToLower(token)) {
+		return true
+	}
+	if strings.ContainsAny(token, "_.-") || len(parts) >= 3 {
+		return true
+	}
+	for _, r := range token {
+		if unicode.IsUpper(r) || unicode.IsDigit(r) {
+			return true
+		}
+	}
+	return false
+}
+
+func conceptCompactIsGeneric(compact string) bool {
+	switch compact {
+	case "architecture", "architecturedecision", "architecturedecisionrecord",
+		"documentation", "implementation", "productrequirements",
+		"productrequirementsdocument", "requirements", "repositoryinstructions":
+		return true
+	default:
+		return false
+	}
+}
+
+func conceptCompactAlternates(compact string) []string {
+	alts := []string{compact}
+	if strings.HasPrefix(compact, "test") && len(compact) > 8 {
+		alts = append(alts, strings.TrimPrefix(compact, "test"))
+	}
+	return uniqueStrings(alts)
+}
+
+func conceptPhrases(words []string) []string {
+	if len(words) < 2 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for n := 3; n >= 2; n-- {
+		if len(words) < n {
+			continue
+		}
+		for i := 0; i+n <= len(words); i++ {
+			phrase := strings.Join(words[i:i+n], " ")
+			if seen[phrase] {
+				continue
+			}
+			seen[phrase] = true
+			out = append(out, phrase)
+		}
+	}
+	return out
+}
+
+func conceptPhraseScore(phrase string, pathSignal bool) float64 {
+	parts := strings.Count(phrase, " ") + 1
+	if pathSignal {
+		if parts >= 3 {
+			return 18.0
+		}
+		return 12.0
+	}
+	if parts >= 3 {
+		return 7.0
+	}
+	return 4.0
+}
+
+func normalizeConceptText(text string) string {
+	var b strings.Builder
+	lastSpace := true
+	for _, r := range strings.ToLower(text) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			lastSpace = false
+			continue
+		}
+		if !lastSpace {
+			b.WriteByte(' ')
+			lastSpace = true
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func conceptMetadataText(c Candidate) string {
+	if c.Metadata == nil {
+		return ""
+	}
+	keys := []string{
+		"classifier_kind", "classifier_model", "classifier_subtype",
+		"openspec_role", "parent_title", "source_type", "test_name",
+	}
+	var parts []string
+	for _, key := range keys {
+		if value := strings.TrimSpace(c.Metadata[key]); value != "" {
+			parts = append(parts, value)
+		}
+	}
+	for _, key := range []string{"symbols_json", "assertion_terms_json", "indexed_section_match_headings_json"} {
+		parts = append(parts, metadataJSONList(c, key)...)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func conceptSectionText(c Candidate) string {
+	var parts []string
+	for _, section := range c.Sections {
+		if section.HeadingPath != "" {
+			parts = append(parts, section.HeadingPath)
+		}
+		if section.Title != "" {
+			parts = append(parts, section.Title)
+		}
+		if section.Metadata != nil {
+			for _, key := range []string{"role", "kind", "subtype"} {
+				if value := strings.TrimSpace(section.Metadata[key]); value != "" {
+					parts = append(parts, value)
+				}
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func conceptQueryIsBroad(profile conceptQueryProfile, queryLower string) bool {
+	if len(profile.compacts) > 0 {
+		return false
+	}
+	if len(profile.words) <= 1 {
+		return true
+	}
+	broadSignals := 0
+	for _, term := range []string{"architecture", "instructions", "requirements", "template", "video"} {
+		if strings.Contains(queryLower, term) {
+			broadSignals++
+		}
+	}
+	return broadSignals >= 2 && len(profile.words) < 3
+}
+
+func stringSetFromSlice(items []string) map[string]bool {
+	out := make(map[string]bool, len(items))
+	for _, item := range items {
+		out[item] = true
+	}
+	return out
+}
+
+func jsonStringList(values []string) string {
+	data, err := json.Marshal(values)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
 }
 
 type balancedEvidenceStats struct {
@@ -3364,6 +3933,22 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 	if c.Metadata != nil && c.Metadata["retrieval_expansion_reason"] != "" {
 		reasons = append(reasons, "relationship expansion: "+c.Metadata["retrieval_expansion_reason"])
 	}
+	if c.Metadata != nil && c.Metadata["concept_backfill_score"] != "" {
+		var parts []string
+		if compacts := metadataJSONList(c, "concept_backfill_matched_compacts_json"); len(compacts) > 0 {
+			parts = append(parts, "compacts "+strings.Join(limitStrings(compacts, 3), ", "))
+		}
+		if phrases := metadataJSONList(c, "concept_backfill_matched_phrases_json"); len(phrases) > 0 {
+			parts = append(parts, "phrases "+strings.Join(limitStrings(phrases, 3), ", "))
+		}
+		if pathTerms := metadataJSONList(c, "concept_backfill_matched_path_terms_json"); len(pathTerms) > 0 {
+			parts = append(parts, "path terms "+strings.Join(limitStrings(pathTerms, 3), ", "))
+		}
+		if len(parts) == 0 {
+			parts = append(parts, "score "+c.Metadata["concept_backfill_score"])
+		}
+		reasons = append(reasons, "concept backfill: "+strings.Join(parts, "; "))
+	}
 	if c.Metadata != nil && c.Metadata["section_pack_mode"] == "sections" {
 		reasons = append(reasons, "section-packed context: "+strings.ReplaceAll(c.Metadata["section_pack_headings"], "\n", "; "))
 	}
@@ -3633,4 +4218,11 @@ func uniqueStrings(items []string) []string {
 		out = append(out, item)
 	}
 	return out
+}
+
+func limitStrings(items []string, limit int) []string {
+	if limit <= 0 || len(items) <= limit {
+		return items
+	}
+	return items[:limit]
 }

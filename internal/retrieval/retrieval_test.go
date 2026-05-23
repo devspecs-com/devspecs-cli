@@ -990,6 +990,79 @@ func TestWeightedFilesRetrieverV0_AuthorityPriorDoesNotCreateUnrelatedMatches(t 
 	}
 }
 
+func TestRankConceptCandidates_CompactTestIdentifier(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:     "pkg/tools/exposed_tool_test.go#L24-L39",
+			Subtype:  "test_case",
+			Title:    "TestPutAndGetExposedTool",
+			Body:     "Test: TestPutAndGetExposedTool\nassert exposed tool is returned.",
+			Metadata: map[string]string{"source_type": "test_case", "test_name": "TestPutAndGetExposedTool"},
+		},
+		{
+			Path:  "docs/testing.md",
+			Title: "Testing",
+			Body:  "General tests cover tool behavior.",
+		},
+	}
+
+	ranks := RankConceptCandidates(candidates, "what tests cover testputandgetexposedtool behavior")
+	if len(ranks) == 0 || ranks[0].Path != "pkg/tools/exposed_tool_test.go#L24-L39" {
+		t.Fatalf("compact test identifier should rank first: %#v", ranks)
+	}
+	if !containsString(ranks[0].MatchedCompacts, "testputandgetexposedtool") {
+		t.Fatalf("missing compact diagnostic: %#v", ranks[0])
+	}
+}
+
+func TestApplyConceptBackfill_AddsSpecificProductRequirementsDoc(t *testing.T) {
+	selected := []Candidate{{Path: "docs/roadmap.md", Body: "Roadmap for unrelated launch work."}}
+	universe := []Candidate{
+		selected[0],
+		{
+			Path:    "docs/product-specs/fluxnova-aigf.md",
+			Kind:    "requirements",
+			Subtype: "prd",
+			Title:   "FluxNova AIGF Requirements",
+			Body:    "Product requirements for FluxNova AIGF workflows.",
+		},
+		{
+			Path:  "docs/product-specs/general-ai-video.md",
+			Title: "AI Video",
+			Body:  "Generic product requirements and background.",
+		},
+	}
+
+	query := "FluxNova AIGF requirements"
+	got := applyConceptBackfill(selected, universe, query, strings.ToLower(query), expandedTerms(query), 5)
+	if !containsCandidatePath(got, "docs/product-specs/fluxnova-aigf.md") {
+		t.Fatalf("missing specific product requirements backfill: %#v", CandidatePaths(got))
+	}
+	for _, c := range got {
+		if c.Path == "docs/product-specs/fluxnova-aigf.md" && c.Metadata["concept_backfill_score"] == "" {
+			t.Fatalf("missing concept backfill metadata: %#v", c.Metadata)
+		}
+	}
+}
+
+func TestApplyConceptBackfill_IgnoresBroadTemplateNoise(t *testing.T) {
+	universe := []Candidate{
+		{
+			Path:     "templates/PROPOSAL_TEMPLATE.md",
+			Subtype:  "template",
+			Title:    "Proposal Template",
+			Body:     "Architecture requirements instructions template for proposals.",
+			Metadata: map[string]string{"classifier_mode": "template"},
+		},
+	}
+
+	query := "architecture requirements instructions"
+	got := applyConceptBackfill(nil, universe, query, strings.ToLower(query), expandedTerms(query), 5)
+	if len(got) != 0 {
+		t.Fatalf("broad query should not backfill template noise: %#v", CandidatePaths(got))
+	}
+}
+
 func TestWeightedFilesRetrieverV0_AuthorityPriorRanksCanonicalCurrentArtifacts(t *testing.T) {
 	query := "architecture design for API boundary"
 	terms := expandedTerms(query)
@@ -1277,6 +1350,15 @@ func reasonContains(reasons []string, want string) bool {
 func containsCandidatePath(candidates []Candidate, path string) bool {
 	for _, c := range candidates {
 		if c.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
 			return true
 		}
 	}

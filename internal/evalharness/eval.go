@@ -104,6 +104,7 @@ type Options struct {
 	DisableSectionAwareRetrieval bool
 	ExperimentalBalancedEvidence bool
 	ExperimentalBudgetedPacking  bool
+	ExperimentalConceptBackfill  bool
 	ContextTokenBudget           int
 	IndexCacheDir                string
 	RefreshIndexCache            bool
@@ -226,60 +227,71 @@ type MissClassDiagnostic struct {
 }
 
 type CaseResult struct {
-	ID                            string            `json:"id"`
-	Query                         string            `json:"query"`
-	CaseDurationMS                int64             `json:"case_duration_ms,omitempty"`
-	CaseBudgetExceeded            bool              `json:"case_budget_exceeded,omitempty"`
-	CaseBudgetSeconds             int               `json:"case_budget_seconds,omitempty"`
-	DevSpecsTokens                int               `json:"devspecs_tokens"`
-	FullPlanningTokens            int               `json:"full_planning_tokens"`
-	AllMarkdownTokens             int               `json:"all_markdown_tokens"`
-	FullCandidateCorpusTokens     int               `json:"full_candidate_corpus_tokens"`
-	QueryFileBaselineTokens       int               `json:"query_file_baseline_tokens"`
-	PreBudgetDevSpecsTokens       int               `json:"pre_budget_devspecs_tokens,omitempty"`
-	ContextTokenBudget            int               `json:"context_token_budget,omitempty"`
-	ContextBudgetDroppedCount     int               `json:"context_budget_dropped_count,omitempty"`
-	ContextBudgetDroppedArtifacts []string          `json:"context_budget_dropped_artifacts,omitempty"`
-	TokenReductionVsFullPlanning  float64           `json:"token_reduction_vs_full_planning"`
-	TokenReductionVsAllMarkdown   float64           `json:"token_reduction_vs_all_markdown"`
-	TokenReductionVsFullCandidate float64           `json:"token_reduction_vs_full_candidate_corpus"`
-	TokenReductionVsQueryFile     float64           `json:"token_reduction_vs_query_file_baseline"`
-	ExpectedRelevantCount         int               `json:"expected_relevant_count"`
-	RelevantRetrieved             int               `json:"relevant_retrieved"`
-	ArtifactRecall                float64           `json:"artifact_recall"`
-	MustExpectedCount             int               `json:"must_expected_count"`
-	MustRelevantRetrieved         int               `json:"must_relevant_retrieved"`
-	MustHaveRecall                float64           `json:"must_have_recall"`
-	HelpfulExpectedCount          int               `json:"helpful_expected_count"`
-	HelpfulRelevantRetrieved      int               `json:"helpful_relevant_retrieved"`
-	HelpfulRecall                 float64           `json:"helpful_recall"`
-	BackgroundExpectedCount       int               `json:"background_expected_count"`
-	BackgroundRelevantRetrieved   int               `json:"background_relevant_retrieved"`
-	BackgroundRecall              float64           `json:"background_recall"`
-	ArtifactsIncluded             []string          `json:"artifacts_included"`
-	ArtifactReasons               []ArtifactReason  `json:"artifact_reasons"`
-	PackedSectionArtifacts        []string          `json:"packed_section_artifacts,omitempty"`
-	PackedSectionCount            int               `json:"packed_section_count,omitempty"`
-	SectionSelectedArtifacts      []string          `json:"section_selected_artifacts,omitempty"`
-	SectionSelectedCount          int               `json:"section_selected_count,omitempty"`
-	FullFileArtifactCount         int               `json:"full_file_artifact_count,omitempty"`
-	TestCaseArtifactCount         int               `json:"test_case_artifact_count,omitempty"`
-	CodeCommentArtifactCount      int               `json:"code_comment_artifact_count,omitempty"`
-	RelevantIncluded              []string          `json:"relevant_included"`
-	IrrelevantIncluded            []string          `json:"irrelevant_included"`
-	ArtifactPrecision             float64           `json:"artifact_precision"`
-	MissedExpectedRelevant        []string          `json:"missed_expected_relevant"`
-	UnexpectedExcludedHits        []string          `json:"unexpected_excluded_hits"`
-	ExpectedAvailableCount        int               `json:"expected_available_count"`
-	ExpectedMissingFromCorpus     []string          `json:"expected_missing_from_corpus,omitempty"`
-	MissedAfterDiscovery          []string          `json:"missed_after_discovery,omitempty"`
-	DiscoveryCoverage             float64           `json:"discovery_coverage"`
-	RetrievalCoverageOfDiscovered float64           `json:"retrieval_coverage_of_discovered"`
-	ContextSufficiency            SufficiencyResult `json:"context_sufficiency"`
-	AgentMetrics                  CaseAgentMetrics  `json:"agent_metrics"`
-	ArtifactGrades                []ArtifactGrade   `json:"artifact_grades,omitempty"`
-	Baselines                     []BaselineMetrics `json:"baselines"`
-	ThresholdFailures             []string          `json:"threshold_failures,omitempty"`
+	ID                            string                  `json:"id"`
+	Query                         string                  `json:"query"`
+	CaseDurationMS                int64                   `json:"case_duration_ms,omitempty"`
+	CaseBudgetExceeded            bool                    `json:"case_budget_exceeded,omitempty"`
+	CaseBudgetSeconds             int                     `json:"case_budget_seconds,omitempty"`
+	DevSpecsTokens                int                     `json:"devspecs_tokens"`
+	FullPlanningTokens            int                     `json:"full_planning_tokens"`
+	AllMarkdownTokens             int                     `json:"all_markdown_tokens"`
+	FullCandidateCorpusTokens     int                     `json:"full_candidate_corpus_tokens"`
+	QueryFileBaselineTokens       int                     `json:"query_file_baseline_tokens"`
+	PreBudgetDevSpecsTokens       int                     `json:"pre_budget_devspecs_tokens,omitempty"`
+	ContextTokenBudget            int                     `json:"context_token_budget,omitempty"`
+	ContextBudgetDroppedCount     int                     `json:"context_budget_dropped_count,omitempty"`
+	ContextBudgetDroppedArtifacts []string                `json:"context_budget_dropped_artifacts,omitempty"`
+	TokenReductionVsFullPlanning  float64                 `json:"token_reduction_vs_full_planning"`
+	TokenReductionVsAllMarkdown   float64                 `json:"token_reduction_vs_all_markdown"`
+	TokenReductionVsFullCandidate float64                 `json:"token_reduction_vs_full_candidate_corpus"`
+	TokenReductionVsQueryFile     float64                 `json:"token_reduction_vs_query_file_baseline"`
+	ExpectedRelevantCount         int                     `json:"expected_relevant_count"`
+	RelevantRetrieved             int                     `json:"relevant_retrieved"`
+	ArtifactRecall                float64                 `json:"artifact_recall"`
+	MustExpectedCount             int                     `json:"must_expected_count"`
+	MustRelevantRetrieved         int                     `json:"must_relevant_retrieved"`
+	MustHaveRecall                float64                 `json:"must_have_recall"`
+	HelpfulExpectedCount          int                     `json:"helpful_expected_count"`
+	HelpfulRelevantRetrieved      int                     `json:"helpful_relevant_retrieved"`
+	HelpfulRecall                 float64                 `json:"helpful_recall"`
+	BackgroundExpectedCount       int                     `json:"background_expected_count"`
+	BackgroundRelevantRetrieved   int                     `json:"background_relevant_retrieved"`
+	BackgroundRecall              float64                 `json:"background_recall"`
+	ArtifactsIncluded             []string                `json:"artifacts_included"`
+	ArtifactReasons               []ArtifactReason        `json:"artifact_reasons"`
+	PackedSectionArtifacts        []string                `json:"packed_section_artifacts,omitempty"`
+	PackedSectionCount            int                     `json:"packed_section_count,omitempty"`
+	SectionSelectedArtifacts      []string                `json:"section_selected_artifacts,omitempty"`
+	SectionSelectedCount          int                     `json:"section_selected_count,omitempty"`
+	FullFileArtifactCount         int                     `json:"full_file_artifact_count,omitempty"`
+	TestCaseArtifactCount         int                     `json:"test_case_artifact_count,omitempty"`
+	CodeCommentArtifactCount      int                     `json:"code_comment_artifact_count,omitempty"`
+	RelevantIncluded              []string                `json:"relevant_included"`
+	IrrelevantIncluded            []string                `json:"irrelevant_included"`
+	ArtifactPrecision             float64                 `json:"artifact_precision"`
+	MissedExpectedRelevant        []string                `json:"missed_expected_relevant"`
+	MissedMustConceptDiagnostics  []ConceptMissDiagnostic `json:"missed_must_concept_diagnostics,omitempty"`
+	UnexpectedExcludedHits        []string                `json:"unexpected_excluded_hits"`
+	ExpectedAvailableCount        int                     `json:"expected_available_count"`
+	ExpectedMissingFromCorpus     []string                `json:"expected_missing_from_corpus,omitempty"`
+	MissedAfterDiscovery          []string                `json:"missed_after_discovery,omitempty"`
+	DiscoveryCoverage             float64                 `json:"discovery_coverage"`
+	RetrievalCoverageOfDiscovered float64                 `json:"retrieval_coverage_of_discovered"`
+	ContextSufficiency            SufficiencyResult       `json:"context_sufficiency"`
+	AgentMetrics                  CaseAgentMetrics        `json:"agent_metrics"`
+	ArtifactGrades                []ArtifactGrade         `json:"artifact_grades,omitempty"`
+	Baselines                     []BaselineMetrics       `json:"baselines"`
+	ThresholdFailures             []string                `json:"threshold_failures,omitempty"`
+}
+
+type ConceptMissDiagnostic struct {
+	ExpectedPath     string   `json:"expected_path"`
+	InCandidatePool  bool     `json:"in_candidate_pool"`
+	ConceptRank      int      `json:"concept_rank,omitempty"`
+	ConceptScore     float64  `json:"concept_score,omitempty"`
+	MatchedCompacts  []string `json:"matched_compacts,omitempty"`
+	MatchedPhrases   []string `json:"matched_phrases,omitempty"`
+	MatchedPathTerms []string `json:"matched_path_terms,omitempty"`
 }
 
 type Summary struct {
@@ -420,6 +432,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 		retriever = retrieval.WeightedFilesRetrieverV0{
 			DisableSectionAware: opts.DisableSectionAwareRetrieval,
 			EvidenceMode:        evidenceMode,
+			ConceptBackfill:     opts.ExperimentalConceptBackfill,
 		}
 	}
 	tokenizerProfile := tokenizerProfile(counter)
@@ -557,6 +570,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 		applyPackingMetrics(&cr, devspecsFiles)
 		applyArtifactMetrics(&cr, c)
 		applyDiscoveryDiagnostics(&cr, c, corpusPaths)
+		applyConceptMissDiagnostics(&cr, c, queryFiles)
 		cr.ContextSufficiency = evaluateSufficiency(c.SuccessCriteria, devContext, cr.ArtifactsIncluded)
 		applyAgentCaseMetrics(&cr, c, devspecsFiles)
 		cr.CaseDurationMS = casePhase.durationMS()
@@ -1832,6 +1846,51 @@ func applyDiscoveryDiagnostics(cr *CaseResult, spec CaseSpec, corpusPaths map[st
 	}
 	if cr.ExpectedAvailableCount > 0 {
 		cr.RetrievalCoverageOfDiscovered = float64(availableRetrieved) / float64(cr.ExpectedAvailableCount)
+	}
+}
+
+func applyConceptMissDiagnostics(cr *CaseResult, spec CaseSpec, candidatePool []File) {
+	if cr.MustExpectedCount == 0 {
+		return
+	}
+	included := stringSet(cr.ArtifactsIncluded)
+	ranks := retrieval.RankConceptCandidates(candidatePool, spec.Query)
+	rankByPath := map[string]ConceptMissDiagnostic{}
+	for i, rank := range ranks {
+		path := filepath.ToSlash(rank.Path)
+		if path == "" {
+			continue
+		}
+		if _, exists := rankByPath[path]; exists {
+			continue
+		}
+		rankByPath[path] = ConceptMissDiagnostic{
+			ExpectedPath:     path,
+			InCandidatePool:  true,
+			ConceptRank:      i + 1,
+			ConceptScore:     rank.Score,
+			MatchedCompacts:  append([]string(nil), rank.MatchedCompacts...),
+			MatchedPhrases:   append([]string(nil), rank.MatchedPhrases...),
+			MatchedPathTerms: append([]string(nil), rank.MatchedPathTerms...),
+		}
+	}
+	poolPaths := candidatePathSet(candidatePool)
+	for _, artifact := range spec.ExpectedRelevant {
+		if artifact.Importance != "must" {
+			continue
+		}
+		path := filepath.ToSlash(artifact.Path)
+		if included[path] {
+			continue
+		}
+		if diag, ok := rankByPath[path]; ok {
+			cr.MissedMustConceptDiagnostics = append(cr.MissedMustConceptDiagnostics, diag)
+			continue
+		}
+		cr.MissedMustConceptDiagnostics = append(cr.MissedMustConceptDiagnostics, ConceptMissDiagnostic{
+			ExpectedPath:    path,
+			InCandidatePool: poolPaths[path],
+		})
 	}
 }
 
