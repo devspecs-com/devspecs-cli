@@ -17,7 +17,7 @@ import (
 var schemaDDL string
 
 // SchemaVersion is the current schema version. Bump when schema.sql changes.
-const SchemaVersion = 7
+const SchemaVersion = 8
 
 // DB wraps *sql.DB with DevSpecs-specific operations.
 type DB struct {
@@ -86,6 +86,11 @@ func (db *DB) migrate() error {
 				return err
 			}
 			maxVersion = 7
+		case 7:
+			if err := db.migrate7To8(now); err != nil {
+				return err
+			}
+			maxVersion = 8
 		default:
 			return fmt.Errorf(
 				"index was created with schema v%d but this CLI requires v%d. Run 'ds scan --rebuild' or delete ~/.devspecs/devspecs.db and run 'ds scan' to rebuild",
@@ -157,5 +162,54 @@ func (db *DB) migrate6To7(now string) error {
 		return fmt.Errorf("migrate v6→v7 remap prd: %w", err)
 	}
 	_, err = db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 7, now)
+	return err
+}
+
+func (db *DB) migrate7To8(now string) error {
+	if err := tryAlterTable(db.DB, `ALTER TABLE artifact_todos ADD COLUMN section_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("migrate v7â†’v8 todo section_id: %w", err)
+	}
+	if err := tryAlterTable(db.DB, `ALTER TABLE artifact_criteria ADD COLUMN section_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("migrate v7â†’v8 criteria section_id: %w", err)
+	}
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS artifact_sections (
+			id             TEXT PRIMARY KEY,
+			artifact_id    TEXT NOT NULL,
+			revision_id    TEXT NOT NULL,
+			source_path    TEXT NOT NULL,
+			heading_path   TEXT NOT NULL,
+			heading_depth  INTEGER NOT NULL,
+			start_line     INTEGER NOT NULL,
+			end_line       INTEGER NOT NULL,
+			title          TEXT NOT NULL,
+			body           TEXT NOT NULL,
+			token_estimate INTEGER NOT NULL,
+			section_kind   TEXT NOT NULL DEFAULT '',
+			metadata_json  TEXT NOT NULL DEFAULT '{}',
+			created_at     TEXT NOT NULL,
+			FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE,
+			FOREIGN KEY (revision_id) REFERENCES artifact_revisions(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_todos_section ON artifact_todos(section_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_criteria_section ON artifact_criteria(section_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_sections_artifact ON artifact_sections(artifact_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_sections_revision ON artifact_sections(revision_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_sections_source_path ON artifact_sections(source_path)`,
+		`CREATE VIRTUAL TABLE IF NOT EXISTS artifact_sections_fts USING fts5(
+			section_id UNINDEXED,
+			artifact_id UNINDEXED,
+			heading_path,
+			title,
+			body,
+			tokenize='unicode61'
+		)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate v7â†’v8 section schema: %w", err)
+		}
+	}
+	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 8, now)
 	return err
 }

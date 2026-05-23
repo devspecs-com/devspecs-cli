@@ -28,6 +28,40 @@ type Adapter struct{}
 
 func (a *Adapter) Name() string { return sourceType }
 
+func (a *Adapter) AcceptsFile(rel string, size int64, cfg *config.RepoConfig) bool {
+	if cfg != nil && !cfg.TestCaseArtifactsEnabled(false) {
+		return false
+	}
+	return size <= maxFileBytes && isLikelyTestFile(rel)
+}
+
+func (a *Adapter) DiscoverFile(ctx context.Context, file adapters.FileCandidate, cfg *config.RepoConfig) ([]adapters.Candidate, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !a.AcceptsFile(file.RelPath, file.Size, cfg) {
+		return nil, nil
+	}
+	var candidates []adapters.Candidate
+	for _, unit := range extractUnits(file.RelPath, string(file.Body)) {
+		candidates = append(candidates, adapters.Candidate{
+			PrimaryPath:    file.PrimaryPath,
+			RelPath:        file.RelPath,
+			AdapterName:    sourceType,
+			UnitName:       unit.Name,
+			UnitParent:     unit.Parent,
+			UnitBody:       unit.Body,
+			UnitLanguage:   unit.Language,
+			UnitFramework:  unit.Framework,
+			UnitStartLine:  unit.StartLine,
+			UnitEndLine:    unit.EndLine,
+			UnitSymbols:    unit.Symbols,
+			UnitAssertions: unit.Assertions,
+		})
+	}
+	return candidates, nil
+}
+
 func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.RepoConfig) ([]adapters.Candidate, error) {
 	if cfg != nil && !cfg.TestCaseArtifactsEnabled(false) {
 		return nil, nil

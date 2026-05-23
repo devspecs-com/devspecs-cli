@@ -2,14 +2,19 @@ package evalharness
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/adr"
@@ -20,6 +25,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/testcase"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
+	"github.com/devspecs-com/devspecs-cli/internal/indexquery"
 	"github.com/devspecs-com/devspecs-cli/internal/openspecmetrics"
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/scan"
@@ -82,19 +88,32 @@ func (ApproxTokenCounter) Profile() TokenizerProfile {
 }
 
 type Options struct {
-	JSON                 bool
-	MinRecall            *float64
-	MinMeanRecall        *float64
-	MinMustRecall        *float64
-	MinSufficiency       *float64
-	MinReductionFull     *float64
-	CorpusSource         string
-	CommandUnderTest     string
-	CommandRunner        CommandRunner
-	TokenCounter         TokenCounter
-	Retriever            retrieval.Retriever
-	TestCaseArtifacts    bool
-	CodeCommentArtifacts bool
+	JSON                         bool
+	MinRecall                    *float64
+	MinMeanRecall                *float64
+	MinMustRecall                *float64
+	MinSufficiency               *float64
+	MinReductionFull             *float64
+	CorpusSource                 string
+	CommandUnderTest             string
+	CommandRunner                CommandRunner
+	TokenCounter                 TokenCounter
+	Retriever                    retrieval.Retriever
+	TestCaseArtifacts            bool
+	CodeCommentArtifacts         bool
+	DisableSectionAwareRetrieval bool
+	ExperimentalBalancedEvidence bool
+	ExperimentalBudgetedPacking  bool
+	ContextTokenBudget           int
+	IndexCacheDir                string
+	RefreshIndexCache            bool
+	MaxCorpusFiles               int
+	MaxSourceFiles               int
+	MaxTestCaseArtifacts         int
+	MaxCodeComments              int
+	MaxCaseSeconds               int
+	ProgressWriter               io.Writer
+	ProgressInterval             time.Duration
 }
 
 type CommandRunner func(fixtureAbs string, cases []CaseSpec) (map[string]CommandCaseOutput, error)
@@ -202,11 +221,18 @@ type RoleDiagnostic struct {
 type CaseResult struct {
 	ID                            string            `json:"id"`
 	Query                         string            `json:"query"`
+	CaseDurationMS                int64             `json:"case_duration_ms,omitempty"`
+	CaseBudgetExceeded            bool              `json:"case_budget_exceeded,omitempty"`
+	CaseBudgetSeconds             int               `json:"case_budget_seconds,omitempty"`
 	DevSpecsTokens                int               `json:"devspecs_tokens"`
 	FullPlanningTokens            int               `json:"full_planning_tokens"`
 	AllMarkdownTokens             int               `json:"all_markdown_tokens"`
 	FullCandidateCorpusTokens     int               `json:"full_candidate_corpus_tokens"`
 	QueryFileBaselineTokens       int               `json:"query_file_baseline_tokens"`
+	PreBudgetDevSpecsTokens       int               `json:"pre_budget_devspecs_tokens,omitempty"`
+	ContextTokenBudget            int               `json:"context_token_budget,omitempty"`
+	ContextBudgetDroppedCount     int               `json:"context_budget_dropped_count,omitempty"`
+	ContextBudgetDroppedArtifacts []string          `json:"context_budget_dropped_artifacts,omitempty"`
 	TokenReductionVsFullPlanning  float64           `json:"token_reduction_vs_full_planning"`
 	TokenReductionVsAllMarkdown   float64           `json:"token_reduction_vs_all_markdown"`
 	TokenReductionVsFullCandidate float64           `json:"token_reduction_vs_full_candidate_corpus"`
@@ -227,6 +253,8 @@ type CaseResult struct {
 	ArtifactReasons               []ArtifactReason  `json:"artifact_reasons"`
 	PackedSectionArtifacts        []string          `json:"packed_section_artifacts,omitempty"`
 	PackedSectionCount            int               `json:"packed_section_count,omitempty"`
+	SectionSelectedArtifacts      []string          `json:"section_selected_artifacts,omitempty"`
+	SectionSelectedCount          int               `json:"section_selected_count,omitempty"`
 	FullFileArtifactCount         int               `json:"full_file_artifact_count,omitempty"`
 	TestCaseArtifactCount         int               `json:"test_case_artifact_count,omitempty"`
 	CodeCommentArtifactCount      int               `json:"code_comment_artifact_count,omitempty"`
@@ -241,6 +269,8 @@ type CaseResult struct {
 	DiscoveryCoverage             float64           `json:"discovery_coverage"`
 	RetrievalCoverageOfDiscovered float64           `json:"retrieval_coverage_of_discovered"`
 	ContextSufficiency            SufficiencyResult `json:"context_sufficiency"`
+	AgentMetrics                  CaseAgentMetrics  `json:"agent_metrics"`
+	ArtifactGrades                []ArtifactGrade   `json:"artifact_grades,omitempty"`
 	Baselines                     []BaselineMetrics `json:"baselines"`
 	ThresholdFailures             []string          `json:"threshold_failures,omitempty"`
 }
@@ -250,14 +280,19 @@ type Summary struct {
 	MedianTokenReductionVsFullPlanning      float64       `json:"median_token_reduction_vs_full_planning"`
 	MeanTokenReductionVsFullPlanning        float64       `json:"mean_token_reduction_vs_full_planning"`
 	MedianTokenReductionVsQueryFileBaseline float64       `json:"median_token_reduction_vs_query_file_baseline"`
+	MeanTokenReductionVsQueryFileBaseline   float64       `json:"mean_token_reduction_vs_query_file_baseline"`
 	MeanArtifactRecall                      float64       `json:"mean_artifact_recall"`
 	MeanMustHaveRecall                      float64       `json:"mean_must_have_recall"`
 	MeanHelpfulRecall                       float64       `json:"mean_helpful_recall"`
 	MeanBackgroundRecall                    float64       `json:"mean_background_recall"`
 	MeanArtifactPrecision                   float64       `json:"mean_artifact_precision"`
+	MeanGradedPrecision                     float64       `json:"mean_graded_precision"`
+	MeanPenalizedUtilityPrecision           float64       `json:"mean_penalized_utility_precision"`
+	GradeCounts                             GradeCounts   `json:"grade_counts"`
 	ContextSufficiencyCases                 int           `json:"context_sufficiency_cases"`
 	ContextSufficiencyPassed                int           `json:"context_sufficiency_passed"`
 	ContextSufficiencyPassRate              float64       `json:"context_sufficiency_pass_rate"`
+	AgentMetrics                            AgentMetrics  `json:"agent_metrics"`
 	Pareto                                  ParetoSummary `json:"pareto"`
 	WorstRecallCase                         string        `json:"worst_recall_case"`
 	LargestTokenContextCase                 string        `json:"largest_token_context_case"`
@@ -265,11 +300,14 @@ type Summary struct {
 }
 
 type ParetoSummary struct {
-	MeanTokenReductionVsFullPlanning float64 `json:"mean_token_reduction_vs_full_planning"`
-	MeanArtifactRecall               float64 `json:"mean_artifact_recall"`
-	MeanMustHaveRecall               float64 `json:"mean_must_have_recall"`
-	MeanArtifactPrecision            float64 `json:"mean_artifact_precision"`
-	ContextSufficiencyPassRate       float64 `json:"context_sufficiency_pass_rate"`
+	MeanTokenReductionVsFullPlanning      float64 `json:"mean_token_reduction_vs_full_planning"`
+	MeanTokenReductionVsQueryFileBaseline float64 `json:"mean_token_reduction_vs_query_file_baseline"`
+	MeanArtifactRecall                    float64 `json:"mean_artifact_recall"`
+	MeanMustHaveRecall                    float64 `json:"mean_must_have_recall"`
+	MeanArtifactPrecision                 float64 `json:"mean_artifact_precision"`
+	MeanGradedPrecision                   float64 `json:"mean_graded_precision"`
+	MeanPenalizedUtilityPrecision         float64 `json:"mean_penalized_utility_precision"`
+	ContextSufficiencyPassRate            float64 `json:"context_sufficiency_pass_rate"`
 }
 
 type ArtifactReason = retrieval.Reason
@@ -285,21 +323,64 @@ type SufficiencyResult struct {
 }
 
 type Result struct {
-	Fixture          string           `json:"fixture"`
-	FixtureVersion   string           `json:"fixture_version"`
-	EvalStage        string           `json:"eval_stage"`
-	CorpusSource     string           `json:"corpus_source"`
-	ProductPath      string           `json:"product_path"`
-	CommandUnderTest string           `json:"command_under_test,omitempty"`
-	Retriever        string           `json:"retriever"`
-	TokenCounter     string           `json:"token_counter"`
-	TokenizerProfile TokenizerProfile `json:"tokenizer_profile"`
-	PricingProfile   PricingProfile   `json:"pricing_profile"`
-	ResultsFile      string           `json:"results_file,omitempty"`
-	Corpus           CorpusSummary    `json:"corpus"`
-	Summary          Summary          `json:"summary"`
-	Diagnostics      Diagnostics      `json:"diagnostics"`
-	Cases            []CaseResult     `json:"cases"`
+	Fixture          string            `json:"fixture"`
+	FixtureVersion   string            `json:"fixture_version"`
+	EvalStage        string            `json:"eval_stage"`
+	CorpusSource     string            `json:"corpus_source"`
+	ProductPath      string            `json:"product_path"`
+	CommandUnderTest string            `json:"command_under_test,omitempty"`
+	Retriever        string            `json:"retriever"`
+	TokenCounter     string            `json:"token_counter"`
+	TokenizerProfile TokenizerProfile  `json:"tokenizer_profile"`
+	PricingProfile   PricingProfile    `json:"pricing_profile"`
+	ResultsFile      string            `json:"results_file,omitempty"`
+	Corpus           CorpusSummary     `json:"corpus"`
+	Summary          Summary           `json:"summary"`
+	Diagnostics      Diagnostics       `json:"diagnostics"`
+	AgentMetrics     AgentMetrics      `json:"agent_metrics"`
+	LaneMetrics      []LaneMetric      `json:"lane_metrics"`
+	MetricNotes      map[string]string `json:"metric_notes,omitempty"`
+	PhaseTelemetry   []PhaseTelemetry  `json:"phase_telemetry,omitempty"`
+	IndexCache       *IndexCacheReport `json:"index_cache,omitempty"`
+	Budgets          BudgetReport      `json:"budgets,omitempty"`
+	Cases            []CaseResult      `json:"cases"`
+}
+
+type PhaseTelemetry struct {
+	Name       string            `json:"name"`
+	StartedAt  string            `json:"started_at"`
+	EndedAt    string            `json:"ended_at"`
+	DurationMS int64             `json:"duration_ms"`
+	Status     string            `json:"status"`
+	Counts     map[string]int    `json:"counts,omitempty"`
+	Details    map[string]string `json:"details,omitempty"`
+}
+
+type IndexCacheReport struct {
+	Enabled               bool   `json:"enabled"`
+	Hit                   bool   `json:"hit"`
+	Key                   string `json:"key,omitempty"`
+	Path                  string `json:"path,omitempty"`
+	SchemaVersion         int    `json:"schema_version,omitempty"`
+	Reason                string `json:"reason,omitempty"`
+	CorpusFingerprint     string `json:"corpus_fingerprint,omitempty"`
+	ProvenanceFingerprint string `json:"provenance_fingerprint,omitempty"`
+}
+
+type BudgetReport struct {
+	MaxCorpusFiles       int           `json:"max_corpus_files,omitempty"`
+	MaxSourceFiles       int           `json:"max_source_files,omitempty"`
+	MaxTestCaseArtifacts int           `json:"max_test_case_artifacts,omitempty"`
+	MaxCodeComments      int           `json:"max_code_comments,omitempty"`
+	MaxCaseSeconds       int           `json:"max_case_seconds,omitempty"`
+	Applied              []BudgetEvent `json:"applied,omitempty"`
+}
+
+type BudgetEvent struct {
+	Name    string `json:"name"`
+	Before  int    `json:"before"`
+	After   int    `json:"after"`
+	Message string `json:"message,omitempty"`
 }
 
 type CorpusSummary struct {
@@ -318,36 +399,54 @@ type CorpusSlice struct {
 }
 
 func Run(fixture string, opts Options) (*Result, error) {
+	telemetry := newPhaseRecorder()
 	counter := opts.TokenCounter
 	if counter == nil {
 		counter = ApproxTokenCounter{}
 	}
 	retriever := opts.Retriever
 	if retriever == nil {
-		retriever = retrieval.WeightedFilesRetrieverV0{}
+		evidenceMode := ""
+		if opts.ExperimentalBalancedEvidence {
+			evidenceMode = retrieval.EvidenceModeBalanced
+		}
+		retriever = retrieval.WeightedFilesRetrieverV0{
+			DisableSectionAware: opts.DisableSectionAwareRetrieval,
+			EvidenceMode:        evidenceMode,
+		}
 	}
 	tokenizerProfile := tokenizerProfile(counter)
 	fixtureAbs, err := filepath.Abs(fixture)
 	if err != nil {
 		return nil, err
 	}
+	loadPhase := telemetry.start("load_cases")
 	caseFile, err := loadCaseFile(fixtureAbs)
 	if err != nil {
+		loadPhase.finish("error", nil, map[string]string{"error": err.Error()})
 		return nil, err
 	}
+	loadPhase.finish("ok", map[string]int{"cases": len(caseFile.Cases)}, nil)
 	corpusSource := defaultString(opts.CorpusSource, CorpusSourceSQLiteIndex)
-	files, err := collectCorpusFiles(fixtureAbs, corpusSource, opts)
+	indexPhase := telemetry.start("index_or_load_corpus")
+	files, cacheReport, budgetEvents, err := collectCorpusFiles(fixtureAbs, corpusSource, opts)
 	if err != nil {
+		indexPhase.finish("error", nil, map[string]string{"error": err.Error()})
 		return nil, err
 	}
+	indexPhase.finish("ok", map[string]int{"files": len(files)}, nil)
 	var commandOutputs map[string]CommandCaseOutput
 	if opts.CommandRunner != nil {
+		commandPhase := telemetry.start("command_runner")
 		commandOutputs, err = opts.CommandRunner(fixtureAbs, caseFile.Cases)
 		if err != nil {
+			commandPhase.finish("error", nil, map[string]string{"error": err.Error()})
 			return nil, err
 		}
+		commandPhase.finish("ok", map[string]int{"cases": len(commandOutputs)}, nil)
 	}
 
+	preparePhase := telemetry.start("prepare_corpus_contexts")
 	fullPlanning := fullPlanningCorpus(files)
 	allMarkdown := filterFiles(files, func(f File) bool {
 		return strings.EqualFold(filepath.Ext(f.Path), ".md")
@@ -360,6 +459,16 @@ func Run(fixture string, opts Options) (*Result, error) {
 	sourceContext := renderContext("source/context candidates", sourceCandidates)
 	fullCandidateContext := renderContext("full candidate corpus", fullCandidate)
 	corpusPaths := candidatePathSet(files)
+	preparePhase.finish("ok", map[string]int{
+		"planning_files":        len(fullPlanning),
+		"markdown_files":        len(allMarkdown),
+		"source_context_files":  len(sourceCandidates),
+		"full_candidate_files":  len(fullCandidate),
+		"full_candidate_tokens": counter.Count(fullCandidateContext),
+		"planning_tokens":       counter.Count(fullContext),
+		"source_context_tokens": counter.Count(sourceContext),
+		"all_markdown_tokens":   counter.Count(allMarkdownContext),
+	}, nil)
 
 	result := &Result{
 		Fixture:          filepath.ToSlash(fixture),
@@ -378,27 +487,37 @@ func Run(fixture string, opts Options) (*Result, error) {
 			SourceContextCandidates: corpusSlice("non-markdown text/code candidates considered by filesystem retrieval", true, sourceCandidates, counter.Count(sourceContext)),
 			FullCandidateCorpus:     corpusSlice("planning/intent docs plus non-markdown source/context candidates", true, fullCandidate, counter.Count(fullCandidateContext)),
 		},
+		IndexCache: cacheReport,
+		Budgets:    budgetReportFromOptions(opts, budgetEvents),
 	}
 	for _, c := range caseFile.Cases {
+		casePhase := telemetry.start("case")
 		devspecsFiles := retriever.Retrieve(files, c.Query)
 		queryFiles := retrieval.QueryBaseline(files, c.Query)
 
-		devContext := renderContext(c.Query, devspecsFiles)
 		artifactReasons := retrieval.ExplainCandidates(devspecsFiles, c.Query)
+		preBudgetTokens := 0
+		var droppedByContextBudget []string
 		if commandOutputs != nil {
 			output, ok := commandOutputs[c.ID]
 			if !ok {
 				return nil, fmt.Errorf("command eval missing output for case %q", c.ID)
 			}
 			devspecsFiles = output.Artifacts
-			if output.Context != "" {
-				devContext = output.Context
-			} else {
-				devContext = renderContext(c.Query, devspecsFiles)
-			}
 			artifactReasons = output.ArtifactReasons
 			if len(artifactReasons) == 0 {
 				artifactReasons = retrieval.ExplainCandidates(devspecsFiles, c.Query)
+			}
+		} else if opts.ExperimentalBudgetedPacking && opts.ContextTokenBudget > 0 {
+			var dropped []string
+			devspecsFiles, preBudgetTokens, dropped = applyContextTokenBudget(c.Query, devspecsFiles, opts.ContextTokenBudget, counter)
+			droppedByContextBudget = dropped
+			artifactReasons = retrieval.ExplainCandidates(devspecsFiles, c.Query)
+		}
+		devContext := renderContext(c.Query, devspecsFiles)
+		if commandOutputs != nil {
+			if output := commandOutputs[c.ID]; output.Context != "" {
+				devContext = output.Context
 			}
 		}
 		queryContext := renderContext(c.Query, queryFiles)
@@ -411,6 +530,8 @@ func Run(fixture string, opts Options) (*Result, error) {
 			AllMarkdownTokens:         counter.Count(allMarkdownContext),
 			FullCandidateCorpusTokens: counter.Count(fullCandidateContext),
 			QueryFileBaselineTokens:   counter.Count(queryContext),
+			PreBudgetDevSpecsTokens:   preBudgetTokens,
+			ContextTokenBudget:        contextTokenBudgetForCase(opts),
 			ArtifactsIncluded:         rels(devspecsFiles),
 			ArtifactReasons:           artifactReasons,
 			Baselines: []BaselineMetrics{
@@ -424,22 +545,77 @@ func Run(fixture string, opts Options) (*Result, error) {
 		cr.TokenReductionVsAllMarkdown = tokenReduction(cr.DevSpecsTokens, cr.AllMarkdownTokens)
 		cr.TokenReductionVsFullCandidate = tokenReduction(cr.DevSpecsTokens, cr.FullCandidateCorpusTokens)
 		cr.TokenReductionVsQueryFile = tokenReduction(cr.DevSpecsTokens, cr.QueryFileBaselineTokens)
+		cr.ContextBudgetDroppedArtifacts = droppedByContextBudget
+		cr.ContextBudgetDroppedCount = len(droppedByContextBudget)
 		applyPackingMetrics(&cr, devspecsFiles)
 		applyArtifactMetrics(&cr, c)
 		applyDiscoveryDiagnostics(&cr, c, corpusPaths)
 		cr.ContextSufficiency = evaluateSufficiency(c.SuccessCriteria, devContext, cr.ArtifactsIncluded)
+		applyAgentCaseMetrics(&cr, c, devspecsFiles)
+		cr.CaseDurationMS = casePhase.durationMS()
+		if opts.MaxCaseSeconds > 0 && cr.CaseDurationMS > int64(opts.MaxCaseSeconds)*1000 {
+			cr.CaseBudgetExceeded = true
+			cr.CaseBudgetSeconds = opts.MaxCaseSeconds
+			cr.ThresholdFailures = append(cr.ThresholdFailures, fmt.Sprintf("case duration %.1fs exceeded budget %ds", float64(cr.CaseDurationMS)/1000.0, opts.MaxCaseSeconds))
+		}
 		applyThresholds(&cr, opts)
 		result.Cases = append(result.Cases, cr)
+		casePhase.finish("ok", map[string]int{
+			"artifacts_included": len(cr.ArtifactsIncluded),
+			"devspecs_tokens":    cr.DevSpecsTokens,
+		}, map[string]string{"case_id": c.ID})
 	}
+	summarizePhase := telemetry.start("summarize")
 	result.Summary = summarize(result.Cases)
 	result.Diagnostics = summarizeDiagnostics(result.Cases)
+	result.AgentMetrics = summarizeAgentMetrics(result.Cases)
+	result.LaneMetrics = summarizeLaneMetrics(result.Cases)
+	result.MetricNotes = agentMetricNotes()
+	result.Summary.AgentMetrics = result.AgentMetrics
 	if corpusSource == CorpusSourceSQLiteIndex {
 		if metrics := openSpecMetricsFromFiles(fixtureAbs, files); metrics != nil {
 			result.Diagnostics.OpenSpec = metrics
 		}
 	}
 	result.Summary.FailedThresholdCount += len(CheckSummaryThresholds(result, opts))
+	summarizePhase.finish("ok", map[string]int{"cases": len(result.Cases)}, nil)
+	result.PhaseTelemetry = telemetry.phases
 	return result, nil
+}
+
+type phaseRecorder struct {
+	phases []PhaseTelemetry
+}
+
+type activePhase struct {
+	rec     *phaseRecorder
+	name    string
+	started time.Time
+}
+
+func newPhaseRecorder() *phaseRecorder {
+	return &phaseRecorder{}
+}
+
+func (r *phaseRecorder) start(name string) *activePhase {
+	return &activePhase{rec: r, name: name, started: time.Now().UTC()}
+}
+
+func (p *activePhase) durationMS() int64 {
+	return time.Since(p.started).Milliseconds()
+}
+
+func (p *activePhase) finish(status string, counts map[string]int, details map[string]string) {
+	ended := time.Now().UTC()
+	p.rec.phases = append(p.rec.phases, PhaseTelemetry{
+		Name:       p.name,
+		StartedAt:  p.started.Format(time.RFC3339Nano),
+		EndedAt:    ended.Format(time.RFC3339Nano),
+		DurationMS: ended.Sub(p.started).Milliseconds(),
+		Status:     status,
+		Counts:     counts,
+		Details:    details,
+	})
 }
 
 func tokenizerProfile(counter TokenCounter) TokenizerProfile {
@@ -503,10 +679,10 @@ func normalizeImportance(value string) (string, error) {
 		importance = "must"
 	}
 	switch importance {
-	case "must", "helpful", "background":
+	case "must", "helpful", "background", "same_cluster":
 		return importance, nil
 	default:
-		return "", fmt.Errorf("importance must be must, helpful, or background, got %q", value)
+		return "", fmt.Errorf("importance must be must, helpful, background, or same_cluster, got %q", value)
 	}
 }
 
@@ -530,14 +706,29 @@ func normalizeCriteriaPaths(c *SuccessCriteria) {
 
 type File = retrieval.Candidate
 
-func collectCorpusFiles(root, corpusSource string, opts Options) ([]File, error) {
+const evalIndexCacheSchemaVersion = 3
+
+type indexedCorpusCacheFile struct {
+	SchemaVersion int    `json:"schema_version"`
+	Key           string `json:"key"`
+	CreatedAt     string `json:"created_at"`
+	Root          string `json:"root"`
+	Files         []File `json:"files"`
+}
+
+func collectCorpusFiles(root, corpusSource string, opts Options) ([]File, *IndexCacheReport, []BudgetEvent, error) {
 	switch corpusSource {
 	case "", CorpusSourceFilesystemFixture:
-		return collectFiles(root)
+		files, err := collectFiles(root)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		files, events := applyEvalBudgets(files, opts)
+		return files, nil, events, nil
 	case CorpusSourceSQLiteIndex:
 		return collectIndexedFiles(root, opts)
 	default:
-		return nil, fmt.Errorf("unknown eval corpus source %q", corpusSource)
+		return nil, nil, nil, fmt.Errorf("unknown eval corpus source %q", corpusSource)
 	}
 }
 
@@ -590,22 +781,54 @@ func collectFiles(root string) ([]File, error) {
 	return files, err
 }
 
-func collectIndexedFiles(root string, opts Options) ([]File, error) {
+func collectIndexedFiles(root string, opts Options) ([]File, *IndexCacheReport, []BudgetEvent, error) {
+	cacheReport := &IndexCacheReport{}
+	cachePath := ""
+	cacheKey := ""
+	if strings.TrimSpace(opts.IndexCacheDir) != "" {
+		cacheReport.Enabled = true
+		cacheReport.SchemaVersion = evalIndexCacheSchemaVersion
+		cacheReport.CorpusFingerprint = evalIndexedCorpusIndexFingerprint()
+		cacheReport.ProvenanceFingerprint = evalRunProvenanceFingerprint()
+		key, err := indexedCorpusCacheKey(root, opts)
+		if err != nil {
+			return nil, cacheReport, nil, fmt.Errorf("compute indexed eval cache key: %w", err)
+		}
+		cacheKey = key
+		cachePath = filepath.Join(opts.IndexCacheDir, key+".json")
+		cacheReport.Key = key
+		cacheReport.Path = filepath.ToSlash(cachePath)
+		if !opts.RefreshIndexCache {
+			if cached, ok := readIndexedCorpusCache(cachePath, key); ok {
+				cacheReport.Hit = true
+				cacheReport.Reason = "cache_hit"
+				files, events := applyEvalBudgets(cached.Files, opts)
+				return files, cacheReport, events, nil
+			}
+		}
+		if opts.RefreshIndexCache {
+			cacheReport.Reason = "refresh_requested"
+		} else {
+			cacheReport.Reason = "cache_miss"
+		}
+	}
+
 	tempDir, err := os.MkdirTemp("", "devspecs-eval-index-*")
 	if err != nil {
-		return nil, fmt.Errorf("create indexed eval temp dir: %w", err)
+		return nil, cacheReport, nil, fmt.Errorf("create indexed eval temp dir: %w", err)
 	}
 	defer os.RemoveAll(tempDir)
 
 	db, err := store.Open(filepath.Join(tempDir, "devspecs.db"))
 	if err != nil {
-		return nil, fmt.Errorf("open indexed eval database: %w", err)
+		return nil, cacheReport, nil, fmt.Errorf("open indexed eval database: %w", err)
 	}
+	db.SetMaxOpenConns(1)
 	defer db.Close()
 
 	cfg, err := config.LoadRepoConfig(root)
 	if err != nil {
-		return nil, fmt.Errorf("load fixture repo config: %w", err)
+		return nil, cacheReport, nil, fmt.Errorf("load fixture repo config: %w", err)
 	}
 	cfg = config.WithDefaultIntentCandidateDiscovery(cfg, true)
 	if opts.TestCaseArtifacts {
@@ -627,221 +850,570 @@ func collectIndexedFiles(root string, opts Options) ([]File, error) {
 		adpts = append(adpts, &codecomment.Adapter{})
 	}
 	scanner := scan.New(db, idgen.NewFactory(), adpts)
-	if _, err := scanner.Run(context.Background(), root, cfg); err != nil {
-		return nil, fmt.Errorf("scan fixture into indexed eval database: %w", err)
+	if _, err := scanner.RunWithOptions(context.Background(), root, cfg, scan.RunOptions{
+		MaxCandidatesByAdapter: evalCandidateLimits(opts),
+		UseTransaction:         true,
+		SkipAuthoredAtLookup:   true,
+		FreshIndex:             true,
+		Progress:               evalScanProgressCallback(root, opts),
+		ProgressInterval:       opts.ProgressInterval,
+	}); err != nil {
+		return nil, cacheReport, nil, fmt.Errorf("scan fixture into indexed eval database: %w", err)
 	}
 
-	artifacts, err := db.ListArtifacts(store.FilterParams{RepoRoot: root})
+	files, err := collectIndexedFilesFromDB(db, root)
 	if err != nil {
-		return nil, fmt.Errorf("list indexed eval artifacts: %w", err)
+		return nil, cacheReport, nil, fmt.Errorf("read indexed eval artifacts: %w", err)
 	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	if cachePath != "" && cacheKey != "" {
+		if err := writeIndexedCorpusCache(cachePath, indexedCorpusCacheFile{
+			SchemaVersion: evalIndexCacheSchemaVersion,
+			Key:           cacheKey,
+			CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+			Root:          filepath.ToSlash(root),
+			Files:         files,
+		}); err != nil {
+			cacheReport.Reason = "cache_write_failed: " + err.Error()
+		}
+	}
+	files, events := applyEvalBudgets(files, opts)
+	return files, cacheReport, events, nil
+}
+
+func collectIndexedFilesFromDB(db *store.DB, root string) ([]File, error) {
 	seen := map[string]bool{}
-	var files []File
+	artifacts, bodies, extracted, err := listIndexedArtifactsWithRevisions(db, root)
+	if err != nil {
+		return nil, err
+	}
+	sourcesByArtifact, err := listIndexedSourcesByArtifact(db, root)
+	if err != nil {
+		return nil, err
+	}
+	todosByArtifact, err := listIndexedTodosByArtifact(db, root)
+	if err != nil {
+		return nil, err
+	}
+	linksByArtifact, err := listIndexedLinksByArtifact(db, root)
+	if err != nil {
+		return nil, err
+	}
+	sectionsByArtifact, err := listIndexedSectionsByArtifact(db, root)
+	if err != nil {
+		return nil, err
+	}
+
+	candidates := make([]File, 0, len(artifacts))
 	for _, art := range artifacts {
-		sources, _ := db.GetSourcesForArtifact(art.ID)
-		rel := indexedArtifactRel(art, sources)
+		candidates = append(candidates, indexquery.ArtifactCandidateWithLinks(
+			art,
+			sourcesByArtifact[art.ID],
+			linksByArtifact[art.ID],
+			todosByArtifact[art.ID],
+			sectionsByArtifact[art.ID],
+			bodies[art.ID],
+			extracted[art.ID],
+		))
+	}
+	files := make([]File, 0, len(candidates))
+	for _, candidate := range candidates {
+		rel := filepath.ToSlash(candidate.Path)
 		if rel == "" || seen[rel] {
 			continue
 		}
 		seen[rel] = true
-
-		var body string
-		var extractedJSON string
-		if art.CurrentRevID != "" {
-			if rev, err := db.GetRevision(art.CurrentRevID); err == nil && rev != nil {
-				body = rev.Body
-				extractedJSON = rev.ExtractedJSON
-			}
-		}
-		todos, _ := db.GetTodosForArtifact(art.ID)
-		links, _ := db.GetLinksForArtifact(art.ID)
-		files = append(files, File{
-			ID:       art.ID,
-			Path:     filepath.ToSlash(rel),
-			Kind:     art.Kind,
-			Subtype:  art.Subtype,
-			Title:    art.Title,
-			Status:   art.Status,
-			Body:     renderIndexedArtifactContent(art, sources, todos, body),
-			Metadata: indexedArtifactMetadata(sources, links, extractedJSON),
-		})
+		files = append(files, candidate)
 	}
-	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files, nil
 }
 
-func indexedArtifactRel(art store.ArtifactRow, sources []store.SourceRow) string {
-	for _, src := range sources {
-		if strings.TrimSpace(src.Path) != "" {
-			if src.SourceType == "test_case" {
-				return indexedLineScopedRel(src, "test_case")
-			}
-			if src.SourceType == "code_comment" {
-				return indexedLineScopedRel(src, "code_comment")
-			}
-			return filepath.ToSlash(src.Path)
+func listIndexedArtifactsWithRevisions(db *store.DB, root string) ([]store.ArtifactRow, map[string]string, map[string]string, error) {
+	rows, err := db.Query(`SELECT a.id, a.repo_id, COALESCE(a.short_id,''), a.kind, COALESCE(a.subtype,''), a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at, COALESCE(ar.body,''), COALESCE(ar.extracted_json,'')
+FROM artifacts a
+JOIN repos r ON a.repo_id = r.id
+LEFT JOIN artifact_revisions ar ON ar.id = a.current_revision_id
+WHERE r.root_path = ?
+ORDER BY a.last_observed_at DESC`, root)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	defer rows.Close()
+	var artifacts []store.ArtifactRow
+	bodies := map[string]string{}
+	extracted := map[string]string{}
+	for rows.Next() {
+		var art store.ArtifactRow
+		var body string
+		var extractedJSON string
+		if err := rows.Scan(&art.ID, &art.RepoID, &art.ShortID, &art.Kind, &art.Subtype, &art.Title, &art.Status, &art.CurrentRevID, &art.CreatedAt, &art.UpdatedAt, &art.LastObservedAt, &body, &extractedJSON); err != nil {
+			return nil, nil, nil, err
 		}
+		artifacts = append(artifacts, art)
+		bodies[art.ID] = body
+		extracted[art.ID] = extractedJSON
 	}
-	if art.Title != "" {
-		return strings.TrimSpace(art.Title)
+	if err := rows.Err(); err != nil {
+		return nil, nil, nil, err
 	}
-	return art.ID
+	return artifacts, bodies, extracted, nil
 }
 
-func indexedLineScopedRel(src store.SourceRow, fallback string) string {
-	path := filepath.ToSlash(strings.TrimSpace(src.Path))
-	parts := strings.Split(src.SourceIdentity, "|")
-	if len(parts) >= 3 && strings.TrimSpace(parts[2]) != "" {
-		if path == "" {
-			path = filepath.ToSlash(strings.TrimSpace(parts[0]))
+func listIndexedSourcesByArtifact(db *store.DB, root string) (map[string][]store.SourceRow, error) {
+	rows, err := db.Query(`SELECT s.id, s.artifact_id, s.source_type, COALESCE(s.path,''), s.source_identity, COALESCE(s.format_profile,''), COALESCE(s.layout_group,'')
+FROM sources s
+JOIN repos r ON s.repo_id = r.id
+WHERE r.root_path = ?
+ORDER BY s.artifact_id, s.path, s.id`, root)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]store.SourceRow{}
+	for rows.Next() {
+		var src store.SourceRow
+		if err := rows.Scan(&src.ID, &src.ArtifactID, &src.SourceType, &src.Path, &src.SourceIdentity, &src.FormatProfile, &src.LayoutGroup); err != nil {
+			return nil, err
 		}
-		return path + "#L" + strings.TrimSpace(parts[2])
+		out[src.ArtifactID] = append(out[src.ArtifactID], src)
 	}
-	if path == "" {
-		path = filepath.ToSlash(strings.TrimSpace(src.SourceIdentity))
-	}
-	if path == "" {
-		return fallback
-	}
-	return path + "#" + fallback
+	return out, rows.Err()
 }
 
-func renderIndexedArtifactContent(art store.ArtifactRow, sources []store.SourceRow, todos []store.TodoRow, body string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Title: %s\n", art.Title)
-	fmt.Fprintf(&b, "Kind: %s\n", art.Kind)
-	if art.Subtype != "" {
-		fmt.Fprintf(&b, "Subtype: %s\n", art.Subtype)
+func listIndexedTodosByArtifact(db *store.DB, root string) (map[string][]store.TodoRow, error) {
+	rows, err := db.Query(`SELECT t.id, t.artifact_id, t.revision_id, t.ordinal, t.text, t.done, t.source_file, t.source_line
+FROM artifact_todos t
+JOIN artifacts a ON t.artifact_id = a.id
+JOIN repos r ON a.repo_id = r.id
+WHERE r.root_path = ?
+ORDER BY t.artifact_id, t.ordinal`, root)
+	if err != nil {
+		return nil, err
 	}
-	fmt.Fprintf(&b, "Status: %s\n", art.Status)
-	for _, src := range sources {
-		if src.Path != "" {
-			fmt.Fprintf(&b, "Source: %s\n", filepath.ToSlash(src.Path))
+	defer rows.Close()
+	out := map[string][]store.TodoRow{}
+	for rows.Next() {
+		var todo store.TodoRow
+		if err := rows.Scan(&todo.ID, &todo.ArtifactID, &todo.RevisionID, &todo.Ordinal, &todo.Text, &todo.Done, &todo.SourceFile, &todo.SourceLine); err != nil {
+			return nil, err
 		}
-		if src.FormatProfile != "" {
-			fmt.Fprintf(&b, "Format profile: %s\n", src.FormatProfile)
-		}
-		if src.LayoutGroup != "" {
-			fmt.Fprintf(&b, "Layout group: %s\n", src.LayoutGroup)
-		}
+		out[todo.ArtifactID] = append(out[todo.ArtifactID], todo)
 	}
-	if len(todos) > 0 {
-		fmt.Fprintln(&b, "\nTasks:")
-		for _, td := range todos {
-			marker := "[ ]"
-			if td.Done {
-				marker = "[x]"
-			}
-			fmt.Fprintf(&b, "- %s %s\n", marker, td.Text)
-		}
-	}
-	if strings.TrimSpace(body) != "" {
-		fmt.Fprintf(&b, "\n%s", strings.TrimRight(body, "\r\n"))
-	}
-	return b.String()
+	return out, rows.Err()
 }
 
-func indexedArtifactMetadata(sources []store.SourceRow, links []store.LinkRow, extractedJSON string) map[string]string {
-	metadata := map[string]string{}
-	if len(sources) > 0 {
-		metadata["source_type"] = sources[0].SourceType
-		metadata["source_identity"] = sources[0].SourceIdentity
+func listIndexedLinksByArtifact(db *store.DB, root string) (map[string][]store.LinkRow, error) {
+	rows, err := db.Query(`SELECT l.id, l.artifact_id, l.link_type, l.target, l.created_at
+FROM links l
+JOIN artifacts a ON l.artifact_id = a.id
+JOIN repos r ON a.repo_id = r.id
+WHERE r.root_path = ?
+ORDER BY l.artifact_id, l.link_type, l.target`, root)
+	if err != nil {
+		return nil, err
 	}
-	for key, value := range indexedLinkMetadata(links) {
-		metadata[key] = value
+	defer rows.Close()
+	out := map[string][]store.LinkRow{}
+	for rows.Next() {
+		var link store.LinkRow
+		if err := rows.Scan(&link.ID, &link.ArtifactID, &link.LinkType, &link.Target, &link.CreatedAt); err != nil {
+			return nil, err
+		}
+		out[link.ArtifactID] = append(out[link.ArtifactID], link)
 	}
-	var payload struct {
-		ArtifactScope   string   `json:"artifact_scope"`
-		OpenSpecRole    string   `json:"openspec_role"`
-		Mode            string   `json:"mode"`
-		Language        string   `json:"language"`
-		Framework       string   `json:"framework"`
-		TestName        string   `json:"test_name"`
-		ParentTitle     string   `json:"parent_title"`
-		CommentRole     string   `json:"comment_role"`
-		SourceLineRange string   `json:"source_line_range"`
-		Symbols         []string `json:"symbols"`
-		AssertionTerms  []string `json:"assertion_terms"`
+	return out, rows.Err()
+}
+
+func listIndexedSectionsByArtifact(db *store.DB, root string) (map[string][]store.SectionRow, error) {
+	rows, err := db.Query(`SELECT s.id, s.artifact_id, s.revision_id, s.source_path, s.heading_path, s.heading_depth, s.start_line, s.end_line, s.title, s.body, s.token_estimate, s.section_kind, s.metadata_json
+FROM artifact_sections s
+JOIN artifacts a ON s.artifact_id = a.id
+JOIN repos r ON a.repo_id = r.id
+WHERE r.root_path = ?
+ORDER BY s.artifact_id, s.start_line, s.heading_path`, root)
+	if err != nil {
+		return nil, err
 	}
-	if strings.TrimSpace(extractedJSON) != "" {
-		if err := json.Unmarshal([]byte(extractedJSON), &payload); err == nil {
-			if payload.ArtifactScope != "" {
-				metadata["artifact_scope"] = payload.ArtifactScope
-			}
-			if payload.OpenSpecRole != "" {
-				metadata["openspec_role"] = payload.OpenSpecRole
-			}
-			if payload.Mode != "" {
-				metadata["mode"] = payload.Mode
-			}
-			if payload.Language != "" {
-				metadata["language"] = payload.Language
-			}
-			if payload.Framework != "" {
-				metadata["framework"] = payload.Framework
-			}
-			if payload.TestName != "" {
-				metadata["test_name"] = payload.TestName
-			}
-			if payload.ParentTitle != "" {
-				metadata["parent_title"] = payload.ParentTitle
-			}
-			if payload.CommentRole != "" {
-				metadata["comment_role"] = payload.CommentRole
-			}
-			if payload.SourceLineRange != "" {
-				metadata["source_line_range"] = payload.SourceLineRange
-			}
-			if len(payload.Symbols) > 0 {
-				metadata["symbols"] = strings.Join(payload.Symbols, "\n")
-			}
-			if len(payload.AssertionTerms) > 0 {
-				metadata["assertion_terms"] = strings.Join(payload.AssertionTerms, "\n")
+	defer rows.Close()
+	out := map[string][]store.SectionRow{}
+	for rows.Next() {
+		var section store.SectionRow
+		if err := rows.Scan(&section.ID, &section.ArtifactID, &section.RevisionID, &section.SourcePath, &section.HeadingPath, &section.HeadingDepth, &section.StartLine, &section.EndLine, &section.Title, &section.Body, &section.TokenEstimate, &section.SectionKind, &section.MetadataJSON); err != nil {
+			return nil, err
+		}
+		out[section.ArtifactID] = append(out[section.ArtifactID], section)
+	}
+	return out, rows.Err()
+}
+
+func indexedCorpusCacheKey(root string, opts Options) (string, error) {
+	repoDigest, err := repoSnapshotDigest(root)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	fmt.Fprintf(h, "schema=%d\n", evalIndexCacheSchemaVersion)
+	fmt.Fprintf(h, "index_shape=%s\n", evalIndexedCorpusIndexFingerprint())
+	fmt.Fprintf(h, "repo=%s\n", repoDigest)
+	fmt.Fprintf(h, "corpus=%s\n", CorpusSourceSQLiteIndex)
+	fmt.Fprintf(h, "tests=%t\n", opts.TestCaseArtifacts)
+	fmt.Fprintf(h, "comments=%t\n", opts.CodeCommentArtifacts)
+	fmt.Fprintf(h, "max_corpus_files=%d\n", opts.MaxCorpusFiles)
+	fmt.Fprintf(h, "max_source_files=%d\n", opts.MaxSourceFiles)
+	fmt.Fprintf(h, "max_test_case_artifacts=%d\n", opts.MaxTestCaseArtifacts)
+	fmt.Fprintf(h, "max_code_comments=%d\n", opts.MaxCodeComments)
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+func evalIndexedCorpusIndexFingerprint() string {
+	parts := []string{
+		"eval-indexed-corpus-v3",
+		"adapters:openspec,adr,markdown,sourcecontext,testcase,codecomment",
+		"retrieval-candidate-shape:v2-section-aware",
+	}
+	if root, ok := evalSourceRoot(); ok {
+		if digest, err := sourceTreeDigest(root, indexedCorpusFingerprintPaths()); err == nil && digest != "" {
+			parts = append(parts, "index_shape_tree="+digest)
+			return strings.Join(parts, "|")
+		}
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		parts = append(parts, "module="+info.Main.Path+"@"+info.Main.Version)
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision", "vcs.time", "vcs.modified":
+				parts = append(parts, setting.Key+"="+setting.Value)
 			}
 		}
 	}
-	if len(metadata) == 0 {
+	return strings.Join(parts, "|")
+}
+
+func evalRunProvenanceFingerprint() string {
+	parts := []string{"eval-run-provenance-v1"}
+	if root, ok := evalSourceRoot(); ok {
+		if digest, err := sourceTreeDigest(root, evalRunProvenanceFingerprintPaths()); err == nil && digest != "" {
+			parts = append(parts, "source_tree="+digest)
+			return strings.Join(parts, "|")
+		}
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		parts = append(parts, "module="+info.Main.Path+"@"+info.Main.Version)
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision", "vcs.time", "vcs.modified":
+				parts = append(parts, setting.Key+"="+setting.Value)
+			}
+		}
+	}
+	return strings.Join(parts, "|")
+}
+
+func indexedCorpusFingerprintPaths() []string {
+	return []string{
+		filepath.Join("internal", "adapters"),
+		filepath.Join("internal", "classify"),
+		filepath.Join("internal", "config"),
+		filepath.Join("internal", "format"),
+		filepath.Join("internal", "ignore"),
+		filepath.Join("internal", "indexquery"),
+		filepath.Join("internal", "scan"),
+		filepath.Join("internal", "sections"),
+		filepath.Join("internal", "store"),
+	}
+}
+
+func evalRunProvenanceFingerprintPaths() []string {
+	return []string{
+		filepath.Join("internal", "commands"),
+		filepath.Join("internal", "evalharness"),
+		filepath.Join("internal", "retrieval"),
+	}
+}
+
+func evalSourceRoot() (string, bool) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok || strings.TrimSpace(file) == "" {
+		return "", false
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	if info, err := os.Stat(filepath.Join(root, "go.mod")); err == nil && !info.IsDir() {
+		return root, true
+	}
+	return "", false
+}
+
+func sourceTreeDigest(root string, relPaths []string) (string, error) {
+	h := sha256.New()
+	for _, relPath := range relPaths {
+		path := filepath.Join(root, relPath)
+		if err := hashSourcePath(h, root, path); err != nil {
+			return "", err
+		}
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+func hashSourcePath(h io.Writer, root, path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
 		return nil
 	}
-	return metadata
+	if !info.IsDir() {
+		return hashSourceFile(h, root, path, info)
+	}
+	return filepath.WalkDir(path, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext != ".go" && ext != ".sql" {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		return hashSourceFile(h, root, path, info)
+	})
 }
 
-func indexedLinkMetadata(links []store.LinkRow) map[string]string {
-	if len(links) == 0 {
+func hashSourceFile(h io.Writer, root, path string, info os.FileInfo) error {
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext != ".go" && ext != ".sql" {
 		return nil
 	}
-	grouped := map[string][]string{}
-	for _, link := range links {
-		linkType := strings.TrimSpace(link.LinkType)
-		target := strings.TrimSpace(link.Target)
-		if linkType == "" || target == "" {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return nil
+	}
+	rel = filepath.ToSlash(rel)
+	fmt.Fprintf(h, "source=%s size=%d\n", rel, info.Size())
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(h, f)
+	closeErr := f.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	fmt.Fprintln(h)
+	return nil
+}
+
+func repoSnapshotDigest(root string) (string, error) {
+	h := sha256.New()
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+		if shouldIgnore(rel, d.IsDir()) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if rel != "cases.yaml" && !isTextArtifact(rel) {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(h, "path=%s size=%d\n", rel, info.Size())
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(h, f)
+		closeErr := f.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		fmt.Fprintln(h)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+func readIndexedCorpusCache(path, key string) (indexedCorpusCacheFile, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return indexedCorpusCacheFile{}, false
+	}
+	var cached indexedCorpusCacheFile
+	if err := json.Unmarshal(data, &cached); err != nil {
+		return indexedCorpusCacheFile{}, false
+	}
+	if cached.SchemaVersion != evalIndexCacheSchemaVersion || cached.Key != key {
+		return indexedCorpusCacheFile{}, false
+	}
+	return cached, true
+}
+
+func writeIndexedCorpusCache(path string, cached indexedCorpusCacheFile) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(cached, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func budgetReportFromOptions(opts Options, events []BudgetEvent) BudgetReport {
+	return BudgetReport{
+		MaxCorpusFiles:       opts.MaxCorpusFiles,
+		MaxSourceFiles:       opts.MaxSourceFiles,
+		MaxTestCaseArtifacts: opts.MaxTestCaseArtifacts,
+		MaxCodeComments:      opts.MaxCodeComments,
+		MaxCaseSeconds:       opts.MaxCaseSeconds,
+		Applied:              events,
+	}
+}
+
+func applyEvalBudgets(files []File, opts Options) ([]File, []BudgetEvent) {
+	out := append([]File(nil), files...)
+	var events []BudgetEvent
+	out, events = applyTypedBudget(out, "source_context_files", opts.MaxSourceFiles, func(f File) bool {
+		return retrieval.IsSourceContextCandidate(f)
+	}, events)
+	out, events = applyTypedBudget(out, "test_case_artifacts", opts.MaxTestCaseArtifacts, isTestCaseFile, events)
+	out, events = applyTypedBudget(out, "code_comment_artifacts", opts.MaxCodeComments, isCodeCommentFile, events)
+	if opts.MaxCorpusFiles > 0 && len(out) > opts.MaxCorpusFiles {
+		before := len(out)
+		sort.SliceStable(out, func(i, j int) bool {
+			pi := corpusBudgetPriority(out[i])
+			pj := corpusBudgetPriority(out[j])
+			if pi == pj {
+				return out[i].Path < out[j].Path
+			}
+			return pi < pj
+		})
+		out = out[:opts.MaxCorpusFiles]
+		sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+		events = append(events, BudgetEvent{
+			Name:    "corpus_files",
+			Before:  before,
+			After:   len(out),
+			Message: "kept highest-priority planning and source context artifacts",
+		})
+	}
+	return out, events
+}
+
+func evalCandidateLimits(opts Options) map[string]int {
+	limits := map[string]int{}
+	if opts.MaxSourceFiles > 0 {
+		limits["source_context"] = opts.MaxSourceFiles
+	}
+	if opts.MaxTestCaseArtifacts > 0 {
+		limits["test_case"] = opts.MaxTestCaseArtifacts
+	}
+	if opts.MaxCodeComments > 0 {
+		limits["code_comment"] = opts.MaxCodeComments
+	}
+	if len(limits) == 0 {
+		return nil
+	}
+	return limits
+}
+
+func evalScanProgressCallback(root string, opts Options) func(scan.ProgressEvent) {
+	if opts.ProgressWriter == nil {
+		return nil
+	}
+	fixture := filepath.ToSlash(root)
+	return func(event scan.ProgressEvent) {
+		payload := struct {
+			Type    string             `json:"type"`
+			Fixture string             `json:"fixture"`
+			Event   scan.ProgressEvent `json:"event"`
+		}{
+			Type:    "eval_scan_progress",
+			Fixture: fixture,
+			Event:   event,
+		}
+		if data, err := json.Marshal(payload); err == nil {
+			fmt.Fprintln(opts.ProgressWriter, string(data))
+		}
+	}
+}
+
+func applyTypedBudget(files []File, name string, limit int, match func(File) bool, events []BudgetEvent) ([]File, []BudgetEvent) {
+	if limit <= 0 {
+		return files, events
+	}
+	var matched int
+	for _, f := range files {
+		if match(f) {
+			matched++
+		}
+	}
+	if matched <= limit {
+		return files, events
+	}
+	kept := 0
+	out := make([]File, 0, len(files)-(matched-limit))
+	for _, f := range files {
+		if !match(f) {
+			out = append(out, f)
 			continue
 		}
-		grouped[linkType] = append(grouped[linkType], target)
+		if kept < limit {
+			out = append(out, f)
+			kept++
+		}
 	}
-	if len(grouped) == 0 {
-		return nil
-	}
-	out := map[string]string{}
-	for linkType, targets := range grouped {
-		key := "link_" + strings.ReplaceAll(linkType, "-", "_")
-		out[key] = strings.Join(uniqueNonEmptyStrings(targets), "\n")
-	}
-	return out
+	events = append(events, BudgetEvent{
+		Name:    name,
+		Before:  matched,
+		After:   kept,
+		Message: "deterministic path-order cap",
+	})
+	return out, events
 }
 
-func uniqueNonEmptyStrings(values []string) []string {
-	seen := map[string]bool{}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" || seen[value] {
-			continue
-		}
-		seen[value] = true
-		out = append(out, value)
+func corpusBudgetPriority(f File) int {
+	switch {
+	case strings.EqualFold(filepath.Ext(f.Path), ".md") && retrieval.IsPlanningIntentPath(f.Path):
+		return 0
+	case strings.EqualFold(filepath.Ext(f.Path), ".md"):
+		return 1
+	case isTestCaseFile(f):
+		return 2
+	case isCodeCommentFile(f):
+		return 3
+	case retrieval.IsSourceContextCandidate(f):
+		return 4
+	default:
+		return 5
 	}
-	return out
 }
 
 func openSpecMetricsFromFiles(repoRoot string, files []File) *openspecmetrics.Metrics {
@@ -960,6 +1532,41 @@ func renderContext(label string, files []File) string {
 		fmt.Fprintf(&b, "## %s\n\n```text\n%s\n```\n\n", f.Path, strings.TrimRight(f.Body, "\r\n"))
 	}
 	return b.String()
+}
+
+func contextTokenBudgetForCase(opts Options) int {
+	if !opts.ExperimentalBudgetedPacking || opts.ContextTokenBudget <= 0 {
+		return 0
+	}
+	return opts.ContextTokenBudget
+}
+
+func applyContextTokenBudget(query string, files []File, budget int, counter TokenCounter) ([]File, int, []string) {
+	preBudgetTokens := counter.Count(renderContext(query, files))
+	if budget <= 0 || len(files) == 0 || preBudgetTokens <= budget {
+		return files, preBudgetTokens, nil
+	}
+	kept := make([]File, 0, len(files))
+	for _, f := range files {
+		candidate := append(append([]File(nil), kept...), f)
+		if counter.Count(renderContext(query, candidate)) <= budget {
+			kept = append(kept, f)
+		}
+	}
+	if len(kept) == 0 {
+		kept = append(kept, files[0])
+	}
+	keptSet := map[string]bool{}
+	for _, f := range kept {
+		keptSet[f.Path] = true
+	}
+	var dropped []string
+	for _, f := range files {
+		if !keptSet[f.Path] {
+			dropped = append(dropped, f.Path)
+		}
+	}
+	return kept, preBudgetTokens, dropped
 }
 
 func rels(files []File) []string {
@@ -1093,6 +1700,12 @@ func applyPackingMetrics(cr *CaseResult, files []File) {
 		}
 		if isCodeCommentFile(f) {
 			cr.CodeCommentArtifactCount++
+		}
+		if f.Metadata != nil && f.Metadata["indexed_section_retrieval_mode"] == "section_aware" {
+			cr.SectionSelectedArtifacts = append(cr.SectionSelectedArtifacts, f.Path)
+			if count, err := strconv.Atoi(strings.TrimSpace(f.Metadata["indexed_section_match_count"])); err == nil {
+				cr.SectionSelectedCount += count
+			}
 		}
 		if f.Metadata != nil && f.Metadata["section_pack_mode"] == "sections" {
 			cr.PackedSectionArtifacts = append(cr.PackedSectionArtifacts, f.Path)
@@ -1370,6 +1983,7 @@ func summarize(cases []CaseResult) Summary {
 		reductionsFull = append(reductionsFull, c.TokenReductionVsFullPlanning)
 		reductionsQueryFile = append(reductionsQueryFile, c.TokenReductionVsQueryFile)
 		s.MeanTokenReductionVsFullPlanning += c.TokenReductionVsFullPlanning
+		s.MeanTokenReductionVsQueryFileBaseline += c.TokenReductionVsQueryFile
 		s.MeanArtifactRecall += c.ArtifactRecall
 		if c.MustExpectedCount > 0 {
 			s.MeanMustHaveRecall += c.MustHaveRecall
@@ -1384,6 +1998,9 @@ func summarize(cases []CaseResult) Summary {
 			backgroundCases++
 		}
 		s.MeanArtifactPrecision += c.ArtifactPrecision
+		s.MeanGradedPrecision += c.AgentMetrics.GradedPrecision
+		s.MeanPenalizedUtilityPrecision += c.AgentMetrics.PenalizedUtilityPrecision
+		addGradeCounts(&s.GradeCounts, c.AgentMetrics.GradeCounts)
 		s.FailedThresholdCount += len(c.ThresholdFailures)
 		if c.ContextSufficiency.Configured {
 			s.ContextSufficiencyCases++
@@ -1402,6 +2019,7 @@ func summarize(cases []CaseResult) Summary {
 	}
 	n := float64(len(cases))
 	s.MeanTokenReductionVsFullPlanning /= n
+	s.MeanTokenReductionVsQueryFileBaseline /= n
 	s.MeanArtifactRecall /= n
 	if mustCases > 0 {
 		s.MeanMustHaveRecall /= float64(mustCases)
@@ -1413,19 +2031,33 @@ func summarize(cases []CaseResult) Summary {
 		s.MeanBackgroundRecall /= float64(backgroundCases)
 	}
 	s.MeanArtifactPrecision /= n
+	s.MeanGradedPrecision /= n
+	s.MeanPenalizedUtilityPrecision /= n
 	if s.ContextSufficiencyCases > 0 {
 		s.ContextSufficiencyPassRate = float64(s.ContextSufficiencyPassed) / float64(s.ContextSufficiencyCases)
 	}
 	s.MedianTokenReductionVsFullPlanning = median(reductionsFull)
 	s.MedianTokenReductionVsQueryFileBaseline = median(reductionsQueryFile)
 	s.Pareto = ParetoSummary{
-		MeanTokenReductionVsFullPlanning: s.MeanTokenReductionVsFullPlanning,
-		MeanArtifactRecall:               s.MeanArtifactRecall,
-		MeanMustHaveRecall:               s.MeanMustHaveRecall,
-		MeanArtifactPrecision:            s.MeanArtifactPrecision,
-		ContextSufficiencyPassRate:       s.ContextSufficiencyPassRate,
+		MeanTokenReductionVsFullPlanning:      s.MeanTokenReductionVsFullPlanning,
+		MeanTokenReductionVsQueryFileBaseline: s.MeanTokenReductionVsQueryFileBaseline,
+		MeanArtifactRecall:                    s.MeanArtifactRecall,
+		MeanMustHaveRecall:                    s.MeanMustHaveRecall,
+		MeanArtifactPrecision:                 s.MeanArtifactPrecision,
+		MeanGradedPrecision:                   s.MeanGradedPrecision,
+		MeanPenalizedUtilityPrecision:         s.MeanPenalizedUtilityPrecision,
+		ContextSufficiencyPassRate:            s.ContextSufficiencyPassRate,
 	}
 	return s
+}
+
+func addGradeCounts(total *GradeCounts, next GradeCounts) {
+	total.Must += next.Must
+	total.Helpful += next.Helpful
+	total.Background += next.Background
+	total.SameCluster += next.SameCluster
+	total.Unlabeled += next.Unlabeled
+	total.HardNegative += next.HardNegative
 }
 
 func CheckSummaryThresholds(r *Result, opts Options) []string {
@@ -1515,35 +2147,78 @@ func FormatText(r *Result) string {
 	if r.ResultsFile != "" {
 		fmt.Fprintf(&b, "Results file: %s\n", r.ResultsFile)
 	}
+	if r.IndexCache != nil && r.IndexCache.Enabled {
+		fmt.Fprintf(&b, "Index cache: hit=%t key=%s\n", r.IndexCache.Hit, shortKey(r.IndexCache.Key))
+	}
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "Corpus")
 	fmt.Fprintf(&b, "- Planning artifacts: %d files / %s tokens\n", r.Corpus.PlanningArtifacts.Files, comma(r.Corpus.PlanningArtifacts.Tokens))
 	fmt.Fprintf(&b, "- Markdown files: %d files / %s tokens\n", r.Corpus.MarkdownFiles.Files, comma(r.Corpus.MarkdownFiles.Tokens))
 	fmt.Fprintf(&b, "- Source/context candidates: %d files / %s tokens\n", r.Corpus.SourceContextCandidates.Files, comma(r.Corpus.SourceContextCandidates.Tokens))
 	fmt.Fprintf(&b, "- Full candidate corpus: %d files / %s tokens\n\n", r.Corpus.FullCandidateCorpus.Files, comma(r.Corpus.FullCandidateCorpus.Tokens))
+	if len(r.Budgets.Applied) > 0 {
+		fmt.Fprintln(&b, "Budgets")
+		for _, event := range r.Budgets.Applied {
+			fmt.Fprintf(&b, "- %s: %d -> %d\n", event.Name, event.Before, event.After)
+		}
+		fmt.Fprintln(&b)
+	}
 
 	fmt.Fprintln(&b, "Summary")
 	fmt.Fprintf(&b, "- Median token reduction vs full planning corpus: %s\n", pct(r.Summary.MedianTokenReductionVsFullPlanning))
 	fmt.Fprintf(&b, "- Mean token reduction vs full planning corpus: %s\n", pct(r.Summary.MeanTokenReductionVsFullPlanning))
 	fmt.Fprintf(&b, "- Median token reduction vs query file baseline: %s\n", pct(r.Summary.MedianTokenReductionVsQueryFileBaseline))
+	fmt.Fprintf(&b, "- Mean token reduction vs query file baseline: %s\n", pct(r.Summary.MeanTokenReductionVsQueryFileBaseline))
 	fmt.Fprintf(&b, "- Mean artifact recall: %s\n", pct(r.Summary.MeanArtifactRecall))
 	fmt.Fprintf(&b, "- Mean must-have recall: %s\n", pct(r.Summary.MeanMustHaveRecall))
 	fmt.Fprintf(&b, "- Mean helpful recall: %s\n", pct(r.Summary.MeanHelpfulRecall))
 	fmt.Fprintf(&b, "- Mean background recall: %s\n", pct(r.Summary.MeanBackgroundRecall))
 	fmt.Fprintf(&b, "- Mean artifact precision: %s\n", pct(r.Summary.MeanArtifactPrecision))
+	fmt.Fprintf(&b, "- Mean graded precision: %s\n", pct(r.Summary.MeanGradedPrecision))
+	fmt.Fprintf(&b, "- Mean penalized utility precision: %s\n", pct(r.Summary.MeanPenalizedUtilityPrecision))
 	if r.Summary.ContextSufficiencyCases > 0 {
 		fmt.Fprintf(&b, "- Context sufficiency pass rate: %d/%d = %s\n", r.Summary.ContextSufficiencyPassed, r.Summary.ContextSufficiencyCases, pct(r.Summary.ContextSufficiencyPassRate))
 	}
-	fmt.Fprintf(&b, "- Pareto: reduction %s / recall %s / must-have recall %s / precision %s / sufficiency %s\n",
+	fmt.Fprintf(&b, "- Must-hit@3: %s\n", pct(r.AgentMetrics.MustHitAt3))
+	fmt.Fprintf(&b, "- Mean first must rank: %.2f\n", r.AgentMetrics.MeanFirstMustRank)
+	for _, budget := range r.AgentMetrics.ContextSufficiencyAtTokenBudget {
+		fmt.Fprintf(&b, "- Sufficiency within %s tokens: %d/%d = %s\n", comma(budget.BudgetTokens), budget.PassedCases, budget.EligibleCases, pct(budget.PassRate))
+	}
+	fmt.Fprintf(&b, "- Pareto: reduction %s / recall %s / must-have recall %s / precision %s / graded precision %s / sufficiency %s\n",
 		pct(r.Summary.Pareto.MeanTokenReductionVsFullPlanning),
 		pct(r.Summary.Pareto.MeanArtifactRecall),
 		pct(r.Summary.Pareto.MeanMustHaveRecall),
 		pct(r.Summary.Pareto.MeanArtifactPrecision),
+		pct(r.Summary.Pareto.MeanGradedPrecision),
 		pct(r.Summary.Pareto.ContextSufficiencyPassRate))
 	if r.Summary.FailedThresholdCount > 0 {
 		fmt.Fprintf(&b, "- Failed thresholds: %d\n", r.Summary.FailedThresholdCount)
 	}
 	fmt.Fprintln(&b)
+
+	if len(r.LaneMetrics) > 0 {
+		fmt.Fprintln(&b, "Lane Metrics")
+		for _, lane := range r.LaneMetrics {
+			fmt.Fprintf(&b, "- %s: precision %s / graded precision %s / recall %s / included %d / exact relevant %d",
+				lane.Lane,
+				pct(lane.StrictPrecision),
+				pct(lane.GradedPrecision),
+				pct(lane.Recall),
+				lane.IncludedArtifacts,
+				lane.ExactRelevantArtifacts)
+			if lane.SameClusterArtifacts > 0 {
+				fmt.Fprintf(&b, " / same-cluster %d", lane.SameClusterArtifacts)
+			}
+			if lane.HardNegativeArtifacts > 0 {
+				fmt.Fprintf(&b, " / hard-negative %d", lane.HardNegativeArtifacts)
+			}
+			if lane.PackedSectionCount > 0 {
+				fmt.Fprintf(&b, " / packed sections %d", lane.PackedSectionCount)
+			}
+			fmt.Fprintln(&b)
+		}
+		fmt.Fprintln(&b)
+	}
 
 	fmt.Fprintln(&b, "Diagnostics")
 	fmt.Fprintf(&b, "- Discovery coverage: %d/%d = %s\n", r.Diagnostics.ExpectedAvailableCount, r.Diagnostics.ExpectedRelevantCount, pct(r.Diagnostics.DiscoveryCoverage))
@@ -1584,6 +2259,16 @@ func FormatText(r *Result) string {
 	for _, c := range r.Cases {
 		fmt.Fprintf(&b, "Case: %s\n", c.ID)
 		fmt.Fprintf(&b, "- DevSpecs context: %s tokens\n", comma(c.DevSpecsTokens))
+		if c.ContextTokenBudget > 0 {
+			fmt.Fprintf(&b, "- Context budget: %s tokens", comma(c.ContextTokenBudget))
+			if c.PreBudgetDevSpecsTokens > 0 {
+				fmt.Fprintf(&b, " (pre-budget %s)", comma(c.PreBudgetDevSpecsTokens))
+			}
+			fmt.Fprintln(&b)
+			if c.ContextBudgetDroppedCount > 0 {
+				fmt.Fprintf(&b, "- Context budget dropped: %s\n", listOrNone(c.ContextBudgetDroppedArtifacts))
+			}
+		}
 		fmt.Fprintf(&b, "- Full planning corpus: %s tokens\n", comma(c.FullPlanningTokens))
 		fmt.Fprintf(&b, "- All markdown: %s tokens\n", comma(c.AllMarkdownTokens))
 		fmt.Fprintf(&b, "- Full candidate corpus: %s tokens\n", comma(c.FullCandidateCorpusTokens))
@@ -1597,6 +2282,10 @@ func FormatText(r *Result) string {
 		fmt.Fprintf(&b, "- Helpful recall: %s\n", recallText(c.HelpfulRelevantRetrieved, c.HelpfulExpectedCount, c.HelpfulRecall))
 		fmt.Fprintf(&b, "- Background recall: %s\n", recallText(c.BackgroundRelevantRetrieved, c.BackgroundExpectedCount, c.BackgroundRecall))
 		fmt.Fprintf(&b, "- Precision: %d/%d = %s\n", len(c.RelevantIncluded), len(c.ArtifactsIncluded), pct(c.ArtifactPrecision))
+		fmt.Fprintf(&b, "- Graded precision: %s\n", pct(c.AgentMetrics.GradedPrecision))
+		if c.AgentMetrics.FirstMustRank > 0 {
+			fmt.Fprintf(&b, "- First must rank: %d\n", c.AgentMetrics.FirstMustRank)
+		}
 		if c.ContextSufficiency.Configured {
 			fmt.Fprintf(&b, "- Sufficiency: %s\n", passFail(c.ContextSufficiency.Passed))
 			if len(c.ContextSufficiency.Failures) > 0 {
@@ -1642,6 +2331,13 @@ func passFail(passed bool) string {
 		return "pass"
 	}
 	return "fail"
+}
+
+func shortKey(key string) string {
+	if len(key) <= 12 {
+		return key
+	}
+	return key[:12]
 }
 
 func comma(n int) string {

@@ -60,7 +60,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 
 	fp.RepoRoot = resolveRepoScope(db, repoName, allRepos)
 
-	candidates, err := loadRetrievalCandidates(db, fp)
+	candidates, err := loadRetrievalCandidatesForQuery(db, fp, query)
 	if err != nil {
 		return fmt.Errorf("find: %w", err)
 	}
@@ -107,21 +107,22 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 }
 
 type FindResult struct {
-	ID             string   `json:"ID"`
-	RepoID         string   `json:"RepoID"`
-	ShortID        string   `json:"ShortID"`
-	Kind           string   `json:"Kind"`
-	Subtype        string   `json:"Subtype"`
-	Title          string   `json:"Title"`
-	Status         string   `json:"Status"`
-	CurrentRevID   string   `json:"CurrentRevID"`
-	CreatedAt      string   `json:"CreatedAt"`
-	UpdatedAt      string   `json:"UpdatedAt"`
-	LastObservedAt string   `json:"LastObservedAt"`
-	SourcePath     string   `json:"source_path,omitempty"`
-	Retriever      string   `json:"retriever"`
-	AuthorityCues  []string `json:"authority_cues,omitempty"`
-	Reasons        []string `json:"reasons,omitempty"`
+	ID             string            `json:"ID"`
+	RepoID         string            `json:"RepoID"`
+	ShortID        string            `json:"ShortID"`
+	Kind           string            `json:"Kind"`
+	Subtype        string            `json:"Subtype"`
+	Title          string            `json:"Title"`
+	Status         string            `json:"Status"`
+	CurrentRevID   string            `json:"CurrentRevID"`
+	CreatedAt      string            `json:"CreatedAt"`
+	UpdatedAt      string            `json:"UpdatedAt"`
+	LastObservedAt string            `json:"LastObservedAt"`
+	SourcePath     string            `json:"source_path,omitempty"`
+	Retriever      string            `json:"retriever"`
+	AuthorityCues  []string          `json:"authority_cues,omitempty"`
+	Reasons        []string          `json:"reasons,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
 }
 
 func findResults(candidates []retrieval.Candidate, reasons map[string][]string, retrieverName string) []FindResult {
@@ -143,9 +144,39 @@ func findResults(candidates []retrieval.Candidate, reasons map[string][]string, 
 			Retriever:      retrieverName,
 			AuthorityCues:  retrieval.AuthorityCues(c),
 			Reasons:        reasons[c.Path],
+			Metadata:       compactResultMetadata(c.Metadata),
 		})
 	}
 	return results
+}
+
+func compactResultMetadata(metadata map[string]string) map[string]string {
+	if len(metadata) == 0 {
+		return nil
+	}
+	keys := []string{
+		"section_pack_mode",
+		"section_pack_source",
+		"section_pack_count",
+		"section_pack_total",
+		"section_pack_headings",
+		"indexed_section_retrieval_mode",
+		"indexed_section_match_count",
+		"indexed_section_total",
+		"indexed_section_match_ids_json",
+		"indexed_section_match_headings_json",
+		"indexed_section_match_ranges_json",
+	}
+	out := map[string]string{}
+	for _, key := range keys {
+		if value := metadata[key]; value != "" {
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func reasonsByPath(reasons []retrieval.Reason) map[string][]string {

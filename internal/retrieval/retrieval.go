@@ -1,12 +1,16 @@
 package retrieval
 
 import (
+	"encoding/json"
 	"fmt"
+	"math"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"unicode"
+
+	docsections "github.com/devspecs-com/devspecs-cli/internal/sections"
 )
 
 // Candidate is the shared retrieval unit used by eval and live CLI commands.
@@ -22,6 +26,23 @@ type Candidate struct {
 	Body     string
 	Source   string
 	Metadata map[string]string
+	Sections []IndexedSection `json:"sections,omitempty"`
+}
+
+type IndexedSection struct {
+	ID            string            `json:"id,omitempty"`
+	ArtifactID    string            `json:"artifact_id,omitempty"`
+	RevisionID    string            `json:"revision_id,omitempty"`
+	SourcePath    string            `json:"source_path,omitempty"`
+	HeadingPath   string            `json:"heading_path,omitempty"`
+	HeadingDepth  int               `json:"heading_depth,omitempty"`
+	StartLine     int               `json:"start_line,omitempty"`
+	EndLine       int               `json:"end_line,omitempty"`
+	Title         string            `json:"title,omitempty"`
+	Body          string            `json:"body,omitempty"`
+	TokenEstimate int               `json:"token_estimate,omitempty"`
+	Kind          string            `json:"kind,omitempty"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
 }
 
 type Retriever interface {
@@ -29,12 +50,31 @@ type Retriever interface {
 	Retrieve(candidates []Candidate, query string) []Candidate
 }
 
-type WeightedFilesRetrieverV0 struct{}
+const EvidenceModeBalanced = "balanced"
 
-func (WeightedFilesRetrieverV0) Name() string { return "eval_weighted_files_v0" }
+type WeightedFilesRetrieverV0 struct {
+	DisableSectionAware bool
+	EvidenceMode        string
+}
 
-func (WeightedFilesRetrieverV0) Retrieve(candidates []Candidate, query string) []Candidate {
-	return retrieveWeightedFilesV0(candidates, query)
+func (r WeightedFilesRetrieverV0) Name() string {
+	if strings.EqualFold(r.EvidenceMode, EvidenceModeBalanced) {
+		if r.DisableSectionAware {
+			return "eval_weighted_files_v0_evidence_balanced_no_section_retrieval"
+		}
+		return "eval_weighted_files_v0_evidence_balanced"
+	}
+	if r.DisableSectionAware {
+		return "eval_weighted_files_v0_no_section_retrieval"
+	}
+	return "eval_weighted_files_v0"
+}
+
+func (r WeightedFilesRetrieverV0) Retrieve(candidates []Candidate, query string) []Candidate {
+	if !r.DisableSectionAware {
+		candidates = EnrichCandidatesWithSectionMatches(candidates, query)
+	}
+	return retrieveWeightedFilesV0(candidates, query, r.EvidenceMode)
 }
 
 type Reason struct {
@@ -103,7 +143,7 @@ func IsSourceContextCandidate(c Candidate) bool {
 	return !strings.EqualFold(filepath.Ext(c.Path), ".md") && !IsPlanningIntentPath(c.Path)
 }
 
-func retrieveWeightedFilesV0(candidates []Candidate, query string) []Candidate {
+func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode string) []Candidate {
 	terms := expandedTerms(query)
 	queryLower := strings.ToLower(query)
 	var scoredCandidates []scoredCandidate
@@ -123,6 +163,7 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string) []Candidate {
 			})
 		}
 	}
+	evidenceBalanced := strings.EqualFold(evidenceMode, EvidenceModeBalanced)
 	sort.Slice(scoredCandidates, func(i, j int) bool {
 		if scoredCandidates[i].score == scoredCandidates[j].score {
 			return scoredCandidates[i].candidate.Path < scoredCandidates[j].candidate.Path
@@ -134,13 +175,24 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string) []Candidate {
 	scoredCandidates = suppressRawTestSourceCandidates(scoredCandidates, queryLower)
 	scoredCandidates = selectScoredCandidates(scoredCandidates, queryLower, limit)
 	scoredCandidates = enforceSupportingArtifactBudgets(scoredCandidates, queryLower, terms)
+	if evidenceBalanced {
+		scoredCandidates = applyBalancedEvidence(scoredCandidates, queryLower, terms)
+		sort.Slice(scoredCandidates, func(i, j int) bool {
+			if scoredCandidates[i].score == scoredCandidates[j].score {
+				return scoredCandidates[i].candidate.Path < scoredCandidates[j].candidate.Path
+			}
+			return scoredCandidates[i].score > scoredCandidates[j].score
+		})
+	}
 	out := make([]Candidate, 0, len(scoredCandidates))
 	for _, sf := range scoredCandidates {
 		out = append(out, sf.candidate)
 	}
 	out = expandOpenSpecLinks(out, candidates, queryLower, limit)
 	out = packCandidateSections(out, queryLower, terms)
-	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	if !evidenceBalanced {
+		sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	}
 	return out
 }
 
@@ -152,6 +204,323 @@ type scoredCandidate struct {
 	profile    matchProfile
 	role       string
 	sourceFile bool
+}
+
+type balancedEvidenceStats struct {
+	candidateCount   int
+	termDF           map[string]int
+	siblingCounts    map[string]int
+	siblingBestScore map[string]float64
+}
+
+type balancedEvidenceResult struct {
+	score       float64
+	anchorScore float64
+	reasons     []string
+}
+
+func applyBalancedEvidence(candidates []scoredCandidate, queryLower string, terms map[string]float64) []scoredCandidate {
+	if len(candidates) == 0 {
+		return candidates
+	}
+	stats := buildBalancedEvidenceStats(candidates, queryLower)
+	results := make([]balancedEvidenceResult, len(candidates))
+	for i, candidate := range candidates {
+		result := balancedEvidenceForCandidate(candidate, stats, queryLower, terms)
+		results[i] = result
+		if key := balancedSiblingKey(candidate.candidate); key != "" && result.anchorScore > stats.siblingBestScore[key] {
+			stats.siblingBestScore[key] = result.anchorScore
+		}
+	}
+	for i, candidate := range candidates {
+		result := results[i]
+		key := balancedSiblingKey(candidate.candidate)
+		if key != "" && stats.siblingCounts[key] >= 2 {
+			best := stats.siblingBestScore[key]
+			switch {
+			case result.anchorScore > 0 && result.anchorScore == best:
+				result.score += 0.9
+				result.reasons = append(result.reasons, "sibling contrast winner")
+			case result.anchorScore == 0 && best >= 3.0 && isWeakBodyOnlyBackfill(candidate, queryLower):
+				result.score -= 2.0
+				result.reasons = append(result.reasons, "sibling contrast body-only dampening")
+			case result.anchorScore > 0 && best >= 3.0 && result.anchorScore < best*0.55:
+				result.score -= 0.8
+				result.reasons = append(result.reasons, "sibling contrast weaker sibling")
+			}
+		}
+		if result.score != 0 {
+			candidate.score += result.score
+			candidate.candidate = withBalancedEvidenceMetadata(candidate.candidate, result.score, result.reasons)
+		}
+		candidates[i] = candidate
+	}
+	return candidates
+}
+
+func buildBalancedEvidenceStats(candidates []scoredCandidate, queryLower string) balancedEvidenceStats {
+	stats := balancedEvidenceStats{
+		candidateCount:   len(candidates),
+		termDF:           map[string]int{},
+		siblingCounts:    map[string]int{},
+		siblingBestScore: map[string]float64{},
+	}
+	terms := balancedEvidenceTerms(queryLower)
+	for _, candidate := range candidates {
+		text := balancedStructuredText(candidate.candidate)
+		seen := map[string]bool{}
+		for _, term := range terms {
+			if term == "" || seen[term] {
+				continue
+			}
+			if strings.Contains(text, term) {
+				stats.termDF[term]++
+				seen[term] = true
+			}
+		}
+		if key := balancedSiblingKey(candidate.candidate); key != "" {
+			stats.siblingCounts[key]++
+		}
+	}
+	return stats
+}
+
+func balancedEvidenceForCandidate(candidate scoredCandidate, stats balancedEvidenceStats, queryLower string, terms map[string]float64) balancedEvidenceResult {
+	c := candidate.candidate
+	pathTitleLower := strings.ToLower(c.Path + "\n" + c.Title)
+	result := balancedEvidenceResult{}
+	add := func(delta float64, anchor bool, reason string) {
+		if delta == 0 {
+			return
+		}
+		result.score += delta
+		if anchor {
+			result.anchorScore += delta
+		}
+		if reason != "" {
+			result.reasons = append(result.reasons, reason)
+		}
+	}
+
+	pathTitleScore := 0.0
+	for _, term := range balancedEvidenceTerms(queryLower) {
+		if term == "" || !strings.Contains(pathTitleLower, term) {
+			continue
+		}
+		pathTitleScore += balancedLocalIDF(stats, term)
+	}
+	if pathTitleScore > 0 {
+		add(clampFloat(pathTitleScore*0.9, 0, 4.5), true, "rare path/title match")
+	}
+
+	roleScore := balancedRoleEvidenceScore(candidate.role, queryLower)
+	if roleScore > 0 {
+		add(roleScore, true, "query/artifact role alignment")
+	}
+
+	sectionScore := indexedSectionScore(c, terms, queryLower)
+	if sectionScore > 0 {
+		add(clampFloat(sectionScore*0.25, 0, 2.0), true, "indexed section corroboration")
+	}
+
+	if candidate.profile.identifierMatches > 0 && result.anchorScore > 0 {
+		add(clampFloat(float64(candidate.profile.identifierMatches)*0.8, 0, 2.0), true, "anchored identifier match")
+	}
+
+	if candidate.profile.coreTerms >= 3 && result.anchorScore == 0 && !candidate.sourceFile {
+		add(-2.5, false, "body-only evidence dampening")
+	}
+	if mode := nonIntentCandidateMode(c); mode != "" && !hasNonIntentModeIntent(queryLower, mode) {
+		add(-2.0, false, "unrequested non-intent lane")
+	}
+	if result.anchorScore > 0 {
+		pathLower := strings.ToLower(filepath.ToSlash(c.Path))
+		bodyLower := strings.ToLower(c.Body)
+		switch {
+		case candidateIsStale(c, pathLower, bodyLower) && !hasLifecycleIntent(queryLower):
+			add(-0.7, false, "stale lifecycle cue")
+		case hasArchivePath(pathLower) && !containsAny(queryLower, "archive", "archived", "historical", "history"):
+			add(-0.5, false, "archive lifecycle cue")
+		case metadataLower(c, "classifier_authority") != "":
+			add(0.3, false, "classifier authority cue")
+		}
+	}
+
+	result.score = clampFloat(result.score, -6.0, 8.0)
+	result.reasons = uniqueStrings(result.reasons)
+	if len(result.reasons) > 4 {
+		result.reasons = result.reasons[:4]
+	}
+	return result
+}
+
+func balancedRoleEvidenceScore(role, queryLower string) float64 {
+	switch role {
+	case "adr":
+		if containsAny(queryLower, "adr", "decision", "why", "rationale", "architecture") {
+			return 1.6
+		}
+	case "prd":
+		if hasProductBackgroundIntent(queryLower) {
+			return 1.6
+		}
+	case "rfc":
+		if hasRFCIntent(queryLower) {
+			return 1.6
+		}
+	case "design":
+		if containsAny(queryLower, "design", "architecture", "technical") {
+			return 1.4
+		}
+	case "plan", "agent_note":
+		if hasPlanIntent(queryLower) {
+			return 1.2
+		}
+	case "openspec_bundle", "openspec_design", "openspec_tasks", "openspec_spec", "openspec_proposal":
+		if hasOpenSpecStructureIntent(queryLower) || hasOpenSpecChildRoleIntent(queryLower) {
+			return 1.4
+		}
+	case "agent_instruction", "protocol", "skill":
+		if hasNonIntentModeIntent(queryLower, "protocol") {
+			return 1.2
+		}
+	case "template":
+		if hasNonIntentModeIntent(queryLower, "template") {
+			return 1.2
+		}
+	case "model":
+		if hasNonIntentModeIntent(queryLower, "model") {
+			return 1.2
+		}
+	case "test_case":
+		if hasTestBehaviorIntent(queryLower) {
+			return 1.4
+		}
+	case "code_comment":
+		if hasCodeCommentIntent(queryLower) {
+			return 1.2
+		}
+	}
+	return 0
+}
+
+func balancedEvidenceTerms(queryLower string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(term string) {
+		term = strings.ToLower(strings.TrimSpace(term))
+		if term == "" || seen[term] {
+			return
+		}
+		seen[term] = true
+		out = append(out, term)
+	}
+	for _, term := range coreQueryTerms(queryLower) {
+		add(term)
+	}
+	for _, term := range identifierQueryTerms(queryLower) {
+		add(term)
+		for _, part := range splitIdentifier(term) {
+			if len(part) >= 4 {
+				add(part)
+			}
+		}
+	}
+	if len(out) == 0 {
+		for _, term := range meaningfulTerms(queryLower) {
+			if !genericSectionTerm(term) {
+				add(term)
+			}
+		}
+	}
+	return out
+}
+
+func balancedStructuredText(c Candidate) string {
+	var b strings.Builder
+	b.WriteString(strings.ToLower(filepath.ToSlash(c.Path)))
+	b.WriteByte('\n')
+	b.WriteString(strings.ToLower(c.Title))
+	if c.Metadata != nil {
+		for _, key := range []string{
+			"indexed_section_match_headings_json",
+			"section_pack_headings",
+			"openspec_role",
+			"source_standard",
+			"layout_group",
+			"test_name",
+			"parent_title",
+		} {
+			if value := strings.TrimSpace(c.Metadata[key]); value != "" {
+				b.WriteByte('\n')
+				b.WriteString(strings.ToLower(value))
+			}
+		}
+	}
+	return b.String()
+}
+
+func balancedLocalIDF(stats balancedEvidenceStats, term string) float64 {
+	if stats.candidateCount <= 0 {
+		return 1
+	}
+	df := stats.termDF[term]
+	if df <= 0 {
+		df = 1
+	}
+	return clampFloat(1.0+math.Log(float64(stats.candidateCount+1)/float64(df+1)), 0.7, 3.0)
+}
+
+func balancedSiblingKey(c Candidate) string {
+	path := strings.ToLower(filepath.ToSlash(c.Path))
+	if idx := strings.Index(path, "#"); idx >= 0 {
+		path = path[:idx]
+	}
+	path = strings.Trim(path, "/")
+	if path == "" {
+		return ""
+	}
+	if isOpenSpecChangePath(path) {
+		parts := strings.Split(path, "/")
+		for i := 0; i+2 < len(parts); i++ {
+			if parts[i] == "changes" {
+				return "openspec_change|" + strings.Join(parts[:i+2], "/")
+			}
+		}
+	}
+	dir := filepath.ToSlash(filepath.Dir(path))
+	if dir == "." || dir == "" {
+		return ""
+	}
+	role := candidateRole(c)
+	if role == "" {
+		role = strings.ToLower(filepath.Ext(path))
+	}
+	return role + "|" + dir
+}
+
+func withBalancedEvidenceMetadata(c Candidate, score float64, reasons []string) Candidate {
+	if c.Metadata == nil {
+		c.Metadata = map[string]string{}
+	} else {
+		c.Metadata = copyMetadata(c.Metadata)
+	}
+	c.Metadata["retrieval_evidence_mode"] = EvidenceModeBalanced
+	c.Metadata["retrieval_evidence_score"] = fmt.Sprintf("%.3f", score)
+	if len(reasons) > 0 {
+		c.Metadata["retrieval_evidence_reasons"] = strings.Join(reasons, "\n")
+	}
+	return c
+}
+
+func clampFloat(value, min, max float64) float64 {
+	if value < min {
+		return min
+	}
+	if value > max {
+		return max
+	}
+	return value
 }
 
 type authorityPriorResult struct {
@@ -385,6 +754,17 @@ func metadataLower(c Candidate, key string) string {
 		return ""
 	}
 	return strings.ToLower(strings.TrimSpace(c.Metadata[key]))
+}
+
+func metadataJSONList(c Candidate, key string) []string {
+	if c.Metadata == nil || strings.TrimSpace(c.Metadata[key]) == "" {
+		return nil
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(c.Metadata[key]), &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 func hasPathSegment(path, segment string) bool {
@@ -737,21 +1117,314 @@ func isExampleSegment(segment string) bool {
 	}
 }
 
-type markdownSection struct {
-	HeadingPath        string
-	HeadingDepth       int
-	StartLine          int
-	EndLine            int
-	Body               string
-	Frontmatter        map[string]string
-	Tasks              []string
-	AcceptanceCriteria []string
-	Links              []string
-}
+type markdownSection = docsections.Section
 
 type scoredMarkdownSection struct {
 	section markdownSection
 	score   float64
+}
+
+type scoredIndexedSection struct {
+	section          IndexedSection
+	score            float64
+	specificEvidence bool
+}
+
+// EnrichCandidatesWithSectionMatches adds conservative query-specific section
+// evidence to candidates that were loaded from the SQLite section index.
+func EnrichCandidatesWithSectionMatches(candidates []Candidate, query string) []Candidate {
+	if len(candidates) == 0 {
+		return candidates
+	}
+	terms := expandedTerms(query)
+	queryLower := strings.ToLower(query)
+	out := make([]Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		out = append(out, enrichCandidateWithSectionMatches(candidate, queryLower, terms))
+	}
+	return out
+}
+
+func enrichCandidateWithSectionMatches(c Candidate, queryLower string, terms map[string]float64) Candidate {
+	if len(c.Sections) == 0 || IsSourceContextCandidate(c) {
+		return c
+	}
+	if mode := nonIntentCandidateMode(c); mode != "" && !hasNonIntentModeIntent(queryLower, mode) {
+		return c
+	}
+	if !sectionRetrievalAllowedForCandidate(c, queryLower) {
+		return c
+	}
+	scored := make([]scoredIndexedSection, 0, len(c.Sections))
+	for _, section := range c.Sections {
+		score, specific := scoreIndexedSectionEvidence(section, queryLower, terms)
+		if !specific || score < 4.8 {
+			continue
+		}
+		scored = append(scored, scoredIndexedSection{section: section, score: score, specificEvidence: specific})
+	}
+	if len(scored) == 0 {
+		return c
+	}
+	sort.Slice(scored, func(i, j int) bool {
+		if scored[i].score == scored[j].score {
+			return scored[i].section.StartLine < scored[j].section.StartLine
+		}
+		return scored[i].score > scored[j].score
+	})
+	if scored[0].score < 6.0 && !sectionHasIdentifierEvidence(scored[0].section, queryLower) {
+		return c
+	}
+	limit := 2
+	if containsAny(queryLower, "agent context", "implement", "implementation", "resume", "continue") {
+		limit = 3
+	}
+	if limit > len(scored) {
+		limit = len(scored)
+	}
+	threshold := scored[0].score * 0.55
+	if threshold < 4.8 {
+		threshold = 4.8
+	}
+	selected := make([]scoredIndexedSection, 0, limit)
+	for _, section := range scored {
+		if len(selected) >= limit {
+			break
+		}
+		if len(selected) > 0 && section.score < threshold {
+			continue
+		}
+		selected = append(selected, section)
+	}
+	if len(selected) == 0 {
+		return c
+	}
+	sort.Slice(selected, func(i, j int) bool {
+		return selected[i].section.StartLine < selected[j].section.StartLine
+	})
+	if c.Metadata == nil {
+		c.Metadata = map[string]string{}
+	} else {
+		c.Metadata = copyMetadata(c.Metadata)
+	}
+	c.Metadata["indexed_section_retrieval_mode"] = "section_aware"
+	c.Metadata["indexed_section_match_count"] = strconv.Itoa(len(selected))
+	c.Metadata["indexed_section_total"] = strconv.Itoa(len(c.Sections))
+	c.Metadata["indexed_section_match_score"] = fmt.Sprintf("%.3f", boundedSectionBoost(selected))
+	c.Metadata["indexed_section_match_source"] = "candidate_sections"
+	ids := make([]string, 0, len(selected))
+	headings := make([]string, 0, len(selected))
+	ranges := make([]string, 0, len(selected))
+	bodies := make([]string, 0, len(selected))
+	for _, hit := range selected {
+		ids = append(ids, hit.section.ID)
+		headings = append(headings, hit.section.HeadingPath)
+		ranges = append(ranges, fmt.Sprintf("%d-%d", hit.section.StartLine, hit.section.EndLine))
+		bodies = append(bodies, sectionBodyPreview(hit.section.Body, 2200))
+	}
+	putMetadataJSONList(c.Metadata, "indexed_section_match_ids_json", ids)
+	putMetadataJSONList(c.Metadata, "indexed_section_match_headings_json", headings)
+	putMetadataJSONList(c.Metadata, "indexed_section_match_ranges_json", ranges)
+	putMetadataJSONList(c.Metadata, "indexed_section_match_bodies_json", bodies)
+	return c
+}
+
+func sectionRetrievalAllowedForCandidate(c Candidate, queryLower string) bool {
+	pathLower := strings.ToLower(filepath.ToSlash(c.Path))
+	if isRoadmapPath(pathLower) && !hasRoadmapIntent(queryLower) {
+		return false
+	}
+	return true
+}
+
+func scoreIndexedSectionEvidence(section IndexedSection, queryLower string, terms map[string]float64) (float64, bool) {
+	headingLower := strings.ToLower(section.HeadingPath)
+	titleLower := strings.ToLower(section.Title)
+	bodyLower := strings.ToLower(section.Body)
+	score := 0.0
+	specific := false
+	identifierEvidence := false
+	coreTerms := coreQueryTerms(queryLower)
+	for _, term := range coreTerms {
+		if term == "" {
+			continue
+		}
+		if strings.Contains(headingLower, term) || strings.Contains(titleLower, term) {
+			score += 5.0
+			specific = true
+		}
+		hits := strings.Count(bodyLower, term)
+		if hits > 3 {
+			hits = 3
+		}
+		if hits > 0 {
+			score += float64(hits) * 1.4
+			specific = true
+		}
+	}
+	for _, term := range identifierQueryTerms(queryLower) {
+		if term == "" {
+			continue
+		}
+		if strings.Contains(headingLower, term) || strings.Contains(titleLower, term) {
+			score += 6.0
+			specific = true
+			identifierEvidence = true
+		}
+		if strings.Contains(bodyLower, term) {
+			score += 5.0
+			specific = true
+			identifierEvidence = true
+		}
+		for _, part := range splitIdentifier(term) {
+			if len(part) < 4 {
+				continue
+			}
+			if strings.Contains(headingLower, part) || strings.Contains(bodyLower, part) {
+				score += 0.8
+				specific = true
+			}
+		}
+	}
+	if !specific {
+		for term, weight := range terms {
+			if term == "" || genericSectionTerm(term) {
+				continue
+			}
+			if strings.Contains(headingLower, term) || strings.Contains(titleLower, term) {
+				score += 3.0 * weight
+				specific = true
+			}
+		}
+	}
+	if !specific {
+		return 0, false
+	}
+	if genericSectionHeading(headingLower) && !identifierEvidence {
+		bodySpecific := false
+		for _, term := range coreTerms {
+			if term != "" && strings.Contains(bodyLower, term) {
+				bodySpecific = true
+				break
+			}
+		}
+		if !bodySpecific {
+			return 0, false
+		}
+		score -= 2.0
+	}
+	switch {
+	case containsAny(queryLower, "decision", "adr", "why", "rationale") && containsAny(headingLower, "decision", "rationale", "consequences"):
+		score += 2.0
+	case containsAny(queryLower, "design", "architecture") && containsAny(headingLower, "design", "architecture"):
+		score += 2.0
+	case containsAny(queryLower, "scope", "requirement", "requirements", "acceptance") && containsAny(headingLower, "scope", "requirement", "requirements", "acceptance"):
+		score += 1.6
+	case containsAny(queryLower, "task", "tasks", "todo", "implement", "implementation") && containsAny(headingLower, "task", "tasks", "todo", "implementation"):
+		score += 1.4
+	}
+	if sectionLooksMostlyCode(section.Body) && !hasExplicitSourceIntent(queryLower) && !identifierEvidence {
+		score -= 3.0
+	}
+	return score, score >= 4.0
+}
+
+func boundedSectionBoost(selected []scoredIndexedSection) float64 {
+	if len(selected) == 0 {
+		return 0
+	}
+	score := selected[0].score
+	for _, extra := range selected[1:] {
+		score += extra.score * 0.25
+	}
+	if score > 8.0 {
+		return 8.0
+	}
+	return score
+}
+
+func sectionHasIdentifierEvidence(section IndexedSection, queryLower string) bool {
+	text := strings.ToLower(section.HeadingPath + "\n" + section.Title + "\n" + section.Body)
+	for _, term := range identifierQueryTerms(queryLower) {
+		if term != "" && strings.Contains(text, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func genericSectionHeading(headingLower string) bool {
+	parts := strings.Split(headingLower, ">")
+	leaf := strings.TrimSpace(parts[len(parts)-1])
+	switch leaf {
+	case "overview", "introduction", "background", "summary", "notes", "details", "misc", "appendix":
+		return true
+	default:
+		return false
+	}
+}
+
+func genericSectionTerm(term string) bool {
+	switch term {
+	case "agent", "context", "document", "documents", "implementation", "implement", "plan", "spec", "requirements", "design", "task", "tasks":
+		return true
+	default:
+		return false
+	}
+}
+
+func isRoadmapPath(pathLower string) bool {
+	return strings.HasSuffix(pathLower, "roadmap.md") ||
+		strings.Contains(pathLower, "/roadmap.") ||
+		hasPathSegment(pathLower, "roadmap") ||
+		hasPathSegment(pathLower, "roadmaps")
+}
+
+func hasRoadmapIntent(queryLower string) bool {
+	return containsAny(queryLower,
+		"roadmap", "roadmaps", "timeline", "milestone", "milestones",
+		"release plan", "release planning", "future work", "planned work",
+		"quarterly plan", "q1", "q2", "q3", "q4")
+}
+
+func sectionLooksMostlyCode(body string) bool {
+	lines := strings.Split(body, "\n")
+	if len(lines) == 0 {
+		return false
+	}
+	codeLines := 0
+	inFence := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if isMarkdownFence(trimmed) {
+			inFence = !inFence
+			codeLines++
+			continue
+		}
+		if inFence || strings.HasPrefix(trimmed, "    ") || strings.HasPrefix(trimmed, "\t") {
+			codeLines++
+		}
+	}
+	return len(lines) >= 8 && float64(codeLines)/float64(len(lines)) > 0.65
+}
+
+func sectionBodyPreview(body string, maxChars int) string {
+	body = strings.TrimSpace(body)
+	if maxChars <= 0 || len(body) <= maxChars {
+		return body
+	}
+	return strings.TrimSpace(body[:maxChars]) + "\n..."
+}
+
+func putMetadataJSONList(metadata map[string]string, key string, values []string) {
+	if len(values) == 0 {
+		return
+	}
+	b, err := json.Marshal(values)
+	if err != nil {
+		return
+	}
+	metadata[key] = string(b)
 }
 
 func packCandidateSections(candidates []Candidate, queryLower string, terms map[string]float64) []Candidate {
@@ -808,187 +1481,11 @@ func isMarkdownCandidatePath(path string) bool {
 }
 
 func extractMarkdownSections(body string) []markdownSection {
-	body = strings.ReplaceAll(body, "\r\n", "\n")
-	body = strings.ReplaceAll(body, "\r", "\n")
-	lines := strings.Split(body, "\n")
-	frontmatter, startIndex := parseFrontmatter(lines)
-	type headingState struct {
-		depth int
-		title string
-	}
-	var stack []headingState
-	var sections []markdownSection
-	var current *markdownSection
-	var contentStart int
-	inCode := false
-	finalize := func(endLine int) {
-		if current == nil {
-			return
-		}
-		if endLine < contentStart {
-			current.EndLine = current.StartLine
-			current.Body = ""
-		} else {
-			current.EndLine = endLine
-			current.Body = strings.TrimRight(strings.Join(lines[contentStart-1:endLine], "\n"), "\r\n")
-		}
-		current.Tasks = extractTaskLines(current.Body)
-		current.AcceptanceCriteria = extractAcceptanceLines(current.HeadingPath, current.Body)
-		current.Links = extractMarkdownLinks(current.Body)
-		sections = append(sections, *current)
-		current = nil
-	}
-	for i := startIndex; i < len(lines); i++ {
-		line := lines[i]
-		trimmed := strings.TrimSpace(line)
-		if isMarkdownFence(trimmed) {
-			inCode = !inCode
-		}
-		if inCode {
-			continue
-		}
-		depth, title, ok := parseMarkdownHeading(line)
-		if !ok {
-			continue
-		}
-		lineNo := i + 1
-		finalize(lineNo - 1)
-		for len(stack) > 0 && stack[len(stack)-1].depth >= depth {
-			stack = stack[:len(stack)-1]
-		}
-		stack = append(stack, headingState{depth: depth, title: title})
-		pathParts := make([]string, len(stack))
-		for j, item := range stack {
-			pathParts[j] = item.title
-		}
-		current = &markdownSection{
-			HeadingPath:  strings.Join(pathParts, " > "),
-			HeadingDepth: depth,
-			StartLine:    lineNo,
-			Frontmatter:  copyStringMap(frontmatter),
-		}
-		contentStart = lineNo + 1
-	}
-	finalize(len(lines))
-	return sections
-}
-
-func parseFrontmatter(lines []string) (map[string]string, int) {
-	if len(lines) == 0 {
-		return nil, 0
-	}
-	delimiter := strings.TrimSpace(lines[0])
-	if delimiter != "---" && delimiter != "+++" {
-		return nil, 0
-	}
-	frontmatter := map[string]string{}
-	for i := 1; i < len(lines); i++ {
-		if strings.TrimSpace(lines[i]) == delimiter {
-			if len(frontmatter) == 0 {
-				frontmatter = nil
-			}
-			return frontmatter, i + 1
-		}
-		key, value, ok := parseFrontmatterLine(lines[i])
-		if ok {
-			frontmatter[key] = value
-		}
-	}
-	return nil, 0
-}
-
-func parseFrontmatterLine(line string) (string, string, bool) {
-	line = strings.TrimSpace(line)
-	if line == "" || strings.HasPrefix(line, "#") {
-		return "", "", false
-	}
-	separator := strings.Index(line, ":")
-	if separator < 0 {
-		separator = strings.Index(line, "=")
-	}
-	if separator <= 0 {
-		return "", "", false
-	}
-	key := strings.TrimSpace(line[:separator])
-	value := strings.Trim(strings.TrimSpace(line[separator+1:]), `"'`)
-	if key == "" || value == "" {
-		return "", "", false
-	}
-	return key, value, true
-}
-
-func parseMarkdownHeading(line string) (int, string, bool) {
-	trimmed := strings.TrimSpace(line)
-	if !strings.HasPrefix(trimmed, "#") {
-		return 0, "", false
-	}
-	depth := 0
-	for depth < len(trimmed) && trimmed[depth] == '#' {
-		depth++
-	}
-	if depth == 0 || depth > 6 || depth >= len(trimmed) || trimmed[depth] != ' ' {
-		return 0, "", false
-	}
-	title := strings.TrimSpace(trimmed[depth:])
-	title = strings.TrimSpace(strings.TrimRight(title, "#"))
-	if title == "" {
-		return 0, "", false
-	}
-	return depth, title, true
+	return docsections.ExtractMarkdown(body)
 }
 
 func isMarkdownFence(trimmed string) bool {
 	return strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
-}
-
-func extractTaskLines(body string) []string {
-	var out []string
-	for _, line := range strings.Split(body, "\n") {
-		trimmed := strings.TrimSpace(line)
-		lower := strings.ToLower(trimmed)
-		if strings.HasPrefix(lower, "- [ ]") || strings.HasPrefix(lower, "- [x]") ||
-			strings.HasPrefix(lower, "* [ ]") || strings.HasPrefix(lower, "* [x]") {
-			out = append(out, trimmed)
-		}
-	}
-	return out
-}
-
-func extractAcceptanceLines(headingPath, body string) []string {
-	if !containsAny(strings.ToLower(headingPath), "acceptance", "criteria", "requirement") &&
-		!containsAny(strings.ToLower(body), "acceptance criteria", "acceptance criterion") {
-		return nil
-	}
-	var out []string
-	for _, line := range strings.Split(body, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") || strings.Contains(strings.ToLower(trimmed), "acceptance") {
-			out = append(out, trimmed)
-		}
-	}
-	return out
-}
-
-func extractMarkdownLinks(body string) []string {
-	var out []string
-	rest := body
-	for {
-		start := strings.Index(rest, "](")
-		if start < 0 {
-			break
-		}
-		after := rest[start+2:]
-		end := strings.Index(after, ")")
-		if end < 0 {
-			break
-		}
-		target := strings.TrimSpace(after[:end])
-		if target != "" {
-			out = append(out, target)
-		}
-		rest = after[end+1:]
-	}
-	return uniqueStrings(out)
 }
 
 func selectMarkdownSections(sections []markdownSection, queryLower string, terms map[string]float64) []scoredMarkdownSection {
@@ -1700,6 +2197,67 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 	}
 	if mode := nonIntentCandidateMode(c); mode != "" && !hasNonIntentModeIntent(queryLower, mode) {
 		score -= 10.0
+	}
+	return score
+}
+
+func indexedSectionScore(c Candidate, terms map[string]float64, queryLower string) float64 {
+	if c.Metadata == nil || c.Metadata["indexed_section_retrieval_mode"] != "section_aware" {
+		return 0
+	}
+	if value := strings.TrimSpace(c.Metadata["indexed_section_match_score"]); value != "" {
+		if score, err := strconv.ParseFloat(value, 64); err == nil {
+			if score > 8.0 {
+				return 8.0
+			}
+			return score
+		}
+	}
+	headings := metadataJSONList(c, "indexed_section_match_headings_json")
+	ranges := metadataJSONList(c, "indexed_section_match_ranges_json")
+	bodies := metadataJSONList(c, "indexed_section_match_bodies_json")
+	count := len(headings)
+	if count == 0 {
+		if n, err := strconv.Atoi(c.Metadata["indexed_section_match_count"]); err == nil {
+			count = n
+		}
+	}
+	if count == 0 {
+		return 0
+	}
+	score := 2.0 + float64(count)
+	for i, heading := range headings {
+		headingLower := strings.ToLower(heading)
+		bodyLower := ""
+		if i < len(bodies) {
+			bodyLower = strings.ToLower(bodies[i])
+		}
+		for term, weight := range terms {
+			if term == "" {
+				continue
+			}
+			if strings.Contains(headingLower, term) {
+				score += 4.0 * weight
+			}
+			hits := strings.Count(bodyLower, term)
+			if hits > 3 {
+				hits = 3
+			}
+			score += float64(hits) * weight
+		}
+		switch {
+		case containsAny(queryLower, "decision", "adr", "why", "rationale") && containsAny(headingLower, "decision", "rationale", "consequences"):
+			score += 1.5
+		case containsAny(queryLower, "design", "architecture") && containsAny(headingLower, "design", "architecture", "overview"):
+			score += 1.5
+		case containsAny(queryLower, "scope", "requirement", "requirements", "acceptance") && containsAny(headingLower, "scope", "requirement", "requirements", "acceptance"):
+			score += 1.2
+		case containsAny(queryLower, "task", "tasks", "todo", "implement", "implementation") && containsAny(headingLower, "task", "tasks", "todo", "implementation"):
+			score += 1.2
+		}
+	}
+	if len(ranges) > 0 {
+		score += 0.5
 	}
 	return score
 }
@@ -2553,6 +3111,29 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 	if c.Metadata != nil && c.Metadata["section_pack_mode"] == "sections" {
 		reasons = append(reasons, "section-packed context: "+strings.ReplaceAll(c.Metadata["section_pack_headings"], "\n", "; "))
 	}
+	if c.Metadata != nil && c.Metadata["indexed_section_retrieval_mode"] == "section_aware" {
+		headings := metadataJSONList(c, "indexed_section_match_headings_json")
+		ranges := metadataJSONList(c, "indexed_section_match_ranges_json")
+		if len(headings) > 0 {
+			parts := make([]string, 0, len(headings))
+			for i, heading := range headings {
+				part := heading
+				if i < len(ranges) && ranges[i] != "" {
+					part += " lines " + ranges[i]
+				}
+				parts = append(parts, part)
+				if len(parts) >= 3 {
+					break
+				}
+			}
+			reasons = append(reasons, "indexed section match: "+strings.Join(parts, "; "))
+		}
+	}
+	if c.Metadata != nil && c.Metadata["retrieval_evidence_mode"] == EvidenceModeBalanced {
+		if evidenceReasons := strings.TrimSpace(c.Metadata["retrieval_evidence_reasons"]); evidenceReasons != "" {
+			reasons = append(reasons, "balanced evidence: "+strings.ReplaceAll(evidenceReasons, "\n", "; "))
+		}
+	}
 	for term := range terms {
 		if term == "" {
 			continue
@@ -2777,17 +3358,6 @@ func candidateIdentity(c Candidate) string {
 func copyMetadata(metadata map[string]string) map[string]string {
 	out := make(map[string]string, len(metadata)+1)
 	for key, value := range metadata {
-		out[key] = value
-	}
-	return out
-}
-
-func copyStringMap(items map[string]string) map[string]string {
-	if len(items) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(items))
-	for key, value := range items {
 		out[key] = value
 	}
 	return out

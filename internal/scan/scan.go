@@ -8,8 +8,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
@@ -20,6 +24,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
 	"github.com/devspecs-com/devspecs-cli/internal/ignore"
 	"github.com/devspecs-com/devspecs-cli/internal/repo"
+	docsections "github.com/devspecs-com/devspecs-cli/internal/sections"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/devspecs-com/devspecs-cli/internal/userident"
 )
@@ -33,6 +38,16 @@ type Scanner struct {
 	adapters []adapters.Adapter
 }
 
+type RunOptions struct {
+	MaxCandidatesByAdapter map[string]int
+	FileWorkerCount        int
+	UseTransaction         bool
+	SkipAuthoredAtLookup   bool
+	FreshIndex             bool
+	Progress               func(ProgressEvent)
+	ProgressInterval       time.Duration
+}
+
 // New creates a Scanner with the given store and adapters.
 func New(db *store.DB, ids *idgen.Factory, adpts []adapters.Adapter) *Scanner {
 	return &Scanner{db: db, ids: ids, adapters: adpts}
@@ -40,6 +55,11 @@ func New(db *store.DB, ids *idgen.Factory, adpts []adapters.Adapter) *Scanner {
 
 // Run scans the repo at repoRoot, using config if available.
 func (s *Scanner) Run(ctx context.Context, repoRoot string, cfg *config.RepoConfig) (*Result, error) {
+	return s.RunWithOptions(ctx, repoRoot, cfg, RunOptions{})
+}
+
+// RunWithOptions scans the repo with optional eval/runtime controls.
+func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *config.RepoConfig, opts RunOptions) (*Result, error) {
 	if cfg != nil {
 		if err := config.ValidateRepoConfig(cfg); err != nil {
 			return nil, fmt.Errorf("repo config: %w", err)
@@ -51,6 +71,7 @@ func (s *Scanner) Run(ctx context.Context, repoRoot string, cfg *config.RepoConf
 	}
 	result := newResult(adapterNames)
 	now := time.Now().UTC().Format(time.RFC3339)
+	progress := newProgressReporter(opts.Progress, opts.ProgressInterval)
 
 	matcher, _ := ignore.NewMatcher(repoRoot)
 	ctx = ignore.WithContext(ctx, matcher)
@@ -60,22 +81,142 @@ func (s *Scanner) Run(ctx context.Context, repoRoot string, cfg *config.RepoConf
 		return nil, fmt.Errorf("ensure repo: %w", err)
 	}
 
-	for _, adapter := range s.adapters {
-		candidates, err := adapter.Discover(ctx, repoRoot, cfg)
+	inTx := false
+	if opts.UseTransaction {
+		if _, err := s.db.Exec("BEGIN IMMEDIATE"); err != nil {
+			return nil, fmt.Errorf("begin scan transaction: %w", err)
+		}
+		inTx = true
+		defer func() {
+			if inTx {
+				_, _ = s.db.Exec("ROLLBACK")
+			}
+		}()
+	}
+
+	state := &scanRunState{}
+	if opts.FreshIndex {
+		state.shortIDs = map[string]int{}
+		state.fresh, err = newFreshInserter(s.db)
 		if err != nil {
+			return nil, fmt.Errorf("prepare fresh index inserts: %w", err)
+		}
+		defer state.fresh.close()
+	}
+
+	progress.emit(ProgressEvent{
+		Phase:                "scan",
+		Event:                "start",
+		TransactionEnabled:   opts.UseTransaction,
+		SkipAuthoredAtLookup: opts.SkipAuthoredAtLookup,
+	})
+	sharedCandidates, err := s.discoverSharedFileCandidates(ctx, repoRoot, cfg, opts, progress)
+	if err != nil {
+		return nil, fmt.Errorf("shared file discovery: %w", err)
+	}
+	parsedByAdapter := map[string]int{}
+	upsertedByAdapter := map[string]int{}
+	for _, adapter := range s.adapters {
+		var candidates []adapters.Candidate
+		if _, ok := adapter.(adapters.FileDiscoveryAdapter); ok {
+			candidates = sharedCandidates[adapter.Name()]
+		} else {
+			var err error
+			candidates, err = adapter.Discover(ctx, repoRoot, cfg)
+			if err != nil {
+				continue
+			}
+		}
+		progress.emit(ProgressEvent{
+			Phase:             "parse_upsert",
+			Event:             "adapter_start",
+			CurrentAdapter:    adapter.Name(),
+			CandidatesTotal:   len(candidates),
+			CandidatesParsed:  cloneIntMap(parsedByAdapter),
+			ArtifactsUpserted: cloneIntMap(upsertedByAdapter),
+		})
+
+		if opts.FreshIndex {
+			parsed, parsedCount, err := parseCandidatesForFreshIndex(ctx, repoRoot, adapter, candidates, opts, progress)
+			if err != nil {
+				return nil, err
+			}
+			parsedByAdapter[adapter.Name()] += parsedCount
+			for i, parsedArtifact := range parsed {
+				if !parsedArtifact.ok {
+					continue
+				}
+				if err := s.upsertArtifact(repoRoot, repoID, adapter.Name(), parsedArtifact.artifact, parsedArtifact.sources, parsedArtifact.parseResult, now, result, opts, state); err != nil {
+					return nil, fmt.Errorf("upsert artifact %q: %w", parsedArtifact.artifact.SourceIdentity, err)
+				}
+				upsertedByAdapter[adapter.Name()]++
+				progress.maybe(ProgressEvent{
+					Phase:               "persist",
+					CurrentAdapter:      adapter.Name(),
+					CandidatesTotal:     len(candidates),
+					CandidatesProcessed: i + 1,
+					CandidatesParsed:    cloneIntMap(parsedByAdapter),
+					ArtifactsUpserted:   cloneIntMap(upsertedByAdapter),
+					RowsWritten:         state.fresh.rowCounts(),
+					ChunksFlushed:       state.fresh.chunkCounts(),
+				})
+			}
+			progress.emit(ProgressEvent{
+				Phase:               "persist",
+				Event:               "adapter_done",
+				CurrentAdapter:      adapter.Name(),
+				CandidatesTotal:     len(candidates),
+				CandidatesProcessed: len(candidates),
+				CandidatesParsed:    cloneIntMap(parsedByAdapter),
+				ArtifactsUpserted:   cloneIntMap(upsertedByAdapter),
+				RowsWritten:         state.fresh.rowCounts(),
+				ChunksFlushed:       state.fresh.chunkCounts(),
+			})
 			continue
 		}
 
-		for _, c := range candidates {
+		for i, c := range candidates {
 			art, sources, pr, err := adapter.Parse(ctx, c)
 			if err != nil {
 				continue
 			}
+			parsedByAdapter[adapter.Name()]++
 			art = attachClassifierMetadata(repoRoot, c, art)
-			if err := s.upsertArtifact(repoRoot, repoID, adapter.Name(), art, sources, pr, now, result); err != nil {
+			if err := s.upsertArtifact(repoRoot, repoID, adapter.Name(), art, sources, pr, now, result, opts, state); err != nil {
 				return nil, fmt.Errorf("upsert artifact %q: %w", art.SourceIdentity, err)
 			}
+			upsertedByAdapter[adapter.Name()]++
+			progress.maybe(ProgressEvent{
+				Phase:               "parse_upsert",
+				CurrentAdapter:      adapter.Name(),
+				CandidatesTotal:     len(candidates),
+				CandidatesProcessed: i + 1,
+				CandidatesParsed:    cloneIntMap(parsedByAdapter),
+				ArtifactsUpserted:   cloneIntMap(upsertedByAdapter),
+			})
 		}
+		progress.emit(ProgressEvent{
+			Phase:               "parse_upsert",
+			Event:               "adapter_done",
+			CurrentAdapter:      adapter.Name(),
+			CandidatesTotal:     len(candidates),
+			CandidatesProcessed: len(candidates),
+			CandidatesParsed:    cloneIntMap(parsedByAdapter),
+			ArtifactsUpserted:   cloneIntMap(upsertedByAdapter),
+		})
+	}
+
+	if state != nil && state.fresh != nil {
+		if err := state.fresh.flushRows(); err != nil {
+			return nil, fmt.Errorf("flush fresh index rows: %w", err)
+		}
+		progress.emit(ProgressEvent{
+			Phase:           "fresh_index_writer",
+			Event:           "rows_flushed",
+			RowsWritten:     state.fresh.rowCounts(),
+			ChunksFlushed:   state.fresh.chunkCounts(),
+			DeferredFTSRows: state.fresh.pendingFTSRows(),
+		})
 	}
 
 	if err := s.syncOpenSpecLinks(repoID, now); err != nil {
@@ -89,6 +230,37 @@ func (s *Scanner) Run(ctx context.Context, repoRoot string, cfg *config.RepoConf
 
 	s.recordScanMeta(repoID, repoRoot, now)
 	result.finalizeSourcesBreakdown()
+	if state != nil && state.fresh != nil {
+		progress.emit(ProgressEvent{
+			Phase:           "fresh_index_fts",
+			Event:           "start",
+			DeferredFTSRows: state.fresh.pendingFTSRows(),
+		})
+		if err := state.fresh.flushDeferredFTS(); err != nil {
+			return nil, fmt.Errorf("flush deferred fresh index FTS: %w", err)
+		}
+		progress.emit(ProgressEvent{
+			Phase:           "fresh_index_fts",
+			Event:           "done",
+			RowsWritten:     state.fresh.rowCounts(),
+			ChunksFlushed:   state.fresh.chunkCounts(),
+			DeferredFTSRows: 0,
+		})
+	}
+	if inTx {
+		if _, err := s.db.Exec("COMMIT"); err != nil {
+			return nil, fmt.Errorf("commit scan transaction: %w", err)
+		}
+		inTx = false
+	}
+	progress.emit(ProgressEvent{
+		Phase:                "scan",
+		Event:                "done",
+		CandidatesParsed:     cloneIntMap(parsedByAdapter),
+		ArtifactsUpserted:    cloneIntMap(upsertedByAdapter),
+		TransactionEnabled:   opts.UseTransaction,
+		SkipAuthoredAtLookup: opts.SkipAuthoredAtLookup,
+	})
 	return result, nil
 }
 
@@ -96,6 +268,481 @@ func (s *Scanner) recordScanMeta(repoID, repoRoot, now string) {
 	commit := repo.HeadCommit(repoRoot)
 	user := userident.Detect(repoRoot)
 	s.db.UpdateScanMeta(repoID, commit, user, now)
+}
+
+type fileInventoryEntry struct {
+	primaryPath string
+	relPath     string
+	size        int64
+}
+
+type fileCandidateResult struct {
+	index     int
+	byAdapter map[string][]adapters.Candidate
+}
+
+type progressReporter struct {
+	started  time.Time
+	next     time.Time
+	interval time.Duration
+	emitFn   func(ProgressEvent)
+}
+
+func newProgressReporter(emit func(ProgressEvent), interval time.Duration) *progressReporter {
+	if emit == nil {
+		return &progressReporter{}
+	}
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	now := time.Now()
+	return &progressReporter{
+		started:  now,
+		next:     now.Add(interval),
+		interval: interval,
+		emitFn:   emit,
+	}
+}
+
+func (p *progressReporter) emit(event ProgressEvent) {
+	if p == nil || p.emitFn == nil {
+		return
+	}
+	event.ElapsedMS = time.Since(p.started).Milliseconds()
+	p.emitFn(event)
+	p.next = time.Now().Add(p.interval)
+}
+
+func (p *progressReporter) maybe(event ProgressEvent) {
+	if p == nil || p.emitFn == nil || time.Now().Before(p.next) {
+		return
+	}
+	p.emit(event)
+}
+
+func (s *Scanner) discoverSharedFileCandidates(ctx context.Context, repoRoot string, cfg *config.RepoConfig, opts RunOptions, progress *progressReporter) (map[string][]adapters.Candidate, error) {
+	fileAdapters := make([]adapters.FileDiscoveryAdapter, 0)
+	for _, adapter := range s.adapters {
+		if fileAdapter, ok := adapter.(adapters.FileDiscoveryAdapter); ok {
+			fileAdapters = append(fileAdapters, fileAdapter)
+		}
+	}
+	out := make(map[string][]adapters.Candidate, len(fileAdapters))
+	if len(fileAdapters) == 0 {
+		return out, nil
+	}
+	inventory, err := collectFileInventory(ctx, repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	progress.emit(ProgressEvent{
+		Phase:           "shared_discovery",
+		Event:           "inventory_done",
+		InventoryFiles:  len(inventory),
+		FilesTotal:      len(inventory),
+		SharedDiscovery: true,
+		CappedDiscovery: hasCandidateLimits(fileAdapters, opts),
+	})
+	if hasCandidateLimits(fileAdapters, opts) || opts.FileWorkerCount == 1 {
+		return discoverSharedFileCandidatesSequential(ctx, repoRoot, cfg, inventory, fileAdapters, opts, progress)
+	}
+	return discoverSharedFileCandidatesParallel(ctx, repoRoot, cfg, inventory, fileAdapters, opts, progress)
+}
+
+func collectFileInventory(ctx context.Context, repoRoot string) ([]fileInventoryEntry, error) {
+	var files []fileInventoryEntry
+	err := filepath.WalkDir(repoRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(repoRoot, path)
+		if relErr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+		if m := ignore.FromContext(ctx); m != nil && m.ShouldSkip(rel, d.IsDir()) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			if isSharedFileIgnoredDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		info, statErr := d.Info()
+		if statErr != nil || info.IsDir() {
+			return nil
+		}
+		files = append(files, fileInventoryEntry{
+			primaryPath: path,
+			relPath:     rel,
+			size:        info.Size(),
+		})
+		return nil
+	})
+	sort.Slice(files, func(i, j int) bool { return files[i].relPath < files[j].relPath })
+	return files, err
+}
+
+func discoverSharedFileCandidatesSequential(ctx context.Context, repoRoot string, cfg *config.RepoConfig, inventory []fileInventoryEntry, fileAdapters []adapters.FileDiscoveryAdapter, opts RunOptions, progress *progressReporter) (map[string][]adapters.Candidate, error) {
+	out := make(map[string][]adapters.Candidate, len(fileAdapters))
+	counts := map[string]int{}
+	capped := hasCandidateLimits(fileAdapters, opts)
+	for i, file := range inventory {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var active []adapters.FileDiscoveryAdapter
+		for _, adapter := range fileAdapters {
+			name := adapter.Name()
+			limit := candidateLimit(name, opts)
+			if limit > 0 && counts[name] >= limit {
+				continue
+			}
+			if adapter.AcceptsFile(file.relPath, file.size, cfg) {
+				active = append(active, adapter)
+			}
+		}
+		if len(active) == 0 {
+			continue
+		}
+		body, err := os.ReadFile(file.primaryPath)
+		if err != nil {
+			continue
+		}
+		fc := adapters.FileCandidate{
+			RepoRoot:    repoRoot,
+			PrimaryPath: file.primaryPath,
+			RelPath:     file.relPath,
+			Size:        file.size,
+			Body:        body,
+		}
+		for _, adapter := range active {
+			name := adapter.Name()
+			candidates, err := adapter.DiscoverFile(ctx, fc, cfg)
+			if err != nil {
+				continue
+			}
+			if limit := candidateLimit(name, opts); limit > 0 && counts[name]+len(candidates) > limit {
+				candidates = candidates[:limit-counts[name]]
+			}
+			out[name] = append(out[name], candidates...)
+			counts[name] += len(candidates)
+		}
+		progress.maybe(ProgressEvent{
+			Phase:                "shared_discovery",
+			FilesTotal:           len(inventory),
+			FilesScanned:         i + 1,
+			CandidatesDiscovered: cloneIntMap(counts),
+			SharedDiscovery:      true,
+			CappedDiscovery:      capped,
+		})
+	}
+	for name := range out {
+		sortCandidates(out[name])
+	}
+	progress.emit(ProgressEvent{
+		Phase:                "shared_discovery",
+		Event:                "done",
+		FilesTotal:           len(inventory),
+		FilesScanned:         len(inventory),
+		CandidatesDiscovered: cloneIntMap(counts),
+		SharedDiscovery:      true,
+		CappedDiscovery:      capped,
+	})
+	return out, nil
+}
+
+func discoverSharedFileCandidatesParallel(ctx context.Context, repoRoot string, cfg *config.RepoConfig, inventory []fileInventoryEntry, fileAdapters []adapters.FileDiscoveryAdapter, opts RunOptions, progress *progressReporter) (map[string][]adapters.Candidate, error) {
+	workers := opts.FileWorkerCount
+	if workers <= 0 {
+		workers = runtime.GOMAXPROCS(0)
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	jobs := make(chan int)
+	results := make(chan fileCandidateResult, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range jobs {
+				file := inventory[index]
+				result := fileCandidateResult{index: index, byAdapter: map[string][]adapters.Candidate{}}
+				var active []adapters.FileDiscoveryAdapter
+				for _, adapter := range fileAdapters {
+					if adapter.AcceptsFile(file.relPath, file.size, cfg) {
+						active = append(active, adapter)
+					}
+				}
+				if len(active) > 0 {
+					if body, err := os.ReadFile(file.primaryPath); err == nil {
+						fc := adapters.FileCandidate{
+							RepoRoot:    repoRoot,
+							PrimaryPath: file.primaryPath,
+							RelPath:     file.relPath,
+							Size:        file.size,
+							Body:        body,
+						}
+						for _, adapter := range active {
+							if candidates, err := adapter.DiscoverFile(ctx, fc, cfg); err == nil && len(candidates) > 0 {
+								result.byAdapter[adapter.Name()] = candidates
+							}
+						}
+					}
+				}
+				select {
+				case results <- result:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+	go func() {
+		defer close(jobs)
+		for i := range inventory {
+			select {
+			case jobs <- i:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	byIndex := make([]fileCandidateResult, 0, len(inventory))
+	counts := map[string]int{}
+	for result := range results {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		byIndex = append(byIndex, result)
+		for name, candidates := range result.byAdapter {
+			counts[name] += len(candidates)
+		}
+		progress.maybe(ProgressEvent{
+			Phase:                "shared_discovery",
+			FilesTotal:           len(inventory),
+			FilesScanned:         len(byIndex),
+			CandidatesDiscovered: cloneIntMap(counts),
+			SharedDiscovery:      true,
+			ParallelWorkers:      workers,
+		})
+	}
+	sort.Slice(byIndex, func(i, j int) bool { return byIndex[i].index < byIndex[j].index })
+	out := make(map[string][]adapters.Candidate, len(fileAdapters))
+	for _, result := range byIndex {
+		for _, adapter := range fileAdapters {
+			out[adapter.Name()] = append(out[adapter.Name()], result.byAdapter[adapter.Name()]...)
+		}
+	}
+	for name := range out {
+		sortCandidates(out[name])
+	}
+	progress.emit(ProgressEvent{
+		Phase:                "shared_discovery",
+		Event:                "done",
+		FilesTotal:           len(inventory),
+		FilesScanned:         len(inventory),
+		CandidatesDiscovered: cloneIntMap(counts),
+		SharedDiscovery:      true,
+		ParallelWorkers:      workers,
+	})
+	return out, nil
+}
+
+func sortCandidates(candidates []adapters.Candidate) {
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].RelPath == candidates[j].RelPath {
+			if candidates[i].UnitStartLine == candidates[j].UnitStartLine {
+				return candidates[i].UnitName < candidates[j].UnitName
+			}
+			return candidates[i].UnitStartLine < candidates[j].UnitStartLine
+		}
+		return candidates[i].RelPath < candidates[j].RelPath
+	})
+}
+
+type parsedFreshCandidate struct {
+	index       int
+	ok          bool
+	artifact    adapters.Artifact
+	sources     []adapters.Source
+	parseResult todoparse.ParseResult
+}
+
+func parseCandidatesForFreshIndex(ctx context.Context, repoRoot string, adapter adapters.Adapter, candidates []adapters.Candidate, opts RunOptions, progress *progressReporter) ([]parsedFreshCandidate, int, error) {
+	workers := opts.FileWorkerCount
+	if workers <= 0 {
+		workers = runtime.GOMAXPROCS(0)
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	if workers == 1 || len(candidates) < 2 {
+		out := make([]parsedFreshCandidate, len(candidates))
+		parsed := 0
+		for i, c := range candidates {
+			if err := ctx.Err(); err != nil {
+				return nil, parsed, err
+			}
+			art, sources, pr, err := adapter.Parse(ctx, c)
+			if err != nil {
+				continue
+			}
+			parsed++
+			out[i] = parsedFreshCandidate{
+				index:       i,
+				ok:          true,
+				artifact:    attachClassifierMetadata(repoRoot, c, art),
+				sources:     sources,
+				parseResult: pr,
+			}
+			progress.maybe(ProgressEvent{
+				Phase:               "extract",
+				CurrentAdapter:      adapter.Name(),
+				CandidatesTotal:     len(candidates),
+				CandidatesProcessed: i + 1,
+				CandidatesParsed:    map[string]int{adapter.Name(): parsed},
+				ParallelWorkers:     workers,
+			})
+		}
+		progress.emit(ProgressEvent{
+			Phase:               "extract",
+			Event:               "adapter_done",
+			CurrentAdapter:      adapter.Name(),
+			CandidatesTotal:     len(candidates),
+			CandidatesProcessed: len(candidates),
+			CandidatesParsed:    map[string]int{adapter.Name(): parsed},
+			ParallelWorkers:     workers,
+		})
+		return out, parsed, nil
+	}
+
+	jobs := make(chan int)
+	results := make(chan parsedFreshCandidate, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range jobs {
+				c := candidates[index]
+				art, sources, pr, err := adapter.Parse(ctx, c)
+				if err == nil {
+					art = attachClassifierMetadata(repoRoot, c, art)
+					select {
+					case results <- parsedFreshCandidate{index: index, ok: true, artifact: art, sources: sources, parseResult: pr}:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
+				select {
+				case results <- parsedFreshCandidate{index: index}:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+	go func() {
+		defer close(jobs)
+		for i := range candidates {
+			select {
+			case jobs <- i:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	out := make([]parsedFreshCandidate, len(candidates))
+	processed := 0
+	parsed := 0
+	for result := range results {
+		if err := ctx.Err(); err != nil {
+			return nil, parsed, err
+		}
+		processed++
+		if result.ok {
+			parsed++
+			out[result.index] = result
+		}
+		progress.maybe(ProgressEvent{
+			Phase:               "extract",
+			CurrentAdapter:      adapter.Name(),
+			CandidatesTotal:     len(candidates),
+			CandidatesProcessed: processed,
+			CandidatesParsed:    map[string]int{adapter.Name(): parsed},
+			ParallelWorkers:     workers,
+		})
+	}
+	progress.emit(ProgressEvent{
+		Phase:               "extract",
+		Event:               "adapter_done",
+		CurrentAdapter:      adapter.Name(),
+		CandidatesTotal:     len(candidates),
+		CandidatesProcessed: processed,
+		CandidatesParsed:    map[string]int{adapter.Name(): parsed},
+		ParallelWorkers:     workers,
+	})
+	return out, parsed, nil
+}
+
+func hasCandidateLimits(fileAdapters []adapters.FileDiscoveryAdapter, opts RunOptions) bool {
+	for _, adapter := range fileAdapters {
+		if candidateLimit(adapter.Name(), opts) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func candidateLimit(adapterName string, opts RunOptions) int {
+	if opts.MaxCandidatesByAdapter == nil {
+		return 0
+	}
+	return opts.MaxCandidatesByAdapter[adapterName]
+}
+
+func cloneIntMap(values map[string]int) map[string]int {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(values))
+	for key, value := range values {
+		out[key] = value
+	}
+	return out
+}
+
+func isSharedFileIgnoredDir(name string) bool {
+	switch strings.ToLower(name) {
+	case ".git", ".devspecs", "node_modules", "dist", "build", ".next", "coverage", "tmp", "vendor", ".venv", "__pycache__":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Scanner) ensureRepo(rootPath, now string) (string, error) {
@@ -113,7 +760,15 @@ func (s *Scanner) ensureRepo(rootPath, now string) (string, error) {
 	return id, err
 }
 
-func (s *Scanner) upsertArtifact(repoRoot, repoID, adapterName string, art adapters.Artifact, sources []adapters.Source, pr todoparse.ParseResult, now string, result *Result) error {
+type scanRunState struct {
+	fresh    *freshInserter
+	shortIDs map[string]int
+}
+
+func (s *Scanner) upsertArtifact(repoRoot, repoID, adapterName string, art adapters.Artifact, sources []adapters.Source, pr todoparse.ParseResult, now string, result *Result, opts RunOptions, state *scanRunState) error {
+	if opts.FreshIndex {
+		return s.insertFreshArtifact(repoRoot, repoID, adapterName, art, sources, pr, now, result, opts, state)
+	}
 	// Check if artifact exists by source_identity
 	var artifactID, currentRevID string
 	err := s.db.QueryRow(
@@ -127,7 +782,7 @@ func (s *Scanner) upsertArtifact(repoRoot, repoID, adapterName string, art adapt
 		// New artifact
 		artifactID = s.ids.New()
 		revID := s.ids.NewWithPrefix("rev_")
-		if err := s.insertArtifact(artifactID, repoRoot, repoID, art, sources, revID, now); err != nil {
+		if err := s.insertArtifact(artifactID, repoRoot, repoID, art, sources, revID, now, opts.SkipAuthoredAtLookup); err != nil {
 			return err
 		}
 		s.assignShortID(artifactID, art.SourceIdentity)
@@ -139,10 +794,14 @@ func (s *Scanner) upsertArtifact(repoRoot, repoID, adapterName string, art adapt
 				return err
 			}
 		}
-		if err := s.replaceTodos(artifactID, revID, pr.Todos, now); err != nil {
+		sections, err := s.indexSections(artifactID, revID, art, sources, now)
+		if err != nil {
 			return err
 		}
-		if err := s.replaceCriteria(artifactID, revID, pr.Criteria, now); err != nil {
+		if err := s.replaceTodos(artifactID, revID, pr.Todos, now, sections); err != nil {
+			return err
+		}
+		if err := s.replaceCriteria(artifactID, revID, pr.Criteria, now, sections); err != nil {
 			return err
 		}
 		s.replaceTags(artifactID, art, now)
@@ -171,6 +830,9 @@ func (s *Scanner) upsertArtifact(repoRoot, repoID, adapterName string, art adapt
 	if existingHash == contentHash {
 		// Body hash unchanged: keep existing revision row (and extracted_json) until
 		// file content changes — CLI logic-only enrichments won't rewrite revisions alone.
+		if err := s.ensureSectionsIndexed(artifactID, currentRevID, art, sources, now); err != nil {
+			return err
+		}
 		s.replaceTags(artifactID, art, now)
 		result.Unchanged++
 		tallyIndexed(result, adapterName, sources, art)
@@ -184,10 +846,14 @@ func (s *Scanner) upsertArtifact(repoRoot, repoID, adapterName string, art adapt
 	}
 	s.db.Exec("UPDATE artifacts SET current_revision_id = ?, title = ?, status = ?, kind = ?, subtype = ?, updated_at = ? WHERE id = ?",
 		revID, art.Title, art.Status, art.Kind, art.Subtype, now, artifactID)
-	if err := s.replaceTodos(artifactID, revID, pr.Todos, now); err != nil {
+	sections, err := s.indexSections(artifactID, revID, art, sources, now)
+	if err != nil {
 		return err
 	}
-	if err := s.replaceCriteria(artifactID, revID, pr.Criteria, now); err != nil {
+	if err := s.replaceTodos(artifactID, revID, pr.Todos, now, sections); err != nil {
+		return err
+	}
+	if err := s.replaceCriteria(artifactID, revID, pr.Criteria, now, sections); err != nil {
 		return err
 	}
 	s.replaceTags(artifactID, art, now)
@@ -205,8 +871,629 @@ func (s *Scanner) indexFTS(artifactID string, art adapters.Artifact) {
 	s.db.IndexArtifactFTS(artifactID, art.Title, art.Body, sourcePath)
 }
 
-func (s *Scanner) insertArtifact(id, repoRoot, repoID string, art adapters.Artifact, sources []adapters.Source, revID, now string) error {
-	authoredAt := resolveAuthoredAt(repoRoot, art, sources, now)
+const freshInsertChunkSize = 75
+
+type freshInserter struct {
+	db        *store.DB
+	chunkSize int
+
+	artifacts []freshArtifactRow
+	revisions []freshRevisionRow
+	sources   []freshSourceRow
+	todos     []freshTodoRow
+	criteria  []freshCriterionRow
+	tags      []freshTagRow
+	fts       []freshFTSRow
+
+	rows   map[string]int
+	chunks map[string]int
+}
+
+type freshArtifactRow struct {
+	id         string
+	repoID     string
+	shortID    string
+	kind       string
+	subtype    string
+	title      string
+	status     string
+	revID      string
+	now        string
+	authoredAt string
+}
+
+type freshRevisionRow struct {
+	id            string
+	artifactID    string
+	contentHash   string
+	body          string
+	extractedJSON any
+	now           string
+}
+
+type freshSourceRow struct {
+	id             string
+	artifactID     string
+	repoID         string
+	sourceType     string
+	path           string
+	sourceIdentity string
+	formatProfile  string
+	layoutGroup    any
+	now            string
+}
+
+type freshTodoRow struct {
+	id         string
+	artifactID string
+	revID      string
+	sectionID  string
+	ordinal    int
+	text       string
+	done       int
+	sourceFile string
+	sourceLine int
+	now        string
+}
+
+type freshCriterionRow struct {
+	id           string
+	artifactID   string
+	revID        string
+	sectionID    string
+	ordinal      int
+	text         string
+	done         int
+	sourceFile   string
+	sourceLine   int
+	criteriaKind string
+	now          string
+}
+
+type freshTagRow struct {
+	artifactID string
+	tag        string
+	source     string
+	now        string
+}
+
+type freshFTSRow struct {
+	artifactID string
+	title      string
+	body       string
+	sourcePath string
+}
+
+func newFreshInserter(db *store.DB) (*freshInserter, error) {
+	return &freshInserter{
+		db:        db,
+		chunkSize: freshInsertChunkSize,
+		rows:      map[string]int{},
+		chunks:    map[string]int{},
+	}, nil
+}
+
+func (f *freshInserter) close() {}
+
+func (s *Scanner) insertFreshArtifact(repoRoot, repoID, adapterName string, art adapters.Artifact, sources []adapters.Source, pr todoparse.ParseResult, now string, result *Result, opts RunOptions, state *scanRunState) error {
+	if state == nil || state.fresh == nil {
+		return fmt.Errorf("fresh index inserter is not initialized")
+	}
+	artifactID := s.ids.New()
+	revID := s.ids.NewWithPrefix("rev_")
+	contentHash := hashContent(art.Body)
+	shortID := state.claimShortID(art.SourceIdentity)
+	authoredAt := now
+	if !opts.SkipAuthoredAtLookup {
+		authoredAt = resolveAuthoredAt(repoRoot, art, sources, now)
+	}
+	if err := state.fresh.insertArtifact(artifactID, repoID, shortID, art, revID, now, authoredAt); err != nil {
+		return err
+	}
+	if err := state.fresh.insertRevision(revID, artifactID, contentHash, art.Body, art.Extracted, now); err != nil {
+		return err
+	}
+	for _, src := range sources {
+		if err := state.fresh.insertSource(s.ids.NewWithPrefix("src_"), artifactID, repoID, src, now); err != nil {
+			return err
+		}
+	}
+	var sections []docsections.Section
+	if isMarkdownSectionSource(art, sources) {
+		if err := state.fresh.flushRows(); err != nil {
+			return err
+		}
+		var err error
+		sections, err = s.indexSections(artifactID, revID, art, sources, now)
+		if err != nil {
+			return err
+		}
+	}
+	for _, todo := range pr.Todos {
+		if err := state.fresh.insertTodo(s.ids.NewWithPrefix("todo_"), artifactID, revID, todo, now, sections); err != nil {
+			return err
+		}
+	}
+	for _, criterion := range pr.Criteria {
+		if err := state.fresh.insertCriterion(s.ids.NewWithPrefix("crit_"), artifactID, revID, criterion, now, sections); err != nil {
+			return err
+		}
+	}
+	if err := state.fresh.insertTags(artifactID, art, sources, now); err != nil {
+		return err
+	}
+	if err := state.fresh.deferFTS(artifactID, art); err != nil {
+		return err
+	}
+	if err := state.fresh.flushRowsIfFull(); err != nil {
+		return err
+	}
+	result.New++
+	tallyIndexed(result, adapterName, sources, art)
+	return nil
+}
+
+func (s *scanRunState) claimShortID(sourceIdentity string) string {
+	base := idgen.ShortID(sourceIdentity)
+	if base == "" {
+		base = "artifact"
+	}
+	if s.shortIDs == nil {
+		s.shortIDs = map[string]int{}
+	}
+	count := s.shortIDs[base]
+	s.shortIDs[base] = count + 1
+	if count == 0 {
+		return base
+	}
+	return fmt.Sprintf("%s%d", base, count)
+}
+
+func (f *freshInserter) insertArtifact(id, repoID, shortID string, art adapters.Artifact, revID, now, authoredAt string) error {
+	f.artifacts = append(f.artifacts, freshArtifactRow{
+		id:         id,
+		repoID:     repoID,
+		shortID:    shortID,
+		kind:       art.Kind,
+		subtype:    art.Subtype,
+		title:      art.Title,
+		status:     art.Status,
+		revID:      revID,
+		now:        now,
+		authoredAt: authoredAt,
+	})
+	return nil
+}
+
+func (f *freshInserter) insertRevision(id, artifactID, contentHash, body string, extracted map[string]any, now string) error {
+	var extractedArg any
+	if len(extracted) > 0 {
+		b, err := json.Marshal(extracted)
+		if err != nil {
+			return fmt.Errorf("marshal extracted: %w", err)
+		}
+		extractedArg = string(b)
+	}
+	f.revisions = append(f.revisions, freshRevisionRow{
+		id:            id,
+		artifactID:    artifactID,
+		contentHash:   contentHash,
+		body:          body,
+		extractedJSON: extractedArg,
+		now:           now,
+	})
+	return nil
+}
+
+func (f *freshInserter) insertSource(id, artifactID, repoID string, src adapters.Source, now string) error {
+	fp := src.FormatProfile
+	if fp == "" {
+		fp = format.ProfileGeneric
+	}
+	var layoutArg any
+	if src.LayoutGroup != "" {
+		layoutArg = src.LayoutGroup
+	}
+	f.sources = append(f.sources, freshSourceRow{
+		id:             id,
+		artifactID:     artifactID,
+		repoID:         repoID,
+		sourceType:     src.SourceType,
+		path:           src.Path,
+		sourceIdentity: src.SourceIdentity,
+		formatProfile:  fp,
+		layoutGroup:    layoutArg,
+		now:            now,
+	})
+	return nil
+}
+
+func (f *freshInserter) insertTodo(id, artifactID, revID string, todo todoparse.Todo, now string, sections []docsections.Section) error {
+	done := 0
+	if todo.Done {
+		done = 1
+	}
+	sectionID := docsections.EnclosingSectionID(sections, todo.SourceLine)
+	f.todos = append(f.todos, freshTodoRow{
+		id:         id,
+		artifactID: artifactID,
+		revID:      revID,
+		sectionID:  sectionID,
+		ordinal:    todo.Ordinal,
+		text:       todo.Text,
+		done:       done,
+		sourceFile: todo.SourceFile,
+		sourceLine: todo.SourceLine,
+		now:        now,
+	})
+	return nil
+}
+
+func (f *freshInserter) insertCriterion(id, artifactID, revID string, criterion todoparse.Criterion, now string, sections []docsections.Section) error {
+	done := 0
+	if criterion.Done {
+		done = 1
+	}
+	sectionID := docsections.EnclosingSectionID(sections, criterion.SourceLine)
+	f.criteria = append(f.criteria, freshCriterionRow{
+		id:           id,
+		artifactID:   artifactID,
+		revID:        revID,
+		sectionID:    sectionID,
+		ordinal:      criterion.Ordinal,
+		text:         criterion.Text,
+		done:         done,
+		sourceFile:   criterion.SourceFile,
+		sourceLine:   criterion.SourceLine,
+		criteriaKind: criterion.CriteriaKind,
+		now:          now,
+	})
+	return nil
+}
+
+func (f *freshInserter) insertTags(artifactID string, art adapters.Artifact, sources []adapters.Source, now string) error {
+	for _, tag := range art.Tags {
+		f.tags = append(f.tags, freshTagRow{artifactID: artifactID, tag: tag, source: "frontmatter", now: now})
+	}
+	if len(art.Tags) == 0 {
+		if dirTag := markdown.InferDirectoryTag(primarySectionSourcePath(art, sources)); dirTag != "" {
+			f.tags = append(f.tags, freshTagRow{artifactID: artifactID, tag: dirTag, source: "inferred", now: now})
+		}
+	}
+	return nil
+}
+
+func (f *freshInserter) deferFTS(artifactID string, art adapters.Artifact) error {
+	sourcePath := ""
+	if art.PrimaryPath != "" {
+		sourcePath = art.PrimaryPath
+	}
+	f.fts = append(f.fts, freshFTSRow{artifactID: artifactID, title: art.Title, body: art.Body, sourcePath: sourcePath})
+	return nil
+}
+
+func (f *freshInserter) flushRowsIfFull() error {
+	if f == nil {
+		return nil
+	}
+	if len(f.artifacts) >= f.chunkSize || len(f.revisions) >= f.chunkSize || len(f.sources) >= f.chunkSize ||
+		len(f.todos) >= f.chunkSize || len(f.criteria) >= f.chunkSize || len(f.tags) >= f.chunkSize {
+		return f.flushRows()
+	}
+	return nil
+}
+
+func (f *freshInserter) flushRows() error {
+	if f == nil {
+		return nil
+	}
+	if err := f.flushArtifacts(); err != nil {
+		return err
+	}
+	if err := f.flushRevisions(); err != nil {
+		return err
+	}
+	if err := f.flushSources(); err != nil {
+		return err
+	}
+	if err := f.flushTodos(); err != nil {
+		return err
+	}
+	if err := f.flushCriteria(); err != nil {
+		return err
+	}
+	if err := f.flushTags(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (f *freshInserter) flushDeferredFTS() error {
+	if f == nil || len(f.fts) == 0 {
+		return nil
+	}
+	rows := f.fts
+	if err := f.execBatches("artifacts_fts",
+		"INSERT INTO artifacts_fts (artifact_id, title, body, source_path) VALUES ",
+		4,
+		len(rows),
+		func(i int) []any {
+			row := rows[i]
+			return []any{row.artifactID, row.title, row.body, row.sourcePath}
+		},
+	); err != nil {
+		return err
+	}
+	f.fts = nil
+	return nil
+}
+
+func (f *freshInserter) flushArtifacts() error {
+	if len(f.artifacts) == 0 {
+		return nil
+	}
+	rows := f.artifacts
+	if err := f.execBatches("artifacts",
+		"INSERT INTO artifacts (id, repo_id, short_id, kind, subtype, title, status, current_revision_id, created_at, updated_at, last_observed_at, authored_at) VALUES ",
+		12,
+		len(rows),
+		func(i int) []any {
+			row := rows[i]
+			return []any{row.id, row.repoID, row.shortID, row.kind, row.subtype, row.title, row.status, row.revID, row.now, row.now, row.now, row.authoredAt}
+		},
+	); err != nil {
+		return err
+	}
+	f.artifacts = nil
+	return nil
+}
+
+func (f *freshInserter) flushRevisions() error {
+	if len(f.revisions) == 0 {
+		return nil
+	}
+	rows := f.revisions
+	if err := f.execBatches("artifact_revisions",
+		"INSERT INTO artifact_revisions (id, artifact_id, content_hash, body, extracted_json, observed_at) VALUES ",
+		6,
+		len(rows),
+		func(i int) []any {
+			row := rows[i]
+			return []any{row.id, row.artifactID, row.contentHash, row.body, row.extractedJSON, row.now}
+		},
+	); err != nil {
+		return err
+	}
+	f.revisions = nil
+	return nil
+}
+
+func (f *freshInserter) flushSources() error {
+	if len(f.sources) == 0 {
+		return nil
+	}
+	rows := f.sources
+	if err := f.execBatches("sources",
+		"INSERT INTO sources (id, artifact_id, repo_id, source_type, path, source_identity, format_profile, layout_group, created_at, updated_at) VALUES ",
+		10,
+		len(rows),
+		func(i int) []any {
+			row := rows[i]
+			return []any{row.id, row.artifactID, row.repoID, row.sourceType, row.path, row.sourceIdentity, row.formatProfile, row.layoutGroup, row.now, row.now}
+		},
+	); err != nil {
+		return err
+	}
+	f.sources = nil
+	return nil
+}
+
+func (f *freshInserter) flushTodos() error {
+	if len(f.todos) == 0 {
+		return nil
+	}
+	rows := f.todos
+	if err := f.execBatches("artifact_todos",
+		"INSERT INTO artifact_todos (id, artifact_id, revision_id, section_id, ordinal, text, done, source_file, source_line, created_at) VALUES ",
+		10,
+		len(rows),
+		func(i int) []any {
+			row := rows[i]
+			return []any{row.id, row.artifactID, row.revID, row.sectionID, row.ordinal, row.text, row.done, row.sourceFile, row.sourceLine, row.now}
+		},
+	); err != nil {
+		return err
+	}
+	f.todos = nil
+	return nil
+}
+
+func (f *freshInserter) flushCriteria() error {
+	if len(f.criteria) == 0 {
+		return nil
+	}
+	rows := f.criteria
+	if err := f.execBatches("artifact_criteria",
+		"INSERT INTO artifact_criteria (id, artifact_id, revision_id, section_id, ordinal, text, done, source_file, source_line, criteria_kind, created_at) VALUES ",
+		11,
+		len(rows),
+		func(i int) []any {
+			row := rows[i]
+			return []any{row.id, row.artifactID, row.revID, row.sectionID, row.ordinal, row.text, row.done, row.sourceFile, row.sourceLine, row.criteriaKind, row.now}
+		},
+	); err != nil {
+		return err
+	}
+	f.criteria = nil
+	return nil
+}
+
+func (f *freshInserter) flushTags() error {
+	if len(f.tags) == 0 {
+		return nil
+	}
+	rows := f.tags
+	if err := f.execBatches("artifact_tags",
+		"INSERT INTO artifact_tags (artifact_id, tag, source, created_at) VALUES ",
+		4,
+		len(rows),
+		func(i int) []any {
+			row := rows[i]
+			return []any{row.artifactID, row.tag, row.source, row.now}
+		},
+	); err != nil {
+		return err
+	}
+	f.tags = nil
+	return nil
+}
+
+func (f *freshInserter) execBatches(table, prefix string, valuesPerRow, rowCount int, argsForRow func(int) []any) error {
+	if rowCount == 0 {
+		return nil
+	}
+	chunkSize := f.chunkSize
+	if chunkSize <= 0 {
+		chunkSize = freshInsertChunkSize
+	}
+	for start := 0; start < rowCount; start += chunkSize {
+		end := start + chunkSize
+		if end > rowCount {
+			end = rowCount
+		}
+		var b strings.Builder
+		b.WriteString(prefix)
+		args := make([]any, 0, (end-start)*valuesPerRow)
+		for i := start; i < end; i++ {
+			if i > start {
+				b.WriteString(", ")
+			}
+			b.WriteByte('(')
+			for col := 0; col < valuesPerRow; col++ {
+				if col > 0 {
+					b.WriteString(", ")
+				}
+				b.WriteByte('?')
+			}
+			b.WriteByte(')')
+			args = append(args, argsForRow(i)...)
+		}
+		if _, err := f.db.Exec(b.String(), args...); err != nil {
+			return fmt.Errorf("insert %s rows %d-%d: %w", table, start, end, err)
+		}
+		f.rows[table] += end - start
+		f.chunks[table]++
+	}
+	return nil
+}
+
+func (f *freshInserter) rowCounts() map[string]int {
+	if f == nil {
+		return nil
+	}
+	return cloneIntMap(f.rows)
+}
+
+func (f *freshInserter) chunkCounts() map[string]int {
+	if f == nil {
+		return nil
+	}
+	return cloneIntMap(f.chunks)
+}
+
+func (f *freshInserter) pendingFTSRows() int {
+	if f == nil {
+		return 0
+	}
+	return len(f.fts)
+}
+
+func (s *Scanner) ensureSectionsIndexed(artifactID, revID string, art adapters.Artifact, sources []adapters.Source, now string) error {
+	if revID == "" || !isMarkdownSectionSource(art, sources) {
+		return nil
+	}
+	existing, err := s.db.GetSectionsForArtifact(artifactID)
+	if err != nil {
+		return err
+	}
+	if len(existing) > 0 {
+		return nil
+	}
+	_, err = s.indexSections(artifactID, revID, art, sources, now)
+	return err
+}
+
+func (s *Scanner) indexSections(artifactID, revID string, art adapters.Artifact, sources []adapters.Source, now string) ([]docsections.Section, error) {
+	if revID == "" || !isMarkdownSectionSource(art, sources) {
+		return nil, s.db.ReplaceArtifactSections(artifactID, revID, nil, now)
+	}
+	sourcePath := primarySectionSourcePath(art, sources)
+	indexed := docsections.AssignStableIDs(docsections.ExtractMarkdown(art.Body), artifactID, revID, sourcePath)
+	for i := range indexed {
+		indexed[i].Kind = inferIndexedSectionKind(indexed[i])
+		indexed[i].Metadata = map[string]string{
+			"artifact_kind":    art.Kind,
+			"artifact_subtype": art.Subtype,
+			"artifact_status":  art.Status,
+		}
+		if role, ok := art.Extracted["openspec_role"]; ok && strings.TrimSpace(fmt.Sprint(role)) != "" {
+			indexed[i].Metadata["openspec_role"] = fmt.Sprint(role)
+		}
+		if scope, ok := art.Extracted["artifact_scope"]; ok && strings.TrimSpace(fmt.Sprint(scope)) != "" {
+			indexed[i].Metadata["artifact_scope"] = fmt.Sprint(scope)
+		}
+	}
+	if err := s.db.ReplaceArtifactSections(artifactID, revID, indexed, now); err != nil {
+		return nil, err
+	}
+	return indexed, nil
+}
+
+func primarySectionSourcePath(art adapters.Artifact, sources []adapters.Source) string {
+	for _, src := range sources {
+		if strings.TrimSpace(src.Path) != "" {
+			return filepath.ToSlash(src.Path)
+		}
+	}
+	if art.PrimaryPath != "" {
+		return filepath.ToSlash(art.PrimaryPath)
+	}
+	return ""
+}
+
+func isMarkdownSectionSource(art adapters.Artifact, sources []adapters.Source) bool {
+	path := primarySectionSourcePath(art, sources)
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".md", ".mdx":
+		return strings.TrimSpace(art.Body) != ""
+	default:
+		return false
+	}
+}
+
+func inferIndexedSectionKind(section docsections.Section) string {
+	heading := strings.ToLower(section.HeadingPath)
+	switch {
+	case strings.Contains(heading, "decision") || strings.Contains(heading, "rationale") || strings.Contains(heading, "consequences"):
+		return "decision"
+	case strings.Contains(heading, "requirement") || strings.Contains(heading, "acceptance") || strings.Contains(heading, "criteria"):
+		return "requirement"
+	case strings.Contains(heading, "task") || strings.Contains(heading, "todo") || strings.Contains(heading, "next step") || len(section.Tasks) > 0:
+		return "task"
+	case strings.Contains(heading, "design") || strings.Contains(heading, "architecture"):
+		return "design"
+	case strings.Contains(heading, "risk") || strings.Contains(heading, "open question"):
+		return "risk"
+	default:
+		return ""
+	}
+}
+
+func (s *Scanner) insertArtifact(id, repoRoot, repoID string, art adapters.Artifact, sources []adapters.Source, revID, now string, skipAuthoredAtLookup bool) error {
+	authoredAt := now
+	if !skipAuthoredAtLookup {
+		authoredAt = resolveAuthoredAt(repoRoot, art, sources, now)
+	}
 	_, err := s.db.Exec(
 		`INSERT INTO artifacts (id, repo_id, kind, subtype, title, status, current_revision_id, created_at, updated_at, last_observed_at, authored_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -279,7 +1566,7 @@ func (s *Scanner) syncSources(artifactID, repoID string, sources []adapters.Sour
 	return nil
 }
 
-func (s *Scanner) replaceTodos(artifactID, revID string, todos []todoparse.Todo, now string) error {
+func (s *Scanner) replaceTodos(artifactID, revID string, todos []todoparse.Todo, now string, indexedSections []docsections.Section) error {
 	// Delete existing todos for this artifact
 	if _, err := s.db.Exec("DELETE FROM artifact_todos WHERE artifact_id = ?", artifactID); err != nil {
 		return err
@@ -290,9 +1577,10 @@ func (s *Scanner) replaceTodos(artifactID, revID string, todos []todoparse.Todo,
 		if todo.Done {
 			done = 1
 		}
+		sectionID := docsections.EnclosingSectionID(indexedSections, todo.SourceLine)
 		if _, err := s.db.Exec(
-			"INSERT INTO artifact_todos (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			id, artifactID, revID, todo.Ordinal, todo.Text, done, todo.SourceFile, todo.SourceLine, now,
+			"INSERT INTO artifact_todos (id, artifact_id, revision_id, section_id, ordinal, text, done, source_file, source_line, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			id, artifactID, revID, sectionID, todo.Ordinal, todo.Text, done, todo.SourceFile, todo.SourceLine, now,
 		); err != nil {
 			return err
 		}
@@ -300,7 +1588,7 @@ func (s *Scanner) replaceTodos(artifactID, revID string, todos []todoparse.Todo,
 	return nil
 }
 
-func (s *Scanner) replaceCriteria(artifactID, revID string, criteria []todoparse.Criterion, now string) error {
+func (s *Scanner) replaceCriteria(artifactID, revID string, criteria []todoparse.Criterion, now string, indexedSections []docsections.Section) error {
 	if _, err := s.db.Exec("DELETE FROM artifact_criteria WHERE artifact_id = ?", artifactID); err != nil {
 		return err
 	}
@@ -310,9 +1598,10 @@ func (s *Scanner) replaceCriteria(artifactID, revID string, criteria []todoparse
 		if c.Done {
 			done = 1
 		}
+		sectionID := docsections.EnclosingSectionID(indexedSections, c.SourceLine)
 		if _, err := s.db.Exec(
-			"INSERT INTO artifact_criteria (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, criteria_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			id, artifactID, revID, c.Ordinal, c.Text, done, c.SourceFile, c.SourceLine, c.CriteriaKind, now,
+			"INSERT INTO artifact_criteria (id, artifact_id, revision_id, section_id, ordinal, text, done, source_file, source_line, criteria_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			id, artifactID, revID, sectionID, c.Ordinal, c.Text, done, c.SourceFile, c.SourceLine, c.CriteriaKind, now,
 		); err != nil {
 			return err
 		}

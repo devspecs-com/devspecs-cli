@@ -28,6 +28,38 @@ type Adapter struct{}
 
 func (a *Adapter) Name() string { return sourceType }
 
+func (a *Adapter) AcceptsFile(rel string, size int64, cfg *config.RepoConfig) bool {
+	if cfg != nil && !cfg.CodeCommentArtifactsEnabled(false) {
+		return false
+	}
+	return size <= maxFileBytes && isSupportedCodeFile(rel)
+}
+
+func (a *Adapter) DiscoverFile(ctx context.Context, file adapters.FileCandidate, cfg *config.RepoConfig) ([]adapters.Candidate, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !a.AcceptsFile(file.RelPath, file.Size, cfg) {
+		return nil, nil
+	}
+	var candidates []adapters.Candidate
+	for _, unit := range extractComments(file.RelPath, string(file.Body)) {
+		candidates = append(candidates, adapters.Candidate{
+			PrimaryPath:   file.PrimaryPath,
+			RelPath:       file.RelPath,
+			AdapterName:   sourceType,
+			UnitName:      unit.Title,
+			UnitBody:      unit.Text,
+			UnitLanguage:  unit.Language,
+			UnitStartLine: unit.StartLine,
+			UnitEndLine:   unit.EndLine,
+			UnitSymbols:   unit.Symbols,
+			Role:          unit.Role,
+		})
+	}
+	return candidates, nil
+}
+
 func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.RepoConfig) ([]adapters.Candidate, error) {
 	if cfg != nil && !cfg.CodeCommentArtifactsEnabled(false) {
 		return nil, nil

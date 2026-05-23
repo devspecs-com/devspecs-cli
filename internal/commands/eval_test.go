@@ -30,11 +30,14 @@ func TestEvalCommand_TextOutputLabelsRetrieverAndTokenCounter(t *testing.T) {
 		"Corpus",
 		"Mean must-have recall:",
 		"Context sufficiency pass rate:",
+		"Must-hit@3:",
 		"Pareto:",
+		"Lane Metrics",
 		"Diagnostics",
 		"Discovery coverage:",
 		"Role summaries:",
 		"Case: resume-entitlement-sync",
+		"Graded precision:",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in output:\n%s", want, out)
@@ -81,6 +84,26 @@ func TestEvalCommand_JSONOutput(t *testing.T) {
 	}
 	if _, ok := summary["context_sufficiency_pass_rate"].(float64); !ok {
 		t.Fatalf("missing sufficiency pass rate: %#v", summary["context_sufficiency_pass_rate"])
+	}
+	if _, ok := summary["agent_metrics"].(map[string]any); !ok {
+		t.Fatalf("missing summary agent metrics: %#v", summary["agent_metrics"])
+	}
+	if _, ok := got["agent_metrics"].(map[string]any); !ok {
+		t.Fatalf("missing agent metrics: %#v", got["agent_metrics"])
+	}
+	if lanes, ok := got["lane_metrics"].([]any); !ok || len(lanes) == 0 {
+		t.Fatalf("missing lane metrics: %#v", got["lane_metrics"])
+	}
+	cases, ok := got["cases"].([]any)
+	if !ok || len(cases) == 0 {
+		t.Fatalf("missing cases: %#v", got["cases"])
+	}
+	firstCase := cases[0].(map[string]any)
+	if _, ok := firstCase["agent_metrics"].(map[string]any); !ok {
+		t.Fatalf("missing case agent metrics: %#v", firstCase["agent_metrics"])
+	}
+	if grades, ok := firstCase["artifact_grades"].([]any); !ok || len(grades) == 0 {
+		t.Fatalf("missing artifact grades: %#v", firstCase["artifact_grades"])
 	}
 	diagnostics, ok := got["diagnostics"].(map[string]any)
 	if !ok {
@@ -170,10 +193,12 @@ func TestEvalCommand_FirstIndexReportTextOutput(t *testing.T) {
 		"Token reduction:",
 		"saved",
 		"Retrieval: precision",
+		"Agent:",
 		"Sufficiency:",
 		"Discovery:",
 		"Classifier:",
 		"Retrieval And Tokens",
+		"Lane metrics:",
 		"Classifier Fixtures",
 		"Model adr:",
 		"Residual Risks",
@@ -227,6 +252,12 @@ func TestEvalCommand_FirstIndexReportJSONOutput(t *testing.T) {
 	}
 	if retrieval["retriever"] != "eval_weighted_files_v0" {
 		t.Fatalf("retriever = %#v", retrieval["retriever"])
+	}
+	if _, ok := retrieval["agent_metrics"].(map[string]any); !ok {
+		t.Fatalf("missing retrieval agent metrics: %#v", retrieval["agent_metrics"])
+	}
+	if lanes, ok := retrieval["lane_metrics"].([]any); !ok || len(lanes) == 0 {
+		t.Fatalf("missing retrieval lane metrics: %#v", retrieval["lane_metrics"])
 	}
 	classifiers, ok := got["classifiers"].([]any)
 	if !ok || len(classifiers) != 1 {
@@ -295,6 +326,46 @@ func TestEvalCommand_FilesystemCorpusDiagnosticFlag(t *testing.T) {
 	planning := corpus["planning_artifacts"].(map[string]any)
 	if planning["files"].(float64) == 0 {
 		t.Fatalf("filesystem eval should load planning artifacts: %#v", planning)
+	}
+}
+
+func TestEvalCommand_IndexCacheFlags(t *testing.T) {
+	root := t.TempDir()
+	writeBatchEvalFixture(t, root, "alpha", "billing retry plan")
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+
+	for i := 0; i < 2; i++ {
+		cmd := NewEvalCmd()
+		cmd.SetArgs([]string{
+			root,
+			"--json",
+			"--no-save",
+			"--eval-index-cache-dir", cacheDir,
+			"--eval-max-source-files", "3",
+			"--eval-max-case-seconds", "30",
+		})
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		cache, ok := got["index_cache"].(map[string]any)
+		if !ok {
+			t.Fatalf("missing index_cache: %#v", got["index_cache"])
+		}
+		if cache["enabled"] != true {
+			t.Fatalf("cache not enabled: %#v", cache)
+		}
+		if i == 1 && cache["hit"] != true {
+			t.Fatalf("second run should hit cache: %#v", cache)
+		}
+		if phases, ok := got["phase_telemetry"].([]any); !ok || len(phases) == 0 {
+			t.Fatalf("missing phase telemetry: %#v", got["phase_telemetry"])
+		}
 	}
 }
 

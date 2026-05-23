@@ -1,4 +1,4 @@
--- DevSpecs v0.1 schema (version 7)
+-- DevSpecs v0.1 schema (version 8)
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version    INTEGER PRIMARY KEY,
@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS artifact_todos (
   id          TEXT PRIMARY KEY,
   artifact_id TEXT NOT NULL,
   revision_id TEXT NOT NULL,
+  section_id  TEXT NOT NULL DEFAULT '',
   ordinal     INTEGER NOT NULL,
   text        TEXT NOT NULL,
   done        INTEGER NOT NULL CHECK (done IN (0, 1)),
@@ -88,6 +89,7 @@ CREATE TABLE IF NOT EXISTS artifact_criteria (
   id             TEXT PRIMARY KEY,
   artifact_id    TEXT NOT NULL,
   revision_id    TEXT NOT NULL,
+  section_id      TEXT NOT NULL DEFAULT '',
   ordinal        INTEGER NOT NULL,
   text           TEXT NOT NULL,
   done           INTEGER NOT NULL CHECK (done IN (0, 1)),
@@ -108,14 +110,38 @@ CREATE TABLE IF NOT EXISTS artifact_tags (
   FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS artifact_sections (
+  id             TEXT PRIMARY KEY,
+  artifact_id    TEXT NOT NULL,
+  revision_id    TEXT NOT NULL,
+  source_path    TEXT NOT NULL,
+  heading_path   TEXT NOT NULL,
+  heading_depth  INTEGER NOT NULL,
+  start_line     INTEGER NOT NULL,
+  end_line       INTEGER NOT NULL,
+  title          TEXT NOT NULL,
+  body           TEXT NOT NULL,
+  token_estimate INTEGER NOT NULL,
+  section_kind   TEXT NOT NULL DEFAULT '',
+  metadata_json  TEXT NOT NULL DEFAULT '{}',
+  created_at     TEXT NOT NULL,
+  FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE,
+  FOREIGN KEY (revision_id) REFERENCES artifact_revisions(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_todos_artifact ON artifact_todos(artifact_id);
 CREATE INDEX IF NOT EXISTS idx_todos_revision ON artifact_todos(revision_id);
+CREATE INDEX IF NOT EXISTS idx_todos_section ON artifact_todos(section_id);
 CREATE INDEX IF NOT EXISTS idx_criteria_artifact ON artifact_criteria(artifact_id);
 CREATE INDEX IF NOT EXISTS idx_criteria_revision ON artifact_criteria(revision_id);
+CREATE INDEX IF NOT EXISTS idx_criteria_section ON artifact_criteria(section_id);
 CREATE INDEX IF NOT EXISTS idx_sources_identity ON sources(source_identity);
 CREATE INDEX IF NOT EXISTS idx_artifacts_repo ON artifacts(repo_id);
 CREATE INDEX IF NOT EXISTS idx_revisions_artifact ON artifact_revisions(artifact_id);
 CREATE INDEX IF NOT EXISTS idx_tags_tag ON artifact_tags(tag);
+CREATE INDEX IF NOT EXISTS idx_sections_artifact ON artifact_sections(artifact_id);
+CREATE INDEX IF NOT EXISTS idx_sections_revision ON artifact_sections(revision_id);
+CREATE INDEX IF NOT EXISTS idx_sections_source_path ON artifact_sections(source_path);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_short_id ON artifacts(short_id);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS artifacts_fts USING fts5(
@@ -123,5 +149,14 @@ CREATE VIRTUAL TABLE IF NOT EXISTS artifacts_fts USING fts5(
   title,
   body,
   source_path,
+  tokenize='unicode61'
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS artifact_sections_fts USING fts5(
+  section_id UNINDEXED,
+  artifact_id UNINDEXED,
+  heading_path,
+  title,
+  body,
   tokenize='unicode61'
 );

@@ -1,8 +1,11 @@
 package commands
 
 import (
+	"path/filepath"
 	"testing"
+	"time"
 
+	docsections "github.com/devspecs-com/devspecs-cli/internal/sections"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 )
 
@@ -92,5 +95,47 @@ func TestArtifactCandidateIncludesHierarchyMetadataAndLinks(t *testing.T) {
 	}
 	if candidate.Metadata["link_contains"] != "artifact:child_1" {
 		t.Fatalf("link_contains = %#v", candidate.Metadata["link_contains"])
+	}
+}
+
+func TestLoadRetrievalCandidatesForQueryAddsSectionEvidence(t *testing.T) {
+	tmp := t.TempDir()
+	db, err := store.Open(filepath.Join(tmp, "devspecs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	repoID := "repo_sec"
+	if _, err := db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES (?, ?, ?, ?)", repoID, tmp, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertArtifactDirect("ds_sec", repoID, "plan", "", "Billing Plan", "active", "rev_sec", now, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertRevisionDirect("rev_sec", "ds_sec", "sha256:test", "# Billing Plan\n\n## Replay Boundary\n\nstripe_event_id idempotency matters.", "", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertSourceDirect("src_sec", "ds_sec", repoID, "markdown", "docs/plans/billing.md", "docs/plans/billing.md|markdown", "", "", now); err != nil {
+		t.Fatal(err)
+	}
+	sections := docsections.AssignStableIDs(docsections.ExtractMarkdown("# Billing Plan\n\n## Replay Boundary\n\nstripe_event_id idempotency matters."), "ds_sec", "rev_sec", "docs/plans/billing.md")
+	if err := db.ReplaceArtifactSections("ds_sec", "rev_sec", sections, now); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates, err := loadRetrievalCandidatesForQuery(db, store.FilterParams{}, "stripe_event_id idempotency")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate, got %d", len(candidates))
+	}
+	if candidates[0].Metadata["indexed_section_retrieval_mode"] != "section_aware" {
+		t.Fatalf("missing section-aware metadata: %#v", candidates[0].Metadata)
+	}
+	if candidates[0].Metadata["indexed_section_match_count"] != "1" {
+		t.Fatalf("expected 1 section match, got %#v", candidates[0].Metadata)
 	}
 }

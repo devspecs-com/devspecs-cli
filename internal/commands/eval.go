@@ -26,24 +26,36 @@ var nowUTC = func() time.Time {
 // NewEvalCmd creates the ds eval command.
 func NewEvalCmd() *cobra.Command {
 	var (
-		asJSON              bool
-		minRecall           float64
-		minMeanRecall       float64
-		minMustRecall       float64
-		minSufficiency      float64
-		minReductionFull    float64
-		resultsDir          string
-		noSave              bool
-		indexed             bool
-		filesystem          bool
-		commandUnderTest    string
-		classifierEval      bool
-		firstIndexReport    bool
-		batchFixtures       bool
-		includeTests        bool
-		includeCodeComments bool
-		classifierFixtures  []string
-		inputUSDPer1M       float64
+		asJSON                       bool
+		minRecall                    float64
+		minMeanRecall                float64
+		minMustRecall                float64
+		minSufficiency               float64
+		minReductionFull             float64
+		resultsDir                   string
+		noSave                       bool
+		indexed                      bool
+		filesystem                   bool
+		commandUnderTest             string
+		classifierEval               bool
+		firstIndexReport             bool
+		batchFixtures                bool
+		includeTests                 bool
+		includeCodeComments          bool
+		disableSectionAwareRetrieval bool
+		experimentalBalancedEvidence bool
+		experimentalBudgetedPacking  bool
+		contextTokenBudget           int
+		evalIndexCacheDir            string
+		refreshIndexCache            bool
+		maxCorpusFiles               int
+		maxSourceFiles               int
+		maxTestCaseArtifacts         int
+		maxCodeComments              int
+		maxCaseSeconds               int
+		progressIntervalSec          int
+		classifierFixtures           []string
+		inputUSDPer1M                float64
 	)
 
 	cmd := &cobra.Command{
@@ -87,7 +99,7 @@ func NewEvalCmd() *cobra.Command {
 				return nil
 			}
 
-			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, includeTests, includeCodeComments, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
+			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, evalIndexCacheDir, refreshIndexCache, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
 			if err != nil {
 				return err
 			}
@@ -182,6 +194,18 @@ func NewEvalCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Index executable test cases as behavioral intent artifacts during indexed evals")
 	cmd.Flags().BoolVar(&includeTests, "experimental-test-cases", false, "Deprecated alias for --include-tests")
 	cmd.Flags().BoolVar(&includeCodeComments, "include-code-comments", false, "Index high-signal code comments as implementation intent artifacts during indexed evals")
+	cmd.Flags().BoolVar(&disableSectionAwareRetrieval, "disable-section-aware-retrieval", false, "Disable indexed section-aware retrieval for eval ablations")
+	cmd.Flags().BoolVar(&experimentalBalancedEvidence, "experimental-balanced-evidence", false, "Use the opt-in balanced evidence reranker during retrieval evals")
+	cmd.Flags().BoolVar(&experimentalBudgetedPacking, "experimental-budgeted-packing", false, "Trim retrieved eval context to --eval-context-token-budget after ranking")
+	cmd.Flags().StringVar(&evalIndexCacheDir, "eval-index-cache-dir", "", "Directory for strict indexed eval corpus cache; disabled when empty")
+	cmd.Flags().BoolVar(&refreshIndexCache, "refresh-index-cache", false, "Refresh the indexed eval corpus cache entry instead of reusing it")
+	cmd.Flags().IntVar(&maxCorpusFiles, "eval-max-corpus-files", 0, "Maximum indexed eval corpus artifacts after indexing; 0 means unlimited")
+	cmd.Flags().IntVar(&maxSourceFiles, "eval-max-source-files", 0, "Maximum source-context artifacts retained for eval retrieval; 0 means unlimited")
+	cmd.Flags().IntVar(&maxTestCaseArtifacts, "eval-max-test-case-artifacts", 0, "Maximum test-case artifacts retained for eval retrieval; 0 means unlimited")
+	cmd.Flags().IntVar(&maxCodeComments, "eval-max-code-comments", 0, "Maximum code-comment artifacts retained for eval retrieval; 0 means unlimited")
+	cmd.Flags().IntVar(&maxCaseSeconds, "eval-max-case-seconds", 0, "Per-case duration budget for eval diagnostics; 0 means unlimited")
+	cmd.Flags().IntVar(&contextTokenBudget, "eval-context-token-budget", 0, "Context token budget for --experimental-budgeted-packing; 0 disables budget trimming")
+	cmd.Flags().IntVar(&progressIntervalSec, "eval-progress-interval-sec", 0, "Emit indexed eval scan progress JSONL to stderr at this interval; 0 disables progress output")
 	_ = cmd.Flags().MarkDeprecated("experimental-test-cases", "use --include-tests")
 	cmd.Flags().StringArrayVar(&classifierFixtures, "classifier-fixture", nil, "Classifier fixture to include in --first-index-report; may be repeated")
 	cmd.Flags().StringVar(&commandUnderTest, "command", "", "Run eval through a live command path: find or resume-query")
@@ -381,6 +405,14 @@ func runFindForEval(spec evalharness.CaseSpec, candidatesByPath map[string]retri
 				Title:   row.Title,
 				Status:  row.Status,
 				Source:  path,
+			}
+		}
+		if len(row.Metadata) > 0 {
+			if candidate.Metadata == nil {
+				candidate.Metadata = map[string]string{}
+			}
+			for key, value := range row.Metadata {
+				candidate.Metadata[key] = value
 			}
 		}
 		artifacts = append(artifacts, candidate)

@@ -1,6 +1,7 @@
 package retrieval
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -33,6 +34,181 @@ func TestWeightedFilesRetrieverV0_RetrievesAndExplainsCandidates(t *testing.T) {
 	if len(reasons) != 1 || reasons[0].Path != got[0].Path || len(reasons[0].Reasons) == 0 {
 		t.Fatalf("missing reasons: %#v", reasons)
 	}
+}
+
+func TestWeightedFilesRetrieverV0_UsesIndexedSectionEvidence(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "docs/plans/broad.md",
+			Title: "Broad Plan",
+			Kind:  "plan",
+			Body:  "# Broad Plan\n\n" + strings.Repeat("general implementation background.\n", 140) + "\nstripe_event_id idempotency protects webhook replay behavior.\n",
+			Metadata: map[string]string{
+				"indexed_section_retrieval_mode":      "section_aware",
+				"indexed_section_match_count":         "1",
+				"indexed_section_match_headings_json": mustJSONList(t, []string{"Requirements > Replay Boundary"}),
+				"indexed_section_match_ranges_json":   mustJSONList(t, []string{"22-40"}),
+				"indexed_section_match_bodies_json":   mustJSONList(t, []string{"stripe_event_id idempotency protects webhook replay behavior."}),
+				"indexed_section_match_ids_json":      mustJSONList(t, []string{"sec_test"}),
+				"indexed_section_total":               "5",
+			},
+		},
+		{Path: "docs/plans/unrelated.md", Body: "general implementation background"},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "stripe_event_id idempotency")
+	if !containsCandidatePath(got, "docs/plans/broad.md") {
+		t.Fatalf("missing section-selected artifact: %#v", CandidatePaths(got))
+	}
+	if got[0].Metadata["indexed_section_retrieval_mode"] != "section_aware" {
+		t.Fatalf("expected indexed section match metadata, got %#v", got[0].Metadata)
+	}
+	reasons := ExplainCandidates(got, "stripe_event_id idempotency")
+	if len(reasons) == 0 || !strings.Contains(strings.Join(reasons[0].Reasons, "\n"), "indexed section match") {
+		t.Fatalf("expected indexed section reason, got %#v", reasons)
+	}
+}
+
+func TestWeightedFilesRetrieverV0_BalancedEvidenceOrdersAnchoredCandidate(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "docs/notes/broad-sync-notes.md",
+			Title: "Broad Notes",
+			Body:  strings.Repeat("entitlement sync rollout background ", 12),
+		},
+		{
+			Path:  "docs/plans/entitlement-sync-rollout.md",
+			Title: "Entitlement Sync Rollout Plan",
+			Kind:  "plan",
+			Body:  "Plan for the entitlement sync rollout.",
+		},
+	}
+
+	retriever := WeightedFilesRetrieverV0{EvidenceMode: EvidenceModeBalanced}
+	got := retriever.Retrieve(candidates, "resume entitlement sync rollout plan")
+	if retriever.Name() != "eval_weighted_files_v0_evidence_balanced" {
+		t.Fatalf("retriever name = %q", retriever.Name())
+	}
+	if len(got) == 0 || got[0].Path != "docs/plans/entitlement-sync-rollout.md" {
+		t.Fatalf("anchored plan should rank first, got %#v", CandidatePaths(got))
+	}
+	if got[0].Metadata["retrieval_evidence_mode"] != EvidenceModeBalanced {
+		t.Fatalf("missing balanced evidence metadata: %#v", got[0].Metadata)
+	}
+}
+
+func TestWeightedFilesRetrieverV0_UsesAttachedSectionsForPackingAndAblationDisablesThem(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "plan_broad",
+			Path:  "docs/plans/broad.md",
+			Title: "Broad Plan",
+			Kind:  "plan",
+			Body:  "# Broad Plan\n\n" + strings.Repeat("general implementation background.\n", 140) + "\nstripe_event_id idempotency protects webhook replay behavior.\n",
+			Sections: []IndexedSection{
+				{
+					ID:           "sec_replay",
+					ArtifactID:   "plan_broad",
+					SourcePath:   "docs/plans/broad.md",
+					HeadingPath:  "Requirements > Replay Boundary",
+					Title:        "Replay Boundary",
+					StartLine:    22,
+					EndLine:      40,
+					Body:         "stripe_event_id idempotency protects webhook replay behavior.",
+					HeadingDepth: 2,
+				},
+			},
+		},
+		{ID: "unrelated", Path: "docs/plans/unrelated.md", Body: "general implementation background"},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "stripe_event_id idempotency")
+	if !containsCandidatePath(got, "docs/plans/broad.md") {
+		t.Fatalf("missing section-selected artifact: %#v", CandidatePaths(got))
+	}
+	if got[0].Metadata["indexed_section_match_source"] != "candidate_sections" {
+		t.Fatalf("expected attached section metadata, got %#v", got[0].Metadata)
+	}
+
+	disabled := (WeightedFilesRetrieverV0{DisableSectionAware: true}).Retrieve(candidates, "stripe_event_id idempotency")
+	if !containsCandidatePath(disabled, "docs/plans/broad.md") {
+		t.Fatalf("ablation should keep the file-level match: %#v", CandidatePaths(disabled))
+	}
+	if disabled[0].Metadata != nil && disabled[0].Metadata["indexed_section_retrieval_mode"] == "section_aware" {
+		t.Fatalf("section-aware ablation should not annotate section evidence: %#v", disabled[0].Metadata)
+	}
+}
+
+func TestEnrichCandidatesWithSectionMatchesRejectsGenericBodyOnlyMatches(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "generic",
+			Path:  "docs/plans/generic.md",
+			Title: "Generic Plan",
+			Kind:  "plan",
+			Body:  "# Generic Plan\n\nGeneral notes.",
+			Sections: []IndexedSection{
+				{
+					ID:          "sec_generic",
+					ArtifactID:  "generic",
+					SourcePath:  "docs/plans/generic.md",
+					HeadingPath: "Overview",
+					Title:       "Overview",
+					StartLine:   1,
+					EndLine:     5,
+					Body:        "This implementation plan document gives general context and background.",
+				},
+			},
+		},
+	}
+
+	got := EnrichCandidatesWithSectionMatches(candidates, "implementation plan context")
+	if got[0].Metadata != nil && got[0].Metadata["indexed_section_retrieval_mode"] == "section_aware" {
+		t.Fatalf("generic body-only section should not be selected: %#v", got[0].Metadata)
+	}
+}
+
+func TestEnrichCandidatesWithSectionMatchesDoesNotRescueRoadmapWithoutRoadmapIntent(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "roadmap",
+			Path:  "ROADMAP.md",
+			Title: "AReaL Roadmap",
+			Kind:  "plan",
+			Body:  "# AReaL Roadmap\n\nGeneral future planning.",
+			Sections: []IndexedSection{
+				{
+					ID:          "sec_roadmap",
+					ArtifactID:  "roadmap",
+					SourcePath:  "ROADMAP.md",
+					HeadingPath: "AReaL Roadmap",
+					Title:       "AReaL Roadmap",
+					StartLine:   1,
+					EndLine:     9,
+					Body:        "AReaL project timeline and future planning notes.",
+				},
+			},
+		},
+	}
+
+	got := EnrichCandidatesWithSectionMatches(candidates, "repository agent operating instructions and contributor guidance for AReaL")
+	if got[0].Metadata != nil && got[0].Metadata["indexed_section_retrieval_mode"] == "section_aware" {
+		t.Fatalf("roadmap should not be section-rescued without roadmap intent: %#v", got[0].Metadata)
+	}
+
+	roadmap := EnrichCandidatesWithSectionMatches(candidates, "AReaL roadmap future work and milestones")
+	if roadmap[0].Metadata == nil || roadmap[0].Metadata["indexed_section_retrieval_mode"] != "section_aware" {
+		t.Fatalf("roadmap intent should allow section evidence: %#v", roadmap[0].Metadata)
+	}
+}
+
+func mustJSONList(t *testing.T, values []string) string {
+	t.Helper()
+	b, err := json.Marshal(values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
 
 func TestQueryBaselineMatchesPathOrBody(t *testing.T) {

@@ -21,6 +21,30 @@ type ScanHint struct {
 	SuggestCommand string `json:"suggest_command,omitempty"`
 }
 
+// ProgressEvent is a coarse scan heartbeat for long eval/index runs.
+type ProgressEvent struct {
+	Phase                string         `json:"phase"`
+	Event                string         `json:"event,omitempty"`
+	ElapsedMS            int64          `json:"elapsed_ms,omitempty"`
+	FilesTotal           int            `json:"files_total,omitempty"`
+	FilesScanned         int            `json:"files_scanned,omitempty"`
+	CurrentAdapter       string         `json:"current_adapter,omitempty"`
+	CandidatesTotal      int            `json:"candidates_total,omitempty"`
+	CandidatesProcessed  int            `json:"candidates_processed,omitempty"`
+	CandidatesDiscovered map[string]int `json:"candidates_discovered,omitempty"`
+	CandidatesParsed     map[string]int `json:"candidates_parsed,omitempty"`
+	ArtifactsUpserted    map[string]int `json:"artifacts_upserted,omitempty"`
+	RowsWritten          map[string]int `json:"rows_written,omitempty"`
+	ChunksFlushed        map[string]int `json:"chunks_flushed,omitempty"`
+	DeferredFTSRows      int            `json:"deferred_fts_rows,omitempty"`
+	InventoryFiles       int            `json:"inventory_files,omitempty"`
+	SharedDiscovery      bool           `json:"shared_discovery,omitempty"`
+	ParallelWorkers      int            `json:"parallel_workers,omitempty"`
+	CappedDiscovery      bool           `json:"capped_discovery,omitempty"`
+	TransactionEnabled   bool           `json:"transaction_enabled,omitempty"`
+	SkipAuthoredAtLookup bool           `json:"skip_authored_at_lookup,omitempty"`
+}
+
 type sourceAgg struct {
 	count   int
 	formats map[string]int

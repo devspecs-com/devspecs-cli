@@ -10,8 +10,10 @@ import (
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/codecomment"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/testcase"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/format"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
@@ -146,6 +148,46 @@ func TestScan_RefreshesTodosOnRevision(t *testing.T) {
 	db.QueryRow("SELECT COUNT(*) FROM artifact_todos").Scan(&todoCount)
 	if todoCount != 1 {
 		t.Errorf("expected 1 todo after revision, got %d", todoCount)
+	}
+}
+
+func TestScan_PersistsMarkdownSectionsAndTodoLinks(t *testing.T) {
+	repoRoot, db := setupTestRepo(t)
+	ids := idgen.NewFactory()
+	s := New(db, ids, []adapters.Adapter{&markdown.Adapter{}})
+
+	if _, err := s.Run(context.Background(), repoRoot, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	var sectionID, heading, sourcePath string
+	if err := db.QueryRow("SELECT id, heading_path, source_path FROM artifact_sections LIMIT 1").Scan(&sectionID, &heading, &sourcePath); err != nil {
+		t.Fatal(err)
+	}
+	if sectionID == "" {
+		t.Fatal("expected section id")
+	}
+	if heading != "Auth Plan" {
+		t.Fatalf("expected Auth Plan heading, got %q", heading)
+	}
+	if sourcePath != "plans/auth.md" {
+		t.Fatalf("expected relative source path, got %q", sourcePath)
+	}
+
+	var todoSectionID string
+	if err := db.QueryRow("SELECT section_id FROM artifact_todos WHERE text = 'Add login'").Scan(&todoSectionID); err != nil {
+		t.Fatal(err)
+	}
+	if todoSectionID != sectionID {
+		t.Fatalf("expected todo to link to section %q, got %q", sectionID, todoSectionID)
+	}
+
+	hits, err := db.FindArtifactSections("design schema", store.FilterParams{RepoRoot: repoRoot}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].ID != sectionID {
+		t.Fatalf("expected section FTS hit %q, got %#v", sectionID, hits)
 	}
 }
 
@@ -681,4 +723,155 @@ func TestScan_SourcesBreakdown_MultipleMarkdownFormats(t *testing.T) {
 	if g != 1 || c != 1 {
 		t.Fatalf("expected generic=1 and cursor_plan=1, got formats %#v", mdRow.Formats)
 	}
+}
+
+func TestScan_FreshIndexBatchDeferredFTSEquivalence(t *testing.T) {
+	repoRoot := setupFreshIndexSpeedRepo(t)
+
+	canonicalDB, canonical := runFreshIndexSpeedScan(t, repoRoot, false, 1)
+	freshDB, fresh := runFreshIndexSpeedScan(t, repoRoot, true, 4)
+
+	if !reflect.DeepEqual(canonical.Found, fresh.Found) {
+		t.Fatalf("Found mismatch:\ncanonical=%#v\nfresh=%#v", canonical.Found, fresh.Found)
+	}
+	if canonical.New != fresh.New {
+		t.Fatalf("New mismatch: canonical=%d fresh=%d", canonical.New, fresh.New)
+	}
+	for _, table := range []string{
+		"artifacts",
+		"artifact_revisions",
+		"sources",
+		"artifact_todos",
+		"artifact_criteria",
+		"artifact_tags",
+		"artifact_sections",
+		"artifact_sections_fts",
+		"artifacts_fts",
+	} {
+		canonicalCount := tableCount(t, canonicalDB, table)
+		freshCount := tableCount(t, freshDB, table)
+		if canonicalCount != freshCount {
+			t.Fatalf("%s count mismatch: canonical=%d fresh=%d", table, canonicalCount, freshCount)
+		}
+	}
+	if got, want := artifactIdentitySnapshot(t, freshDB), artifactIdentitySnapshot(t, canonicalDB); !reflect.DeepEqual(got, want) {
+		t.Fatalf("artifact identity snapshot mismatch:\ngot:  %#v\nwant: %#v", got, want)
+	}
+	hits, err := freshDB.FindArtifacts("duplicate replay", store.FilterParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("expected deferred FTS to be populated before scan completes")
+	}
+}
+
+func TestScan_FreshIndexParallelismIsDeterministic(t *testing.T) {
+	repoRoot := setupFreshIndexSpeedRepo(t)
+
+	oneWorkerDB, oneWorker := runFreshIndexSpeedScan(t, repoRoot, true, 1)
+	manyWorkersDB, manyWorkers := runFreshIndexSpeedScan(t, repoRoot, true, 4)
+
+	if !reflect.DeepEqual(oneWorker.Found, manyWorkers.Found) {
+		t.Fatalf("Found mismatch:\none=%#v\nmany=%#v", oneWorker.Found, manyWorkers.Found)
+	}
+	if got, want := artifactIdentitySnapshot(t, manyWorkersDB), artifactIdentitySnapshot(t, oneWorkerDB); !reflect.DeepEqual(got, want) {
+		t.Fatalf("parallel fresh index changed artifact identity order:\ngot:  %#v\nwant: %#v", got, want)
+	}
+}
+
+func setupFreshIndexSpeedRepo(t *testing.T) string {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(root, "docs", "plans"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plan := "# Billing Retry Plan\n\n" +
+		"## Replay Boundary\n\n" +
+		"- [ ] Preserve duplicate replay protection\n\n" +
+		"## Acceptance Criteria\n\n" +
+		"- [ ] Duplicate webhook replay is rejected\n"
+	if err := os.WriteFile(filepath.Join(root, "docs", "plans", "billing.md"), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := "// TODO because duplicate webhook replay must stay idempotent for legacy callers.\n" +
+		"export function retryBilling() { return true }\n"
+	if err := os.WriteFile(filepath.Join(root, "src", "billing.ts"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testSource := "describe(\"billing retries\", () => {\n" +
+		"  it(\"rejects duplicate replay\", () => {\n" +
+		"    expect(retryBilling()).toBe(true)\n" +
+		"  })\n" +
+		"  it(\"keeps legacy compatibility\", () => {\n" +
+		"    expect(retryBilling()).toBe(true)\n" +
+		"  })\n" +
+		"})\n"
+	if err := os.WriteFile(filepath.Join(root, "src", "billing.test.ts"), []byte(testSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func runFreshIndexSpeedScan(t *testing.T, repoRoot string, fresh bool, workers int) (*store.DB, *Result) {
+	t.Helper()
+	db, err := store.Open(filepath.Join(t.TempDir(), "devspecs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { db.Close() })
+
+	cfg := config.WithCodeCommentArtifacts(config.WithTestCaseArtifacts(config.WithDefaultIntentCandidateDiscovery(nil, true), true), true)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{
+		&markdown.Adapter{},
+		&testcase.Adapter{},
+		&codecomment.Adapter{},
+	})
+	result, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, RunOptions{
+		UseTransaction:       true,
+		SkipAuthoredAtLookup: true,
+		FreshIndex:           fresh,
+		FileWorkerCount:      workers,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return db, result
+}
+
+func tableCount(t *testing.T, db *store.DB, table string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return count
+}
+
+func artifactIdentitySnapshot(t *testing.T, db *store.DB) []string {
+	t.Helper()
+	rows, err := db.Query(`SELECT s.source_identity, COALESCE(a.short_id,''), a.kind, COALESCE(a.subtype,''), a.title
+FROM sources s
+JOIN artifacts a ON a.id = s.artifact_id
+ORDER BY s.source_identity`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var identity, shortID, kind, subtype, title string
+		if err := rows.Scan(&identity, &shortID, &kind, &subtype, &title); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, strings.Join([]string{identity, shortID, kind, subtype, title}, "\x00"))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
 }

@@ -44,64 +44,78 @@ type firstIndexBatchReport struct {
 }
 
 type firstIndexNorthStarSummary struct {
-	MeanTokenReductionVsFullPlanning float64 `json:"mean_token_reduction_vs_full_planning"`
-	MeanArtifactPrecision            float64 `json:"mean_artifact_precision"`
-	MeanArtifactRecall               float64 `json:"mean_artifact_recall"`
-	MeanMustHaveRecall               float64 `json:"mean_must_have_recall"`
-	ContextSufficiencyPassRate       float64 `json:"context_sufficiency_pass_rate"`
-	DiscoveryCoverage                float64 `json:"discovery_coverage"`
-	SavedInputTokensVsFullPlanning   int     `json:"saved_input_tokens_vs_full_planning"`
-	EstimatedInputUSDSaved           float64 `json:"estimated_input_usd_saved,omitempty"`
-	ClassifierCases                  int     `json:"classifier_cases,omitempty"`
-	ClassifierPassedCases            int     `json:"classifier_passed_cases,omitempty"`
-	ClassifierAccuracy               float64 `json:"classifier_accuracy,omitempty"`
-	ClassifierAmbiguityRate          float64 `json:"classifier_ambiguity_rate,omitempty"`
-	ClassifierGenericFallbackRate    float64 `json:"classifier_generic_fallback_rate,omitempty"`
+	MeanTokenReductionVsFullPlanning      float64 `json:"mean_token_reduction_vs_full_planning"`
+	MeanTokenReductionVsQueryFileBaseline float64 `json:"mean_token_reduction_vs_query_file_baseline"`
+	MeanArtifactPrecision                 float64 `json:"mean_artifact_precision"`
+	MeanGradedPrecision                   float64 `json:"mean_graded_precision"`
+	MeanPenalizedUtilityPrecision         float64 `json:"mean_penalized_utility_precision"`
+	MeanArtifactRecall                    float64 `json:"mean_artifact_recall"`
+	MeanMustHaveRecall                    float64 `json:"mean_must_have_recall"`
+	ContextSufficiencyPassRate            float64 `json:"context_sufficiency_pass_rate"`
+	DiscoveryCoverage                     float64 `json:"discovery_coverage"`
+	SavedInputTokensVsFullPlanning        int     `json:"saved_input_tokens_vs_full_planning"`
+	EstimatedInputUSDSaved                float64 `json:"estimated_input_usd_saved,omitempty"`
+	ClassifierCases                       int     `json:"classifier_cases,omitempty"`
+	ClassifierPassedCases                 int     `json:"classifier_passed_cases,omitempty"`
+	ClassifierAccuracy                    float64 `json:"classifier_accuracy,omitempty"`
+	ClassifierAmbiguityRate               float64 `json:"classifier_ambiguity_rate,omitempty"`
+	ClassifierGenericFallbackRate         float64 `json:"classifier_generic_fallback_rate,omitempty"`
 }
 
 type firstIndexRetrievalReport struct {
-	Fixture                          string  `json:"fixture"`
-	FixtureVersion                   string  `json:"fixture_version,omitempty"`
-	EvalStage                        string  `json:"eval_stage,omitempty"`
-	CorpusSource                     string  `json:"corpus_source"`
-	ProductPath                      string  `json:"product_path"`
-	CommandUnderTest                 string  `json:"command_under_test,omitempty"`
-	Retriever                        string  `json:"retriever"`
-	TokenCounter                     string  `json:"token_counter"`
-	PricingProfile                   string  `json:"pricing_profile,omitempty"`
-	ResultsFile                      string  `json:"results_file,omitempty"`
-	Cases                            int     `json:"cases"`
-	MeanTokenReductionVsFullPlanning float64 `json:"mean_token_reduction_vs_full_planning"`
-	MeanArtifactPrecision            float64 `json:"mean_artifact_precision"`
-	MeanArtifactRecall               float64 `json:"mean_artifact_recall"`
-	MeanMustHaveRecall               float64 `json:"mean_must_have_recall"`
-	ContextSufficiencyCases          int     `json:"context_sufficiency_cases"`
-	ContextSufficiencyPassed         int     `json:"context_sufficiency_passed"`
-	ContextSufficiencyPassRate       float64 `json:"context_sufficiency_pass_rate"`
-	DiscoveryCoverage                float64 `json:"discovery_coverage"`
-	RetrievalCoverageOfDiscovered    float64 `json:"retrieval_coverage_of_discovered"`
-	DevSpecsTokens                   int     `json:"devspecs_tokens"`
-	FullPlanningTokens               int     `json:"full_planning_tokens"`
-	SavedInputTokensVsFullPlanning   int     `json:"saved_input_tokens_vs_full_planning"`
-	PackedSectionArtifactCount       int     `json:"packed_section_artifact_count,omitempty"`
-	PackedSectionCount               int     `json:"packed_section_count,omitempty"`
-	FullFileArtifactCount            int     `json:"full_file_artifact_count,omitempty"`
-	TestCaseArtifactCount            int     `json:"test_case_artifact_count,omitempty"`
-	InputUSDPer1M                    float64 `json:"input_usd_per_1m,omitempty"`
-	EstimatedInputUSDSaved           float64 `json:"estimated_input_usd_saved,omitempty"`
-	PlanningArtifactFiles            int     `json:"planning_artifact_files"`
-	PlanningArtifactTokens           int     `json:"planning_artifact_tokens"`
-	MarkdownFiles                    int     `json:"markdown_files"`
-	MarkdownTokens                   int     `json:"markdown_tokens"`
-	FullCandidateCorpusFiles         int     `json:"full_candidate_corpus_files"`
-	FullCandidateCorpusTokens        int     `json:"full_candidate_corpus_tokens"`
-	ExpectedRelevantCount            int     `json:"expected_relevant_count"`
-	ExpectedAvailableCount           int     `json:"expected_available_count"`
-	ExpectedMissingFromCorpusCount   int     `json:"expected_missing_from_corpus_count"`
-	MissedAfterDiscoveryCount        int     `json:"missed_after_discovery_count"`
-	WorstRecallCase                  string  `json:"worst_recall_case,omitempty"`
-	LargestTokenContextCase          string  `json:"largest_token_context_case,omitempty"`
-	FailedPerCaseThresholdCount      int     `json:"failed_per_case_threshold_count,omitempty"`
+	Fixture                          string                        `json:"fixture"`
+	FixtureVersion                   string                        `json:"fixture_version,omitempty"`
+	EvalStage                        string                        `json:"eval_stage,omitempty"`
+	CorpusSource                     string                        `json:"corpus_source"`
+	ProductPath                      string                        `json:"product_path"`
+	CommandUnderTest                 string                        `json:"command_under_test,omitempty"`
+	Retriever                        string                        `json:"retriever"`
+	TokenCounter                     string                        `json:"token_counter"`
+	PricingProfile                   string                        `json:"pricing_profile,omitempty"`
+	ResultsFile                      string                        `json:"results_file,omitempty"`
+	Cases                            int                           `json:"cases"`
+	MeanTokenReductionVsFullPlanning float64                       `json:"mean_token_reduction_vs_full_planning"`
+	MeanTokenReductionVsQueryFile    float64                       `json:"mean_token_reduction_vs_query_file_baseline"`
+	MeanArtifactPrecision            float64                       `json:"mean_artifact_precision"`
+	MeanGradedPrecision              float64                       `json:"mean_graded_precision"`
+	MeanPenalizedUtilityPrecision    float64                       `json:"mean_penalized_utility_precision"`
+	MeanArtifactRecall               float64                       `json:"mean_artifact_recall"`
+	MeanMustHaveRecall               float64                       `json:"mean_must_have_recall"`
+	ContextSufficiencyCases          int                           `json:"context_sufficiency_cases"`
+	ContextSufficiencyPassed         int                           `json:"context_sufficiency_passed"`
+	ContextSufficiencyPassRate       float64                       `json:"context_sufficiency_pass_rate"`
+	DiscoveryCoverage                float64                       `json:"discovery_coverage"`
+	RetrievalCoverageOfDiscovered    float64                       `json:"retrieval_coverage_of_discovered"`
+	DevSpecsTokens                   int                           `json:"devspecs_tokens"`
+	FullPlanningTokens               int                           `json:"full_planning_tokens"`
+	SavedInputTokensVsFullPlanning   int                           `json:"saved_input_tokens_vs_full_planning"`
+	PackedSectionArtifactCount       int                           `json:"packed_section_artifact_count,omitempty"`
+	PackedSectionCount               int                           `json:"packed_section_count,omitempty"`
+	SectionSelectedArtifactCount     int                           `json:"section_selected_artifact_count,omitempty"`
+	SectionSelectedCount             int                           `json:"section_selected_count,omitempty"`
+	FullFileArtifactCount            int                           `json:"full_file_artifact_count,omitempty"`
+	TestCaseArtifactCount            int                           `json:"test_case_artifact_count,omitempty"`
+	CodeCommentArtifactCount         int                           `json:"code_comment_artifact_count,omitempty"`
+	AgentMetrics                     evalharness.AgentMetrics      `json:"agent_metrics"`
+	LaneMetrics                      []evalharness.LaneMetric      `json:"lane_metrics,omitempty"`
+	IndexCache                       *evalharness.IndexCacheReport `json:"index_cache,omitempty"`
+	Budgets                          evalharness.BudgetReport      `json:"budgets,omitempty"`
+	PhaseTelemetry                   []evalharness.PhaseTelemetry  `json:"phase_telemetry,omitempty"`
+	InputUSDPer1M                    float64                       `json:"input_usd_per_1m,omitempty"`
+	EstimatedInputUSDSaved           float64                       `json:"estimated_input_usd_saved,omitempty"`
+	PlanningArtifactFiles            int                           `json:"planning_artifact_files"`
+	PlanningArtifactTokens           int                           `json:"planning_artifact_tokens"`
+	MarkdownFiles                    int                           `json:"markdown_files"`
+	MarkdownTokens                   int                           `json:"markdown_tokens"`
+	FullCandidateCorpusFiles         int                           `json:"full_candidate_corpus_files"`
+	FullCandidateCorpusTokens        int                           `json:"full_candidate_corpus_tokens"`
+	ExpectedRelevantCount            int                           `json:"expected_relevant_count"`
+	ExpectedAvailableCount           int                           `json:"expected_available_count"`
+	ExpectedMissingFromCorpusCount   int                           `json:"expected_missing_from_corpus_count"`
+	MissedAfterDiscoveryCount        int                           `json:"missed_after_discovery_count"`
+	WorstRecallCase                  string                        `json:"worst_recall_case,omitempty"`
+	LargestTokenContextCase          string                        `json:"largest_token_context_case,omitempty"`
+	FailedPerCaseThresholdCount      int                           `json:"failed_per_case_threshold_count,omitempty"`
 }
 
 type firstIndexClassifierReport struct {
@@ -140,8 +154,33 @@ type firstIndexWeakSpot struct {
 	Message string `json:"message"`
 }
 
-func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed bool, commandUnderTest string, includeTests, includeCodeComments bool, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull float64) (evalharness.Options, error) {
-	opts := evalharness.Options{JSON: asJSON, TestCaseArtifacts: includeTests, CodeCommentArtifacts: includeCodeComments}
+func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed bool, commandUnderTest string, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking bool, evalIndexCacheDir string, refreshIndexCache bool, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec int, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull float64) (evalharness.Options, error) {
+	opts := evalharness.Options{
+		JSON:                         asJSON,
+		TestCaseArtifacts:            includeTests,
+		CodeCommentArtifacts:         includeCodeComments,
+		DisableSectionAwareRetrieval: disableSectionAwareRetrieval,
+		ExperimentalBalancedEvidence: experimentalBalancedEvidence,
+		ExperimentalBudgetedPacking:  experimentalBudgetedPacking,
+		ContextTokenBudget:           contextTokenBudget,
+		IndexCacheDir:                strings.TrimSpace(evalIndexCacheDir),
+		RefreshIndexCache:            refreshIndexCache,
+		MaxCorpusFiles:               maxCorpusFiles,
+		MaxSourceFiles:               maxSourceFiles,
+		MaxTestCaseArtifacts:         maxTestCaseArtifacts,
+		MaxCodeComments:              maxCodeComments,
+		MaxCaseSeconds:               maxCaseSeconds,
+	}
+	if progressIntervalSec > 0 {
+		opts.ProgressWriter = cmd.ErrOrStderr()
+		opts.ProgressInterval = time.Duration(progressIntervalSec) * time.Second
+	}
+	if opts.MaxCorpusFiles < 0 || opts.MaxSourceFiles < 0 || opts.MaxTestCaseArtifacts < 0 || opts.MaxCodeComments < 0 || opts.MaxCaseSeconds < 0 || opts.ContextTokenBudget < 0 || progressIntervalSec < 0 {
+		return evalharness.Options{}, fmt.Errorf("eval budget flags must be non-negative")
+	}
+	if opts.ExperimentalBudgetedPacking && opts.ContextTokenBudget == 0 {
+		opts.ContextTokenBudget = 8192
+	}
 	if filesystem {
 		opts.CorpusSource = evalharness.CorpusSourceFilesystemFixture
 	} else if indexed {
@@ -402,13 +441,14 @@ func buildFirstIndexBatchReport(root string, retrievalResults []*evalharness.Res
 	}
 
 	var (
-		cases, contextCases, contextPassed                   int
-		devspecsTokens, fullPlanningTokens, savedTokens      int
-		expectedRelevant, expectedAvailable                  int
-		failedThresholds                                     int
-		weightedReduction, weightedPrecision, weightedRecall float64
-		weightedMust                                         float64
-		weakSpots                                            []firstIndexWeakSpot
+		cases, contextCases, contextPassed                           int
+		devspecsTokens, fullPlanningTokens, savedTokens              int
+		expectedRelevant, expectedAvailable                          int
+		failedThresholds                                             int
+		weightedReduction, weightedQueryReduction, weightedPrecision float64
+		weightedGradedPrecision, weightedPenalizedUtility            float64
+		weightedRecall, weightedMust                                 float64
+		weakSpots                                                    []firstIndexWeakSpot
 	)
 	for i, result := range retrievalResults {
 		report := retrievalReports[i]
@@ -426,7 +466,10 @@ func buildFirstIndexBatchReport(root string, retrievalResults []*evalharness.Res
 		expectedAvailable += report.ExpectedAvailableCount
 		failedThresholds += report.FailedPerCaseThresholdCount
 		weightedReduction += report.MeanTokenReductionVsFullPlanning * float64(n)
+		weightedQueryReduction += report.MeanTokenReductionVsQueryFile * float64(n)
 		weightedPrecision += report.MeanArtifactPrecision * float64(n)
+		weightedGradedPrecision += report.MeanGradedPrecision * float64(n)
+		weightedPenalizedUtility += report.MeanPenalizedUtilityPrecision * float64(n)
 		weightedRecall += report.MeanArtifactRecall * float64(n)
 		weightedMust += report.MeanMustHaveRecall * float64(n)
 		weakSpots = append(weakSpots, firstIndexWeakSpots(result, nil)...)
@@ -440,7 +483,10 @@ func buildFirstIndexBatchReport(root string, retrievalResults []*evalharness.Res
 	}
 	if cases > 0 {
 		summary.MeanTokenReductionVsFullPlanning = weightedReduction / float64(cases)
+		summary.MeanTokenReductionVsQueryFileBaseline = weightedQueryReduction / float64(cases)
 		summary.MeanArtifactPrecision = weightedPrecision / float64(cases)
+		summary.MeanGradedPrecision = weightedGradedPrecision / float64(cases)
+		summary.MeanPenalizedUtilityPrecision = weightedPenalizedUtility / float64(cases)
 		summary.MeanArtifactRecall = weightedRecall / float64(cases)
 		summary.MeanMustHaveRecall = weightedMust / float64(cases)
 	}
@@ -481,14 +527,17 @@ func capFirstIndexWeakSpots(in []firstIndexWeakSpot, limit int) []firstIndexWeak
 
 func buildFirstIndexRetrievalReport(r *evalharness.Result, inputUSDPer1M float64) firstIndexRetrievalReport {
 	var devspecsTokens, fullPlanningTokens int
-	var packedSectionArtifacts, packedSections, fullFileArtifacts, testCaseArtifacts int
+	var packedSectionArtifacts, packedSections, sectionSelectedArtifacts, sectionSelected, fullFileArtifacts, testCaseArtifacts, codeCommentArtifacts int
 	for _, c := range r.Cases {
 		devspecsTokens += c.DevSpecsTokens
 		fullPlanningTokens += c.FullPlanningTokens
 		packedSectionArtifacts += len(c.PackedSectionArtifacts)
 		packedSections += c.PackedSectionCount
+		sectionSelectedArtifacts += len(c.SectionSelectedArtifacts)
+		sectionSelected += c.SectionSelectedCount
 		fullFileArtifacts += c.FullFileArtifactCount
 		testCaseArtifacts += c.TestCaseArtifactCount
+		codeCommentArtifacts += c.CodeCommentArtifactCount
 	}
 	savedTokens := fullPlanningTokens - devspecsTokens
 	if savedTokens < 0 {
@@ -511,7 +560,10 @@ func buildFirstIndexRetrievalReport(r *evalharness.Result, inputUSDPer1M float64
 		ResultsFile:                      r.ResultsFile,
 		Cases:                            r.Summary.Cases,
 		MeanTokenReductionVsFullPlanning: r.Summary.MeanTokenReductionVsFullPlanning,
+		MeanTokenReductionVsQueryFile:    r.Summary.MeanTokenReductionVsQueryFileBaseline,
 		MeanArtifactPrecision:            r.Summary.MeanArtifactPrecision,
+		MeanGradedPrecision:              r.Summary.MeanGradedPrecision,
+		MeanPenalizedUtilityPrecision:    r.Summary.MeanPenalizedUtilityPrecision,
 		MeanArtifactRecall:               r.Summary.MeanArtifactRecall,
 		MeanMustHaveRecall:               r.Summary.MeanMustHaveRecall,
 		ContextSufficiencyCases:          r.Summary.ContextSufficiencyCases,
@@ -524,8 +576,16 @@ func buildFirstIndexRetrievalReport(r *evalharness.Result, inputUSDPer1M float64
 		SavedInputTokensVsFullPlanning:   savedTokens,
 		PackedSectionArtifactCount:       packedSectionArtifacts,
 		PackedSectionCount:               packedSections,
+		SectionSelectedArtifactCount:     sectionSelectedArtifacts,
+		SectionSelectedCount:             sectionSelected,
 		FullFileArtifactCount:            fullFileArtifacts,
 		TestCaseArtifactCount:            testCaseArtifacts,
+		CodeCommentArtifactCount:         codeCommentArtifacts,
+		AgentMetrics:                     r.AgentMetrics,
+		LaneMetrics:                      append([]evalharness.LaneMetric(nil), r.LaneMetrics...),
+		IndexCache:                       r.IndexCache,
+		Budgets:                          r.Budgets,
+		PhaseTelemetry:                   append([]evalharness.PhaseTelemetry(nil), r.PhaseTelemetry...),
 		InputUSDPer1M:                    inputUSDPer1M,
 		EstimatedInputUSDSaved:           estimatedSaved,
 		PlanningArtifactFiles:            r.Corpus.PlanningArtifacts.Files,
@@ -654,17 +714,21 @@ func formatFirstIndexBatchReportText(report *firstIndexBatchReport) string {
 		firstIndexPct(report.Summary.MeanTokenReductionVsFullPlanning),
 		firstIndexComma(report.Summary.SavedInputTokensVsFullPlanning),
 		totalCases)
+	fmt.Fprintf(&b, "- Query-search token reduction: %s mean vs query file baseline\n",
+		firstIndexPct(report.Summary.MeanTokenReductionVsQueryFileBaseline))
 	if report.Summary.EstimatedInputUSDSaved > 0 {
 		fmt.Fprintf(&b, "- Estimated input cost saved: $%.4f\n", report.Summary.EstimatedInputUSDSaved)
 	}
-	fmt.Fprintf(&b, "- Retrieval: precision %s / recall %s / must-have recall %s\n",
+	fmt.Fprintf(&b, "- Retrieval: precision %s / graded precision %s / recall %s / must-have recall %s\n",
 		firstIndexPct(report.Summary.MeanArtifactPrecision),
+		firstIndexPct(report.Summary.MeanGradedPrecision),
 		firstIndexPct(report.Summary.MeanArtifactRecall),
 		firstIndexPct(report.Summary.MeanMustHaveRecall))
 	fmt.Fprintf(&b, "- Sufficiency: %d/%d = %s\n",
 		contextPassed,
 		contextCases,
 		firstIndexPct(report.Summary.ContextSufficiencyPassRate))
+	fmt.Fprintf(&b, "- Agent: must-hit@3 %s\n", firstIndexPct(meanRetrievalMustHitAt3(report.Retrievals)))
 	fmt.Fprintf(&b, "- Discovery: %s\n", firstIndexPct(report.Summary.DiscoveryCoverage))
 	if report.Summary.ClassifierCases > 0 {
 		fmt.Fprintf(&b, "- Classifier: %d/%d = %s; ambiguity %s; generic fallback %s\n",
@@ -678,10 +742,11 @@ func formatFirstIndexBatchReportText(report *firstIndexBatchReport) string {
 
 	fmt.Fprintln(&b, "Retrieval Fixtures")
 	for _, retrieval := range report.Retrievals {
-		fmt.Fprintf(&b, "- %s: cases %d, precision %s, recall %s, must %s, sufficiency %d/%d, discovery %s\n",
+		fmt.Fprintf(&b, "- %s: cases %d, precision %s, graded %s, recall %s, must %s, sufficiency %d/%d, discovery %s\n",
 			retrieval.Fixture,
 			retrieval.Cases,
 			firstIndexPct(retrieval.MeanArtifactPrecision),
+			firstIndexPct(retrieval.MeanGradedPrecision),
 			firstIndexPct(retrieval.MeanArtifactRecall),
 			firstIndexPct(retrieval.MeanMustHaveRecall),
 			retrieval.ContextSufficiencyPassed,
@@ -692,9 +757,17 @@ func formatFirstIndexBatchReportText(report *firstIndexBatchReport) string {
 				retrieval.PackedSectionArtifactCount,
 				retrieval.PackedSectionCount)
 		}
+		if retrieval.SectionSelectedArtifactCount > 0 {
+			fmt.Fprintf(&b, "  Section retrieval: %d artifacts / %d section hits\n",
+				retrieval.SectionSelectedArtifactCount,
+				retrieval.SectionSelectedCount)
+		}
 		if retrieval.TestCaseArtifactCount > 0 {
 			fmt.Fprintf(&b, "  Test-case artifacts included: %d\n", retrieval.TestCaseArtifactCount)
 		}
+		fmt.Fprintf(&b, "  Agent: must-hit@3 %s, first useful rank %.2f\n",
+			firstIndexPct(retrieval.AgentMetrics.MustHitAt3),
+			retrieval.AgentMetrics.MeanFirstUsefulRank)
 	}
 	fmt.Fprintln(&b)
 
@@ -741,19 +814,25 @@ func formatFirstIndexReportText(report *firstIndexReport) string {
 		firstIndexPct(report.Summary.MeanTokenReductionVsFullPlanning),
 		firstIndexComma(report.Summary.SavedInputTokensVsFullPlanning),
 		report.Retrieval.Cases)
+	fmt.Fprintf(&b, "- Query-search token reduction: %s mean vs query file baseline\n",
+		firstIndexPct(report.Summary.MeanTokenReductionVsQueryFileBaseline))
 	if report.Summary.EstimatedInputUSDSaved > 0 {
 		fmt.Fprintf(&b, "- Estimated input cost saved: $%.4f at $%.4f / 1M input tokens\n",
 			report.Summary.EstimatedInputUSDSaved,
 			report.Retrieval.InputUSDPer1M)
 	}
-	fmt.Fprintf(&b, "- Retrieval: precision %s / recall %s / must-have recall %s\n",
+	fmt.Fprintf(&b, "- Retrieval: precision %s / graded precision %s / recall %s / must-have recall %s\n",
 		firstIndexPct(report.Summary.MeanArtifactPrecision),
+		firstIndexPct(report.Summary.MeanGradedPrecision),
 		firstIndexPct(report.Summary.MeanArtifactRecall),
 		firstIndexPct(report.Summary.MeanMustHaveRecall))
 	fmt.Fprintf(&b, "- Sufficiency: %d/%d = %s\n",
 		report.Retrieval.ContextSufficiencyPassed,
 		report.Retrieval.ContextSufficiencyCases,
 		firstIndexPct(report.Summary.ContextSufficiencyPassRate))
+	fmt.Fprintf(&b, "- Agent: must-hit@3 %s, first useful rank %.2f\n",
+		firstIndexPct(report.Retrieval.AgentMetrics.MustHitAt3),
+		report.Retrieval.AgentMetrics.MeanFirstUsefulRank)
 	fmt.Fprintf(&b, "- Discovery: %s\n", firstIndexPct(report.Summary.DiscoveryCoverage))
 	if report.Summary.ClassifierCases > 0 {
 		fmt.Fprintf(&b, "- Classifier: %d/%d = %s; ambiguity %s; generic fallback %s\n",
@@ -789,8 +868,27 @@ func formatFirstIndexReportText(report *firstIndexReport) string {
 			report.Retrieval.PackedSectionCount,
 			report.Retrieval.FullFileArtifactCount)
 	}
+	if report.Retrieval.SectionSelectedArtifactCount > 0 {
+		fmt.Fprintf(&b, "- Section retrieval: %d artifacts / %d section hits\n",
+			report.Retrieval.SectionSelectedArtifactCount,
+			report.Retrieval.SectionSelectedCount)
+	}
 	if report.Retrieval.TestCaseArtifactCount > 0 {
 		fmt.Fprintf(&b, "- Test-case artifacts included: %d\n", report.Retrieval.TestCaseArtifactCount)
+	}
+	if report.Retrieval.CodeCommentArtifactCount > 0 {
+		fmt.Fprintf(&b, "- Code-comment artifacts included: %d\n", report.Retrieval.CodeCommentArtifactCount)
+	}
+	if len(report.Retrieval.LaneMetrics) > 0 {
+		fmt.Fprintln(&b, "- Lane metrics:")
+		for _, lane := range report.Retrieval.LaneMetrics {
+			fmt.Fprintf(&b, "  - %s: precision %s / graded %s / recall %s / included %d\n",
+				lane.Lane,
+				firstIndexPct(lane.StrictPrecision),
+				firstIndexPct(lane.GradedPrecision),
+				firstIndexPct(lane.Recall),
+				lane.IncludedArtifacts)
+		}
 	}
 	fmt.Fprintf(&b, "- Planning corpus: %d files / %s tokens\n", report.Retrieval.PlanningArtifactFiles, firstIndexComma(report.Retrieval.PlanningArtifactTokens))
 	fmt.Fprintf(&b, "- Full candidate corpus: %d files / %s tokens\n", report.Retrieval.FullCandidateCorpusFiles, firstIndexComma(report.Retrieval.FullCandidateCorpusTokens))
@@ -863,6 +961,17 @@ func formatFirstIndexReportText(report *firstIndexReport) string {
 
 func firstIndexPct(v float64) string {
 	return fmt.Sprintf("%.1f%%", v*100)
+}
+
+func meanRetrievalMustHitAt3(retrievals []firstIndexRetrievalReport) float64 {
+	if len(retrievals) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, retrieval := range retrievals {
+		sum += retrieval.AgentMetrics.MustHitAt3
+	}
+	return sum / float64(len(retrievals))
 }
 
 func firstIndexComma(n int) string {

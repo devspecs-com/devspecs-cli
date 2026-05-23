@@ -156,7 +156,7 @@ func runResume(cmd *cobra.Command, query string, fp store.FilterParams, repoName
 }
 
 func runFocusedResume(cmd *cobra.Command, db *store.DB, repoRoot, query string, fp store.FilterParams, asJSON bool, limit int) error {
-	candidates, err := loadRetrievalCandidates(db, fp)
+	candidates, err := loadRetrievalCandidatesForQuery(db, fp, query)
 	if err != nil {
 		return fmt.Errorf("resume query: %w", err)
 	}

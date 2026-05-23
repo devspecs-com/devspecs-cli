@@ -26,6 +26,32 @@ type Adapter struct{}
 
 func (a *Adapter) Name() string { return sourceType }
 
+func (a *Adapter) AcceptsFile(rel string, size int64, cfg *config.RepoConfig) bool {
+	if size > maxFileBytes || !isSourceContextFile(rel) {
+		return false
+	}
+	paths, rootCoverage := sourcePaths(cfg)
+	if rootCoverage {
+		return true
+	}
+	return withinConfiguredSourcePath(rel, paths)
+}
+
+func (a *Adapter) DiscoverFile(ctx context.Context, file adapters.FileCandidate, cfg *config.RepoConfig) ([]adapters.Candidate, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !a.AcceptsFile(file.RelPath, file.Size, cfg) {
+		return nil, nil
+	}
+	return []adapters.Candidate{{
+		PrimaryPath: file.PrimaryPath,
+		RelPath:     file.RelPath,
+		AdapterName: sourceType,
+		UnitBody:    string(file.Body),
+	}}, nil
+}
+
 func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.RepoConfig) ([]adapters.Candidate, error) {
 	paths, rootCoverage := sourcePaths(cfg)
 	var candidates []adapters.Candidate
@@ -124,11 +150,14 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 }
 
 func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Artifact, []adapters.Source, todoparse.ParseResult, error) {
-	data, err := os.ReadFile(c.PrimaryPath)
-	if err != nil {
-		return adapters.Artifact{}, nil, todoparse.ParseResult{}, err
+	body := c.UnitBody
+	if body == "" {
+		data, err := os.ReadFile(c.PrimaryPath)
+		if err != nil {
+			return adapters.Artifact{}, nil, todoparse.ParseResult{}, err
+		}
+		body = string(data)
 	}
-	body := string(data)
 	title := sourceTitle(c.RelPath)
 	art := adapters.Artifact{
 		SourceIdentity: c.RelPath + "|" + sourceType,
@@ -168,6 +197,17 @@ func sourcePaths(cfg *config.RepoConfig) ([]string, bool) {
 		return nil, true
 	}
 	return nil, true
+}
+
+func withinConfiguredSourcePath(rel string, paths []string) bool {
+	rel = filepath.ToSlash(strings.TrimPrefix(rel, "./"))
+	for _, p := range paths {
+		p = filepath.ToSlash(strings.Trim(strings.TrimSpace(p), "/"))
+		if p == "" || rel == p || strings.HasPrefix(rel, p+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func isSourceContextFile(rel string) bool {
