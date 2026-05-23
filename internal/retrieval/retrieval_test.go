@@ -2,6 +2,7 @@ package retrieval
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -1034,7 +1035,7 @@ func TestApplyConceptBackfill_AddsSpecificProductRequirementsDoc(t *testing.T) {
 	}
 
 	query := "FluxNova AIGF requirements"
-	got := applyConceptBackfill(selected, universe, query, strings.ToLower(query), expandedTerms(query), 5)
+	got := applyConceptBackfill(selected, universe, query, strings.ToLower(query), expandedTerms(query), 5, false)
 	if !containsCandidatePath(got, "docs/product-specs/fluxnova-aigf.md") {
 		t.Fatalf("missing specific product requirements backfill: %#v", CandidatePaths(got))
 	}
@@ -1057,9 +1058,81 @@ func TestApplyConceptBackfill_IgnoresBroadTemplateNoise(t *testing.T) {
 	}
 
 	query := "architecture requirements instructions"
-	got := applyConceptBackfill(nil, universe, query, strings.ToLower(query), expandedTerms(query), 5)
+	got := applyConceptBackfill(nil, universe, query, strings.ToLower(query), expandedTerms(query), 5, false)
 	if len(got) != 0 {
 		t.Fatalf("broad query should not backfill template noise: %#v", CandidatePaths(got))
+	}
+}
+
+func TestApplyConceptBackfillWithGlossary_SuppressesBroadRepoConcept(t *testing.T) {
+	var universe []Candidate
+	for i := 0; i < 16; i++ {
+		universe = append(universe, Candidate{
+			Path:  fmt.Sprintf("docs/cloudnativepg/module-%02d.md", i),
+			Title: fmt.Sprintf("CloudNativePG Module %02d", i),
+			Body:  "Generic module documentation.",
+		})
+	}
+	universe = append(universe, Candidate{
+		Path:     "tests/e2e/suite_test.go#L236",
+		Subtype:  "test_case",
+		Title:    "CloudNativePG upgrade suite",
+		Body:     "Test: CloudNativePG upgrade suite",
+		Metadata: map[string]string{"source_type": "test_case", "test_name": "CloudNativePG upgrade suite"},
+	})
+
+	query := "CloudNativePG roadmap process"
+	got := applyConceptBackfill(nil, universe, query, strings.ToLower(query), expandedTerms(query), 5, true)
+	if len(got) != 0 {
+		t.Fatalf("glossary should suppress broad repo concept backfill: %#v", CandidatePaths(got))
+	}
+}
+
+func TestApplyConceptBackfillWithGlossary_KeepsRareProductConcept(t *testing.T) {
+	selected := []Candidate{{Path: "docs/roadmap.md", Body: "Roadmap for unrelated launch work."}}
+	universe := append([]Candidate{}, selected...)
+	for i := 0; i < 12; i++ {
+		universe = append(universe, Candidate{
+			Path:  fmt.Sprintf("docs/product-specs/general-%02d.md", i),
+			Title: fmt.Sprintf("General Product Spec %02d", i),
+			Body:  "Generic product requirements and background.",
+		})
+	}
+	universe = append(universe, Candidate{
+		Path:    "calm-suite/calm-studio/docs/REQ_fluxnova_aigf_integration.md",
+		Kind:    "requirements",
+		Subtype: "prd",
+		Title:   "FluxNova AIGF Requirements",
+		Body:    "Requirements for FluxNova templates and AIGF integration.",
+	})
+
+	query := "FluxNova AIGF requirements"
+	got := applyConceptBackfill(selected, universe, query, strings.ToLower(query), expandedTerms(query), 5, true)
+	if !containsCandidatePath(got, "calm-suite/calm-studio/docs/REQ_fluxnova_aigf_integration.md") {
+		t.Fatalf("glossary should preserve rare product concept backfill: %#v", CandidatePaths(got))
+	}
+	for _, c := range got {
+		if c.Path == "calm-suite/calm-studio/docs/REQ_fluxnova_aigf_integration.md" && c.Metadata["concept_glossary_enabled"] != "true" {
+			t.Fatalf("missing glossary metadata: %#v", c.Metadata)
+		}
+	}
+}
+
+func TestApplyConceptBackfillWithGlossary_KeepsExactTestNameConcept(t *testing.T) {
+	universe := []Candidate{
+		{
+			Path:     "pkg/tools/exposed_tool_test.go#L24-L39",
+			Subtype:  "test_case",
+			Title:    "TestPutAndGetExposedTool",
+			Body:     "Test: TestPutAndGetExposedTool\nassert exposed tool is returned.",
+			Metadata: map[string]string{"source_type": "test_case", "test_name": "TestPutAndGetExposedTool"},
+		},
+	}
+
+	query := "what tests cover testputandgetexposedtool behavior"
+	got := applyConceptBackfill(nil, universe, query, strings.ToLower(query), expandedTerms(query), 5, true)
+	if !containsCandidatePath(got, "pkg/tools/exposed_tool_test.go#L24-L39") {
+		t.Fatalf("glossary should preserve exact test-name concept: %#v", CandidatePaths(got))
 	}
 }
 

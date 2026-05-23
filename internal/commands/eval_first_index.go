@@ -154,7 +154,7 @@ type firstIndexWeakSpot struct {
 	Message string `json:"message"`
 }
 
-func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed bool, commandUnderTest string, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill bool, evalIndexCacheDir string, refreshIndexCache bool, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec int, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull float64) (evalharness.Options, error) {
+func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed bool, commandUnderTest string, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts bool, evalIndexCacheDir string, refreshIndexCache bool, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec int, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull float64) (evalharness.Options, error) {
 	opts := evalharness.Options{
 		JSON:                         asJSON,
 		TestCaseArtifacts:            includeTests,
@@ -163,6 +163,7 @@ func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed b
 		ExperimentalBalancedEvidence: experimentalBalancedEvidence,
 		ExperimentalBudgetedPacking:  experimentalBudgetedPacking,
 		ExperimentalConceptBackfill:  experimentalConceptBackfill,
+		ExperimentalGlossaryConcepts: experimentalGlossaryConcepts,
 		ContextTokenBudget:           contextTokenBudget,
 		IndexCacheDir:                strings.TrimSpace(evalIndexCacheDir),
 		RefreshIndexCache:            refreshIndexCache,

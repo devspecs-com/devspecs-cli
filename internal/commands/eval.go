@@ -46,6 +46,7 @@ func NewEvalCmd() *cobra.Command {
 		experimentalBalancedEvidence bool
 		experimentalBudgetedPacking  bool
 		experimentalConceptBackfill  bool
+		experimentalGlossaryConcepts bool
 		contextTokenBudget           int
 		evalIndexCacheDir            string
 		refreshIndexCache            bool
@@ -100,7 +101,7 @@ func NewEvalCmd() *cobra.Command {
 				return nil
 			}
 
-			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, evalIndexCacheDir, refreshIndexCache, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
+			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, evalIndexCacheDir, refreshIndexCache, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
 			if err != nil {
 				return err
 			}
@@ -199,6 +200,7 @@ func NewEvalCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&experimentalBalancedEvidence, "experimental-balanced-evidence", false, "Use the opt-in balanced evidence reranker during retrieval evals")
 	cmd.Flags().BoolVar(&experimentalBudgetedPacking, "experimental-budgeted-packing", false, "Trim retrieved eval context to --eval-context-token-budget after ranking")
 	cmd.Flags().BoolVar(&experimentalConceptBackfill, "experimental-concept-backfill", false, "Use the opt-in deterministic concept backfill lane during retrieval evals")
+	cmd.Flags().BoolVar(&experimentalGlossaryConcepts, "experimental-glossary-concepts", false, "Gate experimental concept backfill through repo-local glossary evidence during retrieval evals")
 	cmd.Flags().StringVar(&evalIndexCacheDir, "eval-index-cache-dir", "", "Directory for strict indexed eval corpus cache; disabled when empty")
 	cmd.Flags().BoolVar(&refreshIndexCache, "refresh-index-cache", false, "Refresh the indexed eval corpus cache entry instead of reusing it")
 	cmd.Flags().IntVar(&maxCorpusFiles, "eval-max-corpus-files", 0, "Maximum indexed eval corpus artifacts after indexing; 0 means unlimited")

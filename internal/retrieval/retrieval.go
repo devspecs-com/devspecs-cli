@@ -56,12 +56,16 @@ type WeightedFilesRetrieverV0 struct {
 	DisableSectionAware bool
 	EvidenceMode        string
 	ConceptBackfill     bool
+	GlossaryConcepts    bool
 }
 
 func (r WeightedFilesRetrieverV0) Name() string {
 	suffix := ""
 	if r.ConceptBackfill {
 		suffix = "_concept_backfill"
+	}
+	if r.GlossaryConcepts {
+		suffix += "_glossary"
 	}
 	if strings.EqualFold(r.EvidenceMode, EvidenceModeBalanced) {
 		if r.DisableSectionAware {
@@ -79,7 +83,7 @@ func (r WeightedFilesRetrieverV0) Retrieve(candidates []Candidate, query string)
 	if !r.DisableSectionAware {
 		candidates = EnrichCandidatesWithSectionMatches(candidates, query)
 	}
-	return retrieveWeightedFilesV0(candidates, query, r.EvidenceMode, r.ConceptBackfill)
+	return retrieveWeightedFilesV0(candidates, query, r.EvidenceMode, r.ConceptBackfill, r.GlossaryConcepts)
 }
 
 type Reason struct {
@@ -148,7 +152,7 @@ func IsSourceContextCandidate(c Candidate) bool {
 	return !strings.EqualFold(filepath.Ext(c.Path), ".md") && !IsPlanningIntentPath(c.Path)
 }
 
-func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode string, conceptBackfill bool) []Candidate {
+func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode string, conceptBackfill, glossaryConcepts bool) []Candidate {
 	terms := expandedTerms(query)
 	queryLower := strings.ToLower(query)
 	var scoredCandidates []scoredCandidate
@@ -195,7 +199,7 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode 
 	}
 	out = expandOpenSpecLinks(out, candidates, queryLower, limit)
 	if conceptBackfill {
-		out = applyConceptBackfill(out, candidates, query, queryLower, terms, limit)
+		out = applyConceptBackfill(out, candidates, query, queryLower, terms, limit, glossaryConcepts)
 	}
 	out = packCandidateSections(out, queryLower, terms)
 	if !evidenceBalanced {
@@ -224,6 +228,8 @@ type ConceptRank struct {
 	MatchedCompacts  []string  `json:"matched_compacts,omitempty"`
 	MatchedPhrases   []string  `json:"matched_phrases,omitempty"`
 	MatchedPathTerms []string  `json:"matched_path_terms,omitempty"`
+	GlossaryMatches  []string  `json:"glossary_matches,omitempty"`
+	GlossaryEvidence []string  `json:"glossary_evidence,omitempty"`
 }
 
 type conceptQueryProfile struct {
@@ -243,6 +249,27 @@ func RankConceptCandidates(candidates []Candidate, query string) []ConceptRank {
 	if !conceptQueryIsUseful(profile) {
 		return nil
 	}
+	return rankConceptCandidatesWithProfile(candidates, profile)
+}
+
+// RankConceptCandidatesWithGlossary applies the experimental local glossary
+// gate before ranking. It is primarily used by eval diagnostics.
+func RankConceptCandidatesWithGlossary(candidates []Candidate, query string) []ConceptRank {
+	profile := buildConceptQueryProfile(query)
+	profile = filterNoisyConceptProfile(profile, candidates)
+	glossary := buildLocalGlossary(candidates)
+	profile = applyGlossaryToConceptProfile(profile, glossary)
+	if !conceptQueryIsUseful(profile) {
+		return nil
+	}
+	ranks := rankConceptCandidatesWithProfile(candidates, profile)
+	for i := range ranks {
+		ranks[i] = annotateConceptRankWithGlossary(ranks[i], glossary)
+	}
+	return filterGlossaryRanks(ranks)
+}
+
+func rankConceptCandidatesWithProfile(candidates []Candidate, profile conceptQueryProfile) []ConceptRank {
 	ranks := make([]ConceptRank, 0, len(candidates))
 	for _, c := range candidates {
 		rank := scoreConceptCandidate(c, profile)
@@ -260,13 +287,18 @@ func RankConceptCandidates(candidates []Candidate, query string) []ConceptRank {
 	return ranks
 }
 
-func applyConceptBackfill(selected []Candidate, universe []Candidate, query, queryLower string, terms map[string]float64, limit int) []Candidate {
+func applyConceptBackfill(selected []Candidate, universe []Candidate, query, queryLower string, terms map[string]float64, limit int, glossaryConcepts bool) []Candidate {
 	_ = limit
 	if len(universe) == 0 {
 		return selected
 	}
 	profile := buildConceptQueryProfile(query)
 	profile = filterNoisyConceptProfile(profile, universe)
+	var glossary localGlossary
+	if glossaryConcepts {
+		glossary = buildLocalGlossary(universe)
+		profile = applyGlossaryToConceptProfile(profile, glossary)
+	}
 	if !conceptQueryIsUseful(profile) {
 		return selected
 	}
@@ -281,7 +313,7 @@ func applyConceptBackfill(selected []Candidate, universe []Candidate, query, que
 			seen[filepath.ToSlash(c.Path)] = true
 		}
 	}
-	ranks := RankConceptCandidates(universe, query)
+	ranks := rankConceptCandidatesWithProfile(universe, profile)
 	out := append([]Candidate(nil), selected...)
 	for _, rank := range ranks {
 		if len(out)-len(selected) >= slots {
@@ -295,6 +327,12 @@ func applyConceptBackfill(selected []Candidate, universe []Candidate, query, que
 		}
 		if candidateIsNoisyConceptBackfill(rank.Candidate, profile, queryLower) {
 			continue
+		}
+		if glossaryConcepts {
+			rank = annotateConceptRankWithGlossary(rank, glossary)
+			if len(rank.GlossaryMatches) == 0 {
+				continue
+			}
 		}
 		c := withConceptBackfillMetadata(rank.Candidate, rank)
 		seen[candidateIdentity(c)] = true
@@ -545,6 +583,11 @@ func withConceptBackfillMetadata(c Candidate, rank ConceptRank) Candidate {
 	c.Metadata["concept_backfill_matched_compacts_json"] = jsonStringList(rank.MatchedCompacts)
 	c.Metadata["concept_backfill_matched_phrases_json"] = jsonStringList(rank.MatchedPhrases)
 	c.Metadata["concept_backfill_matched_path_terms_json"] = jsonStringList(rank.MatchedPathTerms)
+	if len(rank.GlossaryMatches) > 0 {
+		c.Metadata["concept_glossary_enabled"] = "true"
+		c.Metadata["concept_glossary_matched_json"] = jsonStringList(rank.GlossaryMatches)
+		c.Metadata["concept_glossary_evidence_json"] = jsonStringList(rank.GlossaryEvidence)
+	}
 	return c
 }
 
@@ -3935,6 +3978,9 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 	}
 	if c.Metadata != nil && c.Metadata["concept_backfill_score"] != "" {
 		var parts []string
+		if glossary := metadataJSONList(c, "concept_glossary_matched_json"); len(glossary) > 0 {
+			parts = append(parts, "glossary "+strings.Join(limitStrings(glossary, 3), ", "))
+		}
 		if compacts := metadataJSONList(c, "concept_backfill_matched_compacts_json"); len(compacts) > 0 {
 			parts = append(parts, "compacts "+strings.Join(limitStrings(compacts, 3), ", "))
 		}

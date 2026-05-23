@@ -105,6 +105,7 @@ type Options struct {
 	ExperimentalBalancedEvidence bool
 	ExperimentalBudgetedPacking  bool
 	ExperimentalConceptBackfill  bool
+	ExperimentalGlossaryConcepts bool
 	ContextTokenBudget           int
 	IndexCacheDir                string
 	RefreshIndexCache            bool
@@ -292,6 +293,8 @@ type ConceptMissDiagnostic struct {
 	MatchedCompacts  []string `json:"matched_compacts,omitempty"`
 	MatchedPhrases   []string `json:"matched_phrases,omitempty"`
 	MatchedPathTerms []string `json:"matched_path_terms,omitempty"`
+	GlossaryMatches  []string `json:"glossary_matches,omitempty"`
+	GlossaryEvidence []string `json:"glossary_evidence,omitempty"`
 }
 
 type Summary struct {
@@ -433,6 +436,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 			DisableSectionAware: opts.DisableSectionAwareRetrieval,
 			EvidenceMode:        evidenceMode,
 			ConceptBackfill:     opts.ExperimentalConceptBackfill,
+			GlossaryConcepts:    opts.ExperimentalGlossaryConcepts,
 		}
 	}
 	tokenizerProfile := tokenizerProfile(counter)
@@ -570,7 +574,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 		applyPackingMetrics(&cr, devspecsFiles)
 		applyArtifactMetrics(&cr, c)
 		applyDiscoveryDiagnostics(&cr, c, corpusPaths)
-		applyConceptMissDiagnostics(&cr, c, queryFiles)
+		applyConceptMissDiagnostics(&cr, c, queryFiles, opts.ExperimentalGlossaryConcepts)
 		cr.ContextSufficiency = evaluateSufficiency(c.SuccessCriteria, devContext, cr.ArtifactsIncluded)
 		applyAgentCaseMetrics(&cr, c, devspecsFiles)
 		cr.CaseDurationMS = casePhase.durationMS()
@@ -1849,12 +1853,15 @@ func applyDiscoveryDiagnostics(cr *CaseResult, spec CaseSpec, corpusPaths map[st
 	}
 }
 
-func applyConceptMissDiagnostics(cr *CaseResult, spec CaseSpec, candidatePool []File) {
+func applyConceptMissDiagnostics(cr *CaseResult, spec CaseSpec, candidatePool []File, glossaryConcepts bool) {
 	if cr.MustExpectedCount == 0 {
 		return
 	}
 	included := stringSet(cr.ArtifactsIncluded)
 	ranks := retrieval.RankConceptCandidates(candidatePool, spec.Query)
+	if glossaryConcepts {
+		ranks = retrieval.RankConceptCandidatesWithGlossary(candidatePool, spec.Query)
+	}
 	rankByPath := map[string]ConceptMissDiagnostic{}
 	for i, rank := range ranks {
 		path := filepath.ToSlash(rank.Path)
@@ -1872,6 +1879,8 @@ func applyConceptMissDiagnostics(cr *CaseResult, spec CaseSpec, candidatePool []
 			MatchedCompacts:  append([]string(nil), rank.MatchedCompacts...),
 			MatchedPhrases:   append([]string(nil), rank.MatchedPhrases...),
 			MatchedPathTerms: append([]string(nil), rank.MatchedPathTerms...),
+			GlossaryMatches:  append([]string(nil), rank.GlossaryMatches...),
+			GlossaryEvidence: append([]string(nil), rank.GlossaryEvidence...),
 		}
 	}
 	poolPaths := candidatePathSet(candidatePool)
