@@ -196,10 +196,14 @@ func extractMarkers(rel string, lines []string, language string) []unitMarker {
 		return extractGoMarkers(lines)
 	case "python":
 		return extractPythonMarkers(lines)
+	case "java", "kotlin":
+		return extractJVMMarkers(lines)
 	case "ruby":
 		return extractRubyMarkers(lines)
 	case "php":
 		return extractPHPMarkers(lines)
+	case "rust":
+		return extractRustMarkers(lines)
 	default:
 		if isJSTestFile(rel) {
 			return extractJSMarkers(lines)
@@ -263,6 +267,158 @@ func extractJSMarkers(lines []string) []unitMarker {
 		}
 	}
 	return out
+}
+
+func extractJVMMarkers(lines []string) []unitMarker {
+	var out []unitMarker
+	parent := ""
+	annotationTest := false
+	annotationLine := 0
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if className := jvmClassName(trimmed); className != "" {
+			parent = className
+		}
+		if isJVMTestAnnotation(trimmed) {
+			annotationTest = true
+			annotationLine = i + 1
+			continue
+		}
+		name := jvmMethodName(trimmed)
+		if name == "" {
+			if !strings.HasPrefix(trimmed, "@") {
+				annotationTest = false
+			}
+			continue
+		}
+		if annotationTest || strings.HasPrefix(strings.ToLower(name), "test") {
+			startLine := i + 1
+			if annotationTest && annotationLine > 0 {
+				startLine = annotationLine
+			}
+			out = append(out, unitMarker{name: name, parent: parent, startLine: startLine})
+		}
+		annotationTest = false
+		annotationLine = 0
+	}
+	return out
+}
+
+func extractRustMarkers(lines []string) []unitMarker {
+	var out []unitMarker
+	annotationTest := false
+	annotationLine := 0
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#[") {
+			if strings.Contains(strings.ToLower(trimmed), "test") {
+				annotationTest = true
+				annotationLine = i + 1
+			}
+			continue
+		}
+		name := rustFunctionName(trimmed)
+		if name == "" {
+			if trimmed != "" && !strings.HasPrefix(trimmed, "#[") {
+				annotationTest = false
+			}
+			continue
+		}
+		if annotationTest {
+			startLine := i + 1
+			if annotationLine > 0 {
+				startLine = annotationLine
+			}
+			out = append(out, unitMarker{name: name, startLine: startLine})
+		}
+		annotationTest = false
+		annotationLine = 0
+	}
+	return out
+}
+
+func jvmClassName(line string) string {
+	fields := strings.Fields(strings.ReplaceAll(line, "{", " "))
+	for i, field := range fields {
+		if field != "class" && field != "interface" {
+			continue
+		}
+		if i+1 >= len(fields) {
+			return ""
+		}
+		name := strings.Trim(fields[i+1], "{(<")
+		if name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func isJVMTestAnnotation(line string) bool {
+	line = strings.ToLower(strings.TrimSpace(line))
+	if !strings.HasPrefix(line, "@") {
+		return false
+	}
+	return strings.Contains(line, "test") ||
+		strings.Contains(line, "parameterizedtest") ||
+		strings.Contains(line, "repeatedtest")
+}
+
+func jvmMethodName(line string) string {
+	if !strings.Contains(line, "(") {
+		return ""
+	}
+	lower := strings.ToLower(line)
+	if strings.Contains(lower, " class ") || strings.HasPrefix(lower, "class ") ||
+		strings.Contains(lower, " interface ") || strings.HasPrefix(lower, "interface ") ||
+		strings.HasPrefix(lower, "if ") || strings.HasPrefix(lower, "for ") ||
+		strings.HasPrefix(lower, "while ") || strings.HasPrefix(lower, "switch ") {
+		return ""
+	}
+	if idx := strings.Index(line, "fun "); idx >= 0 {
+		after := strings.TrimSpace(line[idx+len("fun "):])
+		return leadingFunctionName(after)
+	}
+	before := strings.TrimSpace(line[:strings.Index(line, "(")])
+	if before == "" {
+		return ""
+	}
+	fields := strings.Fields(before)
+	if len(fields) == 0 {
+		return ""
+	}
+	name := strings.Trim(fields[len(fields)-1], "`")
+	if strings.ContainsAny(name, ".=") {
+		return ""
+	}
+	return name
+}
+
+func rustFunctionName(line string) string {
+	if !strings.Contains(line, "fn ") || !strings.Contains(line, "(") {
+		return ""
+	}
+	idx := strings.Index(line, "fn ")
+	after := strings.TrimSpace(line[idx+len("fn "):])
+	return leadingFunctionName(after)
+}
+
+func leadingFunctionName(s string) string {
+	if strings.HasPrefix(s, "`") {
+		rest := s[1:]
+		if idx := strings.Index(rest, "`"); idx >= 0 {
+			return rest[:idx]
+		}
+		return ""
+	}
+	end := strings.Index(s, "(")
+	if end < 0 {
+		return ""
+	}
+	return strings.TrimSpace(s[:end])
 }
 
 func extractRubyMarkers(lines []string) []unitMarker {
@@ -382,6 +538,12 @@ func isLikelyTestFile(rel string) bool {
 	switch {
 	case strings.HasSuffix(base, "_test.go"):
 		return true
+	case ext == ".java" && (strings.HasSuffix(strings.TrimSuffix(base, ext), "test") || strings.HasSuffix(strings.TrimSuffix(base, ext), "tests") || strings.HasSuffix(strings.TrimSuffix(base, ext), "it")):
+		return true
+	case (ext == ".kt" || ext == ".kts") && (strings.HasSuffix(strings.TrimSuffix(base, ext), "test") || strings.HasSuffix(strings.TrimSuffix(base, ext), "spec")):
+		return true
+	case ext == ".rs" && (strings.HasSuffix(strings.TrimSuffix(base, ext), "_test") || strings.Contains(lower, "/tests/")):
+		return true
 	case ext == ".py" && (strings.HasPrefix(base, "test_") || strings.HasSuffix(strings.TrimSuffix(base, ext), "_test")):
 		return true
 	case ext == ".rb" && strings.HasSuffix(base, "_spec.rb"):
@@ -419,7 +581,7 @@ func isJSTestFile(rel string) bool {
 
 func supportedExt(ext string) bool {
 	switch ext {
-	case ".go", ".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".rb", ".php":
+	case ".go", ".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".rb", ".php", ".java", ".kt", ".kts", ".rs":
 		return true
 	default:
 		return false
@@ -433,6 +595,12 @@ func inferLanguageFramework(rel string) (string, string) {
 		return "go", "go test"
 	case ".py":
 		return "python", "pytest"
+	case ".java":
+		return "java", "junit"
+	case ".kt", ".kts":
+		return "kotlin", "junit"
+	case ".rs":
+		return "rust", "rust test"
 	case ".rb":
 		return "ruby", "rspec"
 	case ".php":
@@ -470,6 +638,8 @@ func codeFenceLanguage(language string) string {
 		return "ts"
 	case "javascript":
 		return "js"
+	case "kotlin":
+		return "kotlin"
 	default:
 		return language
 	}

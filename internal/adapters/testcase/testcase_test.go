@@ -58,6 +58,30 @@ func TestExtractUnits_CommonFrameworks(t *testing.T) {
 			wantLang:  "php",
 			wantFrame: "phpunit",
 		},
+		{
+			name:      "java",
+			rel:       "src/test/java/com/example/BillingTest.java",
+			body:      "class BillingTest {\n  @Test\n  public void testRejectsReplayedStripeEvents() {\n    assertEquals(409, status);\n  }\n}\n",
+			wantName:  "testRejectsReplayedStripeEvents",
+			wantLang:  "java",
+			wantFrame: "junit",
+		},
+		{
+			name:      "kotlin",
+			rel:       "src/test/kotlin/com/example/BillingSpec.kt",
+			body:      "class BillingSpec {\n  @Test\n  fun `rejects replayed stripe events`() {\n    assertEquals(409, status)\n  }\n}\n",
+			wantName:  "rejects replayed stripe events",
+			wantLang:  "kotlin",
+			wantFrame: "junit",
+		},
+		{
+			name:      "rust",
+			rel:       "crates/cli/tests/help_test.rs",
+			body:      "#[test]\nfn help_work_invalid_sgconfig() {\n    assert!(output.contains(\"invalid\"));\n}\n",
+			wantName:  "help_work_invalid_sgconfig",
+			wantLang:  "rust",
+			wantFrame: "rust test",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -123,5 +147,38 @@ func TestDiscoverRequiresExperimentAndParsesArtifact(t *testing.T) {
 	}
 	if len(sources) != 1 || sources[0].SourceType != "test_case" {
 		t.Fatalf("sources = %#v", sources)
+	}
+}
+
+func TestExtractUnits_AnnotatedLanguagesStartAtAnnotation(t *testing.T) {
+	tests := []struct {
+		name string
+		rel  string
+		body string
+	}{
+		{
+			name: "java",
+			rel:  "src/test/java/com/example/BillingTest.java",
+			body: "class BillingTest {\n  @Test\n  public void testRejectsReplay() {}\n}\n",
+		},
+		{
+			name: "rust",
+			rel:  "crates/cli/tests/help_test.rs",
+			body: "#[test]\nfn help_work_invalid_sgconfig() {}\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			units := extractUnits(tc.rel, tc.body)
+			if len(units) != 1 {
+				t.Fatalf("extractUnits returned %d units, want 1", len(units))
+			}
+			if units[0].StartLine != 2 && tc.name == "java" {
+				t.Fatalf("java start line = %d, want annotation line 2", units[0].StartLine)
+			}
+			if units[0].StartLine != 1 && tc.name == "rust" {
+				t.Fatalf("rust start line = %d, want annotation line 1", units[0].StartLine)
+			}
+		})
 	}
 }

@@ -131,6 +131,7 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string) []Candidate {
 	})
 	limit := retrievalLimit(queryLower, terms)
 	scoredCandidates = collapseVariantCandidates(scoredCandidates, queryLower)
+	scoredCandidates = suppressRawTestSourceCandidates(scoredCandidates, queryLower)
 	scoredCandidates = selectScoredCandidates(scoredCandidates, queryLower, limit)
 	scoredCandidates = enforceSupportingArtifactBudgets(scoredCandidates, queryLower, terms)
 	out := make([]Candidate, 0, len(scoredCandidates))
@@ -1211,8 +1212,10 @@ func selectScoredCandidates(candidates []scoredCandidate, queryLower string, lim
 func enforceSupportingArtifactBudgets(candidates []scoredCandidate, queryLower string, terms map[string]float64) []scoredCandidate {
 	testBudget := 0
 	switch {
+	case hasSpecificTestNameIntent(queryLower):
+		testBudget = 2
 	case hasTestBehaviorIntent(queryLower):
-		testBudget = 4
+		testBudget = 3
 	case hasExplicitSourceIntent(queryLower) || hasIdentifierTerm(terms):
 		testBudget = 2
 	}
@@ -1238,6 +1241,39 @@ func enforceSupportingArtifactBudgets(candidates []scoredCandidate, queryLower s
 				continue
 			}
 			commentCount++
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func suppressRawTestSourceCandidates(candidates []scoredCandidate, queryLower string) []scoredCandidate {
+	if len(candidates) == 0 {
+		return candidates
+	}
+	testUnitKeys := map[string]bool{}
+	for _, candidate := range candidates {
+		if candidate.role != "test_case" {
+			continue
+		}
+		if key := lineScopedSourceFileKey(candidate.candidate.Path); key != "" {
+			testUnitKeys[key] = true
+		}
+	}
+	if len(testUnitKeys) == 0 && hasTestBehaviorIntent(queryLower) {
+		return candidates
+	}
+	out := make([]scoredCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if !isRawTestSourceCandidate(candidate.candidate) {
+			out = append(out, candidate)
+			continue
+		}
+		if !hasTestBehaviorIntent(queryLower) && !hasExplicitSourceIntent(queryLower) {
+			continue
+		}
+		if len(testUnitKeys) > 0 && !variantHasExactQueryAnchor(candidate.candidate, queryLower) {
+			continue
 		}
 		out = append(out, candidate)
 	}
@@ -1780,25 +1816,45 @@ func hasExplicitSourceIntent(queryLower string) bool {
 }
 
 func hasTestBehaviorIntent(queryLower string) bool {
-	return containsAny(queryLower,
+	if containsAny(queryLower,
 		"test", "tests", "testing", "test case", "test cases",
 		"behavior", "behaviour", "expected behavior", "edge case", "edge cases",
 		"regression", "regressions", "assert", "assertion", "assertions",
+		"covered by", "coverage", "protected by",
+	) {
+		return true
+	}
+	if !containsAny(queryLower, "cover", "covers", "covered", "protect", "protects", "protected") {
+		return false
+	}
+	return containsAny(queryLower,
 		"validation", "retry", "retries", "idempotent", "idempotency",
 		"auth", "permission", "permissions", "billing", "analytics",
-		"bug", "error", "exception", "failure", "protected",
+		"bug", "error", "exception", "failure",
 	)
 }
 
 func hasCodeCommentIntent(queryLower string) bool {
-	return containsAny(queryLower,
+	if containsAny(queryLower,
 		"code comment", "code comments", "comment says", "comments say",
 		"implementation rationale", "implementation reason", "why does the code",
 		"why is this implemented", "why is it implemented", "source rationale",
-		"invariant", "invariants", "assumption", "assumptions", "workaround",
-		"workarounds", "constraint", "constraints", "compatibility", "legacy",
-		"temporary", "todo", "fixme", "hack",
-	)
+	) {
+		return true
+	}
+	for _, word := range []string{"invariant", "invariants", "assumption", "assumptions", "workaround", "workarounds", "todo", "fixme", "hack"} {
+		if hasQueryWord(queryLower, word) {
+			return true
+		}
+	}
+	if containsAny(queryLower, "comment", "comments", "rationale", "why", "implementation", "source") {
+		for _, word := range []string{"constraint", "constraints", "compatibility", "legacy", "temporary"} {
+			if hasQueryWord(queryLower, word) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func hasProductBackgroundIntent(queryLower string) bool {
@@ -2267,6 +2323,81 @@ func hasIdentifierTerm(terms map[string]float64) bool {
 		}
 	}
 	return false
+}
+
+func hasSpecificTestNameIntent(queryLower string) bool {
+	if !hasTestBehaviorIntent(queryLower) {
+		return false
+	}
+	for _, term := range meaningfulTerms(queryLower) {
+		if len(term) >= 9 && strings.HasPrefix(term, "test") {
+			return true
+		}
+	}
+	return false
+}
+
+func isRawTestSourceCandidate(c Candidate) bool {
+	if isTestCaseCandidate(c) || isCodeCommentCandidate(c) || isMarkdownCandidatePath(c.Path) {
+		return false
+	}
+	path := strings.Trim(strings.ToLower(filepath.ToSlash(c.Path)), "/")
+	if path == "" {
+		return false
+	}
+	base := filepath.Base(path)
+	ext := strings.ToLower(filepath.Ext(base))
+	switch ext {
+	case ".go", ".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".rb", ".php", ".java", ".kt", ".kts", ".rs":
+	default:
+		return false
+	}
+	name := strings.TrimSuffix(base, ext)
+	switch {
+	case strings.HasSuffix(base, "_test.go"):
+		return true
+	case ext == ".py" && (strings.HasPrefix(base, "test_") || strings.HasSuffix(name, "_test")):
+		return true
+	case ext == ".rb" && strings.HasSuffix(base, "_spec.rb"):
+		return true
+	case ext == ".php" && strings.HasSuffix(base, "test.php"):
+		return true
+	case (ext == ".js" || ext == ".jsx" || ext == ".ts" || ext == ".tsx" || ext == ".mjs" || ext == ".cjs") &&
+		(strings.HasSuffix(name, ".test") || strings.HasSuffix(name, ".spec")):
+		return true
+	case ext == ".java" && (strings.HasSuffix(name, "test") || strings.HasSuffix(name, "tests") || strings.HasSuffix(name, "it")):
+		return true
+	case (ext == ".kt" || ext == ".kts") && (strings.HasSuffix(name, "test") || strings.HasSuffix(name, "spec")):
+		return true
+	case ext == ".rs" && strings.HasSuffix(name, "_test"):
+		return true
+	}
+	parts := strings.Split(path, "/")
+	if len(parts) > 1 {
+		parts = parts[:len(parts)-1]
+	}
+	for _, segment := range parts {
+		switch segment {
+		case "tests", "__tests__", "spec", "cypress", "e2e":
+			return true
+		}
+	}
+	return false
+}
+
+func lineScopedSourceFileKey(path string) string {
+	path = strings.Trim(strings.ToLower(filepath.ToSlash(path)), "/")
+	if path == "" {
+		return ""
+	}
+	if idx := strings.Index(path, "#l"); idx >= 0 {
+		path = path[:idx]
+	}
+	ext := filepath.Ext(path)
+	if ext != "" {
+		path = strings.TrimSuffix(path, ext)
+	}
+	return path
 }
 
 func expandedTerms(query string) map[string]float64 {

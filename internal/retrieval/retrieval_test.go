@@ -218,6 +218,125 @@ func TestWeightedFilesRetrieverV0_DoesNotUseTestCasesForOrdinaryRoadmapQueries(t
 	}
 }
 
+func TestWeightedFilesRetrieverV0_SuppressesRawTestFilesForOrdinaryPlanningQueries(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "docs/plans/interactive-mode.md",
+			Title: "Interactive Mode Plan",
+			Body:  "Plan for mode active critical user flow and review state.",
+		},
+		{
+			Path:  "packages/coding-agent/test/interactive-mode-plan-review.test.ts",
+			Title: "interactive-mode-plan-review.test.ts",
+			Body:  "mode active critical user flow review state.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "engineering context for mode active critical user flow")
+	if !containsCandidatePath(got, "docs/plans/interactive-mode.md") {
+		t.Fatalf("missing planning doc: %#v", CandidatePaths(got))
+	}
+	if containsCandidatePath(got, "packages/coding-agent/test/interactive-mode-plan-review.test.ts") {
+		t.Fatalf("raw test file should not appear in non-test planning retrieval: %#v", CandidatePaths(got))
+	}
+}
+
+func TestWeightedFilesRetrieverV0_PrefersTestUnitsOverRawTestFiles(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "services/billing/webhook_test.go",
+			Title: "webhook_test.go",
+			Body:  "TestWebhookReplayProtection stripe_event_id idempotency test file.",
+		},
+		{
+			Path:    "services/billing/webhook_test.go#L12",
+			Kind:    "source_context",
+			Subtype: "test_case",
+			Title:   "TestWebhookReplayProtection",
+			Body:    "Test: TestWebhookReplayProtection\nSource: services/billing/webhook_test.go\nSymbols: stripe_event_id, idempotency, webhook\n",
+			Metadata: map[string]string{
+				"source_type":       "test_case",
+				"source_line_range": "12-24",
+			},
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "what tests cover TestWebhookReplayProtection stripe_event_id behavior")
+	if !containsCandidatePath(got, "services/billing/webhook_test.go#L12") {
+		t.Fatalf("missing precise test unit: %#v", CandidatePaths(got))
+	}
+	if containsCandidatePath(got, "services/billing/webhook_test.go") {
+		t.Fatalf("raw test file should be suppressed when unit-level artifact exists: %#v", CandidatePaths(got))
+	}
+}
+
+func TestWeightedFilesRetrieverV0_DoesNotRouteLegacyWordToCodeComments(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:    "processing/src/test/java/org/example/QuerySegmentSpecTest.java#L39",
+			Kind:    "source_context",
+			Subtype: "test_case",
+			Title:   "testSerializationLegacyString",
+			Body:    "Test: testSerializationLegacyString\nSource: processing/src/test/java/org/example/QuerySegmentSpecTest.java\n",
+			Metadata: map[string]string{
+				"source_type": "test_case",
+			},
+		},
+		{
+			Path:    "processing/src/main/java/org/example/LegacyParser.java#L20",
+			Kind:    "source_context",
+			Subtype: "code_comment",
+			Title:   "Compatibility: keep legacy parser path.",
+			Body:    "Comment: Compatibility: keep legacy parser path.\nSource: processing/src/main/java/org/example/LegacyParser.java\n",
+			Metadata: map[string]string{
+				"source_type":  "code_comment",
+				"comment_role": "compatibility",
+			},
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "what tests cover testSerializationLegacyString behavior")
+	if !containsCandidatePath(got, "processing/src/test/java/org/example/QuerySegmentSpecTest.java#L39") {
+		t.Fatalf("missing test unit: %#v", CandidatePaths(got))
+	}
+	if containsCandidatePath(got, "processing/src/main/java/org/example/LegacyParser.java#L20") {
+		t.Fatalf("legacy inside test name should not request code comments: %#v", CandidatePaths(got))
+	}
+}
+
+func TestWeightedFilesRetrieverV0_DomainWordsDoNotRequestTests(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:    "docs/product-specs/course-visit-analytics.md",
+			Kind:    "requirements",
+			Subtype: "prd",
+			Title:   "Course Visit Analytics",
+			Body:    "Product spec for course visit analytics dashboards and operator reporting.",
+			Metadata: map[string]string{
+				"classifier_model": "prd",
+			},
+		},
+		{
+			Path:    "src/app/courseVisitTracking.test.ts#L11",
+			Kind:    "source_context",
+			Subtype: "test_case",
+			Title:   "tracks course visits",
+			Body:    "Test: tracks course visits\nSource: src/app/courseVisitTracking.test.ts\nanalytics course visit tracking",
+			Metadata: map[string]string{
+				"source_type": "test_case",
+			},
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "course visit analytics product spec")
+	if !containsCandidatePath(got, "docs/product-specs/course-visit-analytics.md") {
+		t.Fatalf("missing product spec: %#v", CandidatePaths(got))
+	}
+	if containsCandidatePath(got, "src/app/courseVisitTracking.test.ts#L11") {
+		t.Fatalf("analytics domain word should not route tests without test intent: %#v", CandidatePaths(got))
+	}
+}
+
 func TestWeightedFilesRetrieverV0_UsesCodeCommentsForRationaleQueries(t *testing.T) {
 	candidates := []Candidate{
 		{
