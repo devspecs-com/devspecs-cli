@@ -85,3 +85,28 @@ Primary metrics:
 Decision:
 
 Promote tiering only if it gives a cleaner main context while still making potentially useful evidence inspectable.
+
+## 2026-05-23 Experiment Result
+
+Implemented as an opt-in eval/runtime experiment:
+
+- `--experimental-tiered-concept-output`
+- `pack_tier=primary|related`
+- strict eval metrics remain primary-pack only
+- related tier is emitted separately with precision/graded-precision diagnostics
+
+Full real50 run:
+
+`tiered-glossary-concept-backfill-freshcache-full-balanced-20260523`
+
+Compared with `glossary-concept-backfill-freshcache-full-balanced-20260523`:
+
+- precision: `0.3741 -> 0.3767`
+- graded precision: `0.4031 -> 0.4059`
+- recall: unchanged at `0.8257`
+- must-have recall: unchanged at `0.9181`
+- sufficiency: unchanged at `0.9052`
+- low-precision sufficient cases: `75 -> 74`
+- related tier: `4` artifacts, `0` exact relevant, `1` same-cluster helpful signal
+
+Readout: tiering is safe and slightly cleaner, but it is not a major precision lever yet. Most noise is still coming from primary retrieval/ranking and label coverage, not from lower-confidence concept backfill overflow.

@@ -52,11 +52,27 @@ type Retriever interface {
 
 const EvidenceModeBalanced = "balanced"
 
+const (
+	PackTierPrimary    = "primary"
+	PackTierRelated    = "related"
+	PackTierDiagnostic = "diagnostic"
+)
+
 type WeightedFilesRetrieverV0 struct {
 	DisableSectionAware bool
 	EvidenceMode        string
 	ConceptBackfill     bool
 	GlossaryConcepts    bool
+	TieredConceptOutput bool
+}
+
+func CandidatePackTier(c Candidate) string {
+	if c.Metadata != nil {
+		if tier := strings.TrimSpace(c.Metadata["pack_tier"]); tier != "" {
+			return strings.ToLower(tier)
+		}
+	}
+	return PackTierPrimary
 }
 
 func (r WeightedFilesRetrieverV0) Name() string {
@@ -66,6 +82,9 @@ func (r WeightedFilesRetrieverV0) Name() string {
 	}
 	if r.GlossaryConcepts {
 		suffix += "_glossary"
+	}
+	if r.TieredConceptOutput {
+		suffix += "_tiered"
 	}
 	if strings.EqualFold(r.EvidenceMode, EvidenceModeBalanced) {
 		if r.DisableSectionAware {
@@ -83,7 +102,7 @@ func (r WeightedFilesRetrieverV0) Retrieve(candidates []Candidate, query string)
 	if !r.DisableSectionAware {
 		candidates = EnrichCandidatesWithSectionMatches(candidates, query)
 	}
-	return retrieveWeightedFilesV0(candidates, query, r.EvidenceMode, r.ConceptBackfill, r.GlossaryConcepts)
+	return retrieveWeightedFilesV0(candidates, query, r.EvidenceMode, r.ConceptBackfill, r.GlossaryConcepts, r.TieredConceptOutput)
 }
 
 type Reason struct {
@@ -152,7 +171,7 @@ func IsSourceContextCandidate(c Candidate) bool {
 	return !strings.EqualFold(filepath.Ext(c.Path), ".md") && !IsPlanningIntentPath(c.Path)
 }
 
-func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode string, conceptBackfill, glossaryConcepts bool) []Candidate {
+func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode string, conceptBackfill, glossaryConcepts, tieredConceptOutput bool) []Candidate {
 	terms := expandedTerms(query)
 	queryLower := strings.ToLower(query)
 	var scoredCandidates []scoredCandidate
@@ -199,7 +218,7 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode 
 	}
 	out = expandOpenSpecLinks(out, candidates, queryLower, limit)
 	if conceptBackfill {
-		out = applyConceptBackfill(out, candidates, query, queryLower, terms, limit, glossaryConcepts)
+		out = applyConceptBackfill(out, candidates, query, queryLower, terms, limit, glossaryConcepts, tieredConceptOutput)
 	}
 	out = packCandidateSections(out, queryLower, terms)
 	if !evidenceBalanced {
@@ -287,7 +306,7 @@ func rankConceptCandidatesWithProfile(candidates []Candidate, profile conceptQue
 	return ranks
 }
 
-func applyConceptBackfill(selected []Candidate, universe []Candidate, query, queryLower string, terms map[string]float64, limit int, glossaryConcepts bool) []Candidate {
+func applyConceptBackfill(selected []Candidate, universe []Candidate, query, queryLower string, terms map[string]float64, limit int, glossaryConcepts, tieredConceptOutput bool) []Candidate {
 	_ = limit
 	if len(universe) == 0 {
 		return selected
@@ -334,12 +353,67 @@ func applyConceptBackfill(selected []Candidate, universe []Candidate, query, que
 				continue
 			}
 		}
-		c := withConceptBackfillMetadata(rank.Candidate, rank)
+		tier, tierReason := conceptBackfillTier(rank, profile, queryLower, tieredConceptOutput)
+		c := withConceptBackfillMetadata(rank.Candidate, rank, tier, tierReason)
 		seen[candidateIdentity(c)] = true
 		seen[filepath.ToSlash(c.Path)] = true
 		out = append(out, c)
 	}
 	return out
+}
+
+func conceptBackfillTier(rank ConceptRank, profile conceptQueryProfile, queryLower string, tieredConceptOutput bool) (string, string) {
+	if !tieredConceptOutput {
+		return PackTierPrimary, "tiering disabled"
+	}
+	role := candidateRole(rank.Candidate)
+	if profile.testIntent && isExactConceptTestNameMatch(rank.Candidate, rank.MatchedCompacts) {
+		return PackTierPrimary, "exact test-name concept anchor"
+	}
+	if isTestCaseCandidate(rank.Candidate) || IsSourceContextCandidate(rank.Candidate) {
+		if profile.testIntent && len(rank.MatchedCompacts) > 0 && rank.Score >= 42 {
+			return PackTierPrimary, "strong test/source identifier concept"
+		}
+		return PackTierRelated, "supporting test/source concept"
+	}
+	if len(rank.GlossaryMatches) > 0 && (len(rank.MatchedCompacts) > 0 || len(rank.MatchedPhrases) > 0 || len(rank.MatchedPathTerms) >= 2) {
+		return PackTierPrimary, "glossary-supported concept"
+	}
+	if hasOpenSpecStructureIntent(queryLower) && strings.HasPrefix(role, "openspec_") {
+		return PackTierPrimary, "requested OpenSpec concept"
+	}
+	if hasProductBackgroundIntent(queryLower) && role == "prd" {
+		return PackTierPrimary, "requested product concept"
+	}
+	if hasRFCIntent(queryLower) && (role == "rfc" || role == "design") {
+		return PackTierPrimary, "requested RFC/design concept"
+	}
+	if hasNonIntentModeIntent(queryLower, "protocol") && (role == "agent_instruction" || role == "skill" || role == "protocol") {
+		return PackTierPrimary, "requested protocol concept"
+	}
+	if hasNonIntentModeIntent(queryLower, "template") && role == "template" {
+		return PackTierPrimary, "requested template concept"
+	}
+	if len(rank.MatchedCompacts) > 0 && rank.Score >= 48 {
+		return PackTierPrimary, "strong compact concept"
+	}
+	return PackTierRelated, "plausible concept backfill"
+}
+
+func isExactConceptTestNameMatch(c Candidate, matchedCompacts []string) bool {
+	if !isTestCaseCandidate(c) || len(matchedCompacts) == 0 {
+		return false
+	}
+	matched := stringSetFromSlice(matchedCompacts)
+	for _, anchor := range testNameAnchors(c) {
+		if anchor.compact != "" && matched[anchor.compact] {
+			return true
+		}
+		if anchor.withoutTestPrefix != "" && matched[anchor.withoutTestPrefix] {
+			return true
+		}
+	}
+	return false
 }
 
 func buildConceptQueryProfile(query string) conceptQueryProfile {
@@ -572,7 +646,7 @@ func candidateIsNoisyConceptBackfill(c Candidate, profile conceptQueryProfile, q
 	return false
 }
 
-func withConceptBackfillMetadata(c Candidate, rank ConceptRank) Candidate {
+func withConceptBackfillMetadata(c Candidate, rank ConceptRank, tier, tierReason string) Candidate {
 	if c.Metadata == nil {
 		c.Metadata = map[string]string{}
 	} else {
@@ -583,6 +657,13 @@ func withConceptBackfillMetadata(c Candidate, rank ConceptRank) Candidate {
 	c.Metadata["concept_backfill_matched_compacts_json"] = jsonStringList(rank.MatchedCompacts)
 	c.Metadata["concept_backfill_matched_phrases_json"] = jsonStringList(rank.MatchedPhrases)
 	c.Metadata["concept_backfill_matched_path_terms_json"] = jsonStringList(rank.MatchedPathTerms)
+	if tier != "" {
+		c.Metadata["pack_tier"] = tier
+		c.Metadata["pack_tier_source"] = "concept_backfill"
+	}
+	if tierReason != "" {
+		c.Metadata["pack_tier_reason"] = tierReason
+	}
 	if len(rank.GlossaryMatches) > 0 {
 		c.Metadata["concept_glossary_enabled"] = "true"
 		c.Metadata["concept_glossary_matched_json"] = jsonStringList(rank.GlossaryMatches)
@@ -3975,6 +4056,14 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 	var reasons []string
 	if c.Metadata != nil && c.Metadata["retrieval_expansion_reason"] != "" {
 		reasons = append(reasons, "relationship expansion: "+c.Metadata["retrieval_expansion_reason"])
+	}
+	if tier := CandidatePackTier(c); tier != PackTierPrimary {
+		reason := strings.TrimSpace(c.Metadata["pack_tier_reason"])
+		if reason != "" {
+			reasons = append(reasons, "pack tier: "+tier+" ("+reason+")")
+		} else {
+			reasons = append(reasons, "pack tier: "+tier)
+		}
 	}
 	if c.Metadata != nil && c.Metadata["concept_backfill_score"] != "" {
 		var parts []string

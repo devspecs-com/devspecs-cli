@@ -1035,7 +1035,7 @@ func TestApplyConceptBackfill_AddsSpecificProductRequirementsDoc(t *testing.T) {
 	}
 
 	query := "FluxNova AIGF requirements"
-	got := applyConceptBackfill(selected, universe, query, strings.ToLower(query), expandedTerms(query), 5, false)
+	got := applyConceptBackfill(selected, universe, query, strings.ToLower(query), expandedTerms(query), 5, false, false)
 	if !containsCandidatePath(got, "docs/product-specs/fluxnova-aigf.md") {
 		t.Fatalf("missing specific product requirements backfill: %#v", CandidatePaths(got))
 	}
@@ -1058,7 +1058,7 @@ func TestApplyConceptBackfill_IgnoresBroadTemplateNoise(t *testing.T) {
 	}
 
 	query := "architecture requirements instructions"
-	got := applyConceptBackfill(nil, universe, query, strings.ToLower(query), expandedTerms(query), 5, false)
+	got := applyConceptBackfill(nil, universe, query, strings.ToLower(query), expandedTerms(query), 5, false, false)
 	if len(got) != 0 {
 		t.Fatalf("broad query should not backfill template noise: %#v", CandidatePaths(got))
 	}
@@ -1082,7 +1082,7 @@ func TestApplyConceptBackfillWithGlossary_SuppressesBroadRepoConcept(t *testing.
 	})
 
 	query := "CloudNativePG roadmap process"
-	got := applyConceptBackfill(nil, universe, query, strings.ToLower(query), expandedTerms(query), 5, true)
+	got := applyConceptBackfill(nil, universe, query, strings.ToLower(query), expandedTerms(query), 5, true, false)
 	if len(got) != 0 {
 		t.Fatalf("glossary should suppress broad repo concept backfill: %#v", CandidatePaths(got))
 	}
@@ -1107,7 +1107,7 @@ func TestApplyConceptBackfillWithGlossary_KeepsRareProductConcept(t *testing.T) 
 	})
 
 	query := "FluxNova AIGF requirements"
-	got := applyConceptBackfill(selected, universe, query, strings.ToLower(query), expandedTerms(query), 5, true)
+	got := applyConceptBackfill(selected, universe, query, strings.ToLower(query), expandedTerms(query), 5, true, false)
 	if !containsCandidatePath(got, "calm-suite/calm-studio/docs/REQ_fluxnova_aigf_integration.md") {
 		t.Fatalf("glossary should preserve rare product concept backfill: %#v", CandidatePaths(got))
 	}
@@ -1130,10 +1130,58 @@ func TestApplyConceptBackfillWithGlossary_KeepsExactTestNameConcept(t *testing.T
 	}
 
 	query := "what tests cover testputandgetexposedtool behavior"
-	got := applyConceptBackfill(nil, universe, query, strings.ToLower(query), expandedTerms(query), 5, true)
+	got := applyConceptBackfill(nil, universe, query, strings.ToLower(query), expandedTerms(query), 5, true, false)
 	if !containsCandidatePath(got, "pkg/tools/exposed_tool_test.go#L24-L39") {
 		t.Fatalf("glossary should preserve exact test-name concept: %#v", CandidatePaths(got))
 	}
+}
+
+func TestConceptBackfillTier_PrimaryForExactTestName(t *testing.T) {
+	candidate := Candidate{
+		Path:     "pkg/tools/exposed_tool_test.go#L24-L39",
+		Subtype:  "test_case",
+		Title:    "TestPutAndGetExposedTool",
+		Body:     "Test: TestPutAndGetExposedTool",
+		Metadata: map[string]string{"source_type": "test_case", "test_name": "TestPutAndGetExposedTool"},
+	}
+	rank := ConceptRank{
+		Candidate:       candidate,
+		Path:            candidate.Path,
+		Score:           36,
+		MatchedCompacts: []string{"testputandgetexposedtool"},
+	}
+	profile := buildConceptQueryProfile("what tests cover testputandgetexposedtool behavior")
+
+	tier, reason := conceptBackfillTier(rank, profile, profile.queryLower, true)
+	if tier != PackTierPrimary {
+		t.Fatalf("exact test-name concept should stay primary, tier=%q reason=%q", tier, reason)
+	}
+}
+
+func TestApplyConceptBackfillTiered_DemotesPlausiblePlanToRelated(t *testing.T) {
+	selected := []Candidate{{Path: "docs/roadmap.md", Body: "Roadmap for unrelated launch work."}}
+	universe := []Candidate{
+		selected[0],
+		{
+			Path:  "docs/plans/billing-entitlement-rollout.md",
+			Kind:  "plan",
+			Title: "Billing Entitlement Rollout",
+			Body:  "Plan for billing entitlement rollout and integration work.",
+		},
+	}
+
+	query := "billing entitlement rollout integration"
+	got := applyConceptBackfill(selected, universe, query, strings.ToLower(query), expandedTerms(query), 5, false, true)
+	for _, c := range got {
+		if c.Path != "docs/plans/billing-entitlement-rollout.md" {
+			continue
+		}
+		if c.Metadata["pack_tier"] != PackTierRelated {
+			t.Fatalf("plausible non-requested concept should be related, metadata=%#v", c.Metadata)
+		}
+		return
+	}
+	t.Fatalf("missing tiered concept backfill: %#v", CandidatePaths(got))
 }
 
 func TestWeightedFilesRetrieverV0_AuthorityPriorRanksCanonicalCurrentArtifacts(t *testing.T) {

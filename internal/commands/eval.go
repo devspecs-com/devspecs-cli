@@ -26,38 +26,39 @@ var nowUTC = func() time.Time {
 // NewEvalCmd creates the ds eval command.
 func NewEvalCmd() *cobra.Command {
 	var (
-		asJSON                       bool
-		minRecall                    float64
-		minMeanRecall                float64
-		minMustRecall                float64
-		minSufficiency               float64
-		minReductionFull             float64
-		resultsDir                   string
-		noSave                       bool
-		indexed                      bool
-		filesystem                   bool
-		commandUnderTest             string
-		classifierEval               bool
-		firstIndexReport             bool
-		batchFixtures                bool
-		includeTests                 bool
-		includeCodeComments          bool
-		disableSectionAwareRetrieval bool
-		experimentalBalancedEvidence bool
-		experimentalBudgetedPacking  bool
-		experimentalConceptBackfill  bool
-		experimentalGlossaryConcepts bool
-		contextTokenBudget           int
-		evalIndexCacheDir            string
-		refreshIndexCache            bool
-		maxCorpusFiles               int
-		maxSourceFiles               int
-		maxTestCaseArtifacts         int
-		maxCodeComments              int
-		maxCaseSeconds               int
-		progressIntervalSec          int
-		classifierFixtures           []string
-		inputUSDPer1M                float64
+		asJSON                          bool
+		minRecall                       float64
+		minMeanRecall                   float64
+		minMustRecall                   float64
+		minSufficiency                  float64
+		minReductionFull                float64
+		resultsDir                      string
+		noSave                          bool
+		indexed                         bool
+		filesystem                      bool
+		commandUnderTest                string
+		classifierEval                  bool
+		firstIndexReport                bool
+		batchFixtures                   bool
+		includeTests                    bool
+		includeCodeComments             bool
+		disableSectionAwareRetrieval    bool
+		experimentalBalancedEvidence    bool
+		experimentalBudgetedPacking     bool
+		experimentalConceptBackfill     bool
+		experimentalGlossaryConcepts    bool
+		experimentalTieredConceptOutput bool
+		contextTokenBudget              int
+		evalIndexCacheDir               string
+		refreshIndexCache               bool
+		maxCorpusFiles                  int
+		maxSourceFiles                  int
+		maxTestCaseArtifacts            int
+		maxCodeComments                 int
+		maxCaseSeconds                  int
+		progressIntervalSec             int
+		classifierFixtures              []string
+		inputUSDPer1M                   float64
 	)
 
 	cmd := &cobra.Command{
@@ -101,7 +102,7 @@ func NewEvalCmd() *cobra.Command {
 				return nil
 			}
 
-			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, evalIndexCacheDir, refreshIndexCache, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
+			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput, evalIndexCacheDir, refreshIndexCache, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
 			if err != nil {
 				return err
 			}
@@ -201,6 +202,7 @@ func NewEvalCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&experimentalBudgetedPacking, "experimental-budgeted-packing", false, "Trim retrieved eval context to --eval-context-token-budget after ranking")
 	cmd.Flags().BoolVar(&experimentalConceptBackfill, "experimental-concept-backfill", false, "Use the opt-in deterministic concept backfill lane during retrieval evals")
 	cmd.Flags().BoolVar(&experimentalGlossaryConcepts, "experimental-glossary-concepts", false, "Gate experimental concept backfill through repo-local glossary evidence during retrieval evals")
+	cmd.Flags().BoolVar(&experimentalTieredConceptOutput, "experimental-tiered-concept-output", false, "Demote lower-confidence concept backfill artifacts to a separate related tier during retrieval evals")
 	cmd.Flags().StringVar(&evalIndexCacheDir, "eval-index-cache-dir", "", "Directory for strict indexed eval corpus cache; disabled when empty")
 	cmd.Flags().BoolVar(&refreshIndexCache, "refresh-index-cache", false, "Refresh the indexed eval corpus cache entry instead of reusing it")
 	cmd.Flags().IntVar(&maxCorpusFiles, "eval-max-corpus-files", 0, "Maximum indexed eval corpus artifacts after indexing; 0 means unlimited")

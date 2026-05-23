@@ -88,34 +88,35 @@ func (ApproxTokenCounter) Profile() TokenizerProfile {
 }
 
 type Options struct {
-	JSON                         bool
-	MinRecall                    *float64
-	MinMeanRecall                *float64
-	MinMustRecall                *float64
-	MinSufficiency               *float64
-	MinReductionFull             *float64
-	CorpusSource                 string
-	CommandUnderTest             string
-	CommandRunner                CommandRunner
-	TokenCounter                 TokenCounter
-	Retriever                    retrieval.Retriever
-	TestCaseArtifacts            bool
-	CodeCommentArtifacts         bool
-	DisableSectionAwareRetrieval bool
-	ExperimentalBalancedEvidence bool
-	ExperimentalBudgetedPacking  bool
-	ExperimentalConceptBackfill  bool
-	ExperimentalGlossaryConcepts bool
-	ContextTokenBudget           int
-	IndexCacheDir                string
-	RefreshIndexCache            bool
-	MaxCorpusFiles               int
-	MaxSourceFiles               int
-	MaxTestCaseArtifacts         int
-	MaxCodeComments              int
-	MaxCaseSeconds               int
-	ProgressWriter               io.Writer
-	ProgressInterval             time.Duration
+	JSON                            bool
+	MinRecall                       *float64
+	MinMeanRecall                   *float64
+	MinMustRecall                   *float64
+	MinSufficiency                  *float64
+	MinReductionFull                *float64
+	CorpusSource                    string
+	CommandUnderTest                string
+	CommandRunner                   CommandRunner
+	TokenCounter                    TokenCounter
+	Retriever                       retrieval.Retriever
+	TestCaseArtifacts               bool
+	CodeCommentArtifacts            bool
+	DisableSectionAwareRetrieval    bool
+	ExperimentalBalancedEvidence    bool
+	ExperimentalBudgetedPacking     bool
+	ExperimentalConceptBackfill     bool
+	ExperimentalGlossaryConcepts    bool
+	ExperimentalTieredConceptOutput bool
+	ContextTokenBudget              int
+	IndexCacheDir                   string
+	RefreshIndexCache               bool
+	MaxCorpusFiles                  int
+	MaxSourceFiles                  int
+	MaxTestCaseArtifacts            int
+	MaxCodeComments                 int
+	MaxCaseSeconds                  int
+	ProgressWriter                  io.Writer
+	ProgressInterval                time.Duration
 }
 
 type CommandRunner func(fixtureAbs string, cases []CaseSpec) (map[string]CommandCaseOutput, error)
@@ -228,61 +229,72 @@ type MissClassDiagnostic struct {
 }
 
 type CaseResult struct {
-	ID                            string                  `json:"id"`
-	Query                         string                  `json:"query"`
-	CaseDurationMS                int64                   `json:"case_duration_ms,omitempty"`
-	CaseBudgetExceeded            bool                    `json:"case_budget_exceeded,omitempty"`
-	CaseBudgetSeconds             int                     `json:"case_budget_seconds,omitempty"`
-	DevSpecsTokens                int                     `json:"devspecs_tokens"`
-	FullPlanningTokens            int                     `json:"full_planning_tokens"`
-	AllMarkdownTokens             int                     `json:"all_markdown_tokens"`
-	FullCandidateCorpusTokens     int                     `json:"full_candidate_corpus_tokens"`
-	QueryFileBaselineTokens       int                     `json:"query_file_baseline_tokens"`
-	PreBudgetDevSpecsTokens       int                     `json:"pre_budget_devspecs_tokens,omitempty"`
-	ContextTokenBudget            int                     `json:"context_token_budget,omitempty"`
-	ContextBudgetDroppedCount     int                     `json:"context_budget_dropped_count,omitempty"`
-	ContextBudgetDroppedArtifacts []string                `json:"context_budget_dropped_artifacts,omitempty"`
-	TokenReductionVsFullPlanning  float64                 `json:"token_reduction_vs_full_planning"`
-	TokenReductionVsAllMarkdown   float64                 `json:"token_reduction_vs_all_markdown"`
-	TokenReductionVsFullCandidate float64                 `json:"token_reduction_vs_full_candidate_corpus"`
-	TokenReductionVsQueryFile     float64                 `json:"token_reduction_vs_query_file_baseline"`
-	ExpectedRelevantCount         int                     `json:"expected_relevant_count"`
-	RelevantRetrieved             int                     `json:"relevant_retrieved"`
-	ArtifactRecall                float64                 `json:"artifact_recall"`
-	MustExpectedCount             int                     `json:"must_expected_count"`
-	MustRelevantRetrieved         int                     `json:"must_relevant_retrieved"`
-	MustHaveRecall                float64                 `json:"must_have_recall"`
-	HelpfulExpectedCount          int                     `json:"helpful_expected_count"`
-	HelpfulRelevantRetrieved      int                     `json:"helpful_relevant_retrieved"`
-	HelpfulRecall                 float64                 `json:"helpful_recall"`
-	BackgroundExpectedCount       int                     `json:"background_expected_count"`
-	BackgroundRelevantRetrieved   int                     `json:"background_relevant_retrieved"`
-	BackgroundRecall              float64                 `json:"background_recall"`
-	ArtifactsIncluded             []string                `json:"artifacts_included"`
-	ArtifactReasons               []ArtifactReason        `json:"artifact_reasons"`
-	PackedSectionArtifacts        []string                `json:"packed_section_artifacts,omitempty"`
-	PackedSectionCount            int                     `json:"packed_section_count,omitempty"`
-	SectionSelectedArtifacts      []string                `json:"section_selected_artifacts,omitempty"`
-	SectionSelectedCount          int                     `json:"section_selected_count,omitempty"`
-	FullFileArtifactCount         int                     `json:"full_file_artifact_count,omitempty"`
-	TestCaseArtifactCount         int                     `json:"test_case_artifact_count,omitempty"`
-	CodeCommentArtifactCount      int                     `json:"code_comment_artifact_count,omitempty"`
-	RelevantIncluded              []string                `json:"relevant_included"`
-	IrrelevantIncluded            []string                `json:"irrelevant_included"`
-	ArtifactPrecision             float64                 `json:"artifact_precision"`
-	MissedExpectedRelevant        []string                `json:"missed_expected_relevant"`
-	MissedMustConceptDiagnostics  []ConceptMissDiagnostic `json:"missed_must_concept_diagnostics,omitempty"`
-	UnexpectedExcludedHits        []string                `json:"unexpected_excluded_hits"`
-	ExpectedAvailableCount        int                     `json:"expected_available_count"`
-	ExpectedMissingFromCorpus     []string                `json:"expected_missing_from_corpus,omitempty"`
-	MissedAfterDiscovery          []string                `json:"missed_after_discovery,omitempty"`
-	DiscoveryCoverage             float64                 `json:"discovery_coverage"`
-	RetrievalCoverageOfDiscovered float64                 `json:"retrieval_coverage_of_discovered"`
-	ContextSufficiency            SufficiencyResult       `json:"context_sufficiency"`
-	AgentMetrics                  CaseAgentMetrics        `json:"agent_metrics"`
-	ArtifactGrades                []ArtifactGrade         `json:"artifact_grades,omitempty"`
-	Baselines                     []BaselineMetrics       `json:"baselines"`
-	ThresholdFailures             []string                `json:"threshold_failures,omitempty"`
+	ID                               string                  `json:"id"`
+	Query                            string                  `json:"query"`
+	CaseDurationMS                   int64                   `json:"case_duration_ms,omitempty"`
+	CaseBudgetExceeded               bool                    `json:"case_budget_exceeded,omitempty"`
+	CaseBudgetSeconds                int                     `json:"case_budget_seconds,omitempty"`
+	DevSpecsTokens                   int                     `json:"devspecs_tokens"`
+	FullPlanningTokens               int                     `json:"full_planning_tokens"`
+	AllMarkdownTokens                int                     `json:"all_markdown_tokens"`
+	FullCandidateCorpusTokens        int                     `json:"full_candidate_corpus_tokens"`
+	QueryFileBaselineTokens          int                     `json:"query_file_baseline_tokens"`
+	PreBudgetDevSpecsTokens          int                     `json:"pre_budget_devspecs_tokens,omitempty"`
+	ContextTokenBudget               int                     `json:"context_token_budget,omitempty"`
+	ContextBudgetDroppedCount        int                     `json:"context_budget_dropped_count,omitempty"`
+	ContextBudgetDroppedArtifacts    []string                `json:"context_budget_dropped_artifacts,omitempty"`
+	TokenReductionVsFullPlanning     float64                 `json:"token_reduction_vs_full_planning"`
+	TokenReductionVsAllMarkdown      float64                 `json:"token_reduction_vs_all_markdown"`
+	TokenReductionVsFullCandidate    float64                 `json:"token_reduction_vs_full_candidate_corpus"`
+	TokenReductionVsQueryFile        float64                 `json:"token_reduction_vs_query_file_baseline"`
+	ExpectedRelevantCount            int                     `json:"expected_relevant_count"`
+	RelevantRetrieved                int                     `json:"relevant_retrieved"`
+	ArtifactRecall                   float64                 `json:"artifact_recall"`
+	MustExpectedCount                int                     `json:"must_expected_count"`
+	MustRelevantRetrieved            int                     `json:"must_relevant_retrieved"`
+	MustHaveRecall                   float64                 `json:"must_have_recall"`
+	HelpfulExpectedCount             int                     `json:"helpful_expected_count"`
+	HelpfulRelevantRetrieved         int                     `json:"helpful_relevant_retrieved"`
+	HelpfulRecall                    float64                 `json:"helpful_recall"`
+	BackgroundExpectedCount          int                     `json:"background_expected_count"`
+	BackgroundRelevantRetrieved      int                     `json:"background_relevant_retrieved"`
+	BackgroundRecall                 float64                 `json:"background_recall"`
+	ArtifactsIncluded                []string                `json:"artifacts_included"`
+	ArtifactReasons                  []ArtifactReason        `json:"artifact_reasons"`
+	RelatedArtifacts                 []string                `json:"related_artifacts,omitempty"`
+	RelatedArtifactReasons           []ArtifactReason        `json:"related_artifact_reasons,omitempty"`
+	RelatedDevSpecsTokens            int                     `json:"related_devspecs_tokens,omitempty"`
+	RelatedRelevantIncluded          []string                `json:"related_relevant_included,omitempty"`
+	RelatedIrrelevantIncluded        []string                `json:"related_irrelevant_included,omitempty"`
+	RelatedArtifactPrecision         float64                 `json:"related_artifact_precision,omitempty"`
+	RelatedAgentMetrics              CaseAgentMetrics        `json:"related_agent_metrics,omitempty"`
+	RelatedArtifactGrades            []ArtifactGrade         `json:"related_artifact_grades,omitempty"`
+	CombinedTieredArtifacts          []string                `json:"combined_tiered_artifacts,omitempty"`
+	CombinedTieredDevSpecsTokens     int                     `json:"combined_tiered_devspecs_tokens,omitempty"`
+	CombinedTieredContextSufficiency SufficiencyResult       `json:"combined_tiered_context_sufficiency,omitempty"`
+	PackedSectionArtifacts           []string                `json:"packed_section_artifacts,omitempty"`
+	PackedSectionCount               int                     `json:"packed_section_count,omitempty"`
+	SectionSelectedArtifacts         []string                `json:"section_selected_artifacts,omitempty"`
+	SectionSelectedCount             int                     `json:"section_selected_count,omitempty"`
+	FullFileArtifactCount            int                     `json:"full_file_artifact_count,omitempty"`
+	TestCaseArtifactCount            int                     `json:"test_case_artifact_count,omitempty"`
+	CodeCommentArtifactCount         int                     `json:"code_comment_artifact_count,omitempty"`
+	RelevantIncluded                 []string                `json:"relevant_included"`
+	IrrelevantIncluded               []string                `json:"irrelevant_included"`
+	ArtifactPrecision                float64                 `json:"artifact_precision"`
+	MissedExpectedRelevant           []string                `json:"missed_expected_relevant"`
+	MissedMustConceptDiagnostics     []ConceptMissDiagnostic `json:"missed_must_concept_diagnostics,omitempty"`
+	UnexpectedExcludedHits           []string                `json:"unexpected_excluded_hits"`
+	ExpectedAvailableCount           int                     `json:"expected_available_count"`
+	ExpectedMissingFromCorpus        []string                `json:"expected_missing_from_corpus,omitempty"`
+	MissedAfterDiscovery             []string                `json:"missed_after_discovery,omitempty"`
+	DiscoveryCoverage                float64                 `json:"discovery_coverage"`
+	RetrievalCoverageOfDiscovered    float64                 `json:"retrieval_coverage_of_discovered"`
+	ContextSufficiency               SufficiencyResult       `json:"context_sufficiency"`
+	AgentMetrics                     CaseAgentMetrics        `json:"agent_metrics"`
+	ArtifactGrades                   []ArtifactGrade         `json:"artifact_grades,omitempty"`
+	Baselines                        []BaselineMetrics       `json:"baselines"`
+	ThresholdFailures                []string                `json:"threshold_failures,omitempty"`
 }
 
 type ConceptMissDiagnostic struct {
@@ -298,27 +310,36 @@ type ConceptMissDiagnostic struct {
 }
 
 type Summary struct {
-	Cases                                   int           `json:"cases"`
-	MedianTokenReductionVsFullPlanning      float64       `json:"median_token_reduction_vs_full_planning"`
-	MeanTokenReductionVsFullPlanning        float64       `json:"mean_token_reduction_vs_full_planning"`
-	MedianTokenReductionVsQueryFileBaseline float64       `json:"median_token_reduction_vs_query_file_baseline"`
-	MeanTokenReductionVsQueryFileBaseline   float64       `json:"mean_token_reduction_vs_query_file_baseline"`
-	MeanArtifactRecall                      float64       `json:"mean_artifact_recall"`
-	MeanMustHaveRecall                      float64       `json:"mean_must_have_recall"`
-	MeanHelpfulRecall                       float64       `json:"mean_helpful_recall"`
-	MeanBackgroundRecall                    float64       `json:"mean_background_recall"`
-	MeanArtifactPrecision                   float64       `json:"mean_artifact_precision"`
-	MeanGradedPrecision                     float64       `json:"mean_graded_precision"`
-	MeanPenalizedUtilityPrecision           float64       `json:"mean_penalized_utility_precision"`
-	GradeCounts                             GradeCounts   `json:"grade_counts"`
-	ContextSufficiencyCases                 int           `json:"context_sufficiency_cases"`
-	ContextSufficiencyPassed                int           `json:"context_sufficiency_passed"`
-	ContextSufficiencyPassRate              float64       `json:"context_sufficiency_pass_rate"`
-	AgentMetrics                            AgentMetrics  `json:"agent_metrics"`
-	Pareto                                  ParetoSummary `json:"pareto"`
-	WorstRecallCase                         string        `json:"worst_recall_case"`
-	LargestTokenContextCase                 string        `json:"largest_token_context_case"`
-	FailedThresholdCount                    int           `json:"failed_threshold_count,omitempty"`
+	Cases                                    int           `json:"cases"`
+	MedianTokenReductionVsFullPlanning       float64       `json:"median_token_reduction_vs_full_planning"`
+	MeanTokenReductionVsFullPlanning         float64       `json:"mean_token_reduction_vs_full_planning"`
+	MedianTokenReductionVsQueryFileBaseline  float64       `json:"median_token_reduction_vs_query_file_baseline"`
+	MeanTokenReductionVsQueryFileBaseline    float64       `json:"mean_token_reduction_vs_query_file_baseline"`
+	MeanArtifactRecall                       float64       `json:"mean_artifact_recall"`
+	MeanMustHaveRecall                       float64       `json:"mean_must_have_recall"`
+	MeanHelpfulRecall                        float64       `json:"mean_helpful_recall"`
+	MeanBackgroundRecall                     float64       `json:"mean_background_recall"`
+	MeanArtifactPrecision                    float64       `json:"mean_artifact_precision"`
+	MeanGradedPrecision                      float64       `json:"mean_graded_precision"`
+	MeanPenalizedUtilityPrecision            float64       `json:"mean_penalized_utility_precision"`
+	GradeCounts                              GradeCounts   `json:"grade_counts"`
+	RelatedCases                             int           `json:"related_cases,omitempty"`
+	RelatedArtifactCount                     int           `json:"related_artifact_count,omitempty"`
+	RelatedRelevantCount                     int           `json:"related_relevant_count,omitempty"`
+	MeanRelatedArtifactPrecision             float64       `json:"mean_related_artifact_precision,omitempty"`
+	MeanRelatedGradedPrecision               float64       `json:"mean_related_graded_precision,omitempty"`
+	RelatedGradeCounts                       GradeCounts   `json:"related_grade_counts,omitempty"`
+	CombinedTieredContextSufficiencyCases    int           `json:"combined_tiered_context_sufficiency_cases,omitempty"`
+	CombinedTieredContextSufficiencyPassed   int           `json:"combined_tiered_context_sufficiency_passed,omitempty"`
+	CombinedTieredContextSufficiencyPassRate float64       `json:"combined_tiered_context_sufficiency_pass_rate,omitempty"`
+	ContextSufficiencyCases                  int           `json:"context_sufficiency_cases"`
+	ContextSufficiencyPassed                 int           `json:"context_sufficiency_passed"`
+	ContextSufficiencyPassRate               float64       `json:"context_sufficiency_pass_rate"`
+	AgentMetrics                             AgentMetrics  `json:"agent_metrics"`
+	Pareto                                   ParetoSummary `json:"pareto"`
+	WorstRecallCase                          string        `json:"worst_recall_case"`
+	LargestTokenContextCase                  string        `json:"largest_token_context_case"`
+	FailedThresholdCount                     int           `json:"failed_threshold_count,omitempty"`
 }
 
 type ParetoSummary struct {
@@ -437,6 +458,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 			EvidenceMode:        evidenceMode,
 			ConceptBackfill:     opts.ExperimentalConceptBackfill,
 			GlossaryConcepts:    opts.ExperimentalGlossaryConcepts,
+			TieredConceptOutput: opts.ExperimentalTieredConceptOutput,
 		}
 	}
 	tokenizerProfile := tokenizerProfile(counter)
@@ -538,26 +560,53 @@ func Run(fixture string, opts Options) (*Result, error) {
 			droppedByContextBudget = dropped
 			artifactReasons = retrieval.ExplainCandidates(devspecsFiles, c.Query)
 		}
+		primaryFiles := devspecsFiles
+		relatedFiles := []File{}
+		relatedReasons := []ArtifactReason{}
+		if opts.ExperimentalTieredConceptOutput {
+			primaryFiles, relatedFiles = splitPackTierFiles(devspecsFiles)
+			primaryReasons, splitRelatedReasons := splitArtifactReasonsByFiles(artifactReasons, relatedFiles)
+			devspecsFiles = primaryFiles
+			artifactReasons = primaryReasons
+			relatedReasons = splitRelatedReasons
+		}
 		devContext := renderContext(c.Query, devspecsFiles)
 		if commandOutputs != nil {
 			if output := commandOutputs[c.ID]; output.Context != "" {
 				devContext = output.Context
 			}
 		}
+		relatedContext := ""
+		combinedTieredFiles := devspecsFiles
+		combinedTieredContext := devContext
+		if opts.ExperimentalTieredConceptOutput {
+			relatedContext = renderContext(c.Query+" related evidence", relatedFiles)
+			combinedTieredFiles = append(append([]File(nil), primaryFiles...), relatedFiles...)
+			combinedTieredContext = renderContext(c.Query, combinedTieredFiles)
+		}
+		relatedTokens := 0
+		if len(relatedFiles) > 0 {
+			relatedTokens = counter.Count(relatedContext)
+		}
 		queryContext := renderContext(c.Query, queryFiles)
 
 		cr := CaseResult{
-			ID:                        c.ID,
-			Query:                     c.Query,
-			DevSpecsTokens:            counter.Count(devContext),
-			FullPlanningTokens:        counter.Count(fullContext),
-			AllMarkdownTokens:         counter.Count(allMarkdownContext),
-			FullCandidateCorpusTokens: counter.Count(fullCandidateContext),
-			QueryFileBaselineTokens:   counter.Count(queryContext),
-			PreBudgetDevSpecsTokens:   preBudgetTokens,
-			ContextTokenBudget:        contextTokenBudgetForCase(opts),
-			ArtifactsIncluded:         rels(devspecsFiles),
-			ArtifactReasons:           artifactReasons,
+			ID:                           c.ID,
+			Query:                        c.Query,
+			DevSpecsTokens:               counter.Count(devContext),
+			FullPlanningTokens:           counter.Count(fullContext),
+			AllMarkdownTokens:            counter.Count(allMarkdownContext),
+			FullCandidateCorpusTokens:    counter.Count(fullCandidateContext),
+			QueryFileBaselineTokens:      counter.Count(queryContext),
+			PreBudgetDevSpecsTokens:      preBudgetTokens,
+			ContextTokenBudget:           contextTokenBudgetForCase(opts),
+			ArtifactsIncluded:            rels(devspecsFiles),
+			ArtifactReasons:              artifactReasons,
+			RelatedArtifacts:             rels(relatedFiles),
+			RelatedArtifactReasons:       relatedReasons,
+			RelatedDevSpecsTokens:        relatedTokens,
+			CombinedTieredArtifacts:      tieredArtifactsForCase(opts, combinedTieredFiles),
+			CombinedTieredDevSpecsTokens: tieredTokensForCase(opts, counter.Count(combinedTieredContext)),
 			Baselines: []BaselineMetrics{
 				baselineMetrics("full_planning_corpus", "planning/intent docs only: openspec/**/*.md, docs/**/*.md, .cursor/**/*.md, .claude/**/*.md, plans/**/*.md, scratch/**/*.md", false, fullPlanning, expectedPaths(c.ExpectedRelevant), counter.Count(fullContext)),
 				baselineMetrics("all_markdown", "all *.md files, excluding ignored dirs and cases.yaml", false, allMarkdown, expectedPaths(c.ExpectedRelevant), counter.Count(allMarkdownContext)),
@@ -576,6 +625,10 @@ func Run(fixture string, opts Options) (*Result, error) {
 		applyDiscoveryDiagnostics(&cr, c, corpusPaths)
 		applyConceptMissDiagnostics(&cr, c, queryFiles, opts.ExperimentalGlossaryConcepts)
 		cr.ContextSufficiency = evaluateSufficiency(c.SuccessCriteria, devContext, cr.ArtifactsIncluded)
+		if opts.ExperimentalTieredConceptOutput {
+			cr.CombinedTieredContextSufficiency = evaluateSufficiency(c.SuccessCriteria, combinedTieredContext, cr.CombinedTieredArtifacts)
+			applyRelatedTierMetrics(&cr, c, relatedFiles, relatedReasons)
+		}
 		applyAgentCaseMetrics(&cr, c, devspecsFiles)
 		cr.CaseDurationMS = casePhase.durationMS()
 		if opts.MaxCaseSeconds > 0 && cr.CaseDurationMS > int64(opts.MaxCaseSeconds)*1000 {
@@ -1602,6 +1655,51 @@ func rels(files []File) []string {
 	return out
 }
 
+func splitPackTierFiles(files []File) ([]File, []File) {
+	primary := make([]File, 0, len(files))
+	var related []File
+	for _, f := range files {
+		switch retrieval.CandidatePackTier(f) {
+		case retrieval.PackTierRelated, retrieval.PackTierDiagnostic:
+			related = append(related, f)
+		default:
+			primary = append(primary, f)
+		}
+	}
+	return primary, related
+}
+
+func splitArtifactReasonsByFiles(reasons []ArtifactReason, relatedFiles []File) ([]ArtifactReason, []ArtifactReason) {
+	if len(relatedFiles) == 0 {
+		return reasons, nil
+	}
+	related := stringSet(rels(relatedFiles))
+	primaryReasons := make([]ArtifactReason, 0, len(reasons))
+	relatedReasons := make([]ArtifactReason, 0, len(relatedFiles))
+	for _, reason := range reasons {
+		if related[filepath.ToSlash(reason.Path)] {
+			relatedReasons = append(relatedReasons, reason)
+			continue
+		}
+		primaryReasons = append(primaryReasons, reason)
+	}
+	return primaryReasons, relatedReasons
+}
+
+func tieredArtifactsForCase(opts Options, files []File) []string {
+	if !opts.ExperimentalTieredConceptOutput {
+		return nil
+	}
+	return rels(files)
+}
+
+func tieredTokensForCase(opts Options, tokens int) int {
+	if !opts.ExperimentalTieredConceptOutput {
+		return 0
+	}
+	return tokens
+}
+
 func expectedPaths(items []ExpectedArtifact) []string {
 	out := make([]string, 0, len(items))
 	for _, item := range items {
@@ -1824,6 +1922,24 @@ func applyArtifactMetrics(cr *CaseResult, spec CaseSpec) {
 	if len(cr.ArtifactsIncluded) > 0 {
 		cr.ArtifactPrecision = float64(len(cr.RelevantIncluded)) / float64(len(cr.ArtifactsIncluded))
 	}
+}
+
+func applyRelatedTierMetrics(cr *CaseResult, spec CaseSpec, relatedFiles []File, relatedReasons []ArtifactReason) {
+	if len(relatedFiles) == 0 {
+		return
+	}
+	related := CaseResult{
+		ArtifactsIncluded:  rels(relatedFiles),
+		ArtifactReasons:    relatedReasons,
+		ContextSufficiency: cr.CombinedTieredContextSufficiency,
+	}
+	applyArtifactMetrics(&related, spec)
+	applyAgentCaseMetrics(&related, spec, relatedFiles)
+	cr.RelatedRelevantIncluded = related.RelevantIncluded
+	cr.RelatedIrrelevantIncluded = related.IrrelevantIncluded
+	cr.RelatedArtifactPrecision = related.ArtifactPrecision
+	cr.RelatedAgentMetrics = related.AgentMetrics
+	cr.RelatedArtifactGrades = related.ArtifactGrades
 }
 
 func applyDiscoveryDiagnostics(cr *CaseResult, spec CaseSpec, corpusPaths map[string]bool) {
@@ -2132,6 +2248,7 @@ func summarize(cases []CaseResult) Summary {
 	mustCases := 0
 	helpfulCases := 0
 	backgroundCases := 0
+	relatedCases := 0
 	for _, c := range cases {
 		reductionsFull = append(reductionsFull, c.TokenReductionVsFullPlanning)
 		reductionsQueryFile = append(reductionsQueryFile, c.TokenReductionVsQueryFile)
@@ -2154,11 +2271,25 @@ func summarize(cases []CaseResult) Summary {
 		s.MeanGradedPrecision += c.AgentMetrics.GradedPrecision
 		s.MeanPenalizedUtilityPrecision += c.AgentMetrics.PenalizedUtilityPrecision
 		addGradeCounts(&s.GradeCounts, c.AgentMetrics.GradeCounts)
+		if len(c.RelatedArtifacts) > 0 {
+			relatedCases++
+			s.RelatedArtifactCount += len(c.RelatedArtifacts)
+			s.RelatedRelevantCount += len(c.RelatedRelevantIncluded)
+			s.MeanRelatedArtifactPrecision += c.RelatedArtifactPrecision
+			s.MeanRelatedGradedPrecision += c.RelatedAgentMetrics.GradedPrecision
+			addGradeCounts(&s.RelatedGradeCounts, c.RelatedAgentMetrics.GradeCounts)
+		}
 		s.FailedThresholdCount += len(c.ThresholdFailures)
 		if c.ContextSufficiency.Configured {
 			s.ContextSufficiencyCases++
 			if c.ContextSufficiency.Passed {
 				s.ContextSufficiencyPassed++
+			}
+		}
+		if c.CombinedTieredContextSufficiency.Configured {
+			s.CombinedTieredContextSufficiencyCases++
+			if c.CombinedTieredContextSufficiency.Passed {
+				s.CombinedTieredContextSufficiencyPassed++
 			}
 		}
 		if c.ArtifactRecall < worstRecall {
@@ -2186,8 +2317,16 @@ func summarize(cases []CaseResult) Summary {
 	s.MeanArtifactPrecision /= n
 	s.MeanGradedPrecision /= n
 	s.MeanPenalizedUtilityPrecision /= n
+	s.RelatedCases = relatedCases
+	if relatedCases > 0 {
+		s.MeanRelatedArtifactPrecision /= float64(relatedCases)
+		s.MeanRelatedGradedPrecision /= float64(relatedCases)
+	}
 	if s.ContextSufficiencyCases > 0 {
 		s.ContextSufficiencyPassRate = float64(s.ContextSufficiencyPassed) / float64(s.ContextSufficiencyCases)
+	}
+	if s.CombinedTieredContextSufficiencyCases > 0 {
+		s.CombinedTieredContextSufficiencyPassRate = float64(s.CombinedTieredContextSufficiencyPassed) / float64(s.CombinedTieredContextSufficiencyCases)
 	}
 	s.MedianTokenReductionVsFullPlanning = median(reductionsFull)
 	s.MedianTokenReductionVsQueryFileBaseline = median(reductionsQueryFile)
@@ -2329,8 +2468,20 @@ func FormatText(r *Result) string {
 	fmt.Fprintf(&b, "- Mean artifact precision: %s\n", pct(r.Summary.MeanArtifactPrecision))
 	fmt.Fprintf(&b, "- Mean graded precision: %s\n", pct(r.Summary.MeanGradedPrecision))
 	fmt.Fprintf(&b, "- Mean penalized utility precision: %s\n", pct(r.Summary.MeanPenalizedUtilityPrecision))
+	if r.Summary.RelatedArtifactCount > 0 {
+		fmt.Fprintf(&b, "- Related tier: %d artifacts / precision %s / graded precision %s\n",
+			r.Summary.RelatedArtifactCount,
+			pct(r.Summary.MeanRelatedArtifactPrecision),
+			pct(r.Summary.MeanRelatedGradedPrecision))
+	}
 	if r.Summary.ContextSufficiencyCases > 0 {
 		fmt.Fprintf(&b, "- Context sufficiency pass rate: %d/%d = %s\n", r.Summary.ContextSufficiencyPassed, r.Summary.ContextSufficiencyCases, pct(r.Summary.ContextSufficiencyPassRate))
+	}
+	if r.Summary.CombinedTieredContextSufficiencyCases > 0 {
+		fmt.Fprintf(&b, "- Combined tiered sufficiency pass rate: %d/%d = %s\n",
+			r.Summary.CombinedTieredContextSufficiencyPassed,
+			r.Summary.CombinedTieredContextSufficiencyCases,
+			pct(r.Summary.CombinedTieredContextSufficiencyPassRate))
 	}
 	fmt.Fprintf(&b, "- Must-hit@3: %s\n", pct(r.AgentMetrics.MustHitAt3))
 	fmt.Fprintf(&b, "- Mean first must rank: %.2f\n", r.AgentMetrics.MeanFirstMustRank)
@@ -2458,6 +2609,13 @@ func FormatText(r *Result) string {
 			fmt.Fprintf(&b, "- Sufficiency: not configured\n")
 		}
 		fmt.Fprintf(&b, "- Artifacts included: %s\n", listOrNone(c.ArtifactsIncluded))
+		if len(c.RelatedArtifacts) > 0 {
+			fmt.Fprintf(&b, "- Related artifacts: %s\n", listOrNone(c.RelatedArtifacts))
+			fmt.Fprintf(&b, "- Related precision: %d/%d = %s\n", len(c.RelatedRelevantIncluded), len(c.RelatedArtifacts), pct(c.RelatedArtifactPrecision))
+			if c.CombinedTieredContextSufficiency.Configured {
+				fmt.Fprintf(&b, "- Combined tiered sufficiency: %s\n", passFail(c.CombinedTieredContextSufficiency.Passed))
+			}
+		}
 		fmt.Fprintf(&b, "- Relevant included: %s\n", listOrNone(c.RelevantIncluded))
 		fmt.Fprintf(&b, "- Irrelevant included: %s\n", listOrNone(c.IrrelevantIncluded))
 		fmt.Fprintf(&b, "- Missed: %s\n", listOrNone(c.MissedExpectedRelevant))
