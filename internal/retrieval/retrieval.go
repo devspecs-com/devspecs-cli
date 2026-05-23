@@ -326,6 +326,11 @@ func balancedEvidenceForCandidate(candidate scoredCandidate, stats balancedEvide
 	if candidate.profile.identifierMatches > 0 && result.anchorScore > 0 {
 		add(clampFloat(float64(candidate.profile.identifierMatches)*0.8, 0, 2.0), true, "anchored identifier match")
 	}
+	if candidate.role == "test_case" {
+		if anchor := testNameAnchorScore(c, queryLower); anchor.score > 0 {
+			add(clampFloat(anchor.score*0.35, 0, 2.5), true, anchor.reason)
+		}
+	}
 
 	if candidate.profile.coreTerms >= 3 && result.anchorScore == 0 && !candidate.sourceFile {
 		add(-2.5, false, "body-only evidence dampening")
@@ -2050,13 +2055,17 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 			score -= 10.0
 		}
 	case "test_case":
-		if hasTestBehaviorIntent(queryLower) || explicitSourceIntent || profile.identifierMatches > 0 {
+		testAnchor := testNameAnchorScore(c, queryLower)
+		if hasTestBehaviorIntent(queryLower) || explicitSourceIntent || profile.identifierMatches > 0 || testAnchor.score > 0 {
 			score += 2.5
 			if profile.pathTitleCoreMatches > 0 {
 				score += 2.0
 			}
 			if profile.identifierMatches > 0 {
 				score += float64(profile.identifierMatches) * 1.5
+			}
+			if testAnchor.score > 0 {
+				score += testAnchor.score
 			}
 		} else {
 			score = -100.0
@@ -2289,6 +2298,10 @@ func candidateMatchProfile(c Candidate, queryLower string) matchProfile {
 		profile.identifierTerms++
 		if strings.Contains(pathLower, term) || strings.Contains(titleLower, term) || strings.Contains(bodyLower, term) {
 			profile.identifierMatches++
+			continue
+		}
+		if isTestCaseCandidate(c) && testNameAnchorContainsCompact(c, term) {
+			profile.identifierMatches++
 		}
 	}
 	return profile
@@ -2320,11 +2333,234 @@ func coreQueryTerms(queryLower string) []string {
 func identifierQueryTerms(queryLower string) []string {
 	var out []string
 	for _, term := range meaningfulTerms(queryLower) {
-		if strings.ContainsAny(term, "_.-") {
+		if strings.ContainsAny(term, "_.-") || looksLikeCompactTestIdentifier(term) {
 			out = append(out, term)
 		}
 	}
 	return out
+}
+
+type testAnchorScore struct {
+	score  float64
+	reason string
+}
+
+func testNameAnchorScore(c Candidate, queryLower string) testAnchorScore {
+	if !isTestCaseCandidate(c) {
+		return testAnchorScore{}
+	}
+	anchors := testNameAnchors(c)
+	if len(anchors) == 0 {
+		return testAnchorScore{}
+	}
+	queryTerms := meaningfulTestAnchorTerms(queryLower)
+	if len(queryTerms) == 0 {
+		return testAnchorScore{}
+	}
+	for _, anchor := range anchors {
+		if anchor.compact == "" {
+			continue
+		}
+		for _, term := range queryTerms {
+			if term == anchor.compact || term == anchor.withoutTestPrefix {
+				return testAnchorScore{score: 10.0, reason: "exact test-name anchor"}
+			}
+		}
+	}
+	if !hasTestBehaviorIntent(queryLower) {
+		return testAnchorScore{}
+	}
+	querySet := map[string]bool{}
+	for _, term := range queryTerms {
+		if len(term) >= 3 {
+			querySet[term] = true
+		}
+	}
+	bestMatches := 0
+	bestAnchorTerms := 0
+	for _, anchor := range anchors {
+		if len(anchor.parts) == 0 {
+			continue
+		}
+		matches := 0
+		anchorTerms := 0
+		for _, part := range anchor.parts {
+			if genericTestAnchorTerm(part) {
+				continue
+			}
+			anchorTerms++
+			if querySet[part] {
+				matches++
+			}
+		}
+		if matches > bestMatches || (matches == bestMatches && anchorTerms > bestAnchorTerms) {
+			bestMatches = matches
+			bestAnchorTerms = anchorTerms
+		}
+	}
+	switch {
+	case bestMatches >= 4:
+		return testAnchorScore{score: 7.0, reason: "test-name token anchor"}
+	case bestMatches >= 3:
+		return testAnchorScore{score: 5.5, reason: "test-name token anchor"}
+	case bestMatches >= 2 && bestAnchorTerms <= 3:
+		return testAnchorScore{score: 3.5, reason: "test-name token anchor"}
+	default:
+		return testAnchorScore{}
+	}
+}
+
+type normalizedTestAnchor struct {
+	parts             []string
+	compact           string
+	withoutTestPrefix string
+}
+
+func testNameAnchors(c Candidate) []normalizedTestAnchor {
+	seen := map[string]bool{}
+	var anchors []normalizedTestAnchor
+	add := func(value string) {
+		anchor := normalizeTestAnchor(value)
+		if anchor.compact == "" || seen[anchor.compact] {
+			return
+		}
+		seen[anchor.compact] = true
+		anchors = append(anchors, anchor)
+	}
+	add(c.Title)
+	if c.Metadata != nil {
+		add(c.Metadata["test_name"])
+		add(c.Metadata["parent_title"])
+	}
+	if c.Body != "" {
+		for _, line := range strings.Split(c.Body, "\n") {
+			line = strings.TrimSpace(line)
+			if value, ok := strings.CutPrefix(line, "Test:"); ok {
+				add(value)
+			}
+		}
+	}
+	return anchors
+}
+
+func normalizeTestAnchor(value string) normalizedTestAnchor {
+	parts := splitIdentifierParts(value)
+	parts = filterEmptyStrings(parts)
+	compact := strings.Join(parts, "")
+	withoutPrefix := compact
+	if strings.HasPrefix(withoutPrefix, "test") && len(withoutPrefix) > 4 {
+		withoutPrefix = strings.TrimPrefix(withoutPrefix, "test")
+	}
+	return normalizedTestAnchor{parts: parts, compact: compact, withoutTestPrefix: withoutPrefix}
+}
+
+func meaningfulTestAnchorTerms(queryLower string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(term string) {
+		term = strings.ToLower(strings.TrimSpace(term))
+		if term == "" || seen[term] || genericTestAnchorTerm(term) {
+			return
+		}
+		seen[term] = true
+		out = append(out, term)
+	}
+	for _, term := range meaningfulTerms(queryLower) {
+		add(term)
+		if strings.ContainsAny(term, "_.-") {
+			for _, part := range splitIdentifier(term) {
+				add(part)
+			}
+		}
+		if looksLikeCompactTestIdentifier(term) {
+			add(strings.TrimPrefix(term, "test"))
+		}
+	}
+	return out
+}
+
+func testNameAnchorContainsCompact(c Candidate, term string) bool {
+	term = strings.ToLower(strings.TrimSpace(term))
+	if term == "" {
+		return false
+	}
+	for _, anchor := range testNameAnchors(c) {
+		if anchor.compact == term || anchor.withoutTestPrefix == term {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeCompactTestIdentifier(term string) bool {
+	term = strings.ToLower(strings.TrimSpace(term))
+	if len(term) < 9 || !strings.HasPrefix(term, "test") {
+		return false
+	}
+	hasLetter := false
+	for _, r := range term[4:] {
+		if unicode.IsDigit(r) {
+			continue
+		}
+		if unicode.IsLetter(r) {
+			hasLetter = true
+			continue
+		}
+		return false
+	}
+	return hasLetter
+}
+
+func splitIdentifierParts(s string) []string {
+	var out []string
+	var current []rune
+	flush := func() {
+		if len(current) == 0 {
+			return
+		}
+		out = append(out, strings.ToLower(string(current)))
+		current = current[:0]
+	}
+	var prev rune
+	for _, r := range s {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			flush()
+			prev = 0
+			continue
+		}
+		if len(current) > 0 {
+			nextStartsWord := unicode.IsUpper(r) && (unicode.IsLower(prev) || unicode.IsDigit(prev))
+			if nextStartsWord {
+				flush()
+			}
+		}
+		current = append(current, r)
+		prev = r
+	}
+	flush()
+	return out
+}
+
+func filterEmptyStrings(values []string) []string {
+	out := values[:0]
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func genericTestAnchorTerm(term string) bool {
+	switch strings.ToLower(strings.TrimSpace(term)) {
+	case "a", "an", "and", "are", "behavior", "behaviour", "case", "cases",
+		"cover", "covers", "covered", "coverage", "does", "for", "how", "in",
+		"protect", "protects", "protected", "regression", "test", "tests",
+		"testing", "the", "to", "what", "when", "where", "which", "with":
+		return true
+	default:
+		return false
+	}
 }
 
 func bodyHitCap(role string, sourceFile bool, term string) int {
@@ -2577,7 +2813,7 @@ func hasNonIntentModeIntent(queryLower, mode string) bool {
 			"instruction", "instructions", "rule", "rules", "policy", "policies",
 			"procedure", "procedures", "runbook", "runbooks", "playbook", "skill",
 			"skills", "standard", "standards", "convention", "conventions",
-			"claude", "agents", "maintainer", "maintainers", "codeowners",
+			"agent", "agents", "claude", "codex", "maintainer", "maintainers", "codeowners",
 			"security policy", "contributing",
 		)
 	case "model":
@@ -2635,6 +2871,10 @@ func fileRole(path string) string {
 	case strings.HasPrefix(path, "docs/prd/") || strings.Contains(path, "/prd/"):
 		return "prd"
 	case strings.HasPrefix(path, "docs/prds/") || strings.Contains(path, "/prds/"):
+		return "prd"
+	case strings.HasPrefix(path, "docs/product-specs/") || strings.Contains(path, "/docs/product-specs/") || strings.Contains(path, "/product-specs/"):
+		return "prd"
+	case isRequirementDocPath(path):
 		return "prd"
 	case strings.HasPrefix(path, "docs/rfcs/") || strings.HasPrefix(path, "docs/rfc/") || strings.HasPrefix(path, "rfcs/") || strings.HasPrefix(path, "rfc/") || strings.Contains(path, "/docs/rfcs/") || strings.Contains(path, "/docs/rfc/") || strings.Contains(path, "/rfcs/") || strings.Contains(path, "/rfc/"):
 		return "rfc"
@@ -2716,6 +2956,8 @@ func kindSubtypeRole(c Candidate) string {
 		return "adr"
 	case kind == "requirements" && subtype == "prd":
 		return "prd"
+	case kind == "requirements":
+		return "prd"
 	case kind == "plan":
 		return "plan"
 	case kind == "design":
@@ -2794,6 +3036,17 @@ func isAgentInstructionPath(path string) bool {
 		strings.HasSuffix(path, ".instructions.md") ||
 		strings.Contains(path, "/agents/") ||
 		strings.Contains(path, "/instructions/")
+}
+
+func isRequirementDocPath(path string) bool {
+	path = strings.Trim(strings.ToLower(filepath.ToSlash(path)), "/")
+	base := filepath.Base(path)
+	return strings.Contains(path, "/requirements/") ||
+		strings.Contains(path, "/docs/requirements/") ||
+		strings.HasPrefix(base, "req_") ||
+		strings.HasPrefix(base, "req-") ||
+		strings.HasSuffix(base, "_req.md") ||
+		strings.HasSuffix(base, "-req.md")
 }
 
 func pathDepth(path string) int {
@@ -2876,7 +3129,7 @@ func hasQueryWord(queryLower, word string) bool {
 
 func hasIdentifierTerm(terms map[string]float64) bool {
 	for term := range terms {
-		if strings.ContainsAny(term, "_.-") {
+		if strings.ContainsAny(term, "_.-") || looksLikeCompactTestIdentifier(term) {
 			return true
 		}
 	}
@@ -2973,6 +3226,9 @@ func expandedTerms(query string) map[string]float64 {
 		"acceptance", "criteria", "create", "creating", "document", "documents",
 		"documentation", "generate", "generating", "instruction", "instructions",
 		"requirement", "requirements", "user", "users",
+		"behavior", "behaviour", "case", "cases", "cover", "covers", "covered",
+		"coverage", "protect", "protects", "protected", "regression", "test",
+		"tests", "testing",
 	} {
 		if _, ok := terms[genericTerm]; ok {
 			terms[genericTerm] = 0.25
@@ -3133,6 +3389,9 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 		if evidenceReasons := strings.TrimSpace(c.Metadata["retrieval_evidence_reasons"]); evidenceReasons != "" {
 			reasons = append(reasons, "balanced evidence: "+strings.ReplaceAll(evidenceReasons, "\n", "; "))
 		}
+	}
+	if anchor := testNameAnchorScore(c, queryLower); anchor.score > 0 {
+		reasons = append(reasons, anchor.reason)
 	}
 	for term := range terms {
 		if term == "" {

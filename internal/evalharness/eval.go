@@ -203,6 +203,7 @@ type Diagnostics struct {
 	ExpectedMissingFromCorpus      []string                 `json:"expected_missing_from_corpus,omitempty"`
 	MissedAfterDiscovery           []string                 `json:"missed_after_discovery,omitempty"`
 	RoleSummaries                  []RoleDiagnostic         `json:"role_summaries,omitempty"`
+	MissClassSummaries             []MissClassDiagnostic    `json:"miss_class_summaries,omitempty"`
 	OpenSpec                       *openspecmetrics.Metrics `json:"openspec,omitempty"`
 }
 
@@ -216,6 +217,12 @@ type RoleDiagnostic struct {
 	MissedAfterDiscovery          int     `json:"missed_after_discovery"`
 	DiscoveryCoverage             float64 `json:"discovery_coverage"`
 	RetrievalCoverageOfDiscovered float64 `json:"retrieval_coverage_of_discovered"`
+}
+
+type MissClassDiagnostic struct {
+	Class    string   `json:"class"`
+	Count    int      `json:"count"`
+	Examples []string `json:"examples,omitempty"`
 }
 
 type CaseResult struct {
@@ -1836,6 +1843,18 @@ func summarizeDiagnostics(cases []CaseResult) Diagnostics {
 	missingFromCorpus := map[string]bool{}
 	missedAfterDiscovery := map[string]bool{}
 	roles := map[string]*RoleDiagnostic{}
+	missClasses := map[string]*MissClassDiagnostic{}
+	addMissClass := func(class, path string) {
+		diag := missClasses[class]
+		if diag == nil {
+			diag = &MissClassDiagnostic{Class: class}
+			missClasses[class] = diag
+		}
+		diag.Count++
+		if len(diag.Examples) < 8 {
+			diag.Examples = append(diag.Examples, path)
+		}
+	}
 	for _, c := range cases {
 		out.ExpectedRelevantCount += c.ExpectedRelevantCount
 		out.ExpectedAvailableCount += c.ExpectedAvailableCount
@@ -1843,9 +1862,11 @@ func summarizeDiagnostics(cases []CaseResult) Diagnostics {
 		out.MissedAfterDiscoveryCount += len(c.MissedAfterDiscovery)
 		for _, path := range c.ExpectedMissingFromCorpus {
 			missingFromCorpus[path] = true
+			addMissClass("missing_from_corpus/"+diagnosticRole(path)+"/"+diagnosticAnchorClass(path), path)
 		}
 		for _, path := range c.MissedAfterDiscovery {
 			missedAfterDiscovery[path] = true
+			addMissClass("missed_after_discovery/"+diagnosticRole(path)+"/"+diagnosticAnchorClass(path), path)
 		}
 		for _, path := range append([]string{}, c.RelevantIncluded...) {
 			role := diagnosticRole(path)
@@ -1901,6 +1922,16 @@ func summarizeDiagnostics(cases []CaseResult) Diagnostics {
 		}
 		out.RoleSummaries = append(out.RoleSummaries, diag)
 	}
+	classNames := make([]string, 0, len(missClasses))
+	for class := range missClasses {
+		classNames = append(classNames, class)
+	}
+	sort.Strings(classNames)
+	for _, class := range classNames {
+		diag := *missClasses[class]
+		sort.Strings(diag.Examples)
+		out.MissClassSummaries = append(out.MissClassSummaries, diag)
+	}
 	return out
 }
 
@@ -1930,18 +1961,72 @@ func diagnosticRole(path string) string {
 		return "rfc"
 	case strings.HasPrefix(path, "docs/prd/") || strings.HasPrefix(path, "docs/prds/") || strings.Contains(path, "/docs/prd/") || strings.Contains(path, "/docs/prds/"):
 		return "prd"
+	case strings.HasPrefix(path, "docs/product-specs/") || strings.Contains(path, "/docs/product-specs/") || strings.Contains(path, "/product-specs/"):
+		return "prd"
 	case strings.HasPrefix(path, ".cursor/"):
 		return "cursor_plan"
 	case strings.HasPrefix(path, ".claude/"):
+		if strings.Contains(path, "/skills/") {
+			return "skill"
+		}
 		return "claude_plan"
 	case strings.HasPrefix(path, ".codex/"):
+		if strings.Contains(path, "/skills/") {
+			return "skill"
+		}
 		return "codex_plan"
+	case strings.Contains(path, "/agents/") || strings.HasSuffix(path, ".agent.md"):
+		return "agent_instruction"
 	case strings.Contains(path, "/plans/") || strings.HasPrefix(path, "plans/") || strings.HasSuffix(path, ".plan.md"):
 		return "plan"
+	case strings.Contains(path, "/requirements/") || strings.HasPrefix(filepath.Base(path), "req_") || strings.HasPrefix(filepath.Base(path), "req-"):
+		return "prd"
 	case strings.EqualFold(filepath.Ext(path), ".md"):
 		return "markdown"
 	default:
 		return "source"
+	}
+}
+
+func diagnosticAnchorClass(path string) string {
+	path = strings.ToLower(filepath.ToSlash(path))
+	role := diagnosticRole(path)
+	switch {
+	case strings.Contains(path, "#l") && role == "source":
+		return "line_scoped_source"
+	case looksLikeDiagnosticTestPath(path):
+		return "test_or_source_anchor"
+	case role == "source":
+		return "source_anchor"
+	default:
+		return "document_anchor"
+	}
+}
+
+func looksLikeDiagnosticTestPath(path string) bool {
+	path = strings.ToLower(filepath.ToSlash(path))
+	base := filepath.Base(path)
+	ext := strings.ToLower(filepath.Ext(base))
+	name := strings.TrimSuffix(base, ext)
+	switch {
+	case strings.Contains(path, "/tests/") || strings.Contains(path, "/__tests__/") || strings.Contains(path, "/spec/"):
+		return true
+	case strings.HasSuffix(base, "_test.go"):
+		return true
+	case ext == ".py" && (strings.HasPrefix(base, "test_") || strings.HasSuffix(name, "_test")):
+		return true
+	case ext == ".rb" && strings.HasSuffix(base, "_spec.rb"):
+		return true
+	case ext == ".php" && strings.HasSuffix(base, "test.php"):
+		return true
+	case (ext == ".js" || ext == ".jsx" || ext == ".ts" || ext == ".tsx" || ext == ".mjs" || ext == ".cjs") &&
+		(strings.HasSuffix(name, ".test") || strings.HasSuffix(name, ".spec")):
+		return true
+	case (ext == ".java" || ext == ".kt" || ext == ".kts") &&
+		(strings.HasSuffix(name, "test") || strings.HasSuffix(name, "tests") || strings.HasSuffix(name, "spec")):
+		return true
+	default:
+		return false
 	}
 }
 
@@ -2236,6 +2321,16 @@ func FormatText(r *Result) string {
 				role.MissingFromCorpus,
 				role.MissedAfterDiscovery,
 				role.IrrelevantRetrieved)
+		}
+	}
+	if len(r.Diagnostics.MissClassSummaries) > 0 {
+		fmt.Fprintln(&b, "- Miss classes:")
+		for _, class := range r.Diagnostics.MissClassSummaries {
+			fmt.Fprintf(&b, "  - %s: %d", class.Class, class.Count)
+			if len(class.Examples) > 0 {
+				fmt.Fprintf(&b, " (examples: %s)", strings.Join(class.Examples, "; "))
+			}
+			fmt.Fprintln(&b)
 		}
 	}
 	if r.Diagnostics.OpenSpec != nil {

@@ -366,6 +366,99 @@ func TestWeightedFilesRetrieverV0_UsesTestCasesForBehaviorQueries(t *testing.T) 
 	}
 }
 
+func TestWeightedFilesRetrieverV0_AnchorsCamelCaseTestNames(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:    "internal/tools/tool_test.go#L42",
+			Kind:    "source_context",
+			Subtype: "test_case",
+			Title:   "TestPutAndGetExposedTool",
+			Body:    "Test: TestPutAndGetExposedTool\nSource: internal/tools/tool_test.go\nAssertion vocabulary: require equal\n",
+			Metadata: map[string]string{
+				"source_type": "test_case",
+				"test_name":   "TestPutAndGetExposedTool",
+			},
+		},
+		{
+			Path:    "internal/tools/tool_test.go#L90",
+			Kind:    "source_context",
+			Subtype: "test_case",
+			Title:   "TestDeleteHiddenTool",
+			Body:    "Test: TestDeleteHiddenTool\nSource: internal/tools/tool_test.go\n",
+			Metadata: map[string]string{
+				"source_type": "test_case",
+				"test_name":   "TestDeleteHiddenTool",
+			},
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "what tests cover TestPutAndGetExposedTool behavior?")
+	if len(got) == 0 || got[0].Path != "internal/tools/tool_test.go#L42" {
+		t.Fatalf("expected exact test-name anchor first, got %#v", CandidatePaths(got))
+	}
+	reasons := ExplainCandidates(got, "what tests cover TestPutAndGetExposedTool behavior?")
+	if len(reasons) == 0 || !reasonContains(reasons[0].Reasons, "exact test-name anchor") {
+		t.Fatalf("missing exact test-name reason: %#v", reasons)
+	}
+}
+
+func TestWeightedFilesRetrieverV0_AnchorsNaturalLanguageTestNameParts(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:    "internal/tools/tool_test.go#L42",
+			Kind:    "source_context",
+			Subtype: "test_case",
+			Title:   "TestPutAndGetExposedTool",
+			Body:    "Test: TestPutAndGetExposedTool\nSource: internal/tools/tool_test.go\n",
+			Metadata: map[string]string{
+				"source_type": "test_case",
+				"test_name":   "TestPutAndGetExposedTool",
+			},
+		},
+		{
+			Path:    "internal/tools/tool_test.go#L90",
+			Kind:    "source_context",
+			Subtype: "test_case",
+			Title:   "TestPutHiddenTool",
+			Body:    "Test: TestPutHiddenTool\nSource: internal/tools/tool_test.go\n",
+			Metadata: map[string]string{
+				"source_type": "test_case",
+				"test_name":   "TestPutHiddenTool",
+			},
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "what tests cover put and get exposed tool behavior?")
+	if len(got) == 0 || got[0].Path != "internal/tools/tool_test.go#L42" {
+		t.Fatalf("expected token test-name anchor first, got %#v", CandidatePaths(got))
+	}
+	reasons := ExplainCandidates(got, "what tests cover put and get exposed tool behavior?")
+	if len(reasons) == 0 || !reasonContains(reasons[0].Reasons, "test-name token anchor") {
+		t.Fatalf("missing token test-name reason: %#v", reasons)
+	}
+}
+
+func TestWeightedFilesRetrieverV0_AnchorsSnakeCaseTestNames(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:    "tests/tools_test.py#L12",
+			Kind:    "source_context",
+			Subtype: "test_case",
+			Title:   "test_put_and_get_exposed_tool",
+			Body:    "Test: test_put_and_get_exposed_tool\nSource: tests/tools_test.py\n",
+			Metadata: map[string]string{
+				"source_type": "test_case",
+				"test_name":   "test_put_and_get_exposed_tool",
+			},
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "what tests cover test_put_and_get_exposed_tool behavior?")
+	if len(got) == 0 || got[0].Path != "tests/tools_test.py#L12" {
+		t.Fatalf("expected snake-case test-name anchor first, got %#v", CandidatePaths(got))
+	}
+}
+
 func TestWeightedFilesRetrieverV0_DoesNotUseTestCasesForOrdinaryRoadmapQueries(t *testing.T) {
 	candidates := []Candidate{
 		{

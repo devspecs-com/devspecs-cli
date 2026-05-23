@@ -252,7 +252,9 @@ func defaultPaths() []string {
 	return []string{
 		"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans",
 		".claude/notes", ".claude/plans", ".codex/plans", ".codex/notes",
-		"docs/prd", "rfcs", "rfc", "docs/rfcs", "docs/rfc",
+		".claude/skills", ".codex/skills", "agents",
+		"docs/prd", "docs/product-specs", "product-specs", "docs/requirements", "requirements",
+		"rfcs", "rfc", "RFCS", "docs/rfcs", "docs/rfc", "docs/RFCS",
 		"roadmaps", "docs/roadmaps",
 		"docs/design", "docs/design-docs", "design-docs", "docs/technical",
 		"architecture", "docs/architecture",
@@ -264,6 +266,7 @@ func rootGlobs() []string {
 	return []string{
 		"*.spec.md", "*.plan.md", "*.prd.md",
 		"*.rfc.md", "*.roadmap.md", "*.design.md", "*.contract.md", "*.requirements.md",
+		"REQ_*.md", "REQ-*.md", "*_REQ.md", "*-REQ.md",
 	}
 }
 
@@ -367,6 +370,10 @@ func walkNestedDefaultMarkdownFiles(ctx context.Context, repoRoot string) ([]str
 				files = append(files, entries...)
 				return filepath.SkipDir
 			}
+			return nil
+		}
+		if strings.HasSuffix(strings.ToLower(info.Name()), ".md") && isDefaultHighSignalMarkdownFile(rel) {
+			files = append(files, path)
 		}
 		return nil
 	})
@@ -410,6 +417,15 @@ func walkIntentMarkdownCandidates(ctx context.Context, repoRoot string) ([]inten
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(info.Name()), ".md") {
+			return nil
+		}
+		if isDefaultHighSignalMarkdownFile(rel) {
+			candidates = append(candidates, intentMarkdownCandidate{
+				absPath: path,
+				relPath: rel,
+				score:   8,
+				reasons: []string{"intent_high_signal_filename"},
+			})
 			return nil
 		}
 		score, reasons := scoreIntentMarkdownCandidate(path, rel)
@@ -828,9 +844,18 @@ func isDefaultNestedMarkdownDir(rel string) bool {
 		"docs/specs",
 		"docs/plans",
 		".claude/notes",
+		".claude/skills",
+		".codex/skills",
+		"agents",
 		"docs/prd",
+		"docs/product-specs",
+		"product-specs",
+		"docs/requirements",
+		"requirements",
 		"docs/rfcs",
 		"docs/rfc",
+		"docs/RFCS",
+		"RFCS",
 		"roadmaps",
 		"docs/roadmaps",
 		"docs/design",
@@ -845,6 +870,19 @@ func isDefaultNestedMarkdownDir(rel string) bool {
 		}
 	}
 	return false
+}
+
+func isDefaultHighSignalMarkdownFile(rel string) bool {
+	rel = strings.Trim(filepath.ToSlash(strings.ToLower(rel)), "/")
+	base := filepath.Base(rel)
+	switch base {
+	case "agents.md", "agent.md", "claude.md", "codex.md", "gemini.md", "memento.md",
+		"maintainers.md", "governance.md", "proposal_template.md", "proposal-template.md",
+		"prd_template.md", "prd-template.md", "requirements_template.md", "requirements-template.md":
+		return true
+	default:
+		return strings.HasSuffix(base, ".agent.md")
+	}
 }
 
 func isOpenSpecOwnedPath(rel string) bool {
@@ -932,7 +970,17 @@ func filenameTitle(relPath string) string {
 func inferKindSubtype(relPath string) (kind, subtype string) {
 	lower := strings.ToLower(relPath)
 	switch {
+	case isSkillPath(lower):
+		return config.KindMarkdownArtifact, config.SubtypeSkill
+	case isAgentInstructionPath(lower):
+		return config.KindMarkdownArtifact, config.SubtypeAgentInstruction
+	case isProtocolPolicyPath(lower):
+		return config.KindMarkdownArtifact, config.SubtypeGovernancePolicy
+	case isTemplatePath(lower):
+		return config.KindMarkdownArtifact, config.SubtypeDocumentTemplate
 	case strings.Contains(lower, "prd"):
+		return config.KindRequirements, config.SubtypePRD
+	case strings.Contains(lower, "product-spec") || isReqPath(lower):
 		return config.KindRequirements, config.SubtypePRD
 	case isRFCProposalPath(lower):
 		return config.KindDesign, ""
@@ -949,6 +997,53 @@ func inferKindSubtype(relPath string) (kind, subtype string) {
 	default:
 		return config.KindMarkdownArtifact, ""
 	}
+}
+
+func isSkillPath(relPath string) bool {
+	relPath = strings.Trim(filepath.ToSlash(strings.ToLower(relPath)), "/")
+	base := filepath.Base(relPath)
+	return base == "skill.md" ||
+		base == "skills.md" ||
+		strings.Contains(relPath, "/skills/")
+}
+
+func isAgentInstructionPath(relPath string) bool {
+	relPath = strings.Trim(filepath.ToSlash(strings.ToLower(relPath)), "/")
+	base := filepath.Base(relPath)
+	switch base {
+	case "agents.md", "agent.md", "claude.md", "codex.md", "gemini.md", "cursor.md", "memento.md", ".cursorrules":
+		return true
+	default:
+		return strings.HasSuffix(base, ".agent.md") ||
+			strings.Contains(relPath, "/agents/")
+	}
+}
+
+func isTemplatePath(relPath string) bool {
+	relPath = strings.Trim(filepath.ToSlash(strings.ToLower(relPath)), "/")
+	base := filepath.Base(relPath)
+	return strings.Contains(relPath, "/templates/") ||
+		strings.Contains(relPath, "/template/") ||
+		strings.Contains(base, "template")
+}
+
+func isProtocolPolicyPath(relPath string) bool {
+	relPath = strings.Trim(filepath.ToSlash(strings.ToLower(relPath)), "/")
+	base := filepath.Base(relPath)
+	switch base {
+	case "maintainers.md", "governance.md":
+		return true
+	default:
+		return false
+	}
+}
+
+func isReqPath(relPath string) bool {
+	base := strings.ToLower(filepath.Base(filepath.ToSlash(relPath)))
+	return strings.HasPrefix(base, "req_") ||
+		strings.HasPrefix(base, "req-") ||
+		strings.HasSuffix(base, "_req.md") ||
+		strings.HasSuffix(base, "-req.md")
 }
 
 func isStoryPath(relPath string) bool {

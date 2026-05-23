@@ -534,6 +534,13 @@ func TestInferKind(t *testing.T) {
 		{"design-docs/worker-runtime.md", "design"},
 		{"docs/architecture/system-boundaries.md", "design"},
 		{"docs/requirements/auth.md", "requirements"},
+		{"docs/product-specs/course-visit-analytics.md", "requirements"},
+		{"calm-suite/calm-studio/docs/REQ_fluxnova_aigf_integration.md", "requirements"},
+		{".codex/skills/query-plan-snapshot-cli/SKILL.md", "markdown_artifact"},
+		{"agents/implementation-plan.agent.md", "markdown_artifact"},
+		{"contributingGuides/PROPOSAL_TEMPLATE.md", "markdown_artifact"},
+		{"GOVERNANCE.md", "markdown_artifact"},
+		{"MAINTAINERS.md", "markdown_artifact"},
 		{"notes/random.md", "markdown_artifact"},
 		{"v0.prd.md", "requirements"},
 		{"api.design.md", "design"},
@@ -553,7 +560,8 @@ func TestDefaultPaths_NarrowDocs(t *testing.T) {
 	paths := defaultPaths()
 	required := []string{
 		".claude/notes", ".claude/plans", ".codex/plans", ".codex/notes",
-		"docs/specs", "docs/plans", "docs/prd", "docs/rfcs", "rfcs",
+		".claude/skills", ".codex/skills", "agents",
+		"docs/specs", "docs/plans", "docs/prd", "docs/product-specs", "docs/requirements", "docs/rfcs", "docs/RFCS", "rfcs", "RFCS",
 		"roadmaps", "docs/roadmaps",
 		"docs/design", "docs/design-docs", "design-docs", "docs/technical",
 		"architecture", "docs/architecture", "_bmad-output", ".specify/memory",
@@ -598,7 +606,7 @@ func TestDefaultRepoConfigMarkdownPathsMatchAdapterDefaults(t *testing.T) {
 
 func TestRootGlobs_AllPatterns(t *testing.T) {
 	globs := rootGlobs()
-	expected := []string{"*.spec.md", "*.plan.md", "*.prd.md", "*.rfc.md", "*.roadmap.md", "*.design.md", "*.contract.md", "*.requirements.md"}
+	expected := []string{"*.spec.md", "*.plan.md", "*.prd.md", "*.rfc.md", "*.roadmap.md", "*.design.md", "*.contract.md", "*.requirements.md", "REQ_*.md", "REQ-*.md", "*_REQ.md", "*-REQ.md"}
 	if len(globs) != len(expected) {
 		t.Fatalf("expected %d root globs, got %d", len(expected), len(globs))
 	}
@@ -624,6 +632,35 @@ func TestDiscover_RootGlobs(t *testing.T) {
 	}
 	if len(candidates) != 5 {
 		t.Fatalf("expected 5 root glob candidates, got %d", len(candidates))
+	}
+}
+
+func TestDiscover_DefaultHighSignalMarkdownFiles(t *testing.T) {
+	tmp := t.TempDir()
+	writeMarkdown(t, tmp, "contributingGuides/PROPOSAL_TEMPLATE.md", "# Proposal Template\n")
+	writeMarkdown(t, tmp, "packages/assistant/agents/specification.agent.md", "# Specification Agent\n")
+	writeMarkdown(t, tmp, "project/GOVERNANCE.md", "# Governance\n")
+	writeMarkdown(t, tmp, "project/MAINTAINERS.md", "# Maintainers\n")
+	writeMarkdown(t, tmp, "docs/random-note.md", "# Random\n")
+
+	a := &Adapter{}
+	candidates, err := a.Discover(context.Background(), tmp, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := candidateRelPaths(candidates)
+	for _, want := range []string{
+		"contributingGuides/PROPOSAL_TEMPLATE.md",
+		"packages/assistant/agents/specification.agent.md",
+		"project/GOVERNANCE.md",
+		"project/MAINTAINERS.md",
+	} {
+		if !stringSliceContains(got, want) {
+			t.Fatalf("missing high-signal markdown %q in %v", want, got)
+		}
+	}
+	if stringSliceContains(got, "docs/random-note.md") {
+		t.Fatalf("unexpected random doc in high-signal discovery: %v", got)
 	}
 }
 
