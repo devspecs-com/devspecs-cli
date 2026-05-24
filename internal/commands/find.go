@@ -3,10 +3,12 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/devspecs-com/devspecs-cli/internal/indexquery"
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/devspecs-com/devspecs-cli/internal/telemetry"
@@ -72,10 +74,13 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 
 	fp.RepoRoot = resolveRepoScope(db, repoName, allRepos)
 
-	candidates, err := loadRetrievalCandidatesForQuery(db, fp, query)
+	loadResult, err := loadRetrievalCandidatesForQueryWithReport(db, fp, query)
 	if err != nil {
 		return fmt.Errorf("find: %w", err)
 	}
+	candidates := loadResult.Candidates
+	recordFindRuntimeProps(props, loadResult.Report)
+	emitFindRuntimeDebug(cmd, loadResult.Report)
 	retriever := retrieval.WeightedFilesRetrieverV0{}
 	matches := retriever.Retrieve(candidates, query)
 	if len(matches) == 0 {
@@ -118,6 +123,47 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	}
 	w.Flush()
 	return nil
+}
+
+func recordFindRuntimeProps(props map[string]any, report indexquery.CandidateLoadReport) {
+	if report.RuntimeMode == "" {
+		return
+	}
+	props["find_runtime"] = report.RuntimeMode
+	props["find_effective_runtime"] = report.EffectiveMode
+	props["candidate_count_bucket"] = telemetry.CountBucket(report.HydratedCount)
+	if report.FullArtifactCount > 0 {
+		props["full_artifact_count_bucket"] = telemetry.CountBucket(report.FullArtifactCount)
+	}
+	if report.PreselectedCount > 0 {
+		props["preselected_count_bucket"] = telemetry.CountBucket(report.PreselectedCount)
+	}
+	if report.FallbackReason != "" {
+		props["find_runtime_fallback"] = report.FallbackReason
+	}
+	if report.OptimizedError != "" {
+		props["find_runtime_optimized_error"] = true
+	}
+}
+
+func emitFindRuntimeDebug(cmd *cobra.Command, report indexquery.CandidateLoadReport) {
+	if os.Getenv("DEVSPECS_FIND_RUNTIME_DEBUG") == "" || report.RuntimeMode == "" {
+		return
+	}
+	_ = json.NewEncoder(cmd.ErrOrStderr()).Encode(map[string]any{
+		"type":                "find_runtime",
+		"runtime_mode":        report.RuntimeMode,
+		"effective_mode":      report.EffectiveMode,
+		"full_artifact_count": report.FullArtifactCount,
+		"preselected_count":   report.PreselectedCount,
+		"hydrated_count":      report.HydratedCount,
+		"fallback_reason":     report.FallbackReason,
+		"lane_counts":         report.LaneCounts,
+		"preselect_ms":        report.PreselectMS,
+		"hydrate_ms":          report.HydrateMS,
+		"full_load_ms":        report.FullLoadMS,
+		"optimized_error":     report.OptimizedError,
+	})
 }
 
 type FindResult struct {

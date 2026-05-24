@@ -96,6 +96,7 @@ type Options struct {
 	MinReductionFull                *float64
 	CorpusSource                    string
 	CommandUnderTest                string
+	FindRuntime                     string
 	CommandRunner                   CommandRunner
 	TokenCounter                    TokenCounter
 	Retriever                       retrieval.Retriever
@@ -419,6 +420,7 @@ type Result struct {
 	CorpusSource     string            `json:"corpus_source"`
 	ProductPath      string            `json:"product_path"`
 	CommandUnderTest string            `json:"command_under_test,omitempty"`
+	FindRuntime      string            `json:"find_runtime,omitempty"`
 	Retriever        string            `json:"retriever"`
 	TokenCounter     string            `json:"token_counter"`
 	TokenizerProfile TokenizerProfile  `json:"tokenizer_profile"`
@@ -570,6 +572,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 		CorpusSource:     corpusSource,
 		ProductPath:      productPathForRun(corpusSource, opts.CommandUnderTest),
 		CommandUnderTest: strings.TrimSpace(opts.CommandUnderTest),
+		FindRuntime:      strings.TrimSpace(opts.FindRuntime),
 		Retriever:        retriever.Name(),
 		TokenCounter:     counter.Name(),
 		TokenizerProfile: tokenizerProfile,
@@ -2805,6 +2808,9 @@ func FormatText(r *Result) string {
 	fmt.Fprintf(&b, "Product path: %s\n", r.ProductPath)
 	if r.CommandUnderTest != "" {
 		fmt.Fprintf(&b, "Command under test: %s\n", r.CommandUnderTest)
+	}
+	if r.FindRuntime != "" {
+		fmt.Fprintf(&b, "Find runtime: %s\n", r.FindRuntime)
 	}
 	fmt.Fprintf(&b, "Retriever: %s\n", r.Retriever)
 	fmt.Fprintf(&b, "Token counter: %s\n", r.TokenCounter)

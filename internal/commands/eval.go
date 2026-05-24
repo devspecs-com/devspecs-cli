@@ -12,6 +12,7 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/classify"
 	"github.com/devspecs-com/devspecs-cli/internal/evalharness"
+	"github.com/devspecs-com/devspecs-cli/internal/indexquery"
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/spf13/cobra"
@@ -37,6 +38,7 @@ func NewEvalCmd() *cobra.Command {
 		indexed                         bool
 		filesystem                      bool
 		commandUnderTest                string
+		findRuntime                     string
 		classifierEval                  bool
 		firstIndexReport                bool
 		batchFixtures                   bool
@@ -102,7 +104,7 @@ func NewEvalCmd() *cobra.Command {
 				return nil
 			}
 
-			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput, evalIndexCacheDir, refreshIndexCache, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
+			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, findRuntime, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput, evalIndexCacheDir, refreshIndexCache, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
 			if err != nil {
 				return err
 			}
@@ -215,6 +217,7 @@ func NewEvalCmd() *cobra.Command {
 	_ = cmd.Flags().MarkDeprecated("experimental-test-cases", "use --include-tests")
 	cmd.Flags().StringArrayVar(&classifierFixtures, "classifier-fixture", nil, "Classifier fixture to include in --first-index-report; may be repeated")
 	cmd.Flags().StringVar(&commandUnderTest, "command", "", "Run eval through a live command path: find or resume-query")
+	cmd.Flags().StringVar(&findRuntime, "find-runtime", "", "Experimental live command find runtime: full, preselect_shadow, or preselect_active")
 	cmd.Flags().StringVar(&resultsDir, "results-dir", defaultEvalResultsDir, "Directory for timestamped JSON eval result files")
 	cmd.Flags().BoolVar(&noSave, "no-save", false, "Do not write a timestamped JSON eval result file")
 	cmd.Flags().Float64Var(&inputUSDPer1M, "input-usd-per-1m", 0, "Optional input-token price in USD per 1M tokens for first-index saved-cost estimates")
@@ -308,7 +311,7 @@ func normalizeEvalCommand(command string) (string, error) {
 	}
 }
 
-func runLiveCommandEval(command, fixtureAbs string, cases []evalharness.CaseSpec, includeTests, includeCodeComments bool) (map[string]evalharness.CommandCaseOutput, error) {
+func runLiveCommandEval(command, findRuntime, fixtureAbs string, cases []evalharness.CaseSpec, includeTests, includeCodeComments bool) (map[string]evalharness.CommandCaseOutput, error) {
 	tempHome, err := os.MkdirTemp("", "devspecs-live-eval-*")
 	if err != nil {
 		return nil, fmt.Errorf("create live command eval home: %w", err)
@@ -324,6 +327,21 @@ func runLiveCommandEval(command, fixtureAbs string, cases []evalharness.CaseSpec
 			os.Setenv("DEVSPECS_HOME", oldHome)
 		} else {
 			os.Unsetenv("DEVSPECS_HOME")
+		}
+	}()
+	mode, err := indexquery.ParseRuntimeMode(findRuntime)
+	if err != nil {
+		return nil, err
+	}
+	oldFindRuntime, hadFindRuntime := os.LookupEnv("DEVSPECS_FIND_RUNTIME")
+	if err := os.Setenv("DEVSPECS_FIND_RUNTIME", string(mode)); err != nil {
+		return nil, err
+	}
+	defer func() {
+		if hadFindRuntime {
+			os.Setenv("DEVSPECS_FIND_RUNTIME", oldFindRuntime)
+		} else {
+			os.Unsetenv("DEVSPECS_FIND_RUNTIME")
 		}
 	}()
 

@@ -38,6 +38,56 @@ func LoadCandidates(db *store.DB, fp store.FilterParams) ([]retrieval.Candidate,
 	return candidates, nil
 }
 
+func LoadCandidatesByArtifactIDs(db *store.DB, fp store.FilterParams, ids []string) ([]retrieval.Candidate, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	artifacts, err := db.ListArtifactsByIDs(ids, fp)
+	if err != nil {
+		return nil, fmt.Errorf("list selected artifacts: %w", err)
+	}
+	artifactIDs := make([]string, 0, len(artifacts))
+	revisionIDs := make([]string, 0, len(artifacts))
+	for _, art := range artifacts {
+		artifactIDs = append(artifactIDs, art.ID)
+		if art.CurrentRevID != "" {
+			revisionIDs = append(revisionIDs, art.CurrentRevID)
+		}
+	}
+	sourcesByID, err := db.GetSourcesForArtifacts(artifactIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load selected sources: %w", err)
+	}
+	linksByID, err := db.GetLinksForArtifacts(artifactIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load selected links: %w", err)
+	}
+	todosByID, err := db.GetTodosForArtifacts(artifactIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load selected todos: %w", err)
+	}
+	sectionsByID, err := db.GetSectionsForArtifacts(artifactIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load selected sections: %w", err)
+	}
+	revisionsByID, err := db.GetRevisionsByIDs(revisionIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load selected revisions: %w", err)
+	}
+
+	candidates := make([]retrieval.Candidate, 0, len(artifacts))
+	for _, art := range artifacts {
+		var body string
+		var extractedJSON string
+		if rev, ok := revisionsByID[art.CurrentRevID]; ok {
+			body = rev.Body
+			extractedJSON = rev.ExtractedJSON
+		}
+		candidates = append(candidates, ArtifactCandidateWithLinks(art, sourcesByID[art.ID], linksByID[art.ID], todosByID[art.ID], sectionsByID[art.ID], body, extractedJSON))
+	}
+	return candidates, nil
+}
+
 func LoadCandidatesForQuery(db *store.DB, fp store.FilterParams, query string) ([]retrieval.Candidate, error) {
 	candidates, err := LoadCandidates(db, fp)
 	if err != nil {

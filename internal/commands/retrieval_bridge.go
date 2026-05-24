@@ -2,6 +2,7 @@ package commands
 
 import (
 	"math"
+	"os"
 
 	"github.com/devspecs-com/devspecs-cli/internal/indexquery"
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
@@ -15,7 +16,16 @@ func loadRetrievalCandidates(db *store.DB, fp store.FilterParams) ([]retrieval.C
 }
 
 func loadRetrievalCandidatesForQuery(db *store.DB, fp store.FilterParams, query string) ([]retrieval.Candidate, error) {
-	return indexquery.LoadCandidatesForQuery(db, fp, query)
+	result, err := loadRetrievalCandidatesForQueryWithReport(db, fp, query)
+	return result.Candidates, err
+}
+
+func loadRetrievalCandidatesForQueryWithReport(db *store.DB, fp store.FilterParams, query string) (indexquery.CandidateLoadResult, error) {
+	mode, err := indexquery.ParseRuntimeMode(os.Getenv("DEVSPECS_FIND_RUNTIME"))
+	if err != nil {
+		return indexquery.CandidateLoadResult{}, err
+	}
+	return indexquery.LoadCandidatesForQueryWithRuntime(db, fp, query, mode)
 }
 
 func artifactCandidate(art store.ArtifactRow, sources []store.SourceRow, todos []store.TodoRow, body, extractedJSON string) retrieval.Candidate {

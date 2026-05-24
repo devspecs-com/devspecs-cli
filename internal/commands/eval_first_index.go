@@ -11,6 +11,7 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/classify"
 	"github.com/devspecs-com/devspecs-cli/internal/evalharness"
+	"github.com/devspecs-com/devspecs-cli/internal/indexquery"
 	"github.com/spf13/cobra"
 )
 
@@ -154,7 +155,7 @@ type firstIndexWeakSpot struct {
 	Message string `json:"message"`
 }
 
-func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed bool, commandUnderTest string, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput bool, evalIndexCacheDir string, refreshIndexCache bool, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec int, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull float64) (evalharness.Options, error) {
+func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed bool, commandUnderTest, findRuntime string, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput bool, evalIndexCacheDir string, refreshIndexCache bool, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec int, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull float64) (evalharness.Options, error) {
 	opts := evalharness.Options{
 		JSON:                            asJSON,
 		TestCaseArtifacts:               includeTests,
@@ -198,8 +199,17 @@ func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed b
 			return evalharness.Options{}, err
 		}
 		opts.CommandUnderTest = normalized
+		normalizedRuntime, err := indexquery.ParseRuntimeMode(findRuntime)
+		if err != nil {
+			return evalharness.Options{}, err
+		}
+		opts.FindRuntime = string(normalizedRuntime)
 		opts.CommandRunner = func(fixtureAbs string, cases []evalharness.CaseSpec) (map[string]evalharness.CommandCaseOutput, error) {
-			return runLiveCommandEval(normalized, fixtureAbs, cases, includeTests, includeCodeComments)
+			return runLiveCommandEval(normalized, string(normalizedRuntime), fixtureAbs, cases, includeTests, includeCodeComments)
+		}
+	} else if strings.TrimSpace(findRuntime) != "" {
+		if _, err := indexquery.ParseRuntimeMode(findRuntime); err != nil {
+			return evalharness.Options{}, err
 		}
 	}
 	if cmd.Flags().Changed("min-recall") {
