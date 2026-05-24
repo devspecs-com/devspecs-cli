@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/devspecs-com/devspecs-cli/internal/evalharness"
+	"github.com/devspecs-com/devspecs-cli/internal/store"
 )
 
 func TestEvalCommand_TextOutputLabelsRetrieverAndTokenCounter(t *testing.T) {
@@ -535,5 +538,38 @@ func TestEvalCommand_SavesTimestampedResultFile(t *testing.T) {
 	}
 	if got["eval_stage"] != "seed_smoke" {
 		t.Fatalf("eval_stage = %#v", got["eval_stage"])
+	}
+}
+
+func TestRunFindForEvalUsesLineScopedPath(t *testing.T) {
+	repoDir, _ := setupReadEnv(t)
+	relPath := seedLineScopedTestArtifacts(t, repoDir)
+
+	db, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	candidates, err := loadRetrievalCandidates(db, store.FilterParams{RepoRoot: canonicalRepoRoot(repoDir)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := runFindForEval(evalharness.CaseSpec{
+		ID:    "camel-tool-cache",
+		Query: "what tests cover testputandgetexposedtool behavior",
+	}, candidatesByArtifactPath(candidates))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(output.Artifacts) == 0 {
+		t.Fatal("runFindForEval returned no artifacts")
+	}
+	wantPath := filepath.ToSlash(relPath) + "#L53"
+	if output.Artifacts[0].Path != wantPath {
+		t.Fatalf("first eval artifact path = %q, want %q", output.Artifacts[0].Path, wantPath)
+	}
+	if output.Artifacts[0].Source != filepath.ToSlash(relPath) {
+		t.Fatalf("first eval artifact source = %q, want %q", output.Artifacts[0].Source, filepath.ToSlash(relPath))
 	}
 }

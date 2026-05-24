@@ -217,7 +217,7 @@ func NewEvalCmd() *cobra.Command {
 	_ = cmd.Flags().MarkDeprecated("experimental-test-cases", "use --include-tests")
 	cmd.Flags().StringArrayVar(&classifierFixtures, "classifier-fixture", nil, "Classifier fixture to include in --first-index-report; may be repeated")
 	cmd.Flags().StringVar(&commandUnderTest, "command", "", "Run eval through a live command path: find or resume-query")
-	cmd.Flags().StringVar(&findRuntime, "find-runtime", "", "Experimental live command find runtime: full, preselect_shadow, or preselect_active")
+	cmd.Flags().StringVar(&findRuntime, "find-runtime", "", "Live command find runtime: full, preselect_shadow, or preselect_active (default preselect_active)")
 	cmd.Flags().StringVar(&resultsDir, "results-dir", defaultEvalResultsDir, "Directory for timestamped JSON eval result files")
 	cmd.Flags().BoolVar(&noSave, "no-save", false, "Do not write a timestamped JSON eval result file")
 	cmd.Flags().Float64Var(&inputUSDPer1M, "input-usd-per-1m", 0, "Optional input-token price in USD per 1M tokens for first-index saved-cost estimates")
@@ -418,7 +418,7 @@ func runFindForEval(spec evalharness.CaseSpec, candidatesByPath map[string]retri
 	artifacts := make([]retrieval.Candidate, 0, len(rows))
 	reasons := make([]evalharness.ArtifactReason, 0, len(rows))
 	for _, row := range rows {
-		path := filepath.ToSlash(row.SourcePath)
+		path := filepath.ToSlash(firstNonEmpty(row.Path, row.SourcePath))
 		candidate := candidatesByPath[path]
 		if candidate.Path == "" {
 			candidate = retrieval.Candidate{
@@ -459,6 +459,7 @@ func runResumeQueryForEval(spec evalharness.CaseSpec, candidatesByPath map[strin
 		Artifacts []struct {
 			ID         string   `json:"id"`
 			ShortID    string   `json:"short_id"`
+			Path       string   `json:"path"`
 			Kind       string   `json:"kind"`
 			Subtype    string   `json:"subtype"`
 			Title      string   `json:"title"`
@@ -473,7 +474,7 @@ func runResumeQueryForEval(spec evalharness.CaseSpec, candidatesByPath map[strin
 	artifacts := make([]retrieval.Candidate, 0, len(obj.Artifacts))
 	reasons := make([]evalharness.ArtifactReason, 0, len(obj.Artifacts))
 	for _, row := range obj.Artifacts {
-		path := filepath.ToSlash(row.SourcePath)
+		path := filepath.ToSlash(firstNonEmpty(row.Path, row.SourcePath))
 		candidate := candidatesByPath[path]
 		if candidate.Path == "" {
 			candidate = retrieval.Candidate{
@@ -493,6 +494,15 @@ func runResumeQueryForEval(spec evalharness.CaseSpec, candidatesByPath map[strin
 		reasons = append(reasons, evalharness.ArtifactReason{Path: candidate.Path, Reasons: row.Reasons})
 	}
 	return evalharness.CommandCaseOutput{Artifacts: artifacts, Context: obj.Context, ArtifactReasons: reasons}, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func candidatesByArtifactPath(candidates []retrieval.Candidate) map[string]retrieval.Candidate {

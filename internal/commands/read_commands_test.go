@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/devspecs-com/devspecs-cli/internal/store"
 )
 
 func setupReadEnv(t *testing.T) (repoDir string, artifactID string) {
@@ -452,6 +456,34 @@ func TestFind_JSONOutput(t *testing.T) {
 	}
 }
 
+func TestFind_JSONOutputIncludesLineScopedPath(t *testing.T) {
+	repoDir, _ := setupReadEnv(t)
+	relPath := seedLineScopedTestArtifacts(t, repoDir)
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"--json", "--no-refresh", "testputandgetexposedtool"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var arts []map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &arts); err != nil {
+		t.Fatalf("find --json invalid: %v", err)
+	}
+	if len(arts) == 0 {
+		t.Fatal("find --json returned empty array")
+	}
+	wantPath := filepath.ToSlash(relPath) + "#L53"
+	if arts[0]["path"] != wantPath {
+		t.Fatalf("find --json path = %#v, want %q\nrows=%#v", arts[0]["path"], wantPath, arts)
+	}
+	if arts[0]["source_path"] != filepath.ToSlash(relPath) {
+		t.Fatalf("find --json source_path = %#v", arts[0]["source_path"])
+	}
+}
+
 func TestResume_QueryFocusedContextJSON(t *testing.T) {
 	setupReadEnv(t)
 
@@ -480,5 +512,43 @@ func TestResume_QueryFocusedContextJSON(t *testing.T) {
 	context, _ := obj["context"].(string)
 	if !strings.Contains(context, "Open task") || !strings.Contains(context, "plan.md") {
 		t.Fatalf("focused context missing expected content: %s", context)
+	}
+}
+
+func seedLineScopedTestArtifacts(t *testing.T, repoDir string) string {
+	t.Helper()
+	db, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	var repoID string
+	if err := db.QueryRow("SELECT id FROM repos LIMIT 1").Scan(&repoID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	relPath := filepath.ToSlash(filepath.Join("components", "camel-ai", "camel-langchain4j-tools", "src", "test", "java", "org", "apache", "camel", "component", "langchain4j", "tools", "spec", "CamelToolExecutorCacheTest.java"))
+	insertTestArtifact(t, db, repoID, "ds_exact_test", "rev_exact_test", "src_exact_test", relPath, 53, 67, "testPutAndGetExposedTool", "Test: testPutAndGetExposedTool\nSource: "+relPath+"\nLines: 53-67\n\ncache.put(\"users\", camelSpec);\ncache.getTools().get(\"users\");", now)
+	insertTestArtifact(t, db, repoID, "ds_other_test", "rev_other_test", "src_other_test", relPath, 151, 159, "testHasSearchableTools", "Test: testHasSearchableTools\nSource: "+relPath+"\nLines: 151-159\n\ncache.putSearchable(\"users\", camelSpec);\ncache.hasSearchableTools();", now)
+	return relPath
+}
+
+func insertTestArtifact(t *testing.T, db *store.DB, repoID, artifactID, revID, sourceID, relPath string, startLine, endLine int, testName, body, now string) {
+	t.Helper()
+	title := "CamelToolExecutorCacheTest > " + testName
+	extracted := `{"mode":"intent","subtype":"test_case","source_type":"test_case","test_name":"` + testName + `","source_line_range":"` + strconv.Itoa(startLine) + `-` + strconv.Itoa(endLine) + `"}`
+	if err := db.InsertArtifactDirect(artifactID, repoID, "source_context", "test_case", title, "unknown", revID, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertRevisionDirect(revID, artifactID, "sha256:"+artifactID, body, extracted, now); err != nil {
+		t.Fatal(err)
+	}
+	sourceIdentity := relPath + "|test_case|" + strconv.Itoa(startLine) + "|" + strings.ToLower(testName)
+	if err := db.InsertSourceDirect(sourceID, artifactID, repoID, "test_case", relPath, sourceIdentity, "", "", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.IndexArtifactFTS(artifactID, title, body, relPath); err != nil {
+		t.Fatal(err)
 	}
 }

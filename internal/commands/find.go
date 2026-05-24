@@ -109,9 +109,9 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 		if sub == "" {
 			sub = "-"
 		}
-		source := c.Source
+		source := c.Path
 		if source == "" {
-			source = c.Path
+			source = c.Source
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", displayID, c.Kind, sub, c.Title, source)
 		if cues := retrieval.AuthorityCues(c); len(cues) > 0 {
@@ -170,6 +170,7 @@ type FindResult struct {
 	ID             string            `json:"ID"`
 	RepoID         string            `json:"RepoID"`
 	ShortID        string            `json:"ShortID"`
+	Path           string            `json:"path,omitempty"`
 	Kind           string            `json:"Kind"`
 	Subtype        string            `json:"Subtype"`
 	Title          string            `json:"Title"`
@@ -192,6 +193,7 @@ func findResults(candidates []retrieval.Candidate, reasons map[string][]string, 
 			ID:             c.ID,
 			RepoID:         metadataValue(c, "repo_id"),
 			ShortID:        metadataValue(c, "short_id"),
+			Path:           c.Path,
 			Kind:           c.Kind,
 			Subtype:        c.Subtype,
 			Title:          c.Title,

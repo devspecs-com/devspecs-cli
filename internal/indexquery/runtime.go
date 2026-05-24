@@ -18,6 +18,10 @@ const (
 	RuntimeModePreselectActive RuntimeMode = "preselect_active"
 )
 
+func DefaultRuntimeMode() RuntimeMode {
+	return RuntimeModePreselectActive
+}
+
 type PreselectOptions struct {
 	PreselectLimit              int
 	MaxRepoSizeForFullHydration int
@@ -52,7 +56,9 @@ type CandidateLoadResult struct {
 
 func ParseRuntimeMode(value string) (RuntimeMode, error) {
 	switch RuntimeMode(strings.ToLower(strings.TrimSpace(value))) {
-	case "", RuntimeModeFull:
+	case "":
+		return DefaultRuntimeMode(), nil
+	case RuntimeModeFull:
 		return RuntimeModeFull, nil
 	case RuntimeModePreselectShadow:
 		return RuntimeModePreselectShadow, nil
@@ -73,7 +79,7 @@ func DefaultPreselectOptions() PreselectOptions {
 
 func LoadCandidatesForQueryWithRuntime(db *store.DB, fp store.FilterParams, query string, mode RuntimeMode) (CandidateLoadResult, error) {
 	if mode == "" {
-		mode = RuntimeModeFull
+		mode = DefaultRuntimeMode()
 	}
 	switch mode {
 	case RuntimeModeFull:

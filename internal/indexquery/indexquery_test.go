@@ -171,6 +171,24 @@ func TestPreselectArtifactIDsForQueryUsesFTSSectionAndPathLanes(t *testing.T) {
 	}
 }
 
+func TestParseRuntimeModeDefaultsToPreselectActive(t *testing.T) {
+	mode, err := ParseRuntimeMode("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != RuntimeModePreselectActive {
+		t.Fatalf("default runtime mode = %q, want %q", mode, RuntimeModePreselectActive)
+	}
+
+	full, err := ParseRuntimeMode("full")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full != RuntimeModeFull {
+		t.Fatalf("explicit full runtime mode = %q, want %q", full, RuntimeModeFull)
+	}
+}
+
 func containsID(ids []string, want string) bool {
 	for _, id := range ids {
 		if id == want {

@@ -228,8 +228,12 @@ func runFocusedResume(cmd *cobra.Command, db *store.DB, repoRoot, query string, 
 	for i, c := range matches {
 		fmt.Fprintf(out, "\n%2d. %s  %s\n", i+1, shortCandidateID(c), c.Title)
 		fmt.Fprintf(out, "    Status: %s  |  Kind: %s\n", c.Status, c.Kind)
-		if c.Source != "" {
-			fmt.Fprintf(out, "    Source: %s\n", c.Source)
+		source := c.Path
+		if source == "" {
+			source = c.Source
+		}
+		if source != "" {
+			fmt.Fprintf(out, "    Source: %s\n", source)
 		}
 		if cues := retrieval.AuthorityCues(c); len(cues) > 0 {
 			fmt.Fprintf(out, "    Cues: %s\n", strings.Join(cues, "; "))
@@ -250,9 +254,9 @@ func buildFocusedResumeContext(query string, candidates []retrieval.Candidate) s
 	fmt.Fprintf(&b, "# DevSpecs Focused Resume Context\n\n")
 	fmt.Fprintf(&b, "Query: %s\n\n", query)
 	for _, c := range candidates {
-		path := c.Source
+		path := c.Path
 		if path == "" {
-			path = c.Path
+			path = c.Source
 		}
 		fmt.Fprintf(&b, "## %s\n\n", path)
 		fmt.Fprintf(&b, "Title: %s\n", c.Title)
@@ -279,6 +283,7 @@ func resumeCandidatesToJSON(candidates []retrieval.Candidate, reasons map[string
 			"kind":        c.Kind,
 			"subtype":     c.Subtype,
 			"title":       c.Title,
+			"path":        c.Path,
 			"status":      c.Status,
 			"source_path": c.Source,
 			"reasons":     reasons[c.Path],
