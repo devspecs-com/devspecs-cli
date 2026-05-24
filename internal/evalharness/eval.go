@@ -197,17 +197,20 @@ type BaselineMetrics struct {
 }
 
 type Diagnostics struct {
-	ExpectedRelevantCount          int                      `json:"expected_relevant_count"`
-	ExpectedAvailableCount         int                      `json:"expected_available_count"`
-	ExpectedMissingFromCorpusCount int                      `json:"expected_missing_from_corpus_count"`
-	MissedAfterDiscoveryCount      int                      `json:"missed_after_discovery_count"`
-	DiscoveryCoverage              float64                  `json:"discovery_coverage"`
-	RetrievalCoverageOfDiscovered  float64                  `json:"retrieval_coverage_of_discovered"`
-	ExpectedMissingFromCorpus      []string                 `json:"expected_missing_from_corpus,omitempty"`
-	MissedAfterDiscovery           []string                 `json:"missed_after_discovery,omitempty"`
-	RoleSummaries                  []RoleDiagnostic         `json:"role_summaries,omitempty"`
-	MissClassSummaries             []MissClassDiagnostic    `json:"miss_class_summaries,omitempty"`
-	OpenSpec                       *openspecmetrics.Metrics `json:"openspec,omitempty"`
+	ExpectedRelevantCount          int                           `json:"expected_relevant_count"`
+	ExpectedAvailableCount         int                           `json:"expected_available_count"`
+	ExpectedMissingFromCorpusCount int                           `json:"expected_missing_from_corpus_count"`
+	MissedAfterDiscoveryCount      int                           `json:"missed_after_discovery_count"`
+	DiscoveryCoverage              float64                       `json:"discovery_coverage"`
+	RetrievalCoverageOfDiscovered  float64                       `json:"retrieval_coverage_of_discovered"`
+	ExpectedMissingFromCorpus      []string                      `json:"expected_missing_from_corpus,omitempty"`
+	MissedAfterDiscovery           []string                      `json:"missed_after_discovery,omitempty"`
+	RoleSummaries                  []RoleDiagnostic              `json:"role_summaries,omitempty"`
+	MissClassSummaries             []MissClassDiagnostic         `json:"miss_class_summaries,omitempty"`
+	FalsePositiveSummaries         []FalsePositiveDiagnostic     `json:"false_positive_summaries,omitempty"`
+	ExtensionSummaries             []ExtensionDiagnostic         `json:"extension_summaries,omitempty"`
+	UnindexedDocumentSummaries     []UnindexedDocumentDiagnostic `json:"unindexed_document_summaries,omitempty"`
+	OpenSpec                       *openspecmetrics.Metrics      `json:"openspec,omitempty"`
 }
 
 type RoleDiagnostic struct {
@@ -226,6 +229,49 @@ type MissClassDiagnostic struct {
 	Class    string   `json:"class"`
 	Count    int      `json:"count"`
 	Examples []string `json:"examples,omitempty"`
+}
+
+type FalsePositiveDiagnostic struct {
+	Class       string                 `json:"class"`
+	QueryType   string                 `json:"query_type"`
+	Lane        string                 `json:"lane"`
+	Role        string                 `json:"role"`
+	ReasonClass string                 `json:"reason_class"`
+	GradeCounts GradeCounts            `json:"grade_counts"`
+	Count       int                    `json:"count"`
+	Examples    []FalsePositiveExample `json:"examples,omitempty"`
+}
+
+type FalsePositiveExample struct {
+	CaseID      string   `json:"case_id"`
+	QueryType   string   `json:"query_type"`
+	Path        string   `json:"path"`
+	Position    int      `json:"position"`
+	Lane        string   `json:"lane"`
+	Role        string   `json:"role"`
+	Grade       string   `json:"grade"`
+	Weight      float64  `json:"weight"`
+	ReasonClass string   `json:"reason_class"`
+	Reasons     []string `json:"reasons,omitempty"`
+}
+
+type ExtensionDiagnostic struct {
+	Extension                  string      `json:"extension"`
+	Role                       string      `json:"role"`
+	Expected                   int         `json:"expected"`
+	ExactRetrieved             int         `json:"exact_retrieved"`
+	MissingFromCorpus          int         `json:"missing_from_corpus"`
+	MissedAfterDiscovery       int         `json:"missed_after_discovery"`
+	PrimaryFalsePositive       int         `json:"primary_false_positive"`
+	PrimaryFalsePositiveGrades GradeCounts `json:"primary_false_positive_grades,omitempty"`
+	Examples                   []string    `json:"examples,omitempty"`
+}
+
+type UnindexedDocumentDiagnostic struct {
+	Extension string   `json:"extension"`
+	Role      string   `json:"role"`
+	Count     int      `json:"count"`
+	Examples  []string `json:"examples,omitempty"`
 }
 
 type CaseResult struct {
@@ -284,6 +330,7 @@ type CaseResult struct {
 	ArtifactPrecision                float64                 `json:"artifact_precision"`
 	MissedExpectedRelevant           []string                `json:"missed_expected_relevant"`
 	MissedMustConceptDiagnostics     []ConceptMissDiagnostic `json:"missed_must_concept_diagnostics,omitempty"`
+	PrimaryFalsePositiveDiagnostics  []FalsePositiveExample  `json:"primary_false_positive_diagnostics,omitempty"`
 	UnexpectedExcludedHits           []string                `json:"unexpected_excluded_hits"`
 	ExpectedAvailableCount           int                     `json:"expected_available_count"`
 	ExpectedMissingFromCorpus        []string                `json:"expected_missing_from_corpus,omitempty"`
@@ -630,6 +677,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 			applyRelatedTierMetrics(&cr, c, relatedFiles, relatedReasons)
 		}
 		applyAgentCaseMetrics(&cr, c, devspecsFiles)
+		applyPrimaryFalsePositiveDiagnostics(&cr, c)
 		cr.CaseDurationMS = casePhase.durationMS()
 		if opts.MaxCaseSeconds > 0 && cr.CaseDurationMS > int64(opts.MaxCaseSeconds)*1000 {
 			cr.CaseBudgetExceeded = true
@@ -646,6 +694,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 	summarizePhase := telemetry.start("summarize")
 	result.Summary = summarize(result.Cases)
 	result.Diagnostics = summarizeDiagnostics(result.Cases)
+	result.Diagnostics.UnindexedDocumentSummaries = summarizeUnindexedDocuments(fixtureAbs, files)
 	result.AgentMetrics = summarizeAgentMetrics(result.Cases)
 	result.LaneMetrics = summarizeLaneMetrics(result.Cases)
 	result.MetricNotes = agentMetricNotes()
@@ -1942,6 +1991,116 @@ func applyRelatedTierMetrics(cr *CaseResult, spec CaseSpec, relatedFiles []File,
 	cr.RelatedArtifactGrades = related.ArtifactGrades
 }
 
+func applyPrimaryFalsePositiveDiagnostics(cr *CaseResult, spec CaseSpec) {
+	if len(cr.ArtifactGrades) == 0 {
+		return
+	}
+	reasonsByPath := artifactReasonsByPath(cr.ArtifactReasons)
+	positionByPath := map[string]int{}
+	for i, path := range cr.ArtifactsIncluded {
+		positionByPath[normalizeMetricPath(path)] = i + 1
+	}
+	queryType := classifyEvalQueryType(spec.Query)
+	for _, grade := range cr.ArtifactGrades {
+		if grade.Exact {
+			continue
+		}
+		norm := normalizeMetricPath(grade.Path)
+		reasons := limitStrings(reasonsByPath[norm], 3)
+		example := FalsePositiveExample{
+			CaseID:      spec.ID,
+			QueryType:   queryType,
+			Path:        filepath.ToSlash(grade.Path),
+			Position:    positionByPath[norm],
+			Lane:        grade.Lane,
+			Role:        diagnosticRole(grade.Path),
+			Grade:       grade.Grade,
+			Weight:      grade.Weight,
+			ReasonClass: classifyReasonClass(reasonsByPath[norm]),
+			Reasons:     reasons,
+		}
+		cr.PrimaryFalsePositiveDiagnostics = append(cr.PrimaryFalsePositiveDiagnostics, example)
+	}
+}
+
+func artifactReasonsByPath(reasons []ArtifactReason) map[string][]string {
+	out := map[string][]string{}
+	for _, reason := range reasons {
+		path := normalizeMetricPath(reason.Path)
+		if path == "" {
+			continue
+		}
+		for _, text := range reason.Reasons {
+			text = strings.TrimSpace(text)
+			if text == "" {
+				continue
+			}
+			out[path] = append(out[path], text)
+		}
+	}
+	return out
+}
+
+func classifyEvalQueryType(query string) string {
+	q := strings.ToLower(query)
+	switch {
+	case containsAny(q, "test", "tests", "coverage", "regression", "behavior", "behaviour"):
+		return "test_behavior"
+	case containsAny(q, "openspec", "open spec", "change bundle", "proposal.md", "tasks.md", "spec.md"):
+		return "openspec"
+	case containsAny(q, "rfc", "request for comments"):
+		return "rfc"
+	case containsAny(q, "prd", "product", "requirement", "requirements", "user story", "user stories"):
+		return "product_requirements"
+	case containsAny(q, "adr", "decision", "why", "rationale"):
+		return "decision_rationale"
+	case containsAny(q, "architecture", "design", "technical design", "system design"):
+		return "architecture_design"
+	case containsAny(q, "plan", "roadmap", "proposal", "resume", "continue"):
+		return "plan_proposal"
+	case containsAny(q, "agent", "claude", "codex", "cursor", "skill", "instructions"):
+		return "agent_protocol"
+	case containsAny(q, "template", "scaffold"):
+		return "template"
+	case containsAny(q, "source", "implementation", "code", "function", "class"):
+		return "implementation_context"
+	default:
+		return "general_intent"
+	}
+}
+
+func classifyReasonClass(reasons []string) string {
+	joined := strings.ToLower(strings.Join(reasons, "\n"))
+	switch {
+	case strings.Contains(joined, "concept backfill"):
+		return "concept_backfill"
+	case strings.Contains(joined, "pack tier"):
+		return "tiered_related"
+	case strings.Contains(joined, "section-packed"):
+		return "section_packed"
+	case strings.Contains(joined, "indexed section") || strings.Contains(joined, "section match"):
+		return "section_match"
+	case strings.Contains(joined, "test-name"):
+		return "test_name_anchor"
+	case strings.Contains(joined, "test-case behavior"):
+		return "test_behavior_signal"
+	case strings.Contains(joined, "code comment"):
+		return "code_comment_signal"
+	case strings.Contains(joined, "relationship expansion"):
+		return "relationship_expansion"
+	case strings.Contains(joined, "authority prior"):
+		return "authority_prior"
+	case strings.Contains(joined, "classifier"):
+		return "classifier_signal"
+	case strings.Contains(joined, "path") || strings.Contains(joined, "title"):
+		return "path_title_signal"
+	case strings.TrimSpace(joined) == "":
+		return "unexplained"
+	default:
+		return "term_overlap"
+	}
+}
+
 func applyDiscoveryDiagnostics(cr *CaseResult, spec CaseSpec, corpusPaths map[string]bool) {
 	included := stringSet(cr.ArtifactsIncluded)
 	availableRetrieved := 0
@@ -2028,6 +2187,8 @@ func summarizeDiagnostics(cases []CaseResult) Diagnostics {
 	missedAfterDiscovery := map[string]bool{}
 	roles := map[string]*RoleDiagnostic{}
 	missClasses := map[string]*MissClassDiagnostic{}
+	falsePositives := map[string]*FalsePositiveDiagnostic{}
+	extensions := map[string]*ExtensionDiagnostic{}
 	addMissClass := func(class, path string) {
 		diag := missClasses[class]
 		if diag == nil {
@@ -2039,6 +2200,19 @@ func summarizeDiagnostics(cases []CaseResult) Diagnostics {
 			diag.Examples = append(diag.Examples, path)
 		}
 	}
+	ensureExtension := func(path string) *ExtensionDiagnostic {
+		ext, role := diagnosticExtensionRole(path)
+		key := ext + "|" + role
+		diag := extensions[key]
+		if diag == nil {
+			diag = &ExtensionDiagnostic{Extension: ext, Role: role}
+			extensions[key] = diag
+		}
+		if len(diag.Examples) < 8 {
+			diag.Examples = append(diag.Examples, filepath.ToSlash(path))
+		}
+		return diag
+	}
 	for _, c := range cases {
 		out.ExpectedRelevantCount += c.ExpectedRelevantCount
 		out.ExpectedAvailableCount += c.ExpectedAvailableCount
@@ -2047,14 +2221,17 @@ func summarizeDiagnostics(cases []CaseResult) Diagnostics {
 		for _, path := range c.ExpectedMissingFromCorpus {
 			missingFromCorpus[path] = true
 			addMissClass("missing_from_corpus/"+diagnosticRole(path)+"/"+diagnosticAnchorClass(path), path)
+			ensureExtension(path).MissingFromCorpus++
 		}
 		for _, path := range c.MissedAfterDiscovery {
 			missedAfterDiscovery[path] = true
 			addMissClass("missed_after_discovery/"+diagnosticRole(path)+"/"+diagnosticAnchorClass(path), path)
+			ensureExtension(path).MissedAfterDiscovery++
 		}
 		for _, path := range append([]string{}, c.RelevantIncluded...) {
 			role := diagnosticRole(path)
 			ensureRoleDiagnostic(roles, role).Retrieved++
+			ensureExtension(path).ExactRetrieved++
 		}
 		for _, path := range c.IrrelevantIncluded {
 			role := diagnosticRole(path)
@@ -2063,6 +2240,7 @@ func summarizeDiagnostics(cases []CaseResult) Diagnostics {
 		for _, path := range append(append([]string{}, c.RelevantIncluded...), c.MissedExpectedRelevant...) {
 			role := diagnosticRole(path)
 			ensureRoleDiagnostic(roles, role).Expected++
+			ensureExtension(path).Expected++
 		}
 		for _, path := range append([]string{}, c.RelevantIncluded...) {
 			role := diagnosticRole(path)
@@ -2077,6 +2255,28 @@ func summarizeDiagnostics(cases []CaseResult) Diagnostics {
 		for _, path := range c.ExpectedMissingFromCorpus {
 			role := diagnosticRole(path)
 			ensureRoleDiagnostic(roles, role).MissingFromCorpus++
+		}
+		for _, fp := range c.PrimaryFalsePositiveDiagnostics {
+			class := falsePositiveClass(fp)
+			diag := falsePositives[class]
+			if diag == nil {
+				diag = &FalsePositiveDiagnostic{
+					Class:       class,
+					QueryType:   fp.QueryType,
+					Lane:        fp.Lane,
+					Role:        fp.Role,
+					ReasonClass: fp.ReasonClass,
+				}
+				falsePositives[class] = diag
+			}
+			diag.Count++
+			addGradeCount(&diag.GradeCounts, fp.Grade)
+			if len(diag.Examples) < 8 {
+				diag.Examples = append(diag.Examples, fp)
+			}
+			extDiag := ensureExtension(fp.Path)
+			extDiag.PrimaryFalsePositive++
+			addGradeCount(&extDiag.PrimaryFalsePositiveGrades, fp.Grade)
 		}
 	}
 	out.ExpectedMissingFromCorpus = sortedSet(missingFromCorpus)
@@ -2116,7 +2316,126 @@ func summarizeDiagnostics(cases []CaseResult) Diagnostics {
 		sort.Strings(diag.Examples)
 		out.MissClassSummaries = append(out.MissClassSummaries, diag)
 	}
+	fpClasses := make([]string, 0, len(falsePositives))
+	for class := range falsePositives {
+		fpClasses = append(fpClasses, class)
+	}
+	sort.Slice(fpClasses, func(i, j int) bool {
+		left := falsePositives[fpClasses[i]]
+		right := falsePositives[fpClasses[j]]
+		if left.Count == right.Count {
+			return left.Class < right.Class
+		}
+		return left.Count > right.Count
+	})
+	for _, class := range fpClasses {
+		out.FalsePositiveSummaries = append(out.FalsePositiveSummaries, *falsePositives[class])
+	}
+	extensionKeys := make([]string, 0, len(extensions))
+	for key := range extensions {
+		extensionKeys = append(extensionKeys, key)
+	}
+	sort.Slice(extensionKeys, func(i, j int) bool {
+		left := extensions[extensionKeys[i]]
+		right := extensions[extensionKeys[j]]
+		leftProblems := left.MissingFromCorpus + left.MissedAfterDiscovery + left.PrimaryFalsePositive
+		rightProblems := right.MissingFromCorpus + right.MissedAfterDiscovery + right.PrimaryFalsePositive
+		if leftProblems == rightProblems {
+			return left.Extension+"|"+left.Role < right.Extension+"|"+right.Role
+		}
+		return leftProblems > rightProblems
+	})
+	for _, key := range extensionKeys {
+		out.ExtensionSummaries = append(out.ExtensionSummaries, *extensions[key])
+	}
 	return out
+}
+
+func falsePositiveClass(fp FalsePositiveExample) string {
+	return "query=" + fp.QueryType + "/lane=" + fp.Lane + "/role=" + fp.Role + "/reason=" + fp.ReasonClass + "/grade=" + fp.Grade
+}
+
+func summarizeUnindexedDocuments(root string, indexedFiles []File) []UnindexedDocumentDiagnostic {
+	indexed := map[string]bool{}
+	for _, f := range indexedFiles {
+		path := stripLineRef(filepath.ToSlash(f.Path))
+		if path != "" {
+			indexed[path] = true
+		}
+	}
+	byKey := map[string]*UnindexedDocumentDiagnostic{}
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		name := d.Name()
+		if d.IsDir() {
+			switch strings.ToLower(name) {
+			case ".git", ".devspecs", "node_modules", "vendor", "dist", "build", "target":
+				return filepath.SkipDir
+			default:
+				return nil
+			}
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if strings.EqualFold(rel, "cases.yaml") || indexed[rel] {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(rel))
+		if !isDocumentGapExtension(ext) {
+			return nil
+		}
+		role := diagnosticRole(rel)
+		key := ext + "|" + role
+		diag := byKey[key]
+		if diag == nil {
+			diag = &UnindexedDocumentDiagnostic{Extension: ext, Role: role}
+			byKey[key] = diag
+		}
+		diag.Count++
+		if len(diag.Examples) < 12 {
+			diag.Examples = append(diag.Examples, rel)
+		}
+		return nil
+	})
+	keys := make([]string, 0, len(byKey))
+	for key := range byKey {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		left := byKey[keys[i]]
+		right := byKey[keys[j]]
+		if left.Count == right.Count {
+			return left.Extension+"|"+left.Role < right.Extension+"|"+right.Role
+		}
+		return left.Count > right.Count
+	})
+	out := make([]UnindexedDocumentDiagnostic, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, *byKey[key])
+	}
+	return out
+}
+
+func isDocumentGapExtension(ext string) bool {
+	switch strings.ToLower(ext) {
+	case ".adoc", ".asciidoc", ".asc", ".rst", ".mdx", ".org":
+		return true
+	default:
+		return false
+	}
+}
+
+func stripLineRef(path string) string {
+	lower := strings.ToLower(path)
+	if idx := strings.Index(lower, "#l"); idx >= 0 {
+		return path[:idx]
+	}
+	return path
 }
 
 func ensureRoleDiagnostic(roles map[string]*RoleDiagnostic, role string) *RoleDiagnostic {
@@ -2126,9 +2445,23 @@ func ensureRoleDiagnostic(roles map[string]*RoleDiagnostic, role string) *RoleDi
 	return roles[role]
 }
 
+func diagnosticExtensionRole(path string) (string, string) {
+	withoutLine := filepath.ToSlash(path)
+	if idx := strings.Index(strings.ToLower(withoutLine), "#l"); idx >= 0 {
+		withoutLine = withoutLine[:idx]
+	}
+	ext := strings.ToLower(filepath.Ext(withoutLine))
+	if ext == "" {
+		ext = "(none)"
+	}
+	return ext, diagnosticRole(path)
+}
+
 func diagnosticRole(path string) string {
 	path = strings.ToLower(filepath.ToSlash(path))
 	switch {
+	case strings.HasSuffix(path, ".adoc") || strings.HasSuffix(path, ".asciidoc") || strings.HasSuffix(path, ".asc"):
+		return "asciidoc"
 	case isOpenSpecDiagnosticPath(path) && strings.Contains(path, "/specs/") && !strings.Contains(path, "/changes/") && strings.HasSuffix(path, "/spec.md"):
 		return "openspec_base_spec"
 	case isOpenSpecDiagnosticPath(path) && strings.HasSuffix(path, "/proposal.md"):
@@ -2410,6 +2743,29 @@ func sortedSet(items map[string]bool) []string {
 	return out
 }
 
+func containsAny(text string, needles ...string) bool {
+	for _, needle := range needles {
+		if needle != "" && strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func limitStrings(values []string, limit int) []string {
+	if limit <= 0 || len(values) <= limit {
+		return append([]string(nil), values...)
+	}
+	return append([]string(nil), values[:limit]...)
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func defaultString(value, fallback string) string {
 	if strings.TrimSpace(value) == "" {
 		return fallback
@@ -2552,6 +2908,61 @@ func FormatText(r *Result) string {
 			fmt.Fprintln(&b)
 		}
 	}
+	if len(r.Diagnostics.FalsePositiveSummaries) > 0 {
+		fmt.Fprintln(&b, "- Primary false-positive classes:")
+		for i, class := range r.Diagnostics.FalsePositiveSummaries {
+			if i >= 10 {
+				break
+			}
+			fmt.Fprintf(&b, "  - %s: %d", class.Class, class.Count)
+			if class.GradeCounts.SameCluster > 0 || class.GradeCounts.Unlabeled > 0 || class.GradeCounts.HardNegative > 0 {
+				fmt.Fprintf(&b, " (same-cluster %d / unlabeled %d / hard-negative %d)",
+					class.GradeCounts.SameCluster,
+					class.GradeCounts.Unlabeled,
+					class.GradeCounts.HardNegative)
+			}
+			if len(class.Examples) > 0 {
+				examples := make([]string, 0, minInt(len(class.Examples), 3))
+				for _, example := range class.Examples {
+					examples = append(examples, example.CaseID+":"+example.Path)
+					if len(examples) >= 3 {
+						break
+					}
+				}
+				fmt.Fprintf(&b, " (examples: %s)", strings.Join(examples, "; "))
+			}
+			fmt.Fprintln(&b)
+		}
+	}
+	if len(r.Diagnostics.ExtensionSummaries) > 0 {
+		fmt.Fprintln(&b, "- Extension coverage:")
+		for i, ext := range r.Diagnostics.ExtensionSummaries {
+			if i >= 10 {
+				break
+			}
+			fmt.Fprintf(&b, "  - %s/%s: expected %d / exact %d / missing-from-corpus %d / missed-after-discovery %d / primary false-positive %d\n",
+				ext.Extension,
+				ext.Role,
+				ext.Expected,
+				ext.ExactRetrieved,
+				ext.MissingFromCorpus,
+				ext.MissedAfterDiscovery,
+				ext.PrimaryFalsePositive)
+		}
+	}
+	if len(r.Diagnostics.UnindexedDocumentSummaries) > 0 {
+		fmt.Fprintln(&b, "- Unindexed document formats:")
+		for i, doc := range r.Diagnostics.UnindexedDocumentSummaries {
+			if i >= 10 {
+				break
+			}
+			fmt.Fprintf(&b, "  - %s/%s: %d", doc.Extension, doc.Role, doc.Count)
+			if len(doc.Examples) > 0 {
+				fmt.Fprintf(&b, " (examples: %s)", strings.Join(limitStrings(doc.Examples, 3), "; "))
+			}
+			fmt.Fprintln(&b)
+		}
+	}
 	if r.Diagnostics.OpenSpec != nil {
 		openSpec := r.Diagnostics.OpenSpec
 		indexedExpectedBundles := openSpec.ExpectedBundles - len(openSpec.MissingBundles)
@@ -2618,6 +3029,16 @@ func FormatText(r *Result) string {
 		}
 		fmt.Fprintf(&b, "- Relevant included: %s\n", listOrNone(c.RelevantIncluded))
 		fmt.Fprintf(&b, "- Irrelevant included: %s\n", listOrNone(c.IrrelevantIncluded))
+		if len(c.PrimaryFalsePositiveDiagnostics) > 0 {
+			examples := make([]string, 0, minInt(len(c.PrimaryFalsePositiveDiagnostics), 5))
+			for _, fp := range c.PrimaryFalsePositiveDiagnostics {
+				examples = append(examples, fmt.Sprintf("#%d %s [%s/%s/%s]", fp.Position, fp.Path, fp.Lane, fp.Role, fp.Grade))
+				if len(examples) >= 5 {
+					break
+				}
+			}
+			fmt.Fprintf(&b, "- Primary false positives: %s\n", strings.Join(examples, "; "))
+		}
 		fmt.Fprintf(&b, "- Missed: %s\n", listOrNone(c.MissedExpectedRelevant))
 		fmt.Fprintf(&b, "- Discovery: %d/%d = %s\n", c.ExpectedAvailableCount, c.ExpectedRelevantCount, pct(c.DiscoveryCoverage))
 		fmt.Fprintf(&b, "- Retrieval of discovered expected artifacts: %s\n", recallText(c.ExpectedAvailableCount-len(c.MissedAfterDiscovery), c.ExpectedAvailableCount, c.RetrievalCoverageOfDiscovered))

@@ -95,6 +95,12 @@ func TestRun_AgenticSaaSFixture(t *testing.T) {
 	if len(result.Diagnostics.RoleSummaries) == 0 {
 		t.Fatalf("expected diagnostic role summaries: %#v", result.Diagnostics)
 	}
+	if len(result.Diagnostics.FalsePositiveSummaries) == 0 {
+		t.Fatalf("expected primary false-positive summaries: %#v", result.Diagnostics)
+	}
+	if len(result.Diagnostics.ExtensionSummaries) == 0 {
+		t.Fatalf("expected extension summaries: %#v", result.Diagnostics)
+	}
 	if result.AgentMetrics.MustHitAt3 == 0 {
 		t.Fatalf("expected agent must-hit@3 metrics: %#v", result.AgentMetrics)
 	}
@@ -140,6 +146,11 @@ func TestRun_AgenticSaaSFixture(t *testing.T) {
 		if len(c.ArtifactGrades) != len(c.ArtifactsIncluded) {
 			t.Fatalf("%s: artifact grade count mismatch", c.ID)
 		}
+		for _, fp := range c.PrimaryFalsePositiveDiagnostics {
+			if fp.CaseID != c.ID || fp.Path == "" || fp.Position <= 0 || fp.Lane == "" || fp.Role == "" || fp.Grade == "" || fp.ReasonClass == "" {
+				t.Fatalf("%s: incomplete false-positive diagnostic: %#v", c.ID, fp)
+			}
+		}
 		if c.AgentMetrics.IncludedArtifacts != len(c.ArtifactsIncluded) {
 			t.Fatalf("%s: agent included count mismatch", c.ID)
 		}
@@ -160,6 +171,28 @@ func TestRun_AgenticSaaSFixture(t *testing.T) {
 	}
 	if sufficiencyPasses == 0 || sufficiencyFailures == 0 {
 		t.Fatalf("expected sufficiency passes and failures, got pass=%d fail=%d", sufficiencyPasses, sufficiencyFailures)
+	}
+}
+
+func TestDiagnostics_ClassifiesAsciiDocGaps(t *testing.T) {
+	if got := diagnosticRole("docs/architecture/runtime.adoc"); got != "asciidoc" {
+		t.Fatalf("diagnosticRole(.adoc) = %q", got)
+	}
+	ext, role := diagnosticExtensionRole("docs/architecture/runtime.adoc")
+	if ext != ".adoc" || role != "asciidoc" {
+		t.Fatalf("diagnosticExtensionRole(.adoc) = %q/%q", ext, role)
+	}
+
+	tmp := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmp, "docs", "architecture"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "docs", "architecture", "runtime.adoc"), []byte("= Runtime\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	summaries := summarizeUnindexedDocuments(tmp, nil)
+	if len(summaries) != 1 || summaries[0].Extension != ".adoc" || summaries[0].Role != "asciidoc" || summaries[0].Count != 1 {
+		t.Fatalf("unexpected unindexed document summaries: %#v", summaries)
 	}
 }
 
