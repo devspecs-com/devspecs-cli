@@ -49,11 +49,12 @@ type TermStats struct {
 }
 
 type anchorScoreResult struct {
-	score       float64
-	matches     []string
-	fields      []string
-	kinds       []string
-	frequencies []string
+	score          float64
+	matches        []string
+	fields         []string
+	kinds          []string
+	frequencies    []string
+	strongSpecific bool
 }
 
 type anchorFieldTerms struct {
@@ -166,14 +167,41 @@ func applyAnchorFirstRanking(candidates []scoredCandidate, universe []Candidate,
 	}
 	vocab := BuildRepoVocabulary(universe)
 	changed := false
+	seen := map[string]bool{}
 	for i := range candidates {
+		seen[candidateIdentity(candidates[i].candidate)] = true
 		result := scoreAnchorFirstCandidate(candidates[i].candidate, profile, vocab)
 		if result.score < 1.0 {
 			continue
 		}
-		delta := clampFloat(result.score, 0, 12)
+		delta := clampFloat(result.score, 0, 24)
 		candidates[i].score += delta
 		candidates[i].candidate = withAnchorFirstMetadata(candidates[i].candidate, delta, result)
+		changed = true
+	}
+	for _, c := range universe {
+		if seen[candidateIdentity(c)] {
+			continue
+		}
+		result := scoreAnchorFirstCandidate(c, profile, vocab)
+		if !result.strongSpecific || result.score < 10.0 {
+			continue
+		}
+		role := candidateRole(c)
+		prior := authorityPrior(c, role, strings.ToLower(query))
+		delta := clampFloat(result.score, 0, 24)
+		c = withAnchorFirstMetadata(c, delta, result)
+		c.Metadata["anchor_first_backfill"] = "true"
+		candidates = append(candidates, scoredCandidate{
+			candidate:  c,
+			score:      delta + prior.score,
+			baseScore:  0,
+			authority:  prior,
+			profile:    candidateMatchProfile(c, strings.ToLower(query)),
+			role:       role,
+			sourceFile: IsSourceContextCandidate(c),
+		})
+		seen[candidateIdentity(c)] = true
 		changed = true
 	}
 	if changed {
@@ -205,7 +233,13 @@ func scoreAnchorFirstCandidate(c Candidate, profile AnchorProfile, vocab RepoVoc
 		if idf <= 0 {
 			idf = 1.0
 		}
-		score := tf * idf * modifier
+		idfWeight := idf - 1.0
+		if anchor.Kind == AnchorCompactIdentifier && idfWeight < 1.0 {
+			idfWeight = 1.0
+		} else if idfWeight < 0 {
+			idfWeight = 0
+		}
+		score := tf * idfWeight * modifier
 		if anchor.Kind == AnchorArtifactRoleTerm && !hasSpecificMatch {
 			score *= 0.25
 		}
@@ -214,6 +248,9 @@ func scoreAnchorFirstCandidate(c Candidate, profile AnchorProfile, vocab RepoVoc
 		}
 		if anchor.Kind != AnchorArtifactRoleTerm {
 			hasSpecificMatch = true
+			if anchorStrongSpecificMatch(anchor, stats, matchedFields) {
+				result.strongSpecific = true
+			}
 		}
 		result.score += score
 		result.matches = append(result.matches, anchor.Term)
@@ -250,21 +287,24 @@ func fieldWeightedTF(term string, fields anchorFieldTerms, kind AnchorKind) (flo
 	}
 	var score float64
 	var matched []string
-	add := func(name string, terms map[string]int, weight float64) {
+	add := func(name string, terms map[string]int, weight float64, capCount int) {
 		count := terms[term]
 		if count <= 0 {
 			return
 		}
+		if capCount > 0 && count > capCount {
+			count = capCount
+		}
 		score += float64(count) * weight
 		matched = append(matched, name)
 	}
-	add("path", fields.path, 4.5)
-	add("title", fields.title, 4.0)
-	add("test_name", fields.testName, 5.0)
-	add("heading", fields.heading, 3.0)
-	add("symbol", fields.symbol, 2.5)
-	add("role", fields.role, 1.2)
-	add("body", fields.body, 0.45)
+	add("path", fields.path, 4.5, 2)
+	add("title", fields.title, 4.0, 2)
+	add("test_name", fields.testName, 5.0, 2)
+	add("heading", fields.heading, 3.0, 3)
+	add("symbol", fields.symbol, 2.5, 3)
+	add("role", fields.role, 1.2, 2)
+	add("body", fields.body, 0.2, 3)
 	if kind == AnchorCompactIdentifier {
 		score *= 1.25
 	}
@@ -383,12 +423,12 @@ func anchorDictionaryModifier(anchor AnchorTerm, hasSpecific bool) float64 {
 		return 0
 	case AnchorArtifactRoleTerm:
 		if !hasSpecific {
-			return 0.15
+			return 0.05
 		}
 		if anchorWeakBroadTerms[anchor.Term] {
-			return 0.2
+			return 0.08
 		}
-		return 0.45
+		return 0.18
 	case AnchorCompactIdentifier:
 		return 1.8
 	case AnchorPathLike:
@@ -400,6 +440,25 @@ func anchorDictionaryModifier(anchor AnchorTerm, hasSpecific bool) float64 {
 	default:
 		return 1
 	}
+}
+
+func anchorStrongSpecificMatch(anchor AnchorTerm, stats TermStats, fields []string) bool {
+	if anchor.Kind == AnchorArtifactRoleTerm || anchor.Kind == AnchorGenericTaskWord {
+		return false
+	}
+	if anchorWeakBroadTerms[anchor.Term] {
+		return false
+	}
+	if stats.IDF > 0 && stats.IDF < 1.8 && anchor.Kind != AnchorCompactIdentifier {
+		return false
+	}
+	for _, field := range fields {
+		switch field {
+		case "path", "title", "test_name":
+			return true
+		}
+	}
+	return false
 }
 
 func vocabularyTermAllowed(term string) bool {
@@ -515,12 +574,18 @@ func maxInt(a, b int) int {
 }
 
 var anchorGenericTaskWords = map[string]bool{
-	"add": true, "build": true, "change": true, "check": true, "continue": true,
+	"a": true, "add": true, "an": true, "and": true, "are": true,
+	"build": true, "change": true, "check": true, "continue": true,
 	"cover": true, "covers": true, "covered": true, "context": true, "do": true,
-	"fix": true, "generate": true, "get": true, "help": true, "implement": true,
-	"improve": true, "make": true, "need": true, "next": true, "run": true,
-	"show": true, "update": true, "use": true, "work": true, "working": true,
-	"behavior": true, "behaviour": true,
+	"fix": true, "for": true, "from": true, "generate": true, "get": true,
+	"help": true, "how": true, "implement": true, "improve": true, "into": true,
+	"make": true, "need": true, "next": true, "or": true, "run": true,
+	"same": true, "share": true, "shared": true, "show": true, "so": true,
+	"that": true, "the": true, "these": true, "this": true, "those": true,
+	"to": true, "update": true, "use": true, "what": true, "when": true,
+	"where": true, "which": true, "who": true, "why": true, "with": true,
+	"without": true, "work": true, "working": true, "behavior": true,
+	"behaviour": true,
 }
 
 var anchorRoleTerms = map[string]bool{

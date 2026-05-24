@@ -236,6 +236,7 @@ func compactResultMetadata(metadata map[string]string) map[string]string {
 		"anchor_fields_json",
 		"anchor_types_json",
 		"anchor_term_frequency_json",
+		"anchor_first_backfill",
 	}
 	out := map[string]string{}
 	for _, key := range keys {
