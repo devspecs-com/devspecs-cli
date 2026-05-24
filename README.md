@@ -227,6 +227,12 @@ The CLI applies **bounded automatic schema migrations** when opening the global 
 
 If configured paths yield **no** artifacts, the CLI runs a **bounded** on-disk pass (respecting the same **`.gitignore` / exclude / `.aiignore`** rules as scanning) and prints up to a fixed number of candidate directories plus an example **`ds config add-source`** command when candidates exist; otherwise it prints a generic **`ds config add-source markdown plans`** line — still **exit 0**. On **`ds scan --json`**, the **`hints`** field follows **`omitempty`**: present only when the candidate list is non-empty.
 
+### Telemetry
+
+DevSpecs sends minimal anonymous CLI telemetry to improve install, init, scan, and query flows. Events use a random local anonymous ID stored under `DEVSPECS_HOME` and include only coarse fields such as CLI version, OS/arch, command name, success, duration bucket, and count buckets. DevSpecs does **not** send repository names, file paths, git remotes, artifact titles, document text, or raw queries.
+
+Disable telemetry with **`DEVSPECS_TELEMETRY=0`** or **`DS_TELEMETRY=0`**. Use **`DEVSPECS_TELEMETRY=debug`** to print the would-send event to stderr, and **`DEVSPECS_TELEMETRY_URL`** / **`DS_TELEMETRY_URL`** to point at a different endpoint.
+
 ### `ds resume`
 
 Groups artifacts into **In Progress**, **Recently Settled** (~14 days by default), and **Stale** (non-terminal, idle ~30+ days). Supports **`--limit`**, **`--all`**, **`--no-refresh`**, short IDs, inline tags, and **`--json`** (`in_progress`, `recently_settled`, `stale`).

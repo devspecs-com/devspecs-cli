@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/devspecs-com/devspecs-cli/internal/telemetry"
 	"github.com/spf13/cobra"
 )
 
@@ -48,6 +50,16 @@ func NewFindCmd() *cobra.Command {
 }
 
 func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh bool) error {
+	start := time.Now()
+	success := false
+	props := map[string]any{
+		"query_length_bucket": telemetry.QueryLengthBucket(query),
+		"json":                asJSON,
+	}
+	defer func() {
+		telemetry.RecordCommand("find", success, time.Since(start), props)
+	}()
+
 	db, err := openDB()
 	if err != nil {
 		return err
@@ -70,6 +82,8 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 		matches = retrieval.QueryBaseline(candidates, query)
 	}
 	reasons := reasonsByPath(retrieval.ExplainCandidates(matches, query))
+	success = true
+	props["result_count_bucket"] = telemetry.CountBucket(len(matches))
 
 	if asJSON {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(findResults(matches, reasons, retriever.Name()))

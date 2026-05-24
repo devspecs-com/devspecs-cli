@@ -34,6 +34,11 @@ type ProgressEvent struct {
 	CandidatesDiscovered map[string]int `json:"candidates_discovered,omitempty"`
 	CandidatesParsed     map[string]int `json:"candidates_parsed,omitempty"`
 	ArtifactsUpserted    map[string]int `json:"artifacts_upserted,omitempty"`
+	ParseDurationMS      int64          `json:"parse_duration_ms,omitempty"`
+	ClassifierDurationMS int64          `json:"classifier_duration_ms,omitempty"`
+	WriterDurationMS     int64          `json:"writer_duration_ms,omitempty"`
+	FlushDurationMS      int64          `json:"flush_duration_ms,omitempty"`
+	FTSDurationMS        int64          `json:"fts_duration_ms,omitempty"`
 	RowsWritten          map[string]int `json:"rows_written,omitempty"`
 	ChunksFlushed        map[string]int `json:"chunks_flushed,omitempty"`
 	DeferredFTSRows      int            `json:"deferred_fts_rows,omitempty"`

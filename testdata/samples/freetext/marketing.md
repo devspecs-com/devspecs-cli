@@ -6,4 +6,4 @@
 
 ## Experiments
 
-- [ ] Landing page A/B
+- [ ] Landing page test

@@ -1,7 +1,7 @@
-# Personas (later)
+# Personas Later
 
-Deferred persona work.
+Persona-specific workflows are out of scope for the first slice.
 
 ## Tasks
 
-- [ ] Research interviews
+- [ ] Revisit after beta

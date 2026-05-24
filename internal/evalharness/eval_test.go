@@ -316,8 +316,15 @@ func TestRun_IndexedCacheTelemetryAndBudgets(t *testing.T) {
 	if len(first.PhaseTelemetry) == 0 {
 		t.Fatalf("expected phase telemetry")
 	}
-	if !hasPhase(first.PhaseTelemetry, "index_or_load_corpus") || !hasPhase(first.PhaseTelemetry, "case") {
+	if !hasPhase(first.PhaseTelemetry, "index_or_load_corpus") || !hasPhase(first.PhaseTelemetry, "sqlite_scan") || !hasPhase(first.PhaseTelemetry, "sqlite_readback") || !hasPhase(first.PhaseTelemetry, "index_cache_write") || !hasPhase(first.PhaseTelemetry, "case") {
 		t.Fatalf("missing expected phases: %#v", first.PhaseTelemetry)
+	}
+	cacheData, err := os.ReadFile(filepath.FromSlash(first.IndexCache.Path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(cacheData), "\n") {
+		t.Fatal("expected indexed corpus cache JSON to be compact")
 	}
 
 	second, err := Run(root, Options{
@@ -330,6 +337,9 @@ func TestRun_IndexedCacheTelemetryAndBudgets(t *testing.T) {
 	}
 	if second.IndexCache == nil || !second.IndexCache.Hit || second.IndexCache.Key != first.IndexCache.Key {
 		t.Fatalf("expected cache hit with same key: first=%#v second=%#v", first.IndexCache, second.IndexCache)
+	}
+	if !hasPhase(second.PhaseTelemetry, "index_cache_read") {
+		t.Fatalf("expected cache read phase on warm run: %#v", second.PhaseTelemetry)
 	}
 
 	withTests, err := Run(root, Options{IndexCacheDir: cacheDir, TestCaseArtifacts: true})
@@ -351,7 +361,7 @@ func TestCollectIndexedFiles_PreScanArtifactBudgets(t *testing.T) {
 		MaxSourceFiles:       1,
 		MaxTestCaseArtifacts: 1,
 		MaxCodeComments:      1,
-	})
+	}, newPhaseRecorder())
 	if err != nil {
 		t.Fatal(err)
 	}

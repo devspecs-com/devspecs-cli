@@ -9,6 +9,7 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/devspecs-com/devspecs-cli/internal/telemetry"
 	"github.com/spf13/cobra"
 )
 
@@ -51,6 +52,19 @@ var settledStatuses = map[string]bool{
 }
 
 func runResume(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, asJSON, noRefresh bool, limit int, all bool) error {
+	start := time.Now()
+	success := false
+	props := map[string]any{
+		"focused": strings.TrimSpace(query) != "",
+		"json":    asJSON,
+	}
+	if strings.TrimSpace(query) != "" {
+		props["query_length_bucket"] = telemetry.QueryLengthBucket(query)
+	}
+	defer func() {
+		telemetry.RecordCommand("resume", success, time.Since(start), props)
+	}()
+
 	db, err := openDB()
 	if err != nil {
 		return err
@@ -65,7 +79,9 @@ func runResume(cmd *cobra.Command, query string, fp store.FilterParams, repoName
 	fp.RepoRoot = repoRoot
 
 	if strings.TrimSpace(query) != "" {
-		return runFocusedResume(cmd, db, repoRoot, query, fp, asJSON, limit)
+		err := runFocusedResume(cmd, db, repoRoot, query, fp, asJSON, limit)
+		success = err == nil
+		return err
 	}
 
 	rows, err := db.ResumeArtifacts(repoRoot, fp)
@@ -75,6 +91,8 @@ func runResume(cmd *cobra.Command, query string, fp store.FilterParams, repoName
 
 	if len(rows) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "No DevSpecs indexed yet. Run: ds scan")
+		success = true
+		props["result_count_bucket"] = telemetry.CountBucket(0)
 		return nil
 	}
 
@@ -117,6 +135,8 @@ func runResume(cmd *cobra.Command, query string, fp store.FilterParams, repoName
 		}
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
+		success = true
+		props["result_count_bucket"] = telemetry.CountBucket(len(inProgress) + len(settled) + len(stale))
 		return enc.Encode(obj)
 	}
 
@@ -152,6 +172,8 @@ func runResume(cmd *cobra.Command, query string, fp store.FilterParams, repoName
 		}
 	}
 
+	success = true
+	props["result_count_bucket"] = telemetry.CountBucket(len(inProgress) + len(settled) + len(stale))
 	return nil
 }
 

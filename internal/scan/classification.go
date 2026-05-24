@@ -15,10 +15,7 @@ const classifierExtractKey = "classifier"
 
 func attachClassifierMetadata(repoRoot string, c adapters.Candidate, art adapters.Artifact) adapters.Artifact {
 	cfg := classify.DefaultPipelineConfig()
-	body := readCandidateBody(c.PrimaryPath, art.Body)
-	if c.AdapterName == "test_case" && strings.TrimSpace(c.UnitBody) != "" {
-		body = c.UnitBody
-	}
+	body := classificationBodyForCandidate(c, art)
 	relPath := filepath.ToSlash(c.RelPath)
 	resolution := classify.ClassifyCandidate(classify.Candidate{
 		Path:  relPath,
@@ -63,6 +60,25 @@ func attachClassifierMetadata(repoRoot string, c adapters.Candidate, art adapter
 	}
 	art.Extracted[classifierExtractKey] = payload
 	return art
+}
+
+func classificationBodyForCandidate(c adapters.Candidate, art adapters.Artifact) string {
+	if shouldPreferCandidateUnitBody(c) {
+		return c.UnitBody
+	}
+	return readCandidateBody(c.PrimaryPath, art.Body)
+}
+
+func shouldPreferCandidateUnitBody(c adapters.Candidate) bool {
+	if strings.TrimSpace(c.UnitBody) == "" {
+		return false
+	}
+	switch c.AdapterName {
+	case "test_case", "code_comment":
+		return true
+	default:
+		return false
+	}
 }
 
 func readCandidateBody(path, fallback string) string {

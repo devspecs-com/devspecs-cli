@@ -855,7 +855,7 @@ func TestDiscover_SampleFixture_Specify(t *testing.T) {
 		t.Fatalf("specify fixture: want >= 8 markdown candidates, got %d", len(candidates))
 	}
 	var specCand adapters.Candidate
-	wantRel := filepath.ToSlash(filepath.Join("specs", "001-discover-related-specs", "spec.md"))
+	wantRel := filepath.ToSlash(filepath.Join("specs", "001-synthetic-feature", "spec.md"))
 	for _, c := range candidates {
 		if filepath.ToSlash(c.RelPath) == wantRel {
 			specCand = c
@@ -863,13 +863,13 @@ func TestDiscover_SampleFixture_Specify(t *testing.T) {
 		}
 	}
 	if specCand.PrimaryPath == "" {
-		t.Fatal("spec.md not discovered under specs/001-discover-related-specs/")
+		t.Fatal("spec.md not discovered under specs/001-synthetic-feature/")
 	}
 	art, _, _, err := a.Parse(context.Background(), specCand)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantLayout := filepath.ToSlash(filepath.Join("specs", "001-discover-related-specs"))
+	wantLayout := filepath.ToSlash(filepath.Join("specs", "001-synthetic-feature"))
 	if art.FormatProfile != format.ProfileSpeckit {
 		t.Fatalf("expected format_profile speckit, got %q", art.FormatProfile)
 	}
@@ -888,11 +888,11 @@ func TestDiscover_SampleFixture_SpecifyChildrenShareLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantLayout := filepath.ToSlash(filepath.Join("specs", "001-discover-related-specs"))
+	wantLayout := filepath.ToSlash(filepath.Join("specs", "001-synthetic-feature"))
 	for _, rel := range []string{
-		filepath.ToSlash(filepath.Join("specs", "001-discover-related-specs", "plan.md")),
-		filepath.ToSlash(filepath.Join("specs", "001-discover-related-specs", "tasks.md")),
-		filepath.ToSlash(filepath.Join("specs", "001-discover-related-specs", "research.md")),
+		filepath.ToSlash(filepath.Join("specs", "001-synthetic-feature", "plan.md")),
+		filepath.ToSlash(filepath.Join("specs", "001-synthetic-feature", "tasks.md")),
+		filepath.ToSlash(filepath.Join("specs", "001-synthetic-feature", "research.md")),
 	} {
 		candidate := findCandidate(candidates, rel)
 		if candidate.PrimaryPath == "" {
@@ -913,7 +913,7 @@ func TestDiscover_SampleFixture_SpecifyChildrenShareLayout(t *testing.T) {
 
 func TestDiscover_SampleFixture_SpecifyTasksTodos(t *testing.T) {
 	root := filepath.Join(testSamplesRoot(t), "specify")
-	wantRel := filepath.ToSlash(filepath.Join("specs", "001-discover-related-specs", "tasks.md"))
+	wantRel := filepath.ToSlash(filepath.Join("specs", "001-synthetic-feature", "tasks.md"))
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), root, nil)
 	if err != nil {
@@ -949,7 +949,7 @@ func TestDiscover_SampleFixture_CursorPlan(t *testing.T) {
 	if len(candidates) != 1 {
 		t.Fatalf("cursor fixture: want 1 candidate, got %d (%v)", len(candidates), candidates)
 	}
-	if want := ".cursor/plans/probabilistic_related_specs_481c4b3f.plan.md"; filepath.ToSlash(candidates[0].RelPath) != want {
+	if want := ".cursor/plans/sample_cursor_plan.plan.md"; filepath.ToSlash(candidates[0].RelPath) != want {
 		t.Fatalf("rel path: want %s, got %s", want, candidates[0].RelPath)
 	}
 	art, _, _, err := a.Parse(context.Background(), candidates[0])
@@ -1034,10 +1034,10 @@ func TestDiscover_SampleFixture_Freetext(t *testing.T) {
 	}{
 		{"ROADMAP.md", config.KindPlan, ""},
 		{"v2/plans/README.md", config.KindPlan, ""},
-		{"v2/plans/01-ui-scraping-high-fidelity-collection/README.md", config.KindPlan, ""},
-		{"v2/plans/02_PROMPT_GROUPING.md", config.KindPlan, ""},
-		{"v2/plans/01-ui-scraping-high-fidelity-collection/03-browserbase-chatgpt-spike.md", config.KindPlan, ""},
-		{"decisions/001-scraping-approach.md", config.KindDecision, ""},
+		{"v2/plans/01-sample-capture-workflow/README.md", config.KindPlan, ""},
+		{"v2/plans/02_TOPIC_GROUPING.md", config.KindPlan, ""},
+		{"v2/plans/01-sample-capture-workflow/03-service-integration-spike.md", config.KindPlan, ""},
+		{"decisions/001-capture-boundary.md", config.KindDecision, ""},
 	} {
 		art, _, _, err := a.Parse(context.Background(), findCand(tc.rel))
 		if err != nil {

@@ -1,7 +1,7 @@
-# Onboarding activation
+# Onboarding Activation
 
-First-run success.
+Help a new workspace finish its first successful run.
 
 ## Tasks
 
-- [ ] Checklist tour
+- [ ] Add sample checklist

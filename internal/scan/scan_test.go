@@ -617,7 +617,7 @@ func TestScan_CursorPlanSample_NoPathToolTagInDB(t *testing.T) {
 	t.Setenv("DEVSPECS_HOME", home)
 
 	srcRoot := filepath.Join(testdataSamplesRoot(t), "cursor")
-	planSrc := filepath.Join(srcRoot, ".cursor", "plans", "probabilistic_related_specs_481c4b3f.plan.md")
+	planSrc := filepath.Join(srcRoot, ".cursor", "plans", "sample_cursor_plan.plan.md")
 	data, err := os.ReadFile(planSrc)
 	if err != nil {
 		t.Fatal(err)
@@ -626,7 +626,7 @@ func TestScan_CursorPlanSample_NoPathToolTagInDB(t *testing.T) {
 	repoRoot := filepath.Join(tmp, "repo")
 	dstDir := filepath.Join(repoRoot, ".cursor", "plans")
 	os.MkdirAll(dstDir, 0o755)
-	dstPath := filepath.Join(dstDir, "probabilistic_related_specs_481c4b3f.plan.md")
+	dstPath := filepath.Join(dstDir, "sample_cursor_plan.plan.md")
 	if err := os.WriteFile(dstPath, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -778,6 +778,53 @@ func TestScan_FreshIndexParallelismIsDeterministic(t *testing.T) {
 	if got, want := artifactIdentitySnapshot(t, manyWorkersDB), artifactIdentitySnapshot(t, oneWorkerDB); !reflect.DeepEqual(got, want) {
 		t.Fatalf("parallel fresh index changed artifact identity order:\ngot:  %#v\nwant: %#v", got, want)
 	}
+}
+
+func TestScan_FreshIndexProgressIncludesGranularTimings(t *testing.T) {
+	repoRoot := setupFreshIndexSpeedRepo(t)
+	db, err := store.Open(filepath.Join(t.TempDir(), "devspecs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	cfg := config.WithCodeCommentArtifacts(config.WithTestCaseArtifacts(config.WithDefaultIntentCandidateDiscovery(nil, true), true), true)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{
+		&markdown.Adapter{},
+		&testcase.Adapter{},
+		&codecomment.Adapter{},
+	})
+	var events []ProgressEvent
+	if _, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, RunOptions{
+		UseTransaction:       true,
+		SkipAuthoredAtLookup: true,
+		FreshIndex:           true,
+		FileWorkerCount:      2,
+		Progress: func(event ProgressEvent) {
+			events = append(events, event)
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !hasScanProgressEvent(events, "extract", "adapter_done") {
+		t.Fatalf("missing extract timing event: %#v", events)
+	}
+	if !hasScanProgressEvent(events, "fresh_index_writer", "rows_flushed") {
+		t.Fatalf("missing writer flush timing event: %#v", events)
+	}
+	if !hasScanProgressEvent(events, "fresh_index_fts", "done") {
+		t.Fatalf("missing FTS timing event: %#v", events)
+	}
+}
+
+func hasScanProgressEvent(events []ProgressEvent, phase, event string) bool {
+	for _, got := range events {
+		if got.Phase == phase && got.Event == event {
+			return true
+		}
+	}
+	return false
 }
 
 func setupFreshIndexSpeedRepo(t *testing.T) string {

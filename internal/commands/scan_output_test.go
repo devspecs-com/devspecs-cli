@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/devspecs-com/devspecs-cli/internal/store"
 )
 
 func TestScanHuman_OutputUsesDisplayLabels(t *testing.T) {
@@ -185,6 +187,53 @@ func TestScanIncludeCodeCommentsIndexesIntentComments(t *testing.T) {
 	}
 	if !sawBreakdown {
 		t.Fatalf("missing code_comment source breakdown: %#v", out.SourcesBreakdown)
+	}
+}
+
+func TestLiveScanRunOptions_FreshIndexOnlyForEmptyIndex(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "devspecs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	opts, err := liveScanRunOptions(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.UseTransaction {
+		t.Fatal("live scan should use a transaction")
+	}
+	if !opts.FreshIndex {
+		t.Fatal("empty live index should use the fresh-index writer")
+	}
+	if !opts.SkipAuthoredAtLookup {
+		t.Fatal("fresh live index should skip per-artifact authored_at lookup")
+	}
+
+	now := "2026-05-24T00:00:00Z"
+	if _, err := db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('r1', '/tmp/repo', ?, ?)", now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO artifacts
+		(id, repo_id, short_id, kind, subtype, title, status, current_revision_id, created_at, updated_at, last_observed_at, authored_at)
+		VALUES ('ds_EXISTING', 'r1', 'existing', 'plan', '', 'Existing', 'draft', '', ?, ?, ?, ?)`,
+		now, now, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	opts, err = liveScanRunOptions(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.UseTransaction {
+		t.Fatal("populated live scan should still use a transaction")
+	}
+	if opts.FreshIndex {
+		t.Fatal("populated live index must not use fresh-index writer")
+	}
+	if opts.SkipAuthoredAtLookup {
+		t.Fatal("populated live index should keep canonical authored_at lookup behavior")
 	}
 }
 

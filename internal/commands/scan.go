@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/adr"
@@ -24,6 +26,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/repo"
 	"github.com/devspecs-com/devspecs-cli/internal/scan"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/devspecs-com/devspecs-cli/internal/telemetry"
 	"github.com/spf13/cobra"
 )
 
@@ -64,6 +67,20 @@ func NewScanCmd() *cobra.Command {
 }
 
 func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, includeTests, includeCodeComments bool) error {
+	start := time.Now()
+	success := false
+	props := map[string]any{
+		"include_tests":         includeTests,
+		"include_code_comments": includeCodeComments,
+		"if_changed":            ifChanged,
+		"rebuild":               rebuild,
+		"json":                  asJSON,
+		"quiet":                 quiet,
+	}
+	defer func() {
+		telemetry.RecordCommand("scan", success, time.Since(start), props)
+	}()
+
 	repoRoot, err := resolveRepoRoot(path)
 	if err != nil {
 		return err
@@ -85,6 +102,9 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	}
 
 	if ifChanged && !sourcePathsChanged(repoRoot, cfg) {
+		success = true
+		props["artifact_count_bucket"] = telemetry.CountBucket(0)
+		props["found_any"] = false
 		return nil
 	}
 
@@ -107,6 +127,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 		return fmt.Errorf("open database: %w", err)
 	}
 	defer db.Close()
+	db.SetMaxOpenConns(1)
 
 	ids := idgen.NewFactory()
 	adpts := []adapters.Adapter{&openspec.Adapter{}, &adr.Adapter{}, &markdown.Adapter{}, &sourcecontext.Adapter{}}
@@ -121,7 +142,17 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	if verbose && !quiet {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Respecting repo-root .gitignore, .git/info/exclude, and .aiignore during configured walks\n")
 	}
-	result, err := scanner.Run(context.Background(), repoRoot, cfg)
+	scanOpts, err := liveScanRunOptions(db)
+	if err != nil {
+		return fmt.Errorf("inspect index state: %w", err)
+	}
+	props["transaction_enabled"] = scanOpts.UseTransaction
+	props["fresh_index"] = scanOpts.FreshIndex
+	props["skip_authored_at_lookup"] = scanOpts.SkipAuthoredAtLookup
+	if verbose && !quiet && scanOpts.FreshIndex {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Using fresh-index scan path for empty/rebuilt index\n")
+	}
+	result, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, scanOpts)
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
@@ -130,6 +161,14 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 		matcher, _ := ignore.NewMatcher(repoRoot)
 		attachScanHints(result, repoRoot, matcher)
 	}
+	totalFound := scanTotalFound(result)
+	success = true
+	props["artifact_count_bucket"] = telemetry.CountBucket(totalFound)
+	props["new_count_bucket"] = telemetry.CountBucket(result.New)
+	props["updated_count_bucket"] = telemetry.CountBucket(result.Updated)
+	props["unchanged_count_bucket"] = telemetry.CountBucket(result.Unchanged)
+	props["source_count_bucket"] = telemetry.CountBucket(len(result.SourcesBreakdown))
+	props["found_any"] = totalFound > 0
 
 	if asJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
@@ -164,6 +203,31 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	fmt.Fprintf(out, "  %d unchanged artifacts\n", result.Unchanged)
 	fmt.Fprintln(out, "\nRun:\n  ds list")
 	return nil
+}
+
+func liveScanRunOptions(db *store.DB) (scan.RunOptions, error) {
+	opts := scan.RunOptions{UseTransaction: true}
+	hasArtifacts, err := scanIndexHasArtifacts(db)
+	if err != nil {
+		return opts, err
+	}
+	if !hasArtifacts {
+		opts.FreshIndex = true
+		opts.SkipAuthoredAtLookup = true
+	}
+	return opts, nil
+}
+
+func scanIndexHasArtifacts(db *store.DB) (bool, error) {
+	var one int
+	err := db.QueryRow("SELECT 1 FROM artifacts LIMIT 1").Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func scanTotalFound(r *scan.Result) int {

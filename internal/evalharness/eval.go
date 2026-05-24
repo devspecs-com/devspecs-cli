@@ -522,7 +522,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 	loadPhase.finish("ok", map[string]int{"cases": len(caseFile.Cases)}, nil)
 	corpusSource := defaultString(opts.CorpusSource, CorpusSourceSQLiteIndex)
 	indexPhase := telemetry.start("index_or_load_corpus")
-	files, cacheReport, budgetEvents, err := collectCorpusFiles(fixtureAbs, corpusSource, opts)
+	files, cacheReport, budgetEvents, err := collectCorpusFiles(fixtureAbs, corpusSource, opts, telemetry)
 	if err != nil {
 		indexPhase.finish("error", nil, map[string]string{"error": err.Error()})
 		return nil, err
@@ -725,14 +725,23 @@ func newPhaseRecorder() *phaseRecorder {
 }
 
 func (r *phaseRecorder) start(name string) *activePhase {
+	if r == nil {
+		return nil
+	}
 	return &activePhase{rec: r, name: name, started: time.Now().UTC()}
 }
 
 func (p *activePhase) durationMS() int64 {
+	if p == nil {
+		return 0
+	}
 	return time.Since(p.started).Milliseconds()
 }
 
 func (p *activePhase) finish(status string, counts map[string]int, details map[string]string) {
+	if p == nil || p.rec == nil {
+		return
+	}
 	ended := time.Now().UTC()
 	p.rec.phases = append(p.rec.phases, PhaseTelemetry{
 		Name:       p.name,
@@ -843,7 +852,7 @@ type indexedCorpusCacheFile struct {
 	Files         []File `json:"files"`
 }
 
-func collectCorpusFiles(root, corpusSource string, opts Options) ([]File, *IndexCacheReport, []BudgetEvent, error) {
+func collectCorpusFiles(root, corpusSource string, opts Options, telemetry *phaseRecorder) ([]File, *IndexCacheReport, []BudgetEvent, error) {
 	switch corpusSource {
 	case "", CorpusSourceFilesystemFixture:
 		files, err := collectFiles(root)
@@ -853,7 +862,7 @@ func collectCorpusFiles(root, corpusSource string, opts Options) ([]File, *Index
 		files, events := applyEvalBudgets(files, opts)
 		return files, nil, events, nil
 	case CorpusSourceSQLiteIndex:
-		return collectIndexedFiles(root, opts)
+		return collectIndexedFiles(root, opts, telemetry)
 	default:
 		return nil, nil, nil, fmt.Errorf("unknown eval corpus source %q", corpusSource)
 	}
@@ -908,7 +917,7 @@ func collectFiles(root string) ([]File, error) {
 	return files, err
 }
 
-func collectIndexedFiles(root string, opts Options) ([]File, *IndexCacheReport, []BudgetEvent, error) {
+func collectIndexedFiles(root string, opts Options, telemetry *phaseRecorder) ([]File, *IndexCacheReport, []BudgetEvent, error) {
 	cacheReport := &IndexCacheReport{}
 	cachePath := ""
 	cacheKey := ""
@@ -926,12 +935,15 @@ func collectIndexedFiles(root string, opts Options) ([]File, *IndexCacheReport, 
 		cacheReport.Key = key
 		cacheReport.Path = filepath.ToSlash(cachePath)
 		if !opts.RefreshIndexCache {
+			cacheReadPhase := telemetry.start("index_cache_read")
 			if cached, ok := readIndexedCorpusCache(cachePath, key); ok {
 				cacheReport.Hit = true
 				cacheReport.Reason = "cache_hit"
 				files, events := applyEvalBudgets(cached.Files, opts)
+				cacheReadPhase.finish("hit", map[string]int{"files": len(cached.Files)}, map[string]string{"key": key})
 				return files, cacheReport, events, nil
 			}
+			cacheReadPhase.finish("miss", nil, map[string]string{"key": key})
 		}
 		if opts.RefreshIndexCache {
 			cacheReport.Reason = "refresh_requested"
@@ -977,6 +989,7 @@ func collectIndexedFiles(root string, opts Options) ([]File, *IndexCacheReport, 
 		adpts = append(adpts, &codecomment.Adapter{})
 	}
 	scanner := scan.New(db, idgen.NewFactory(), adpts)
+	scanPhase := telemetry.start("sqlite_scan")
 	if _, err := scanner.RunWithOptions(context.Background(), root, cfg, scan.RunOptions{
 		MaxCandidatesByAdapter: evalCandidateLimits(opts),
 		UseTransaction:         true,
@@ -985,15 +998,21 @@ func collectIndexedFiles(root string, opts Options) ([]File, *IndexCacheReport, 
 		Progress:               evalScanProgressCallback(root, opts),
 		ProgressInterval:       opts.ProgressInterval,
 	}); err != nil {
+		scanPhase.finish("error", nil, map[string]string{"error": err.Error()})
 		return nil, cacheReport, nil, fmt.Errorf("scan fixture into indexed eval database: %w", err)
 	}
+	scanPhase.finish("ok", nil, nil)
 
+	readbackPhase := telemetry.start("sqlite_readback")
 	files, err := collectIndexedFilesFromDB(db, root)
 	if err != nil {
+		readbackPhase.finish("error", nil, map[string]string{"error": err.Error()})
 		return nil, cacheReport, nil, fmt.Errorf("read indexed eval artifacts: %w", err)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	readbackPhase.finish("ok", map[string]int{"files": len(files)}, nil)
 	if cachePath != "" && cacheKey != "" {
+		cacheWritePhase := telemetry.start("index_cache_write")
 		if err := writeIndexedCorpusCache(cachePath, indexedCorpusCacheFile{
 			SchemaVersion: evalIndexCacheSchemaVersion,
 			Key:           cacheKey,
@@ -1001,7 +1020,10 @@ func collectIndexedFiles(root string, opts Options) ([]File, *IndexCacheReport, 
 			Root:          filepath.ToSlash(root),
 			Files:         files,
 		}); err != nil {
+			cacheWritePhase.finish("error", map[string]int{"files": len(files)}, map[string]string{"error": err.Error(), "key": cacheKey})
 			cacheReport.Reason = "cache_write_failed: " + err.Error()
+		} else {
+			cacheWritePhase.finish("ok", map[string]int{"files": len(files)}, map[string]string{"key": cacheKey})
 		}
 	}
 	files, events := applyEvalBudgets(files, opts)
@@ -1406,7 +1428,7 @@ func writeIndexedCorpusCache(path string, cached indexedCorpusCacheFile) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(cached, "", "  ")
+	data, err := json.Marshal(cached)
 	if err != nil {
 		return err
 	}

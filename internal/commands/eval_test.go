@@ -177,7 +177,6 @@ func TestEvalCommand_FirstIndexReportTextOutput(t *testing.T) {
 		filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"),
 		"--first-index-report",
 		"--classifier-fixture", filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"),
-		"--classifier-fixture", filepath.Join("..", "..", "fixtures", "mined-intent-samples"),
 		"--input-usd-per-1m", "0.15",
 		"--no-save",
 	})
@@ -214,7 +213,7 @@ func TestEvalCommand_FirstIndexReportJSONOutput(t *testing.T) {
 	cmd.SetArgs([]string{
 		filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"),
 		"--first-index-report",
-		"--classifier-fixture", filepath.Join("..", "..", "fixtures", "mined-intent-samples"),
+		"--classifier-fixture", filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"),
 		"--json",
 		"--no-save",
 	})

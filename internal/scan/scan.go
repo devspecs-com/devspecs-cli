@@ -142,13 +142,16 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 				return nil, err
 			}
 			parsedByAdapter[adapter.Name()] += parsedCount
+			var writerDurationMS int64
 			for i, parsedArtifact := range parsed {
 				if !parsedArtifact.ok {
 					continue
 				}
+				writerStarted := time.Now()
 				if err := s.upsertArtifact(repoRoot, repoID, adapter.Name(), parsedArtifact.artifact, parsedArtifact.sources, parsedArtifact.parseResult, now, result, opts, state); err != nil {
 					return nil, fmt.Errorf("upsert artifact %q: %w", parsedArtifact.artifact.SourceIdentity, err)
 				}
+				writerDurationMS += time.Since(writerStarted).Milliseconds()
 				upsertedByAdapter[adapter.Name()]++
 				progress.maybe(ProgressEvent{
 					Phase:               "persist",
@@ -157,6 +160,7 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 					CandidatesProcessed: i + 1,
 					CandidatesParsed:    cloneIntMap(parsedByAdapter),
 					ArtifactsUpserted:   cloneIntMap(upsertedByAdapter),
+					WriterDurationMS:    writerDurationMS,
 					RowsWritten:         state.fresh.rowCounts(),
 					ChunksFlushed:       state.fresh.chunkCounts(),
 				})
@@ -169,6 +173,7 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 				CandidatesProcessed: len(candidates),
 				CandidatesParsed:    cloneIntMap(parsedByAdapter),
 				ArtifactsUpserted:   cloneIntMap(upsertedByAdapter),
+				WriterDurationMS:    writerDurationMS,
 				RowsWritten:         state.fresh.rowCounts(),
 				ChunksFlushed:       state.fresh.chunkCounts(),
 			})
@@ -207,12 +212,15 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 	}
 
 	if state != nil && state.fresh != nil {
+		flushStarted := time.Now()
 		if err := state.fresh.flushRows(); err != nil {
 			return nil, fmt.Errorf("flush fresh index rows: %w", err)
 		}
+		flushDurationMS := time.Since(flushStarted).Milliseconds()
 		progress.emit(ProgressEvent{
 			Phase:           "fresh_index_writer",
 			Event:           "rows_flushed",
+			FlushDurationMS: flushDurationMS,
 			RowsWritten:     state.fresh.rowCounts(),
 			ChunksFlushed:   state.fresh.chunkCounts(),
 			DeferredFTSRows: state.fresh.pendingFTSRows(),
@@ -236,12 +244,15 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 			Event:           "start",
 			DeferredFTSRows: state.fresh.pendingFTSRows(),
 		})
+		ftsStarted := time.Now()
 		if err := state.fresh.flushDeferredFTS(); err != nil {
 			return nil, fmt.Errorf("flush deferred fresh index FTS: %w", err)
 		}
+		ftsDurationMS := time.Since(ftsStarted).Milliseconds()
 		progress.emit(ProgressEvent{
 			Phase:           "fresh_index_fts",
 			Event:           "done",
+			FTSDurationMS:   ftsDurationMS,
 			RowsWritten:     state.fresh.rowCounts(),
 			ChunksFlushed:   state.fresh.chunkCounts(),
 			DeferredFTSRows: 0,
@@ -579,11 +590,13 @@ func sortCandidates(candidates []adapters.Candidate) {
 }
 
 type parsedFreshCandidate struct {
-	index       int
-	ok          bool
-	artifact    adapters.Artifact
-	sources     []adapters.Source
-	parseResult todoparse.ParseResult
+	index                int
+	ok                   bool
+	artifact             adapters.Artifact
+	sources              []adapters.Source
+	parseResult          todoparse.ParseResult
+	parseDurationMS      int64
+	classifierDurationMS int64
 }
 
 func parseCandidatesForFreshIndex(ctx context.Context, repoRoot string, adapter adapters.Adapter, candidates []adapters.Candidate, opts RunOptions, progress *progressReporter) ([]parsedFreshCandidate, int, error) {
@@ -597,39 +610,54 @@ func parseCandidatesForFreshIndex(ctx context.Context, repoRoot string, adapter 
 	if workers == 1 || len(candidates) < 2 {
 		out := make([]parsedFreshCandidate, len(candidates))
 		parsed := 0
+		var parseDurationMS int64
+		var classifierDurationMS int64
 		for i, c := range candidates {
 			if err := ctx.Err(); err != nil {
 				return nil, parsed, err
 			}
+			parseStarted := time.Now()
 			art, sources, pr, err := adapter.Parse(ctx, c)
+			parseMS := time.Since(parseStarted).Milliseconds()
 			if err != nil {
 				continue
 			}
+			classifierStarted := time.Now()
+			art = attachClassifierMetadata(repoRoot, c, art)
+			classifierMS := time.Since(classifierStarted).Milliseconds()
+			parseDurationMS += parseMS
+			classifierDurationMS += classifierMS
 			parsed++
 			out[i] = parsedFreshCandidate{
-				index:       i,
-				ok:          true,
-				artifact:    attachClassifierMetadata(repoRoot, c, art),
-				sources:     sources,
-				parseResult: pr,
+				index:                i,
+				ok:                   true,
+				artifact:             art,
+				sources:              sources,
+				parseResult:          pr,
+				parseDurationMS:      parseMS,
+				classifierDurationMS: classifierMS,
 			}
 			progress.maybe(ProgressEvent{
-				Phase:               "extract",
-				CurrentAdapter:      adapter.Name(),
-				CandidatesTotal:     len(candidates),
-				CandidatesProcessed: i + 1,
-				CandidatesParsed:    map[string]int{adapter.Name(): parsed},
-				ParallelWorkers:     workers,
+				Phase:                "extract",
+				CurrentAdapter:       adapter.Name(),
+				CandidatesTotal:      len(candidates),
+				CandidatesProcessed:  i + 1,
+				CandidatesParsed:     map[string]int{adapter.Name(): parsed},
+				ParseDurationMS:      parseDurationMS,
+				ClassifierDurationMS: classifierDurationMS,
+				ParallelWorkers:      workers,
 			})
 		}
 		progress.emit(ProgressEvent{
-			Phase:               "extract",
-			Event:               "adapter_done",
-			CurrentAdapter:      adapter.Name(),
-			CandidatesTotal:     len(candidates),
-			CandidatesProcessed: len(candidates),
-			CandidatesParsed:    map[string]int{adapter.Name(): parsed},
-			ParallelWorkers:     workers,
+			Phase:                "extract",
+			Event:                "adapter_done",
+			CurrentAdapter:       adapter.Name(),
+			CandidatesTotal:      len(candidates),
+			CandidatesProcessed:  len(candidates),
+			CandidatesParsed:     map[string]int{adapter.Name(): parsed},
+			ParseDurationMS:      parseDurationMS,
+			ClassifierDurationMS: classifierDurationMS,
+			ParallelWorkers:      workers,
 		})
 		return out, parsed, nil
 	}
@@ -643,11 +671,23 @@ func parseCandidatesForFreshIndex(ctx context.Context, repoRoot string, adapter 
 			defer wg.Done()
 			for index := range jobs {
 				c := candidates[index]
+				parseStarted := time.Now()
 				art, sources, pr, err := adapter.Parse(ctx, c)
+				parseMS := time.Since(parseStarted).Milliseconds()
 				if err == nil {
+					classifierStarted := time.Now()
 					art = attachClassifierMetadata(repoRoot, c, art)
+					classifierMS := time.Since(classifierStarted).Milliseconds()
 					select {
-					case results <- parsedFreshCandidate{index: index, ok: true, artifact: art, sources: sources, parseResult: pr}:
+					case results <- parsedFreshCandidate{
+						index:                index,
+						ok:                   true,
+						artifact:             art,
+						sources:              sources,
+						parseResult:          pr,
+						parseDurationMS:      parseMS,
+						classifierDurationMS: classifierMS,
+					}:
 					case <-ctx.Done():
 						return
 					}
@@ -679,6 +719,8 @@ func parseCandidatesForFreshIndex(ctx context.Context, repoRoot string, adapter 
 	out := make([]parsedFreshCandidate, len(candidates))
 	processed := 0
 	parsed := 0
+	var parseDurationMS int64
+	var classifierDurationMS int64
 	for result := range results {
 		if err := ctx.Err(); err != nil {
 			return nil, parsed, err
@@ -686,25 +728,31 @@ func parseCandidatesForFreshIndex(ctx context.Context, repoRoot string, adapter 
 		processed++
 		if result.ok {
 			parsed++
+			parseDurationMS += result.parseDurationMS
+			classifierDurationMS += result.classifierDurationMS
 			out[result.index] = result
 		}
 		progress.maybe(ProgressEvent{
-			Phase:               "extract",
-			CurrentAdapter:      adapter.Name(),
-			CandidatesTotal:     len(candidates),
-			CandidatesProcessed: processed,
-			CandidatesParsed:    map[string]int{adapter.Name(): parsed},
-			ParallelWorkers:     workers,
+			Phase:                "extract",
+			CurrentAdapter:       adapter.Name(),
+			CandidatesTotal:      len(candidates),
+			CandidatesProcessed:  processed,
+			CandidatesParsed:     map[string]int{adapter.Name(): parsed},
+			ParseDurationMS:      parseDurationMS,
+			ClassifierDurationMS: classifierDurationMS,
+			ParallelWorkers:      workers,
 		})
 	}
 	progress.emit(ProgressEvent{
-		Phase:               "extract",
-		Event:               "adapter_done",
-		CurrentAdapter:      adapter.Name(),
-		CandidatesTotal:     len(candidates),
-		CandidatesProcessed: processed,
-		CandidatesParsed:    map[string]int{adapter.Name(): parsed},
-		ParallelWorkers:     workers,
+		Phase:                "extract",
+		Event:                "adapter_done",
+		CurrentAdapter:       adapter.Name(),
+		CandidatesTotal:      len(candidates),
+		CandidatesProcessed:  processed,
+		CandidatesParsed:     map[string]int{adapter.Name(): parsed},
+		ParseDurationMS:      parseDurationMS,
+		ClassifierDurationMS: classifierDurationMS,
+		ParallelWorkers:      workers,
 	})
 	return out, parsed, nil
 }

@@ -1,7 +1,7 @@
-# Pricing packaging
+# Pricing Packaging
 
-Tiers and limits.
+Placeholder note used to verify broad markdown discovery.
 
 ## Tasks
 
-- [ ] Seat model
+- [ ] Keep out of focused capture context
