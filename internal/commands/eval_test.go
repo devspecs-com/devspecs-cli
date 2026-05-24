@@ -558,7 +558,7 @@ func TestRunFindForEvalUsesLineScopedPath(t *testing.T) {
 	output, err := runFindForEval(evalharness.CaseSpec{
 		ID:    "camel-tool-cache",
 		Query: "what tests cover testputandgetexposedtool behavior",
-	}, candidatesByArtifactPath(candidates))
+	}, candidatesByArtifactPath(candidates), false)
 	if err != nil {
 		t.Fatal(err)
 	}

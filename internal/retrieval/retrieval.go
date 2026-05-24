@@ -64,6 +64,7 @@ type WeightedFilesRetrieverV0 struct {
 	ConceptBackfill     bool
 	GlossaryConcepts    bool
 	TieredConceptOutput bool
+	AnchorFirstRanking  bool
 }
 
 func CandidatePackTier(c Candidate) string {
@@ -86,6 +87,9 @@ func (r WeightedFilesRetrieverV0) Name() string {
 	if r.TieredConceptOutput {
 		suffix += "_tiered"
 	}
+	if r.AnchorFirstRanking {
+		suffix += "_anchor_first"
+	}
 	if strings.EqualFold(r.EvidenceMode, EvidenceModeBalanced) {
 		if r.DisableSectionAware {
 			return "eval_weighted_files_v0_evidence_balanced_no_section_retrieval" + suffix
@@ -102,7 +106,7 @@ func (r WeightedFilesRetrieverV0) Retrieve(candidates []Candidate, query string)
 	if !r.DisableSectionAware {
 		candidates = EnrichCandidatesWithSectionMatches(candidates, query)
 	}
-	return retrieveWeightedFilesV0(candidates, query, r.EvidenceMode, r.ConceptBackfill, r.GlossaryConcepts, r.TieredConceptOutput)
+	return retrieveWeightedFilesV0(candidates, query, r.EvidenceMode, r.ConceptBackfill, r.GlossaryConcepts, r.TieredConceptOutput, r.AnchorFirstRanking)
 }
 
 type Reason struct {
@@ -171,7 +175,7 @@ func IsSourceContextCandidate(c Candidate) bool {
 	return !strings.EqualFold(filepath.Ext(c.Path), ".md") && !IsPlanningIntentPath(c.Path)
 }
 
-func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode string, conceptBackfill, glossaryConcepts, tieredConceptOutput bool) []Candidate {
+func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode string, conceptBackfill, glossaryConcepts, tieredConceptOutput, anchorFirstRanking bool) []Candidate {
 	terms := expandedTerms(query)
 	queryLower := strings.ToLower(query)
 	var scoredCandidates []scoredCandidate
@@ -201,6 +205,9 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode 
 	limit := retrievalLimit(queryLower, terms)
 	scoredCandidates = collapseVariantCandidates(scoredCandidates, queryLower)
 	scoredCandidates = suppressRawTestSourceCandidates(scoredCandidates, queryLower)
+	if anchorFirstRanking {
+		scoredCandidates = applyAnchorFirstRanking(scoredCandidates, candidates, query)
+	}
 	scoredCandidates = selectScoredCandidates(scoredCandidates, queryLower, limit)
 	scoredCandidates = enforceSupportingArtifactBudgets(scoredCandidates, queryLower, terms)
 	if evidenceBalanced {
@@ -221,7 +228,7 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode 
 		out = applyConceptBackfill(out, candidates, query, queryLower, terms, limit, glossaryConcepts, tieredConceptOutput)
 	}
 	out = packCandidateSections(out, queryLower, terms)
-	if !evidenceBalanced {
+	if !evidenceBalanced && !anchorFirstRanking {
 		sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	}
 	return out
@@ -4109,6 +4116,16 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 		if evidenceReasons := strings.TrimSpace(c.Metadata["retrieval_evidence_reasons"]); evidenceReasons != "" {
 			reasons = append(reasons, "balanced evidence: "+strings.ReplaceAll(evidenceReasons, "\n", "; "))
 		}
+	}
+	if c.Metadata != nil && c.Metadata["anchor_first_score"] != "" {
+		parts := []string{"score " + c.Metadata["anchor_first_score"]}
+		if matches := metadataJSONList(c, "anchor_matches_json"); len(matches) > 0 {
+			parts = append(parts, "matches "+strings.Join(limitStrings(matches, 4), ", "))
+		}
+		if fields := metadataJSONList(c, "anchor_fields_json"); len(fields) > 0 {
+			parts = append(parts, "fields "+strings.Join(limitStrings(fields, 4), ", "))
+		}
+		reasons = append(reasons, "anchor-first ranking: "+strings.Join(parts, "; "))
 	}
 	if anchor := testNameAnchorScore(c, queryLower); anchor.score > 0 {
 		reasons = append(reasons, anchor.reason)
