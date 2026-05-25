@@ -31,6 +31,32 @@ type AnchorProfile struct {
 	HasSpecific bool         `json:"has_specific"`
 }
 
+const (
+	AnchorFirstModeV1          = "v1"
+	AnchorFirstModeRerankOnly  = "rerank_only"
+	AnchorFirstModeStrongField = "strong_field"
+	AnchorFirstModeStrict      = "strict"
+)
+
+func NormalizeAnchorFirstMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", AnchorFirstModeV1:
+		return AnchorFirstModeV1
+	case "rerank-only", AnchorFirstModeRerankOnly:
+		return AnchorFirstModeRerankOnly
+	case "strong-field", AnchorFirstModeStrongField:
+		return AnchorFirstModeStrongField
+	case AnchorFirstModeStrict:
+		return AnchorFirstModeStrict
+	default:
+		return ""
+	}
+}
+
+func ValidAnchorFirstModes() []string {
+	return []string{AnchorFirstModeV1, AnchorFirstModeRerankOnly, AnchorFirstModeStrongField, AnchorFirstModeStrict}
+}
+
 type RepoVocabulary struct {
 	Terms         map[string]TermStats `json:"terms"`
 	DocumentCount int                  `json:"document_count"`
@@ -55,6 +81,7 @@ type anchorScoreResult struct {
 	kinds          []string
 	frequencies    []string
 	strongSpecific bool
+	maxIDF         float64
 }
 
 type anchorFieldTerms struct {
@@ -160,7 +187,11 @@ func BuildRepoVocabulary(candidates []Candidate) RepoVocabulary {
 	return vocab
 }
 
-func applyAnchorFirstRanking(candidates []scoredCandidate, universe []Candidate, query string) []scoredCandidate {
+func applyAnchorFirstRanking(candidates []scoredCandidate, universe []Candidate, query, mode string) []scoredCandidate {
+	mode = NormalizeAnchorFirstMode(mode)
+	if mode == "" {
+		mode = AnchorFirstModeV1
+	}
 	profile := BuildAnchorProfile(query)
 	if !profile.HasSpecific || len(candidates) == 0 {
 		return candidates
@@ -170,27 +201,39 @@ func applyAnchorFirstRanking(candidates []scoredCandidate, universe []Candidate,
 	seen := map[string]bool{}
 	for i := range candidates {
 		seen[candidateIdentity(candidates[i].candidate)] = true
-		result := scoreAnchorFirstCandidate(candidates[i].candidate, profile, vocab)
+		result := scoreAnchorFirstCandidate(candidates[i].candidate, profile, vocab, mode)
 		if result.score < 1.0 {
 			continue
 		}
 		delta := clampFloat(result.score, 0, 24)
 		candidates[i].score += delta
-		candidates[i].candidate = withAnchorFirstMetadata(candidates[i].candidate, delta, result)
+		candidates[i].candidate = withAnchorFirstMetadata(candidates[i].candidate, delta, result, mode)
 		changed = true
 	}
+	if mode == AnchorFirstModeRerankOnly {
+		if changed {
+			sort.Slice(candidates, func(i, j int) bool {
+				if candidates[i].score == candidates[j].score {
+					return candidates[i].candidate.Path < candidates[j].candidate.Path
+				}
+				return candidates[i].score > candidates[j].score
+			})
+		}
+		return candidates
+	}
+	backfilled := 0
 	for _, c := range universe {
 		if seen[candidateIdentity(c)] {
 			continue
 		}
-		result := scoreAnchorFirstCandidate(c, profile, vocab)
-		if !result.strongSpecific || result.score < 10.0 {
+		result := scoreAnchorFirstCandidate(c, profile, vocab, mode)
+		if !anchorFirstBackfillAllowed(result, mode) {
 			continue
 		}
 		role := candidateRole(c)
 		prior := authorityPrior(c, role, strings.ToLower(query))
 		delta := clampFloat(result.score, 0, 24)
-		c = withAnchorFirstMetadata(c, delta, result)
+		c = withAnchorFirstMetadata(c, delta, result, mode)
 		c.Metadata["anchor_first_backfill"] = "true"
 		candidates = append(candidates, scoredCandidate{
 			candidate:  c,
@@ -203,6 +246,10 @@ func applyAnchorFirstRanking(candidates []scoredCandidate, universe []Candidate,
 		})
 		seen[candidateIdentity(c)] = true
 		changed = true
+		backfilled++
+		if mode != AnchorFirstModeV1 && backfilled >= 1 {
+			break
+		}
 	}
 	if changed {
 		sort.Slice(candidates, func(i, j int) bool {
@@ -215,16 +262,16 @@ func applyAnchorFirstRanking(candidates []scoredCandidate, universe []Candidate,
 	return candidates
 }
 
-func scoreAnchorFirstCandidate(c Candidate, profile AnchorProfile, vocab RepoVocabulary) anchorScoreResult {
+func scoreAnchorFirstCandidate(c Candidate, profile AnchorProfile, vocab RepoVocabulary, mode string) anchorScoreResult {
 	fields := metadataAnchorFieldTerms(c, true)
 	result := anchorScoreResult{}
 	hasSpecificMatch := false
 	for _, anchor := range profile.Anchors {
-		modifier := anchorDictionaryModifier(anchor, profile.HasSpecific)
+		modifier := anchorDictionaryModifier(anchor, profile.HasSpecific, mode)
 		if modifier <= 0 {
 			continue
 		}
-		tf, matchedFields := fieldWeightedTF(anchor.Term, fields, anchor.Kind)
+		tf, matchedFields := fieldWeightedTF(anchor.Term, fields, anchor.Kind, mode)
 		if tf <= 0 {
 			continue
 		}
@@ -248,9 +295,12 @@ func scoreAnchorFirstCandidate(c Candidate, profile AnchorProfile, vocab RepoVoc
 		}
 		if anchor.Kind != AnchorArtifactRoleTerm {
 			hasSpecificMatch = true
-			if anchorStrongSpecificMatch(anchor, stats, matchedFields) {
+			if anchorStrongSpecificMatch(anchor, stats, matchedFields, mode) {
 				result.strongSpecific = true
 			}
+		}
+		if idf > result.maxIDF {
+			result.maxIDF = idf
 		}
 		result.score += score
 		result.matches = append(result.matches, anchor.Term)
@@ -267,12 +317,13 @@ func scoreAnchorFirstCandidate(c Candidate, profile AnchorProfile, vocab RepoVoc
 	return result
 }
 
-func withAnchorFirstMetadata(c Candidate, score float64, result anchorScoreResult) Candidate {
+func withAnchorFirstMetadata(c Candidate, score float64, result anchorScoreResult, mode string) Candidate {
 	if c.Metadata == nil {
 		c.Metadata = map[string]string{}
 	} else {
 		c.Metadata = copyMetadata(c.Metadata)
 	}
+	c.Metadata["anchor_first_mode"] = mode
 	c.Metadata["anchor_first_score"] = fmt.Sprintf("%.3f", score)
 	c.Metadata["anchor_matches_json"] = jsonStringList(result.matches)
 	c.Metadata["anchor_fields_json"] = jsonStringList(result.fields)
@@ -281,9 +332,9 @@ func withAnchorFirstMetadata(c Candidate, score float64, result anchorScoreResul
 	return c
 }
 
-func fieldWeightedTF(term string, fields anchorFieldTerms, kind AnchorKind) (float64, []string) {
+func fieldWeightedTF(term string, fields anchorFieldTerms, kind AnchorKind, mode string) (float64, []string) {
 	if strings.Contains(term, " ") {
-		return phraseFieldWeightedTF(term, fields)
+		return phraseFieldWeightedTF(term, fields, mode)
 	}
 	var score float64
 	var matched []string
@@ -303,15 +354,25 @@ func fieldWeightedTF(term string, fields anchorFieldTerms, kind AnchorKind) (flo
 	add("test_name", fields.testName, 5.0, 2)
 	add("heading", fields.heading, 3.0, 3)
 	add("symbol", fields.symbol, 2.5, 3)
-	add("role", fields.role, 1.2, 2)
-	add("body", fields.body, 0.2, 3)
+	roleWeight := 1.2
+	bodyWeight := 0.2
+	if mode == AnchorFirstModeStrongField {
+		roleWeight = 0.35
+		bodyWeight = 0
+	}
+	if mode == AnchorFirstModeStrict {
+		roleWeight = 0
+		bodyWeight = 0
+	}
+	add("role", fields.role, roleWeight, 2)
+	add("body", fields.body, bodyWeight, 3)
 	if kind == AnchorCompactIdentifier {
 		score *= 1.25
 	}
 	return score, matched
 }
 
-func phraseFieldWeightedTF(phrase string, fields anchorFieldTerms) (float64, []string) {
+func phraseFieldWeightedTF(phrase string, fields anchorFieldTerms, mode string) (float64, []string) {
 	var score float64
 	var matched []string
 	add := func(name string, terms map[string]int, weight float64) {
@@ -326,7 +387,9 @@ func phraseFieldWeightedTF(phrase string, fields anchorFieldTerms) (float64, []s
 	add("title", fields.title, 4.0)
 	add("test_name", fields.testName, 5.0)
 	add("heading", fields.heading, 3.0)
-	add("body", fields.body, 0.45)
+	if mode == AnchorFirstModeV1 || mode == AnchorFirstModeRerankOnly {
+		add("body", fields.body, 0.45)
+	}
 	return score, matched
 }
 
@@ -417,13 +480,22 @@ func addTerm(out map[string]int, term string) {
 	out[term]++
 }
 
-func anchorDictionaryModifier(anchor AnchorTerm, hasSpecific bool) float64 {
+func anchorDictionaryModifier(anchor AnchorTerm, hasSpecific bool, mode string) float64 {
 	switch anchor.Kind {
 	case AnchorGenericTaskWord:
 		return 0
 	case AnchorArtifactRoleTerm:
+		if mode == AnchorFirstModeStrict {
+			return 0
+		}
 		if !hasSpecific {
 			return 0.05
+		}
+		if mode == AnchorFirstModeStrongField {
+			if anchorWeakBroadTerms[anchor.Term] {
+				return 0
+			}
+			return 0.08
 		}
 		if anchorWeakBroadTerms[anchor.Term] {
 			return 0.08
@@ -436,17 +508,23 @@ func anchorDictionaryModifier(anchor AnchorTerm, hasSpecific bool) float64 {
 	case AnchorQuotedPhrase:
 		return 1.4
 	case AnchorProperOrRare:
+		if mode == AnchorFirstModeStrict {
+			return 0.45
+		}
 		return 1.05
 	default:
 		return 1
 	}
 }
 
-func anchorStrongSpecificMatch(anchor AnchorTerm, stats TermStats, fields []string) bool {
+func anchorStrongSpecificMatch(anchor AnchorTerm, stats TermStats, fields []string, mode string) bool {
 	if anchor.Kind == AnchorArtifactRoleTerm || anchor.Kind == AnchorGenericTaskWord {
 		return false
 	}
 	if anchorWeakBroadTerms[anchor.Term] {
+		return false
+	}
+	if mode == AnchorFirstModeStrict && anchor.Kind == AnchorProperOrRare {
 		return false
 	}
 	if stats.IDF > 0 && stats.IDF < 1.8 && anchor.Kind != AnchorCompactIdentifier {
@@ -455,6 +533,48 @@ func anchorStrongSpecificMatch(anchor AnchorTerm, stats TermStats, fields []stri
 	for _, field := range fields {
 		switch field {
 		case "path", "title", "test_name":
+			return true
+		}
+	}
+	return false
+}
+
+func anchorFirstBackfillAllowed(result anchorScoreResult, mode string) bool {
+	if !result.strongSpecific {
+		return false
+	}
+	switch mode {
+	case AnchorFirstModeV1:
+		return result.score >= 10.0
+	case AnchorFirstModeStrongField:
+		return result.score >= 12.0 && result.maxIDF >= 1.8 && resultHasAnyAnchorField(result, "path", "title", "test_name")
+	case AnchorFirstModeStrict:
+		return result.score >= 14.0 && result.maxIDF >= 1.8 && resultHasAnyAnchorField(result, "path", "title", "test_name") && resultHasAnyAnchorKind(result, string(AnchorCompactIdentifier), string(AnchorPathLike), string(AnchorQuotedPhrase))
+	default:
+		return false
+	}
+}
+
+func resultHasAnyAnchorField(result anchorScoreResult, fields ...string) bool {
+	want := map[string]bool{}
+	for _, field := range fields {
+		want[field] = true
+	}
+	for _, field := range result.fields {
+		if want[field] {
+			return true
+		}
+	}
+	return false
+}
+
+func resultHasAnyAnchorKind(result anchorScoreResult, kinds ...string) bool {
+	want := map[string]bool{}
+	for _, kind := range kinds {
+		want[kind] = true
+	}
+	for _, kind := range result.kinds {
+		if want[kind] {
 			return true
 		}
 	}

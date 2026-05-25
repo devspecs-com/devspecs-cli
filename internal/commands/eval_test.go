@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/devspecs-com/devspecs-cli/internal/evalharness"
+	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 )
 
@@ -558,7 +559,7 @@ func TestRunFindForEvalUsesLineScopedPath(t *testing.T) {
 	output, err := runFindForEval(evalharness.CaseSpec{
 		ID:    "camel-tool-cache",
 		Query: "what tests cover testputandgetexposedtool behavior",
-	}, candidatesByArtifactPath(candidates), false)
+	}, candidatesByArtifactPath(candidates), false, retrieval.AnchorFirstModeV1)
 	if err != nil {
 		t.Fatal(err)
 	}

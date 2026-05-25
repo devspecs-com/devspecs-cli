@@ -109,6 +109,7 @@ type Options struct {
 	ExperimentalGlossaryConcepts    bool
 	ExperimentalTieredConceptOutput bool
 	ExperimentalAnchorFirstRanking  bool
+	ExperimentalAnchorFirstMode     string
 	ContextTokenBudget              int
 	IndexCacheDir                   string
 	RefreshIndexCache               bool
@@ -510,6 +511,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 			GlossaryConcepts:    opts.ExperimentalGlossaryConcepts,
 			TieredConceptOutput: opts.ExperimentalTieredConceptOutput,
 			AnchorFirstRanking:  opts.ExperimentalAnchorFirstRanking,
+			AnchorFirstMode:     opts.ExperimentalAnchorFirstMode,
 		}
 	}
 	tokenizerProfile := tokenizerProfile(counter)

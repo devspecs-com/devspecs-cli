@@ -131,6 +131,82 @@ func TestAnchorFirstRankingKeepsExactTestNameFirst(t *testing.T) {
 	}
 }
 
+func TestAnchorFirstRerankOnlyDoesNotBackfill(t *testing.T) {
+	selected := []scoredCandidate{{
+		candidate: Candidate{Path: "docs/generic.md", Title: "Generic Architecture Notes", Body: "Architecture background."},
+		score:     5,
+	}}
+	universe := []Candidate{
+		selected[0].candidate,
+		{
+			Path:  "calm-suite/calm-studio/docs/REQ_fluxnova_aigf_integration.md",
+			Title: "Requirements Spec: FluxNova Templates + AI Governance Framework Integration",
+		},
+	}
+
+	got := applyAnchorFirstRanking(selected, universe, "FluxNova AIGF integration requirements for CALM Studio", AnchorFirstModeRerankOnly)
+	if len(got) != 1 {
+		t.Fatalf("rerank_only should not backfill candidates, got %#v", CandidatePathsFromScoredForTest(got))
+	}
+	if got[0].candidate.Metadata["anchor_first_backfill"] != "" {
+		t.Fatalf("rerank_only should not mark backfill: %#v", got[0].candidate.Metadata)
+	}
+}
+
+func TestAnchorFirstStrongFieldBackfillRequiresStrongField(t *testing.T) {
+	selected := []scoredCandidate{{
+		candidate: Candidate{Path: "docs/generic.md", Title: "Generic Architecture Notes", Body: "Architecture background."},
+		score:     5,
+	}}
+	bodyOnly := Candidate{
+		Path:  "docs/background.md",
+		Title: "Background",
+		Body:  "FluxNova AIGF integration requirements appear only in body text.",
+	}
+	strongField := Candidate{
+		Path:  "calm-suite/calm-studio/docs/REQ_fluxnova_aigf_integration.md",
+		Title: "Requirements Spec: FluxNova Templates + AI Governance Framework Integration",
+	}
+
+	gotBodyOnly := applyAnchorFirstRanking(selected, append([]Candidate{selected[0].candidate, bodyOnly}, anchorFillerCandidatesForTest()...), "FluxNova AIGF integration requirements for CALM Studio", AnchorFirstModeStrongField)
+	if len(gotBodyOnly) != 1 {
+		t.Fatalf("strong_field should not backfill body-only matches, got %#v", CandidatePathsFromScoredForTest(gotBodyOnly))
+	}
+
+	gotStrong := applyAnchorFirstRanking(selected, append([]Candidate{selected[0].candidate, strongField}, anchorFillerCandidatesForTest()...), "FluxNova AIGF integration requirements for CALM Studio", AnchorFirstModeStrongField)
+	if len(gotStrong) != 2 {
+		t.Fatalf("strong_field should backfill one strong field match, got %#v", CandidatePathsFromScoredForTest(gotStrong))
+	}
+	if gotStrong[0].candidate.Path != strongField.Path || gotStrong[0].candidate.Metadata["anchor_first_backfill"] != "true" {
+		t.Fatalf("expected strong field backfill first, got %#v metadata %#v", CandidatePathsFromScoredForTest(gotStrong), gotStrong[0].candidate.Metadata)
+	}
+}
+
+func TestAnchorFirstStrictBackfillRequiresExactAnchorKind(t *testing.T) {
+	selected := []scoredCandidate{{
+		candidate: Candidate{Path: "docs/generic.md", Title: "Generic Architecture Notes", Body: "Architecture background."},
+		score:     5,
+	}}
+	properOnly := Candidate{
+		Path:  "calm-suite/calm-studio/docs/fluxnova-integration.md",
+		Title: "FluxNova Integration",
+	}
+	pathLike := Candidate{
+		Path:  "calm-suite/calm-studio/docs/REQ_fluxnova_aigf_integration.md",
+		Title: "Requirements Spec: FluxNova Templates + AI Governance Framework Integration",
+	}
+
+	gotProper := applyAnchorFirstRanking(selected, append([]Candidate{selected[0].candidate, properOnly}, anchorFillerCandidatesForTest()...), "fluxnova integration requirements", AnchorFirstModeStrict)
+	if len(gotProper) != 1 {
+		t.Fatalf("strict should not backfill proper-term-only matches, got %#v", CandidatePathsFromScoredForTest(gotProper))
+	}
+
+	gotPathLike := applyAnchorFirstRanking(selected, append([]Candidate{selected[0].candidate, pathLike}, anchorFillerCandidatesForTest()...), "REQ_fluxnova_aigf_integration requirements", AnchorFirstModeStrict)
+	if len(gotPathLike) != 2 {
+		t.Fatalf("strict should backfill exact path-like anchors, got %#v", CandidatePathsFromScoredForTest(gotPathLike))
+	}
+}
+
 func assertAnchorTerm(t *testing.T, profile AnchorProfile, term string, kind AnchorKind) {
 	t.Helper()
 	for _, anchor := range profile.Anchors {
@@ -139,6 +215,24 @@ func assertAnchorTerm(t *testing.T, profile AnchorProfile, term string, kind Anc
 		}
 	}
 	t.Fatalf("missing anchor term %q kind %q in %#v", term, kind, profile.Anchors)
+}
+
+func CandidatePathsFromScoredForTest(candidates []scoredCandidate) []string {
+	out := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		out = append(out, c.candidate.Path)
+	}
+	return out
+}
+
+func anchorFillerCandidatesForTest() []Candidate {
+	return []Candidate{
+		{Path: "docs/architecture.md", Title: "Architecture Overview"},
+		{Path: "docs/design.md", Title: "Design Overview"},
+		{Path: "docs/template.md", Title: "Template Overview"},
+		{Path: "docs/service.md", Title: "Service Overview"},
+		{Path: "docs/plan.md", Title: "Implementation Plan"},
+	}
 }
 
 func repeatForTest(s string, n int) string {

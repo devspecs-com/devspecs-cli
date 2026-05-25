@@ -65,6 +65,7 @@ type WeightedFilesRetrieverV0 struct {
 	GlossaryConcepts    bool
 	TieredConceptOutput bool
 	AnchorFirstRanking  bool
+	AnchorFirstMode     string
 }
 
 func CandidatePackTier(c Candidate) string {
@@ -89,6 +90,9 @@ func (r WeightedFilesRetrieverV0) Name() string {
 	}
 	if r.AnchorFirstRanking {
 		suffix += "_anchor_first"
+		if mode := NormalizeAnchorFirstMode(r.AnchorFirstMode); mode != "" && mode != AnchorFirstModeV1 {
+			suffix += "_" + mode
+		}
 	}
 	if strings.EqualFold(r.EvidenceMode, EvidenceModeBalanced) {
 		if r.DisableSectionAware {
@@ -106,7 +110,7 @@ func (r WeightedFilesRetrieverV0) Retrieve(candidates []Candidate, query string)
 	if !r.DisableSectionAware {
 		candidates = EnrichCandidatesWithSectionMatches(candidates, query)
 	}
-	return retrieveWeightedFilesV0(candidates, query, r.EvidenceMode, r.ConceptBackfill, r.GlossaryConcepts, r.TieredConceptOutput, r.AnchorFirstRanking)
+	return retrieveWeightedFilesV0(candidates, query, r.EvidenceMode, r.ConceptBackfill, r.GlossaryConcepts, r.TieredConceptOutput, r.AnchorFirstRanking, r.AnchorFirstMode)
 }
 
 type Reason struct {
@@ -175,7 +179,7 @@ func IsSourceContextCandidate(c Candidate) bool {
 	return !strings.EqualFold(filepath.Ext(c.Path), ".md") && !IsPlanningIntentPath(c.Path)
 }
 
-func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode string, conceptBackfill, glossaryConcepts, tieredConceptOutput, anchorFirstRanking bool) []Candidate {
+func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode string, conceptBackfill, glossaryConcepts, tieredConceptOutput, anchorFirstRanking bool, anchorFirstMode string) []Candidate {
 	terms := expandedTerms(query)
 	queryLower := strings.ToLower(query)
 	var scoredCandidates []scoredCandidate
@@ -206,7 +210,7 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode 
 	scoredCandidates = collapseVariantCandidates(scoredCandidates, queryLower)
 	scoredCandidates = suppressRawTestSourceCandidates(scoredCandidates, queryLower)
 	if anchorFirstRanking {
-		scoredCandidates = applyAnchorFirstRanking(scoredCandidates, candidates, query)
+		scoredCandidates = applyAnchorFirstRanking(scoredCandidates, candidates, query, anchorFirstMode)
 	}
 	scoredCandidates = selectScoredCandidates(scoredCandidates, queryLower, limit)
 	scoredCandidates = enforceSupportingArtifactBudgets(scoredCandidates, queryLower, terms)

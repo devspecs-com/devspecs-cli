@@ -12,6 +12,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/classify"
 	"github.com/devspecs-com/devspecs-cli/internal/evalharness"
 	"github.com/devspecs-com/devspecs-cli/internal/indexquery"
+	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/spf13/cobra"
 )
 
@@ -155,7 +156,11 @@ type firstIndexWeakSpot struct {
 	Message string `json:"message"`
 }
 
-func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed bool, commandUnderTest, findRuntime string, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput, experimentalAnchorFirstRanking bool, evalIndexCacheDir string, refreshIndexCache bool, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec int, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull float64) (evalharness.Options, error) {
+func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed bool, commandUnderTest, findRuntime string, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput, experimentalAnchorFirstRanking bool, experimentalAnchorFirstMode string, evalIndexCacheDir string, refreshIndexCache bool, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec int, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull float64) (evalharness.Options, error) {
+	normalizedAnchorMode := retrieval.NormalizeAnchorFirstMode(experimentalAnchorFirstMode)
+	if normalizedAnchorMode == "" {
+		return evalharness.Options{}, fmt.Errorf("unknown --experimental-anchor-first-mode; valid values: %s", strings.Join(retrieval.ValidAnchorFirstModes(), ", "))
+	}
 	opts := evalharness.Options{
 		JSON:                            asJSON,
 		TestCaseArtifacts:               includeTests,
@@ -167,6 +172,7 @@ func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed b
 		ExperimentalGlossaryConcepts:    experimentalGlossaryConcepts,
 		ExperimentalTieredConceptOutput: experimentalTieredConceptOutput,
 		ExperimentalAnchorFirstRanking:  experimentalAnchorFirstRanking,
+		ExperimentalAnchorFirstMode:     normalizedAnchorMode,
 		ContextTokenBudget:              contextTokenBudget,
 		IndexCacheDir:                   strings.TrimSpace(evalIndexCacheDir),
 		RefreshIndexCache:               refreshIndexCache,
@@ -206,7 +212,7 @@ func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed b
 		}
 		opts.FindRuntime = string(normalizedRuntime)
 		opts.CommandRunner = func(fixtureAbs string, cases []evalharness.CaseSpec) (map[string]evalharness.CommandCaseOutput, error) {
-			return runLiveCommandEval(normalized, string(normalizedRuntime), fixtureAbs, cases, includeTests, includeCodeComments, experimentalAnchorFirstRanking)
+			return runLiveCommandEval(normalized, string(normalizedRuntime), fixtureAbs, cases, includeTests, includeCodeComments, experimentalAnchorFirstRanking, normalizedAnchorMode)
 		}
 	} else if strings.TrimSpace(findRuntime) != "" {
 		if _, err := indexquery.ParseRuntimeMode(findRuntime); err != nil {

@@ -51,6 +51,7 @@ func NewEvalCmd() *cobra.Command {
 		experimentalGlossaryConcepts    bool
 		experimentalTieredConceptOutput bool
 		experimentalAnchorFirstRanking  bool
+		experimentalAnchorFirstMode     string
 		contextTokenBudget              int
 		evalIndexCacheDir               string
 		refreshIndexCache               bool
@@ -105,7 +106,10 @@ func NewEvalCmd() *cobra.Command {
 				return nil
 			}
 
-			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, findRuntime, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput, experimentalAnchorFirstRanking, evalIndexCacheDir, refreshIndexCache, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
+			if cmd.Flags().Changed("experimental-anchor-first-mode") {
+				experimentalAnchorFirstRanking = true
+			}
+			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, findRuntime, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput, experimentalAnchorFirstRanking, experimentalAnchorFirstMode, evalIndexCacheDir, refreshIndexCache, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
 			if err != nil {
 				return err
 			}
@@ -207,6 +211,7 @@ func NewEvalCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&experimentalGlossaryConcepts, "experimental-glossary-concepts", false, "Gate experimental concept backfill through repo-local glossary evidence during retrieval evals")
 	cmd.Flags().BoolVar(&experimentalTieredConceptOutput, "experimental-tiered-concept-output", false, "Demote lower-confidence concept backfill artifacts to a separate related tier during retrieval evals")
 	cmd.Flags().BoolVar(&experimentalAnchorFirstRanking, "experimental-anchor-first-ranking", false, "Use opt-in repo-local TF-IDF anchor-first ranking during retrieval evals")
+	cmd.Flags().StringVar(&experimentalAnchorFirstMode, "experimental-anchor-first-mode", retrieval.AnchorFirstModeV1, "Anchor-first tuning mode: v1, rerank_only, strong_field, or strict")
 	cmd.Flags().StringVar(&evalIndexCacheDir, "eval-index-cache-dir", "", "Directory for strict indexed eval corpus cache; disabled when empty")
 	cmd.Flags().BoolVar(&refreshIndexCache, "refresh-index-cache", false, "Refresh the indexed eval corpus cache entry instead of reusing it")
 	cmd.Flags().IntVar(&maxCorpusFiles, "eval-max-corpus-files", 0, "Maximum indexed eval corpus artifacts after indexing; 0 means unlimited")
@@ -313,7 +318,7 @@ func normalizeEvalCommand(command string) (string, error) {
 	}
 }
 
-func runLiveCommandEval(command, findRuntime, fixtureAbs string, cases []evalharness.CaseSpec, includeTests, includeCodeComments, experimentalAnchorFirstRanking bool) (map[string]evalharness.CommandCaseOutput, error) {
+func runLiveCommandEval(command, findRuntime, fixtureAbs string, cases []evalharness.CaseSpec, includeTests, includeCodeComments, experimentalAnchorFirstRanking bool, experimentalAnchorFirstMode string) (map[string]evalharness.CommandCaseOutput, error) {
 	tempHome, err := os.MkdirTemp("", "devspecs-live-eval-*")
 	if err != nil {
 		return nil, fmt.Errorf("create live command eval home: %w", err)
@@ -386,7 +391,7 @@ func runLiveCommandEval(command, findRuntime, fixtureAbs string, cases []evalhar
 	for _, spec := range cases {
 		switch command {
 		case "find":
-			output, err := runFindForEval(spec, candidatesByPath, experimentalAnchorFirstRanking)
+			output, err := runFindForEval(spec, candidatesByPath, experimentalAnchorFirstRanking, experimentalAnchorFirstMode)
 			if err != nil {
 				return nil, err
 			}
@@ -404,11 +409,14 @@ func runLiveCommandEval(command, findRuntime, fixtureAbs string, cases []evalhar
 	return out, nil
 }
 
-func runFindForEval(spec evalharness.CaseSpec, candidatesByPath map[string]retrieval.Candidate, experimentalAnchorFirstRanking bool) (evalharness.CommandCaseOutput, error) {
+func runFindForEval(spec evalharness.CaseSpec, candidatesByPath map[string]retrieval.Candidate, experimentalAnchorFirstRanking bool, experimentalAnchorFirstMode string) (evalharness.CommandCaseOutput, error) {
 	cmd := NewFindCmd()
 	args := []string{"--json", "--no-refresh"}
 	if experimentalAnchorFirstRanking {
 		args = append(args, "--experimental-anchor-first-ranking")
+		if mode := retrieval.NormalizeAnchorFirstMode(experimentalAnchorFirstMode); mode != "" && mode != retrieval.AnchorFirstModeV1 {
+			args = append(args, "--experimental-anchor-first-mode", mode)
+		}
 	}
 	args = append(args, spec.Query)
 	cmd.SetArgs(args)

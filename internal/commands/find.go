@@ -28,6 +28,7 @@ func NewFindCmd() *cobra.Command {
 		asJSON      bool
 		noRefresh   bool
 		anchorFirst bool
+		anchorMode  string
 	)
 
 	cmd := &cobra.Command{
@@ -36,7 +37,10 @@ func NewFindCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fp := store.FilterParams{Kind: kind, Subtype: subtype, Tag: tag, Branch: branch, User: user}
-			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, anchorFirst)
+			if cmd.Flags().Changed("experimental-anchor-first-mode") {
+				anchorFirst = true
+			}
+			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, anchorFirst, anchorMode)
 		},
 	}
 
@@ -50,16 +54,22 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	cmd.Flags().BoolVar(&anchorFirst, "experimental-anchor-first-ranking", false, "Use opt-in repo-local TF-IDF anchor-first ranking")
+	cmd.Flags().StringVar(&anchorMode, "experimental-anchor-first-mode", retrieval.AnchorFirstModeV1, "Anchor-first tuning mode: v1, rerank_only, strong_field, or strict")
 	return cmd
 }
 
-func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, anchorFirst bool) error {
+func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, anchorFirst bool, anchorMode string) error {
 	start := time.Now()
 	success := false
+	anchorMode = retrieval.NormalizeAnchorFirstMode(anchorMode)
+	if anchorMode == "" {
+		return fmt.Errorf("unknown --experimental-anchor-first-mode; valid values: %s", strings.Join(retrieval.ValidAnchorFirstModes(), ", "))
+	}
 	props := map[string]any{
 		"query_length_bucket": telemetry.QueryLengthBucket(query),
 		"json":                asJSON,
 		"anchor_first":        anchorFirst,
+		"anchor_first_mode":   anchorMode,
 	}
 	defer func() {
 		telemetry.RecordCommand("find", success, time.Since(start), props)
@@ -84,7 +94,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	candidates := loadResult.Candidates
 	recordFindRuntimeProps(props, loadResult.Report)
 	emitFindRuntimeDebug(cmd, loadResult.Report)
-	retriever := retrieval.WeightedFilesRetrieverV0{AnchorFirstRanking: anchorFirst}
+	retriever := retrieval.WeightedFilesRetrieverV0{AnchorFirstRanking: anchorFirst, AnchorFirstMode: anchorMode}
 	matches := retriever.Retrieve(candidates, query)
 	if len(matches) == 0 {
 		matches = retrieval.QueryBaseline(candidates, query)
@@ -232,6 +242,7 @@ func compactResultMetadata(metadata map[string]string) map[string]string {
 		"indexed_section_match_headings_json",
 		"indexed_section_match_ranges_json",
 		"anchor_first_score",
+		"anchor_first_mode",
 		"anchor_matches_json",
 		"anchor_fields_json",
 		"anchor_types_json",
