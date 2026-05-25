@@ -36,7 +36,7 @@ const (
 	AnchorFirstModeRerankOnly  = "rerank_only"
 	AnchorFirstModeStrongField = "strong_field"
 	AnchorFirstModeStrict      = "strict"
-	DefaultAnchorFirstMode     = AnchorFirstModeStrict
+	DefaultAnchorFirstMode     = AnchorFirstModeV1
 )
 
 func NormalizeAnchorFirstMode(mode string) string {
