@@ -158,12 +158,16 @@ func applyAgentCaseMetrics(cr *CaseResult, spec CaseSpec, files []File) {
 		reasonByPath[normalizeMetricPath(reason.Path)] = strings.Join(parts, " ")
 	}
 	packed := normalizedStringSet(cr.PackedSectionArtifacts)
+	sameCluster := sameClusterContext{
+		lineExpectedBases: lineExpectedBases,
+		expectedPaths:     expectedPathList(expected),
+	}
 
 	var positiveWeight, penalizedWeight float64
 	for i, artifact := range cr.ArtifactsIncluded {
 		norm := normalizeMetricPath(artifact)
 		lane := classifyMetricLane(artifact, fileByPath[norm], reasonByPath[norm])
-		grade := gradeArtifactForAgentMetrics(norm, expected, hardNegatives, lineExpectedBases)
+		grade := gradeArtifactForAgentMetrics(norm, expected, hardNegatives, sameCluster)
 		if grade.weight > 0 {
 			positiveWeight += grade.weight
 			penalizedWeight += grade.weight
@@ -442,7 +446,12 @@ func classifyExpectedMetricLane(path string) string {
 	}
 }
 
-func gradeArtifactForAgentMetrics(path string, expected map[string]string, hardNegatives map[string]bool, lineExpectedBases map[string]bool) artifactGradeResult {
+type sameClusterContext struct {
+	lineExpectedBases map[string]bool
+	expectedPaths     []string
+}
+
+func gradeArtifactForAgentMetrics(path string, expected map[string]string, hardNegatives map[string]bool, sameCluster sameClusterContext) artifactGradeResult {
 	if importance, ok := expected[path]; ok {
 		return artifactGradeResult{grade: importance, weight: gradeWeight(importance), exact: true}
 	}
@@ -450,10 +459,222 @@ func gradeArtifactForAgentMetrics(path string, expected map[string]string, hardN
 	if hardNegatives[path] || hardNegatives[base] {
 		return artifactGradeResult{grade: "hard_negative", weight: -1.0, hardNegative: true}
 	}
-	if hasMetricLineRef(path) && lineExpectedBases[base] {
+	if hasMetricLineRef(path) && sameCluster.lineExpectedBases[base] {
+		return artifactGradeResult{grade: "same_cluster", weight: 0.5, sameCluster: true}
+	}
+	if sameClusterMetricPath(path, sameCluster.expectedPaths) {
 		return artifactGradeResult{grade: "same_cluster", weight: 0.5, sameCluster: true}
 	}
 	return artifactGradeResult{grade: "unlabeled"}
+}
+
+func expectedPathList(expected map[string]string) []string {
+	out := make([]string, 0, len(expected))
+	for path := range expected {
+		if path != "" {
+			out = append(out, path)
+		}
+	}
+	return out
+}
+
+func sameClusterMetricPath(path string, expectedPaths []string) bool {
+	path = normalizeMetricPath(path)
+	if path == "" || agentProtocolMetricPath(path) || !isMarkdownMetricPath(path) {
+		return false
+	}
+	for _, expected := range expectedPaths {
+		expected = normalizeMetricPath(expected)
+		if expected == "" || agentProtocolMetricPath(expected) || !isMarkdownMetricPath(expected) {
+			continue
+		}
+		if metricBasePath(path) == metricBasePath(expected) {
+			return true
+		}
+		if sameMarkdownStemFamily(path, expected) {
+			return true
+		}
+		if sameOpenSpecMetricFamily(path, expected) {
+			return true
+		}
+		pathFamily := metricIntentFamilyDir(path)
+		if pathFamily == "" {
+			continue
+		}
+		if expectedFamily := metricIntentFamilyDir(expected); expectedFamily != "" && expectedFamily == pathFamily {
+			return true
+		}
+	}
+	return false
+}
+
+func sameMarkdownStemFamily(a, b string) bool {
+	aBase := metricBasePath(a)
+	bBase := metricBasePath(b)
+	if localeNeutralMetricDir(filepath.Dir(aBase)) != localeNeutralMetricDir(filepath.Dir(bBase)) {
+		return false
+	}
+	aTokens := stemMetricTokens(filepath.Base(aBase))
+	bTokens := stemMetricTokens(filepath.Base(bBase))
+	if len(aTokens) < 2 || len(bTokens) < 2 {
+		return false
+	}
+	common := commonPrefixTokens(aTokens, bTokens)
+	if len(common) < 2 {
+		return false
+	}
+	for _, token := range common {
+		if sameClusterStemSignalToken(token) {
+			return true
+		}
+	}
+	return false
+}
+
+func stemMetricTokens(name string) []string {
+	name = strings.TrimSuffix(strings.ToLower(name), strings.ToLower(filepath.Ext(name)))
+	parts := strings.FieldsFunc(name, func(r rune) bool {
+		return r == '-' || r == '_' || r == '.' || r == ' '
+	})
+	var out []string
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if len(part) >= 3 {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func commonPrefixTokens(a, b []string) []string {
+	limit := len(a)
+	if len(b) < limit {
+		limit = len(b)
+	}
+	var out []string
+	for i := 0; i < limit; i++ {
+		if a[i] != b[i] {
+			break
+		}
+		out = append(out, a[i])
+	}
+	return out
+}
+
+func sameClusterStemSignalToken(token string) bool {
+	switch token {
+	case "adr", "architecture", "decision", "design", "plan", "prd", "proposal", "prompt", "requirement", "requirements", "rfc", "roadmap", "spec":
+		return true
+	default:
+		return false
+	}
+}
+
+func metricIntentFamilyDir(path string) string {
+	base := metricBasePath(path)
+	dir := localeNeutralMetricDir(filepath.Dir(base))
+	if dir == "." || dir == "" {
+		return ""
+	}
+	if !intentFamilyDir(dir) {
+		return ""
+	}
+	return dir
+}
+
+func localeNeutralMetricDir(dir string) string {
+	parts := strings.Split(filepath.ToSlash(dir), "/")
+	out := parts[:0]
+	for _, part := range parts {
+		if metricLocaleSegment(part) {
+			continue
+		}
+		out = append(out, part)
+	}
+	return strings.Join(out, "/")
+}
+
+func metricLocaleSegment(segment string) bool {
+	segment = strings.ToLower(strings.TrimSpace(segment))
+	switch segment {
+	case "en", "en-us", "en-gb", "zh", "zh-cn", "zh-tw", "cn", "ja", "jp", "ko", "kr", "fr", "de", "es", "pt", "br", "it":
+		return true
+	default:
+		return false
+	}
+}
+
+func intentFamilyDir(dir string) bool {
+	for _, segment := range strings.Split(dir, "/") {
+		segment = strings.ToLower(strings.TrimSpace(segment))
+		switch segment {
+		case "adr", "adrs", "architecture", "decisions", "design", "design-docs", "exec-plans", "plans", "planning", "product-specs", "product-requirements", "prd", "prds", "proposal", "proposals", "requirements", "rfc", "rfcs", "roadmap", "spec", "specs":
+			return true
+		}
+		if strings.Contains(segment, "architecture") ||
+			strings.Contains(segment, "design") ||
+			strings.Contains(segment, "decision") ||
+			strings.Contains(segment, "plan") ||
+			strings.Contains(segment, "product-spec") ||
+			strings.Contains(segment, "requirement") ||
+			strings.Contains(segment, "rfc") ||
+			strings.Contains(segment, "spec") {
+			return true
+		}
+	}
+	return false
+}
+
+func sameOpenSpecMetricFamily(a, b string) bool {
+	aParts := strings.Split(metricBasePath(a), "/")
+	bParts := strings.Split(metricBasePath(b), "/")
+	aChange := openSpecChangeName(aParts)
+	bChange := openSpecChangeName(bParts)
+	if aChange != "" && aChange == bChange {
+		return true
+	}
+	aSpec := openSpecSpecName(aParts)
+	bSpec := openSpecSpecName(bParts)
+	return aSpec != "" && aSpec == bSpec
+}
+
+func openSpecChangeName(parts []string) string {
+	for i := 0; i+2 < len(parts); i++ {
+		if parts[i] == "openspec" && parts[i+1] == "changes" {
+			return parts[i+2]
+		}
+	}
+	return ""
+}
+
+func openSpecSpecName(parts []string) string {
+	for i := 0; i+2 < len(parts); i++ {
+		if parts[i] == "openspec" && parts[i+1] == "specs" {
+			return parts[i+2]
+		}
+	}
+	for i := 0; i+2 < len(parts); i++ {
+		if parts[i] == "specs" && parts[len(parts)-1] == "spec.md" {
+			return parts[i+1]
+		}
+	}
+	return ""
+}
+
+func agentProtocolMetricPath(path string) bool {
+	path = normalizeMetricPath(path)
+	base := filepath.Base(metricBasePath(path))
+	switch base {
+	case "agents.md", "claude.md", "governance.md", "maintainers.md", "skill.md":
+		return true
+	}
+	if strings.HasSuffix(base, ".agent.md") {
+		return true
+	}
+	if strings.Contains(path, "/.claude/") || strings.Contains(path, "/.codex/skills/") || strings.Contains(path, "/.cursor/rules/") || strings.Contains(path, "/.github/issue_template/") {
+		return true
+	}
+	return false
 }
 
 func gradeWeight(importance string) float64 {

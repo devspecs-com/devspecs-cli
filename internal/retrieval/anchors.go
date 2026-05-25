@@ -204,8 +204,11 @@ func applyAnchorFirstRanking(candidates []scoredCandidate, universe []Candidate,
 	seen := map[string]bool{}
 	for i := range candidates {
 		seen[candidateIdentity(candidates[i].candidate)] = true
+		if !anchorFirstCandidateEligible(candidates[i].candidate, profile) {
+			continue
+		}
 		result := scoreAnchorFirstCandidate(candidates[i].candidate, profile, vocab, mode)
-		if result.score < 1.0 {
+		if !anchorFirstPrimaryBoostAllowed(candidates[i].candidate, result, profile, mode) {
 			continue
 		}
 		delta := clampFloat(result.score, 0, 24)
@@ -227,6 +230,9 @@ func applyAnchorFirstRanking(candidates []scoredCandidate, universe []Candidate,
 	backfilled := 0
 	for _, c := range universe {
 		if seen[candidateIdentity(c)] {
+			continue
+		}
+		if !anchorFirstCandidateEligible(c, profile) {
 			continue
 		}
 		result := scoreAnchorFirstCandidate(c, profile, vocab, mode)
@@ -263,6 +269,65 @@ func applyAnchorFirstRanking(candidates []scoredCandidate, universe []Candidate,
 		})
 	}
 	return candidates
+}
+
+func anchorFirstCandidateEligible(c Candidate, profile AnchorProfile) bool {
+	if !agentOrProtocolInstructionCandidate(c) {
+		return true
+	}
+	return anchorProfileProtocolOriented(profile)
+}
+
+func anchorProfileProtocolOriented(profile AnchorProfile) bool {
+	for _, anchor := range profile.Anchors {
+		switch anchor.Term {
+		case "agent", "agents", "boilerplate", "claude", "codex", "command", "commands", "convention", "conventions", "cursor", "governance", "instruction", "instructions", "maintainer", "maintainers", "policy", "policies", "procedure", "procedures", "prompt", "prompts", "protocol", "rule", "rules", "scaffold", "scaffolding", "skill", "skills", "standard", "standards", "template", "templates":
+			return true
+		}
+	}
+	return false
+}
+
+func agentOrProtocolInstructionCandidate(c Candidate) bool {
+	path := strings.ToLower(filepath.ToSlash(c.Path))
+	base := filepath.Base(path)
+	switch base {
+	case "agents.md", "claude.md", "codeowners", "governance.md", "maintainers.md", "skill.md":
+		return true
+	}
+	if strings.HasSuffix(base, ".agent.md") {
+		return true
+	}
+	if strings.Contains(path, "/.claude/") ||
+		strings.Contains(path, "/.codex/skills/") ||
+		strings.Contains(path, "/.cursor/rules/") ||
+		strings.Contains(path, "/.github/issue_template/") {
+		return true
+	}
+	return false
+}
+
+func anchorFirstPrimaryBoostAllowed(c Candidate, result anchorScoreResult, profile AnchorProfile, mode string) bool {
+	if result.score < 1.0 {
+		return false
+	}
+	if !anchorFirstCandidateEligible(c, profile) {
+		return false
+	}
+	if result.strongSpecific {
+		return true
+	}
+	if resultHasAnyAnchorField(result, "path", "title", "test_name") && resultHasAnyAnchorKind(result,
+		string(AnchorCompactIdentifier),
+		string(AnchorPathLike),
+		string(AnchorQuotedPhrase),
+	) {
+		return true
+	}
+	if mode == AnchorFirstModeV1 && resultHasAnyAnchorKind(result, string(AnchorCompactIdentifier), string(AnchorPathLike), string(AnchorQuotedPhrase)) {
+		return result.maxIDF >= 1.8 && resultHasAnyAnchorField(result, "heading", "symbol")
+	}
+	return false
 }
 
 func scoreAnchorFirstCandidate(c Candidate, profile AnchorProfile, vocab RepoVocabulary, mode string) anchorScoreResult {
@@ -723,6 +788,6 @@ var anchorRoleTerms = map[string]bool{
 var anchorWeakBroadTerms = map[string]bool{
 	"api": true, "architecture": true, "config": true, "context": true,
 	"design": true, "docs": true, "document": true, "integration": true,
-	"requirements": true, "service": true, "spec": true, "system": true,
+	"mode": true, "requirements": true, "service": true, "spec": true, "system": true,
 	"template": true, "test": true,
 }

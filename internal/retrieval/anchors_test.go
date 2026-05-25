@@ -32,7 +32,7 @@ func TestRepoVocabularyUsesStrongFieldEvidenceAndIDF(t *testing.T) {
 		},
 	}
 
-	vocab := BuildRepoVocabulary(candidates)
+	vocab := BuildRepoVocabulary(append(candidates, anchorFillerCandidatesForTest()...))
 	flux := vocab.Terms["fluxnova"]
 	calm := vocab.Terms["calm"]
 	if flux.DocumentCount == 0 {
@@ -204,6 +204,82 @@ func TestAnchorFirstStrictBackfillRequiresExactAnchorKind(t *testing.T) {
 	gotPathLike := applyAnchorFirstRanking(selected, append([]Candidate{selected[0].candidate, pathLike}, anchorFillerCandidatesForTest()...), "REQ_fluxnova_aigf_integration requirements", AnchorFirstModeStrict)
 	if len(gotPathLike) != 2 {
 		t.Fatalf("strict should backfill exact path-like anchors, got %#v", CandidatePathsFromScoredForTest(gotPathLike))
+	}
+}
+
+func TestAnchorFirstV1DoesNotBoostGenericBodyHeadingOnlyMatches(t *testing.T) {
+	query := "RFC transaction mechanism on key value store using MVCC and commit marks"
+	candidates := []Candidate{
+		{
+			Path:  "rfc/rfc-3/Transaction-implementation-on-kv.md",
+			Title: "RFC transaction mechanism on key-value store",
+			Body:  "MVCC commit marks transaction design.",
+		},
+		{
+			Path:  "design-docs/gravitino-logical-view-management.md",
+			Title: "Design of Logical View Management",
+			Body:  "This design discusses mechanisms, values, and storage details for views.",
+			Sections: []IndexedSection{{
+				HeadingPath: "Proposal > View Metadata Storage > Two View Storage Mechanisms",
+				Title:       "Two View Storage Mechanisms",
+			}},
+		},
+	}
+	profile := BuildAnchorProfile(query)
+	vocab := BuildRepoVocabulary(append(candidates, anchorFillerCandidatesForTest()...))
+	result := scoreAnchorFirstCandidate(candidates[1], profile, vocab, AnchorFirstModeV1)
+	if anchorFirstPrimaryBoostAllowed(candidates[1], result, profile, AnchorFirstModeV1) {
+		t.Fatalf("generic heading/body-only match should not receive anchor-first boost: %#v", result)
+	}
+
+	strong := scoreAnchorFirstCandidate(candidates[0], profile, vocab, AnchorFirstModeV1)
+	if !anchorFirstPrimaryBoostAllowed(candidates[0], strong, profile, AnchorFirstModeV1) {
+		t.Fatalf("path/title RFC anchor should remain boostable: %#v", strong)
+	}
+}
+
+func TestAnchorFirstDoesNotBoostDifferentAreaAgentInstructionsForArchitectureQuery(t *testing.T) {
+	query := "DolphinScheduler architecture design for master worker api alert and dao modules"
+	c := Candidate{
+		Path:  "dolphinscheduler-alert/CLAUDE.md",
+		Title: "CLAUDE.md - dolphinscheduler-alert",
+		Body:  "Sub-modules include master worker api alert modules and design notes.",
+	}
+	profile := BuildAnchorProfile(query)
+	if anchorFirstCandidateEligible(c, profile) {
+		t.Fatalf("architecture query should not primary-promote different-area agent instruction files")
+	}
+}
+
+func TestAnchorFirstAllowsAgentInstructionsForProtocolQuery(t *testing.T) {
+	query := "Claude skill instructions for frontend design command"
+	c := Candidate{
+		Path:  ".claude/skills/frontend-design/SKILL.md",
+		Title: "Frontend Design Skill",
+		Body:  "Instructions for design commands.",
+	}
+	profile := BuildAnchorProfile(query)
+	if !anchorFirstCandidateEligible(c, profile) {
+		t.Fatalf("agent/protocol query should allow agent instruction candidates")
+	}
+}
+
+func TestAnchorFirstKeepsPromptPlanPathAnchorsEligible(t *testing.T) {
+	query := "engineering context for mode active critical you"
+	c := Candidate{
+		Path:    "packages/coding-agent/src/prompts/system/plan-mode-active.md",
+		Title:   "Plan Mode Active",
+		Subtype: "agent_instruction",
+		Body:    "Critical files for implementation.",
+	}
+	profile := BuildAnchorProfile(query)
+	if !anchorFirstCandidateEligible(c, profile) {
+		t.Fatalf("path/title prompt plan anchors should remain eligible even when classifier subtype is protocol-like")
+	}
+	vocab := BuildRepoVocabulary(append([]Candidate{c}, anchorFillerCandidatesForTest()...))
+	result := scoreAnchorFirstCandidate(c, profile, vocab, AnchorFirstModeV1)
+	if !anchorFirstPrimaryBoostAllowed(c, result, profile, AnchorFirstModeV1) {
+		t.Fatalf("path/title prompt plan anchors should remain boostable: %#v", result)
 	}
 }
 
