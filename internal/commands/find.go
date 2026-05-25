@@ -54,7 +54,7 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	cmd.Flags().BoolVar(&anchorFirst, "experimental-anchor-first-ranking", false, "Use opt-in repo-local TF-IDF anchor-first ranking")
-	cmd.Flags().StringVar(&anchorMode, "experimental-anchor-first-mode", retrieval.AnchorFirstModeV1, "Anchor-first tuning mode: v1, rerank_only, strong_field, or strict")
+	cmd.Flags().StringVar(&anchorMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, strong_field, or strict")
 	return cmd
 }
 

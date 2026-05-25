@@ -36,11 +36,14 @@ const (
 	AnchorFirstModeRerankOnly  = "rerank_only"
 	AnchorFirstModeStrongField = "strong_field"
 	AnchorFirstModeStrict      = "strict"
+	DefaultAnchorFirstMode     = AnchorFirstModeStrict
 )
 
 func NormalizeAnchorFirstMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "", AnchorFirstModeV1:
+	case "":
+		return DefaultAnchorFirstMode
+	case AnchorFirstModeV1:
 		return AnchorFirstModeV1
 	case "rerank-only", AnchorFirstModeRerankOnly:
 		return AnchorFirstModeRerankOnly

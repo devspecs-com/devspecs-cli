@@ -211,7 +211,7 @@ func NewEvalCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&experimentalGlossaryConcepts, "experimental-glossary-concepts", false, "Gate experimental concept backfill through repo-local glossary evidence during retrieval evals")
 	cmd.Flags().BoolVar(&experimentalTieredConceptOutput, "experimental-tiered-concept-output", false, "Demote lower-confidence concept backfill artifacts to a separate related tier during retrieval evals")
 	cmd.Flags().BoolVar(&experimentalAnchorFirstRanking, "experimental-anchor-first-ranking", false, "Use opt-in repo-local TF-IDF anchor-first ranking during retrieval evals")
-	cmd.Flags().StringVar(&experimentalAnchorFirstMode, "experimental-anchor-first-mode", retrieval.AnchorFirstModeV1, "Anchor-first tuning mode: v1, rerank_only, strong_field, or strict")
+	cmd.Flags().StringVar(&experimentalAnchorFirstMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, strong_field, or strict")
 	cmd.Flags().StringVar(&evalIndexCacheDir, "eval-index-cache-dir", "", "Directory for strict indexed eval corpus cache; disabled when empty")
 	cmd.Flags().BoolVar(&refreshIndexCache, "refresh-index-cache", false, "Refresh the indexed eval corpus cache entry instead of reusing it")
 	cmd.Flags().IntVar(&maxCorpusFiles, "eval-max-corpus-files", 0, "Maximum indexed eval corpus artifacts after indexing; 0 means unlimited")
@@ -414,7 +414,7 @@ func runFindForEval(spec evalharness.CaseSpec, candidatesByPath map[string]retri
 	args := []string{"--json", "--no-refresh"}
 	if experimentalAnchorFirstRanking {
 		args = append(args, "--experimental-anchor-first-ranking")
-		if mode := retrieval.NormalizeAnchorFirstMode(experimentalAnchorFirstMode); mode != "" && mode != retrieval.AnchorFirstModeV1 {
+		if mode := retrieval.NormalizeAnchorFirstMode(experimentalAnchorFirstMode); mode != "" && mode != retrieval.DefaultAnchorFirstMode {
 			args = append(args, "--experimental-anchor-first-mode", mode)
 		}
 	}
