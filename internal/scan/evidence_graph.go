@@ -726,6 +726,7 @@ func materializeSharedConceptEdges(artifacts []evidenceArtifact, concepts map[st
 	for _, pair := range selectedPairs {
 		maxIDF := 0.0
 		strongCount := 0
+		semanticCount := 0
 		names := make([]string, 0, minInt(3, len(pair.concepts)))
 		metaConcepts := make([]map[string]any, 0, minInt(maxSharedConceptMetadataPerEdge, len(pair.concepts)))
 		for i, concept := range pair.concepts {
@@ -734,6 +735,9 @@ func materializeSharedConceptEdges(artifacts []evidenceArtifact, concepts map[st
 			}
 			if concept.strong {
 				strongCount++
+			}
+			if semanticEdgeConcept(concept.kind) {
+				semanticCount++
 			}
 			if i < 3 {
 				names = append(names, concept.canonical)
@@ -748,6 +752,9 @@ func materializeSharedConceptEdges(artifacts []evidenceArtifact, concepts map[st
 		confidence := 0.56 + float64(strongCount)*0.10 + float64(weakCount)*0.04 + maxIDF*0.03
 		if strongCount == 0 {
 			confidence = minFloat(confidence, 0.84)
+		}
+		if semanticCount == 0 {
+			confidence = minFloat(confidence, 0.88)
 		}
 		explanation := fmt.Sprintf("shares rare concept %q", names[0])
 		if len(names) > 1 {
@@ -1270,6 +1277,15 @@ func sharedConceptPairScore(pair *pairEvidence) float64 {
 	return score
 }
 
+func semanticEdgeConcept(kind string) bool {
+	switch kind {
+	case conceptKindPhrase, conceptKindSymbol, conceptKindTestBehavior:
+		return true
+	default:
+		return false
+	}
+}
+
 func genericEdgeConcept(canonical string) bool {
 	canonical = strings.TrimSpace(strings.ToLower(canonical))
 	if canonical == "" {
@@ -1451,9 +1467,12 @@ var evidenceStopWords = map[string]bool{
 
 var genericEdgeTerms = map[string]bool{
 	"additions": true, "architecture": true, "config": true, "context": true,
-	"current": true, "discover": true, "discovery": true, "infrastructure": true,
-	"doc": true, "docs": true, "documentation": true, "layer": true,
-	"local": true, "model": true, "notes": true, "page": true, "quick": true,
-	"rationale": true, "requirements": true, "states": true, "test": true,
-	"testing": true, "validate": true, "validation": true, "works": true,
+	"current": true, "deliverables": true, "descriptive": true, "discover": true,
+	"discovery": true, "doc": true, "docs": true, "documentation": true,
+	"file": true, "files": true, "infrastructure": true, "implementation": true,
+	"layer": true, "local": true, "model": true, "notes": true, "overview": true,
+	"page": true, "preconditions": true, "quick": true, "rationale": true,
+	"requirements": true, "resolution": true, "short": true, "states": true,
+	"template": true, "test": true, "testing": true, "title": true,
+	"validate": true, "validation": true, "works": true, "your": true,
 }

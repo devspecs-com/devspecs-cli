@@ -82,6 +82,31 @@ func TestSharedConceptEdgesAllowHighConfidenceStrongAnchors(t *testing.T) {
 	}
 }
 
+func TestSharedConceptEdgesCapCompactOnlyConfidence(t *testing.T) {
+	result := buildEvidenceGraph("repo", []evidenceArtifact{
+		evidenceTestArtifact("a1", "Alpha", "docs/service-radar/work-items.md"),
+		evidenceTestArtifact("a2", "Beta", "plans/service-radar/follow-up.md"),
+	})
+
+	edge := singleEdgeByType(t, result.edges, edgeTypeMentionsSameConcept)
+	if edge.Confidence > 0.88 {
+		t.Fatalf("compact/path-only shared concepts should not become high confidence: %.3f", edge.Confidence)
+	}
+}
+
+func TestSharedConceptEdgesRejectTemplatePhrases(t *testing.T) {
+	result := buildEvidenceGraph("repo", []evidenceArtifact{
+		evidenceTestArtifact("a1", "BEP Your Short Descriptive Title", "beps/0001-topic.md"),
+		evidenceTestArtifact("a2", "BEP Your Short Descriptive Title", "beps/NNNN-template.md"),
+	})
+
+	for _, edge := range result.edges {
+		if edge.EdgeType == edgeTypeMentionsSameConcept && edge.Confidence > 0.84 {
+			t.Fatalf("template phrases should not create high-confidence edges: %#v", edge)
+		}
+	}
+}
+
 func TestSharedConceptEdgesSkipConceptsWithTooManyArtifacts(t *testing.T) {
 	var artifacts []evidenceArtifact
 	for i := 0; i < maxSharedConceptArtifacts+1; i++ {
