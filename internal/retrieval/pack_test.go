@@ -235,6 +235,28 @@ func TestBuildRoleGroupedPackIncludesSkillUnderAgentDirectoryWhenRequested(t *te
 	assertGroupCount(t, pack, PackRoleSupportingContext, 1)
 }
 
+func TestBuildRoleGroupedPackIncludesSkillReferencePathWhenWorkflowRequested(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "skill-ref-1",
+			Path:  "skills/browser/references/agent.md",
+			Kind:  "markdown_artifact",
+			Title: "Agent Configuration",
+			Body:  "reference for browser automation workflow behavior",
+			Metadata: map[string]string{
+				"classifier_model": "protocol",
+			},
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "automate browser interactions with the browser cli skill workflow")
+
+	if len(pack.ExcludedNoise) != 0 {
+		t.Fatalf("expected requested skill reference path to stay included, got excluded: %#v", pack.ExcludedNoise)
+	}
+	assertGroupCount(t, pack, PackRoleSupportingContext, 1)
+}
+
 func TestBuildRoleGroupedPackExcludesUnrequestedGenericSkill(t *testing.T) {
 	candidates := []Candidate{
 		{

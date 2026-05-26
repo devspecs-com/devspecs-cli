@@ -383,6 +383,7 @@ func isSkillPathCandidate(pathLower string) bool {
 	base := strings.ToLower(filepath.Base(pathLower))
 	return base == "skill.md" ||
 		base == "skills.md" ||
+		strings.HasPrefix(pathLower, "skills/") ||
 		strings.Contains(pathLower, "/skills/") ||
 		strings.Contains(pathLower, ".claude/skills/") ||
 		strings.Contains(pathLower, ".codex/skills/")
