@@ -174,6 +174,25 @@ func TestRun_AgenticSaaSFixture(t *testing.T) {
 	}
 }
 
+func TestRun_PackDiagnostics(t *testing.T) {
+	result, err := Run(fixturePath(t), Options{CorpusSource: CorpusSourceFilesystemFixture, PackDiagnostics: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Cases) == 0 {
+		t.Fatal("expected eval cases")
+	}
+	if result.Cases[0].PackDiagnostics == nil {
+		t.Fatal("expected per-case pack diagnostics")
+	}
+	if result.Cases[0].PackDiagnostics.Mode != "role_grouped_pack_v0" {
+		t.Fatalf("pack diagnostics mode = %q", result.Cases[0].PackDiagnostics.Mode)
+	}
+	if len(result.Cases[0].PackDiagnostics.Groups) == 0 {
+		t.Fatalf("expected grouped pack diagnostics: %#v", result.Cases[0].PackDiagnostics)
+	}
+}
+
 func TestDiagnostics_ClassifiesAsciiDocGaps(t *testing.T) {
 	if got := diagnosticRole("docs/architecture/runtime.adoc"); got != "asciidoc" {
 		t.Fatalf("diagnosticRole(.adoc) = %q", got)

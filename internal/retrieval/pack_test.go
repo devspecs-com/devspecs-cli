@@ -1,0 +1,219 @@
+package retrieval
+
+import "testing"
+
+func TestBuildRoleGroupedPackClassifiesCoreRolesAndNoise(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "adr-1",
+			Path:  "docs/adr/001-auth-session.md",
+			Kind:  "decision",
+			Title: "Auth session decision",
+			Body:  "refresh token session model",
+			Metadata: map[string]string{
+				"short_id": "ADR1",
+			},
+		},
+		{
+			ID:    "src-1",
+			Path:  "internal/auth/refresh_token.go",
+			Kind:  "source_context",
+			Title: "RefreshTokenService",
+			Body:  "func RotateRefreshToken() {}",
+		},
+		{
+			ID:      "test-1",
+			Path:    "internal/auth/refresh_token_test.go",
+			Kind:    "source_context",
+			Subtype: "test_case",
+			Title:   "TestRotatesRefreshToken",
+			Body:    "rejects expired refresh token",
+		},
+		{
+			ID:      "config-1",
+			Path:    "config/auth.yaml",
+			Kind:    "source_context",
+			Subtype: "configuration",
+			Title:   "auth.yaml",
+			Body:    "refresh_token_ttl: 3600",
+		},
+		{
+			ID:    "agent-1",
+			Path:  "AGENTS.md",
+			Kind:  "protocol",
+			Title: "Agent instructions",
+			Body:  "rules for working in this repo",
+			Metadata: map[string]string{
+				"classifier_model":   "protocol",
+				"classifier_subtype": "agent_instruction",
+			},
+		},
+	}
+	reasons := map[string][]string{
+		"docs/adr/001-auth-session.md":        {"matched query term: refresh"},
+		"internal/auth/refresh_token.go":      {"matched identifier: refresh_token"},
+		"internal/auth/refresh_token_test.go": {"matched test behavior: rotates refresh token"},
+		"config/auth.yaml":                    {"matched config key: refresh_token_ttl"},
+		"AGENTS.md":                           {"matched query term: agent"},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, reasons, "resume auth token refresh work")
+
+	assertGroupCount(t, pack, PackRoleBackgroundDecisions, 1)
+	assertGroupCount(t, pack, PackRoleImplementation, 1)
+	assertGroupCount(t, pack, PackRoleBehaviorTests, 1)
+	assertGroupCount(t, pack, PackRoleConfigSchema, 1)
+	if len(pack.ExcludedNoise) != 1 {
+		t.Fatalf("expected one excluded noise item, got %d", len(pack.ExcludedNoise))
+	}
+	if pack.ExcludedNoise[0].Path != "AGENTS.md" {
+		t.Fatalf("expected AGENTS.md to be excluded, got %q", pack.ExcludedNoise[0].Path)
+	}
+	if pack.ExcludedNoise[0].RoleReason == "" {
+		t.Fatal("excluded noise item should explain why it was excluded")
+	}
+}
+
+func TestBuildRoleGroupedPackIncludesAgentInstructionsWhenRequested(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "agent-1",
+			Path:  "AGENTS.md",
+			Kind:  "protocol",
+			Title: "Agent instructions",
+			Body:  "rules for working in this repo",
+			Metadata: map[string]string{
+				"classifier_model":   "protocol",
+				"classifier_subtype": "agent_instruction",
+			},
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "show repo agent instructions and rules")
+
+	if len(pack.ExcludedNoise) != 0 {
+		t.Fatalf("expected requested agent instructions to stay included, got excluded: %#v", pack.ExcludedNoise)
+	}
+	assertGroupCount(t, pack, PackRoleSupportingContext, 1)
+}
+
+func TestBuildRoleGroupedPackDoesNotExcludeAgentNotesAsInstructions(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "note-1",
+			Path:  ".claude/notes/webhook-idempotency-followup.md",
+			Kind:  "markdown_artifact",
+			Title: "Claude Notes: Webhook Idempotency Follow-up",
+			Body:  "stripe_event_id replay protection follow up",
+			Metadata: map[string]string{
+				"classifier_model": "agent_note",
+			},
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "give agent context to implement webhook replay protection")
+
+	if len(pack.ExcludedNoise) != 0 {
+		t.Fatalf("expected agent note to stay included, got excluded: %#v", pack.ExcludedNoise)
+	}
+	if got := includedPackItemCount(pack); got != 1 {
+		t.Fatalf("expected one included agent note, got %d in %#v", got, pack.Groups)
+	}
+}
+
+func TestBuildRoleGroupedPackDeduplicatesSamePath(t *testing.T) {
+	candidates := []Candidate{
+		{ID: "a", Path: "docs/adr/0002-webhook-idempotency-boundary.md", Kind: "decision", Subtype: "adr", Title: "ADR 0002"},
+		{ID: "b", Path: "docs/adr/0002-webhook-idempotency-boundary.md", Kind: "markdown_artifact", Title: "ADR 0002"},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "webhook idempotency")
+
+	assertGroupCount(t, pack, PackRoleBackgroundDecisions, 1)
+}
+
+func TestBuildRoleGroupedPackKeepsStaleArtifactWhenQueryTargetsIt(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:      "adr-stale",
+			Path:    "docs/adr/0003-superseded-local-entitlements.md",
+			Kind:    "decision",
+			Subtype: "adr",
+			Title:   "ADR 0003: Superseded Local Entitlements Cache",
+			Status:  "superseded",
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "continue local entitlement caching plan")
+
+	if len(pack.ExcludedNoise) != 0 {
+		t.Fatalf("expected targeted stale artifact to stay included, got excluded: %#v", pack.ExcludedNoise)
+	}
+	assertGroupCount(t, pack, PackRoleBackgroundDecisions, 1)
+}
+
+func TestBuildRoleGroupedPackExcludesWeakStaleArtifact(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:      "adr-stale",
+			Path:    "docs/adr/0003-superseded-local-entitlements.md",
+			Kind:    "decision",
+			Subtype: "adr",
+			Title:   "ADR 0003: Superseded Local Entitlements Cache",
+			Status:  "superseded",
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "resume entitlement sync hardening")
+
+	if len(pack.ExcludedNoise) != 1 {
+		t.Fatalf("expected weak stale artifact to be excluded, got %#v", pack)
+	}
+}
+
+func TestBuildRoleGroupedPackSuppressesConflictingStaleCueForActiveArtifact(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:     "proposal",
+			Path:   "openspec/changes/harden-entitlement-sync/proposal.md",
+			Kind:   "spec",
+			Title:  "Harden Entitlement Sync",
+			Status: "implementing",
+			Body:   "This proposal supersedes the old local entitlement cache.",
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "resume entitlement sync hardening")
+
+	if len(pack.Groups) != 1 || len(pack.Groups[0].Items) != 1 {
+		t.Fatalf("expected active artifact to be included, got %#v", pack)
+	}
+	for _, cue := range pack.Groups[0].Items[0].AuthorityCues {
+		if cue == "superseded" {
+			t.Fatalf("active artifact should not show stale cue: %#v", pack.Groups[0].Items[0].AuthorityCues)
+		}
+	}
+}
+
+func assertGroupCount(t *testing.T, pack RoleGroupedPack, role string, want int) {
+	t.Helper()
+	for _, group := range pack.Groups {
+		if group.Role == role {
+			if got := len(group.Items); got != want {
+				t.Fatalf("role %s: want %d items, got %d", role, want, got)
+			}
+			return
+		}
+	}
+	if want != 0 {
+		t.Fatalf("role %s: want %d items, group missing", role, want)
+	}
+}
+
+func includedPackItemCount(pack RoleGroupedPack) int {
+	var count int
+	for _, group := range pack.Groups {
+		count += len(group.Items)
+	}
+	return count
+}

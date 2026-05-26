@@ -456,6 +456,50 @@ func TestFind_JSONOutput(t *testing.T) {
 	}
 }
 
+func TestFindPack_JSONOutputKeepsRankedResultsAndGroups(t *testing.T) {
+	setupReadEnv(t)
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"Plan", "--json", "--pack"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out FindPackOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("find --json --pack invalid: %v\n%s", err, buf.String())
+	}
+	if out.Mode != "role_grouped_pack_v0" {
+		t.Fatalf("pack mode = %q", out.Mode)
+	}
+	if len(out.Groups) == 0 {
+		t.Fatalf("find --json --pack returned no groups: %#v", out)
+	}
+	if len(out.RankedResults) == 0 {
+		t.Fatalf("find --json --pack returned no ranked results: %#v", out)
+	}
+}
+
+func TestFindPack_HumanOutputShowsReceipt(t *testing.T) {
+	setupReadEnv(t)
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"Plan", "--pack"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	output := buf.String()
+	for _, want := range []string{"Working set: Plan", "Mode: role_grouped_pack_v0", "Why:"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("find --pack missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestFind_JSONOutputIncludesLineScopedPath(t *testing.T) {
 	repoDir, _ := setupReadEnv(t)
 	relPath := seedLineScopedTestArtifacts(t, repoDir)

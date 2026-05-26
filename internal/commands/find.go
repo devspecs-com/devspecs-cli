@@ -27,6 +27,7 @@ func NewFindCmd() *cobra.Command {
 		allRepos    bool
 		asJSON      bool
 		noRefresh   bool
+		pack        bool
 		anchorFirst bool
 		anchorMode  string
 	)
@@ -40,7 +41,7 @@ func NewFindCmd() *cobra.Command {
 			if cmd.Flags().Changed("experimental-anchor-first-mode") {
 				anchorFirst = true
 			}
-			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, anchorFirst, anchorMode)
+			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, pack, anchorFirst, anchorMode)
 		},
 	}
 
@@ -53,12 +54,13 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&allRepos, "all", false, "Search artifacts in all indexed repos (ignore cwd scope)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
+	cmd.Flags().BoolVar(&pack, "pack", false, "Group results into a role-based context pack with inclusion and exclusion receipts")
 	cmd.Flags().BoolVar(&anchorFirst, "experimental-anchor-first-ranking", false, "Use opt-in repo-local TF-IDF anchor-first ranking")
 	cmd.Flags().StringVar(&anchorMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, strong_field, or strict")
 	return cmd
 }
 
-func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, anchorFirst bool, anchorMode string) error {
+func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, pack, anchorFirst bool, anchorMode string) error {
 	start := time.Now()
 	success := false
 	anchorMode = retrieval.NormalizeAnchorFirstMode(anchorMode)
@@ -68,6 +70,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	props := map[string]any{
 		"query_length_bucket": telemetry.QueryLengthBucket(query),
 		"json":                asJSON,
+		"pack":                pack,
 		"anchor_first":        anchorFirst,
 		"anchor_first_mode":   anchorMode,
 	}
@@ -102,6 +105,14 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	reasons := reasonsByPath(retrieval.ExplainCandidates(matches, query))
 	success = true
 	props["result_count_bucket"] = telemetry.CountBucket(len(matches))
+
+	if pack {
+		rolePack := retrieval.BuildRoleGroupedPack(matches, reasons, query)
+		if asJSON {
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(findPackOutput(query, retriever.Name(), matches, reasons, rolePack))
+		}
+		return writeFindPackText(cmd.OutOrStdout(), query, retriever.Name(), rolePack)
+	}
 
 	if asJSON {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(findResults(matches, reasons, retriever.Name()))
