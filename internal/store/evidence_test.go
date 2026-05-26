@@ -1,0 +1,102 @@
+package store
+
+import (
+	"path/filepath"
+	"testing"
+)
+
+func TestEvidenceStore_ReplaceRepoEvidenceIsIdempotent(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "devspecs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := "2026-05-26T00:00:00Z"
+	mustNoErr(t, insertEvidenceRepo(db, "repo_evidence", now))
+	mustNoErr(t, db.InsertArtifactDirect("ds_A", "repo_evidence", "plan", "", "Auth Plan", "draft", "rev_a", now, now))
+	mustNoErr(t, db.InsertArtifactDirect("ds_B", "repo_evidence", "plan", "", "Auth Tests", "draft", "rev_b", now, now))
+
+	concepts := []ConceptInput{{
+		ID:                       "concept_auth",
+		RepoID:                   "repo_evidence",
+		Canonical:                "auth",
+		Kind:                     "path_fragment",
+		Forms:                    []string{"auth"},
+		DocumentFrequency:        2,
+		InverseDocumentFrequency: 1.1,
+	}}
+	mentions := []ConceptMentionInput{
+		{ID: "mention_a", ConceptID: "concept_auth", ArtifactID: "ds_A", Field: "title", Weight: 0.8, EvidenceJSON: `{"form":"auth"}`},
+		{ID: "mention_b", ConceptID: "concept_auth", ArtifactID: "ds_B", Field: "title", Weight: 0.8, EvidenceJSON: `{"form":"auth"}`},
+	}
+	edges := []ArtifactEdgeInput{{
+		ID:            "edge_auth",
+		RepoID:        "repo_evidence",
+		SrcArtifactID: "ds_A",
+		DstArtifactID: "ds_B",
+		EdgeType:      "mentions_same_concept",
+		Weight:        0.7,
+		Confidence:    0.8,
+		EvidenceCount: 1,
+		SourceSignal:  "shared_rare_concept",
+		Explanation:   "shares rare concept auth",
+		MetadataJSON:  `{"concepts":["auth"]}`,
+	}}
+	for i := 0; i < 2; i++ {
+		if err := db.ReplaceRepoEvidence("repo_evidence", concepts, mentions, edges, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertTableCount(t, db, "concepts", 1)
+	assertTableCount(t, db, "concept_mentions", 2)
+	assertTableCount(t, db, "artifact_edges", 1)
+
+	got, err := db.GetArtifactEdges(ArtifactEdgeFilter{RepoID: "repo_evidence", EdgeType: "mentions_same_concept"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected one edge, got %d", len(got))
+	}
+	if got[0].Explanation == "" || got[0].MetadataJSON == "" {
+		t.Fatalf("edge should preserve explanation and metadata: %#v", got[0])
+	}
+}
+
+func TestEvidenceStore_DeleteArtifactEvidence(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "devspecs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := "2026-05-26T00:00:00Z"
+	mustNoErr(t, insertEvidenceRepo(db, "repo_evidence", now))
+	mustNoErr(t, db.InsertArtifactDirect("ds_A", "repo_evidence", "plan", "", "A", "draft", "rev_a", now, now))
+	mustNoErr(t, db.InsertArtifactDirect("ds_B", "repo_evidence", "plan", "", "B", "draft", "rev_b", now, now))
+	mustNoErr(t, db.UpsertConcept(ConceptInput{ID: "concept_x", RepoID: "repo_evidence", Canonical: "x", Kind: "term"}, now))
+	mustNoErr(t, db.ReplaceConceptMentions("ds_A", []ConceptMentionInput{{ID: "mention_x", ConceptID: "concept_x", ArtifactID: "ds_A", Field: "title", Weight: 1}}, now))
+	mustNoErr(t, db.UpsertArtifactEdge(ArtifactEdgeInput{ID: "edge_x", RepoID: "repo_evidence", SrcArtifactID: "ds_A", DstArtifactID: "ds_B", EdgeType: "explicit_reference", Weight: 1, Confidence: 1, SourceSignal: "path_reference"}, now))
+
+	if err := db.DeleteArtifactEvidence("ds_A"); err != nil {
+		t.Fatal(err)
+	}
+	assertTableCount(t, db, "concept_mentions", 0)
+	assertTableCount(t, db, "artifact_edges", 0)
+	assertTableCount(t, db, "concepts", 1)
+}
+
+func insertEvidenceRepo(db *DB, repoID, now string) error {
+	_, err := db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES (?, ?, ?, ?)", repoID, "/tmp/"+repoID, now, now)
+	return err
+}
+
+func assertTableCount(t *testing.T, db *DB, table string, want int) {
+	t.Helper()
+	var got int
+	if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("%s count = %d, want %d", table, got, want)
+	}
+}

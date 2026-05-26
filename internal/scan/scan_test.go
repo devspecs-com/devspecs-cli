@@ -101,6 +101,50 @@ func TestScan_NoDuplicateOnUnchanged(t *testing.T) {
 	}
 }
 
+func TestScan_RebuildsEvidenceGraphDiagnostics(t *testing.T) {
+	repoRoot, db := setupTestRepo(t)
+	if err := os.WriteFile(filepath.Join(repoRoot, "plans", "auth-tests.md"), []byte("# Auth Token Tests\n\nSee plans/auth.md for the auth token rollout.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ids := idgen.NewFactory()
+	s := New(db, ids, []adapters.Adapter{&markdown.Adapter{}})
+
+	result, err := s.Run(context.Background(), repoRoot, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.EvidenceGraph == nil {
+		t.Fatal("expected evidence graph diagnostics")
+	}
+	if result.EvidenceGraph.ConceptsIndexed == 0 {
+		t.Fatal("expected indexed concepts")
+	}
+	if result.EvidenceGraph.MentionsIndexed == 0 {
+		t.Fatal("expected indexed concept mentions")
+	}
+	if result.EvidenceGraph.EdgesByType[edgeTypeMentionsSameConcept] == 0 {
+		t.Fatalf("expected shared-concept edge diagnostics: %#v", result.EvidenceGraph)
+	}
+	if result.EvidenceGraph.EdgesByType[edgeTypeExplicitReference] == 0 {
+		t.Fatalf("expected explicit path-reference edge diagnostics: %#v", result.EvidenceGraph)
+	}
+	firstConcepts := tableCount(t, db, "concepts")
+	firstMentions := tableCount(t, db, "concept_mentions")
+	firstEdges := tableCount(t, db, "artifact_edges")
+	if _, err := s.Run(context.Background(), repoRoot, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := tableCount(t, db, "concepts"); got != firstConcepts {
+		t.Fatalf("concept count changed after rescan: got %d want %d", got, firstConcepts)
+	}
+	if got := tableCount(t, db, "concept_mentions"); got != firstMentions {
+		t.Fatalf("mention count changed after rescan: got %d want %d", got, firstMentions)
+	}
+	if got := tableCount(t, db, "artifact_edges"); got != firstEdges {
+		t.Fatalf("edge count changed after rescan: got %d want %d", got, firstEdges)
+	}
+}
+
 func TestScan_NewRevisionOnContentChange(t *testing.T) {
 	repoRoot, db := setupTestRepo(t)
 	ids := idgen.NewFactory()
@@ -747,6 +791,9 @@ func TestScan_FreshIndexBatchDeferredFTSEquivalence(t *testing.T) {
 		"artifact_sections",
 		"artifact_sections_fts",
 		"artifacts_fts",
+		"concepts",
+		"concept_mentions",
+		"artifact_edges",
 	} {
 		canonicalCount := tableCount(t, canonicalDB, table)
 		freshCount := tableCount(t, freshDB, table)

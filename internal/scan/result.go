@@ -64,13 +64,14 @@ type sourceAgg struct {
 //   - "hints": optional; only when all adapters indexed zero artifacts AND at least one hint
 //     candidate exists. Empty candidate list omits the key (encoding/json omitempty on []ScanHint).
 type Result struct {
-	Found            map[string]int           `json:"Found"`
-	SourcesBreakdown []SourceBreakdownRow     `json:"sources_breakdown"`
-	New              int                      `json:"New"`
-	Updated          int                      `json:"Updated"`
-	Unchanged        int                      `json:"Unchanged"`
-	Hints            []ScanHint               `json:"hints,omitempty"`
-	OpenSpec         *openspecmetrics.Metrics `json:"openspec,omitempty"`
+	Found            map[string]int            `json:"Found"`
+	SourcesBreakdown []SourceBreakdownRow      `json:"sources_breakdown"`
+	New              int                       `json:"New"`
+	Updated          int                       `json:"Updated"`
+	Unchanged        int                       `json:"Unchanged"`
+	Hints            []ScanHint                `json:"hints,omitempty"`
+	OpenSpec         *openspecmetrics.Metrics  `json:"openspec,omitempty"`
+	EvidenceGraph    *EvidenceGraphDiagnostics `json:"evidence_graph,omitempty"`
 
 	sourcesAgg map[string]*sourceAgg `json:"-"`
 }

@@ -17,7 +17,7 @@ import (
 var schemaDDL string
 
 // SchemaVersion is the current schema version. Bump when schema.sql changes.
-const SchemaVersion = 8
+const SchemaVersion = 9
 
 // DB wraps *sql.DB with DevSpecs-specific operations.
 type DB struct {
@@ -91,6 +91,11 @@ func (db *DB) migrate() error {
 				return err
 			}
 			maxVersion = 8
+		case 8:
+			if err := db.migrate8To9(now); err != nil {
+				return err
+			}
+			maxVersion = 9
 		default:
 			return fmt.Errorf(
 				"index was created with schema v%d but this CLI requires v%d. Run 'ds scan --rebuild' or delete ~/.devspecs/devspecs.db and run 'ds scan' to rebuild",
@@ -211,5 +216,62 @@ func (db *DB) migrate7To8(now string) error {
 		}
 	}
 	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 8, now)
+	return err
+}
+
+func (db *DB) migrate8To9(now string) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS concepts (
+			id                         TEXT PRIMARY KEY,
+			repo_id                    TEXT NOT NULL,
+			canonical                  TEXT NOT NULL,
+			kind                       TEXT NOT NULL,
+			forms_json                 TEXT NOT NULL DEFAULT '[]',
+			document_frequency         INTEGER NOT NULL DEFAULT 0,
+			inverse_document_frequency REAL NOT NULL DEFAULT 0,
+			created_at                 TEXT NOT NULL,
+			updated_at                 TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS concept_mentions (
+			id            TEXT PRIMARY KEY,
+			concept_id    TEXT NOT NULL,
+			artifact_id   TEXT NOT NULL,
+			section_id    TEXT NOT NULL DEFAULT '',
+			field         TEXT NOT NULL,
+			weight        REAL NOT NULL,
+			evidence_json TEXT NOT NULL DEFAULT '{}',
+			created_at    TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS artifact_edges (
+			id              TEXT PRIMARY KEY,
+			repo_id         TEXT NOT NULL,
+			src_artifact_id TEXT NOT NULL,
+			dst_artifact_id TEXT NOT NULL,
+			edge_type       TEXT NOT NULL,
+			weight          REAL NOT NULL,
+			confidence      REAL NOT NULL,
+			evidence_count  INTEGER NOT NULL DEFAULT 1,
+			freshness       TEXT NOT NULL DEFAULT '',
+			source_signal   TEXT NOT NULL,
+			explanation     TEXT NOT NULL DEFAULT '',
+			metadata_json   TEXT NOT NULL DEFAULT '{}',
+			created_at      TEXT NOT NULL,
+			updated_at      TEXT NOT NULL
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_concepts_repo_kind_canonical ON concepts(repo_id, kind, canonical)`,
+		`CREATE INDEX IF NOT EXISTS idx_concept_mentions_concept ON concept_mentions(concept_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_concept_mentions_artifact ON concept_mentions(artifact_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_concept_mentions_artifact_section ON concept_mentions(artifact_id, section_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_artifact_edges_src ON artifact_edges(repo_id, src_artifact_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_artifact_edges_dst ON artifact_edges(repo_id, dst_artifact_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_artifact_edges_type ON artifact_edges(repo_id, edge_type)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_edges_identity ON artifact_edges(repo_id, src_artifact_id, dst_artifact_id, edge_type, source_signal)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate v8->v9 evidence graph schema: %w", err)
+		}
+	}
+	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 9, now)
 	return err
 }

@@ -1,4 +1,4 @@
--- DevSpecs v0.1 schema (version 8)
+-- DevSpecs v0.1 schema (version 9)
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version    INTEGER PRIMARY KEY,
@@ -129,6 +129,46 @@ CREATE TABLE IF NOT EXISTS artifact_sections (
   FOREIGN KEY (revision_id) REFERENCES artifact_revisions(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS concepts (
+  id                         TEXT PRIMARY KEY,
+  repo_id                    TEXT NOT NULL,
+  canonical                  TEXT NOT NULL,
+  kind                       TEXT NOT NULL,
+  forms_json                 TEXT NOT NULL DEFAULT '[]',
+  document_frequency         INTEGER NOT NULL DEFAULT 0,
+  inverse_document_frequency REAL NOT NULL DEFAULT 0,
+  created_at                 TEXT NOT NULL,
+  updated_at                 TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS concept_mentions (
+  id            TEXT PRIMARY KEY,
+  concept_id    TEXT NOT NULL,
+  artifact_id   TEXT NOT NULL,
+  section_id    TEXT NOT NULL DEFAULT '',
+  field         TEXT NOT NULL,
+  weight        REAL NOT NULL,
+  evidence_json TEXT NOT NULL DEFAULT '{}',
+  created_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS artifact_edges (
+  id              TEXT PRIMARY KEY,
+  repo_id         TEXT NOT NULL,
+  src_artifact_id TEXT NOT NULL,
+  dst_artifact_id TEXT NOT NULL,
+  edge_type       TEXT NOT NULL,
+  weight          REAL NOT NULL,
+  confidence      REAL NOT NULL,
+  evidence_count  INTEGER NOT NULL DEFAULT 1,
+  freshness       TEXT NOT NULL DEFAULT '',
+  source_signal   TEXT NOT NULL,
+  explanation     TEXT NOT NULL DEFAULT '',
+  metadata_json   TEXT NOT NULL DEFAULT '{}',
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_todos_artifact ON artifact_todos(artifact_id);
 CREATE INDEX IF NOT EXISTS idx_todos_revision ON artifact_todos(revision_id);
 CREATE INDEX IF NOT EXISTS idx_todos_section ON artifact_todos(section_id);
@@ -143,6 +183,14 @@ CREATE INDEX IF NOT EXISTS idx_sections_artifact ON artifact_sections(artifact_i
 CREATE INDEX IF NOT EXISTS idx_sections_revision ON artifact_sections(revision_id);
 CREATE INDEX IF NOT EXISTS idx_sections_source_path ON artifact_sections(source_path);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_short_id ON artifacts(short_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_concepts_repo_kind_canonical ON concepts(repo_id, kind, canonical);
+CREATE INDEX IF NOT EXISTS idx_concept_mentions_concept ON concept_mentions(concept_id);
+CREATE INDEX IF NOT EXISTS idx_concept_mentions_artifact ON concept_mentions(artifact_id);
+CREATE INDEX IF NOT EXISTS idx_concept_mentions_artifact_section ON concept_mentions(artifact_id, section_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_edges_src ON artifact_edges(repo_id, src_artifact_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_edges_dst ON artifact_edges(repo_id, dst_artifact_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_edges_type ON artifact_edges(repo_id, edge_type);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_edges_identity ON artifact_edges(repo_id, src_artifact_id, dst_artifact_id, edge_type, source_signal);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS artifacts_fts USING fts5(
   artifact_id UNINDEXED,

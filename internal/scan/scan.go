@@ -230,6 +230,11 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 	if err := s.syncOpenSpecLinks(repoID, now); err != nil {
 		return nil, fmt.Errorf("sync openspec links: %w", err)
 	}
+	if diagnostics, err := s.rebuildEvidenceGraph(repoID, now); err != nil {
+		return nil, fmt.Errorf("rebuild evidence graph: %w", err)
+	} else {
+		result.EvidenceGraph = diagnostics
+	}
 	if metrics, err := s.computeOpenSpecMetrics(repoRoot, repoID); err != nil {
 		return nil, fmt.Errorf("compute openspec metrics: %w", err)
 	} else {
