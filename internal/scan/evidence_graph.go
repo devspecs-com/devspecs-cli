@@ -33,6 +33,9 @@ const (
 
 	maxConceptForms                  = 6
 	maxMentionEvidenceFormLength     = 120
+	maxEvidenceMentionsPerArtifact   = 96
+	minEvidenceMentionsPerArtifact   = 8
+	maxEvidenceMentionsPerRepo       = 60000
 	maxSymbolConceptsPerArtifact     = 12
 	maxSharedConceptArtifacts        = 6
 	maxSharedConceptEdges            = 1500
@@ -208,8 +211,9 @@ func buildEvidenceGraph(repoID string, artifacts []evidenceArtifact) evidenceBui
 	artifactCount := len(artifacts)
 	rawMentions := make([]rawConceptMention, 0, artifactCount*12)
 	for _, artifact := range artifacts {
-		rawMentions = append(rawMentions, extractEvidenceMentions(artifact)...)
+		rawMentions = append(rawMentions, limitArtifactEvidenceMentions(extractEvidenceMentions(artifact))...)
 	}
+	rawMentions = limitRepoEvidenceMentions(rawMentions)
 
 	conceptsByKey := map[string]*conceptAccumulator{}
 	mentionSeen := map[string]bool{}
@@ -364,6 +368,126 @@ func extractEvidenceMentions(artifact evidenceArtifact) []rawConceptMention {
 		addSectionMentions(section, add)
 	}
 	return mentions
+}
+
+func limitArtifactEvidenceMentions(mentions []rawConceptMention) []rawConceptMention {
+	if len(mentions) <= maxEvidenceMentionsPerArtifact {
+		return mentions
+	}
+	out := append([]rawConceptMention(nil), mentions...)
+	sortEvidenceMentions(out)
+	out = out[:maxEvidenceMentionsPerArtifact]
+	return out
+}
+
+func limitRepoEvidenceMentions(mentions []rawConceptMention) []rawConceptMention {
+	if len(mentions) <= maxEvidenceMentionsPerRepo {
+		return mentions
+	}
+	byArtifact := map[string][]rawConceptMention{}
+	for _, mention := range mentions {
+		byArtifact[mention.artifactID] = append(byArtifact[mention.artifactID], mention)
+	}
+	artifactIDs := sortedMentionArtifactIDs(byArtifact)
+	selected := make([]rawConceptMention, 0, maxEvidenceMentionsPerRepo)
+	var extras []rawConceptMention
+	for _, artifactID := range artifactIDs {
+		group := byArtifact[artifactID]
+		sortEvidenceMentions(group)
+		keep := minInt(minEvidenceMentionsPerArtifact, len(group))
+		selected = append(selected, group[:keep]...)
+		extras = append(extras, group[keep:]...)
+	}
+	if len(selected) >= maxEvidenceMentionsPerRepo {
+		sortEvidenceMentions(selected)
+		return selected[:maxEvidenceMentionsPerRepo]
+	}
+	sortEvidenceMentions(extras)
+	remaining := maxEvidenceMentionsPerRepo - len(selected)
+	if len(extras) > remaining {
+		extras = extras[:remaining]
+	}
+	selected = append(selected, extras...)
+	sort.Slice(selected, func(i, j int) bool {
+		if selected[i].artifactID == selected[j].artifactID {
+			if selected[i].field == selected[j].field {
+				if selected[i].canonical == selected[j].canonical {
+					return selected[i].sectionID < selected[j].sectionID
+				}
+				return selected[i].canonical < selected[j].canonical
+			}
+			return selected[i].field < selected[j].field
+		}
+		return selected[i].artifactID < selected[j].artifactID
+	})
+	return selected
+}
+
+func sortedMentionArtifactIDs(groups map[string][]rawConceptMention) []string {
+	out := make([]string, 0, len(groups))
+	for artifactID := range groups {
+		out = append(out, artifactID)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sortEvidenceMentions(mentions []rawConceptMention) {
+	sort.SliceStable(mentions, func(i, j int) bool {
+		left := evidenceMentionPriority(mentions[i])
+		right := evidenceMentionPriority(mentions[j])
+		if left == right {
+			if mentions[i].kind == mentions[j].kind {
+				if mentions[i].canonical == mentions[j].canonical {
+					if mentions[i].field == mentions[j].field {
+						if mentions[i].sectionID == mentions[j].sectionID {
+							return mentions[i].form < mentions[j].form
+						}
+						return mentions[i].sectionID < mentions[j].sectionID
+					}
+					return mentions[i].field < mentions[j].field
+				}
+				return mentions[i].canonical < mentions[j].canonical
+			}
+			return mentions[i].kind < mentions[j].kind
+		}
+		return left > right
+	})
+}
+
+func evidenceMentionPriority(mention rawConceptMention) float64 {
+	score := mention.weight
+	switch mention.field {
+	case "path":
+		score += 0.35
+	case "title":
+		score += 0.3
+	case "symbol", "test_name", "parent_title":
+		score += 0.25
+	case "openspec_change_id", "openspec_capability":
+		score += 0.22
+	case "assertion":
+		score += 0.18
+	case "heading":
+		score += 0.08
+	}
+	switch mention.kind {
+	case conceptKindSymbol, conceptKindTestBehavior:
+		score += 0.18
+	case conceptKindCompactIdentifier:
+		score += 0.12
+	case conceptKindPathFragment:
+		score += 0.08
+	case conceptKindPhrase:
+		score += 0.04
+	}
+	if mention.sectionID == "" {
+		score += 0.03
+	}
+	if len(mention.canonical) >= 8 {
+		score += 0.02
+	}
+	return score
 }
 
 func addMetadataMentions(artifact evidenceArtifact, add func(kind, canonical, form, field, source, sectionID string, weight float64)) {

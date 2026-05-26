@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/store"
@@ -93,6 +94,60 @@ func TestSharedConceptEdgesSkipConceptsWithTooManyArtifacts(t *testing.T) {
 	}
 }
 
+func TestEvidenceMentionBudgetCapsDenseArtifacts(t *testing.T) {
+	artifact := evidenceTestArtifact("a1", "Refresh Token Rotation", "docs/auth-refresh-token.md")
+	for i := 0; i < maxEvidenceMentionsPerArtifact*3; i++ {
+		artifact.sections = append(artifact.sections, store.SectionRow{
+			ID:    fmt.Sprintf("s%d", i),
+			Title: fmt.Sprintf("Unique Behavior Anchor %03d", i),
+		})
+	}
+
+	result := buildEvidenceGraph("repo", []evidenceArtifact{artifact})
+
+	if len(result.mentions) > maxEvidenceMentionsPerArtifact {
+		t.Fatalf("dense artifact should be capped at %d mentions, got %d", maxEvidenceMentionsPerArtifact, len(result.mentions))
+	}
+	if !hasMentionField(result.mentions, "path") {
+		t.Fatalf("path anchors should survive dense-artifact cap")
+	}
+	if !hasMentionField(result.mentions, "title") {
+		t.Fatalf("title anchors should survive dense-artifact cap")
+	}
+}
+
+func TestEvidenceMentionBudgetCapsDenseRepos(t *testing.T) {
+	var mentions []rawConceptMention
+	for artifact := 0; artifact < 20; artifact++ {
+		for i := 0; i < (maxEvidenceMentionsPerRepo/20)+500; i++ {
+			mentions = append(mentions, rawConceptMention{
+				kind:       conceptKindPhrase,
+				canonical:  fmt.Sprintf("concept-%02d-%05d", artifact, i),
+				form:       fmt.Sprintf("Concept %02d %05d", artifact, i),
+				artifactID: fmt.Sprintf("a%02d", artifact),
+				field:      "heading",
+				weight:     0.75,
+			})
+		}
+	}
+
+	limited := limitRepoEvidenceMentions(mentions)
+
+	if len(limited) != maxEvidenceMentionsPerRepo {
+		t.Fatalf("dense repo should be capped at %d mentions, got %d", maxEvidenceMentionsPerRepo, len(limited))
+	}
+	byArtifact := map[string]int{}
+	for _, mention := range limited {
+		byArtifact[mention.artifactID]++
+	}
+	for artifact := 0; artifact < 20; artifact++ {
+		id := fmt.Sprintf("a%02d", artifact)
+		if byArtifact[id] < minEvidenceMentionsPerArtifact {
+			t.Fatalf("artifact %s should retain at least %d mentions, got %d", id, minEvidenceMentionsPerArtifact, byArtifact[id])
+		}
+	}
+}
+
 func evidenceTestArtifact(id, title, path string) evidenceArtifact {
 	return evidenceArtifact{
 		id:        id,
@@ -107,6 +162,15 @@ func evidenceTestArtifact(id, title, path string) evidenceArtifact {
 			FormatProfile: "generic",
 		}},
 	}
+}
+
+func hasMentionField(mentions []store.ConceptMentionInput, field string) bool {
+	for _, mention := range mentions {
+		if mention.Field == field {
+			return true
+		}
+	}
+	return false
 }
 
 func countEdgesByType(edges []store.ArtifactEdgeInput, edgeType string) int {
