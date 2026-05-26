@@ -21,6 +21,15 @@ func TestCollect_NonGitDirectory(t *testing.T) {
 	}
 }
 
+func TestGitErrorMeansNonGit(t *testing.T) {
+	if !gitErrorMeansNonGit(assertErr("exit status 128: fatal: not a git repository")) {
+		t.Fatal("expected not-a-git error to be classified as non-git")
+	}
+	if gitErrorMeansNonGit(assertErr("exit status 128: fatal: detected dubious ownership in repository")) {
+		t.Fatal("expected dubious ownership to be unavailable, not non-git")
+	}
+}
+
 func TestCollect_LocalGitRepo(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git executable not available")
@@ -67,4 +76,10 @@ func mustWriteFile(t *testing.T, path, body string) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+type assertErr string
+
+func (e assertErr) Error() string {
+	return string(e)
 }

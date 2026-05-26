@@ -4,6 +4,7 @@ package gitfacts
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -93,7 +94,12 @@ func Collect(ctx context.Context, repoRoot string, opts Options) (Facts, error) 
 			out.Diagnostics.GitError = "git executable not found"
 			return out, nil
 		}
-		out.Diagnostics.HistoryShape = ShapeNonGit
+		if gitErrorMeansNonGit(err) {
+			out.Diagnostics.HistoryShape = ShapeNonGit
+			return out, nil
+		}
+		out.Diagnostics.HistoryShape = ShapeUnavailable
+		out.Diagnostics.GitError = shortGitError(err)
 		return out, nil
 	}
 	if strings.TrimSpace(inside) != "true" {
@@ -160,11 +166,21 @@ func historyShape(total int, shallow bool) string {
 func gitOutput(ctx context.Context, repoRoot string, args ...string) (string, error) {
 	cmdArgs := append([]string{"-C", filepath.Clean(repoRoot)}, args...)
 	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
-	b, err := cmd.Output()
+	b, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(b)))
 	}
 	return string(b), nil
+}
+
+func gitErrorMeansNonGit(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "not a git repository") ||
+		strings.Contains(msg, "not a git work tree") ||
+		strings.Contains(msg, "not inside a git")
 }
 
 func parseLog(raw, branch, shape string, maxFilesPerCommit int) ([]Commit, []FileChange, int) {

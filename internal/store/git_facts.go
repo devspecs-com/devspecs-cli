@@ -34,6 +34,9 @@ type GitFactCounts struct {
 // ArtifactSourcePathRow maps a stored artifact to a source path that can be matched to git file changes.
 type ArtifactSourcePathRow struct {
 	ArtifactID     string
+	Kind           string
+	Subtype        string
+	Title          string
 	Path           string
 	SourceIdentity string
 }
@@ -117,7 +120,7 @@ func (db *DB) CountGitFacts(repoID string) (GitFactCounts, error) {
 // GetArtifactSourcePaths returns artifact source paths for git file-change mapping.
 func (db *DB) GetArtifactSourcePaths(repoID string) ([]ArtifactSourcePathRow, error) {
 	rows, err := db.Query(
-		`SELECT DISTINCT a.id, COALESCE(s.path,''), COALESCE(s.source_identity,'')
+		`SELECT DISTINCT a.id, a.kind, COALESCE(a.subtype,''), a.title, COALESCE(s.path,''), COALESCE(s.source_identity,'')
 		 FROM artifacts a
 		 JOIN sources s ON s.artifact_id = a.id
 		 WHERE a.repo_id = ?
@@ -131,7 +134,7 @@ func (db *DB) GetArtifactSourcePaths(repoID string) ([]ArtifactSourcePathRow, er
 	var out []ArtifactSourcePathRow
 	for rows.Next() {
 		var r ArtifactSourcePathRow
-		if err := rows.Scan(&r.ArtifactID, &r.Path, &r.SourceIdentity); err != nil {
+		if err := rows.Scan(&r.ArtifactID, &r.Kind, &r.Subtype, &r.Title, &r.Path, &r.SourceIdentity); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

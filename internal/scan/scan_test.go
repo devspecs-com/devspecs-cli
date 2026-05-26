@@ -181,6 +181,13 @@ func TestScan_ExperimentalGitEvidenceStoresFactsAndEdges(t *testing.T) {
 	if result.GitEvidence.EdgesByType[edgeTypeCoChangedWith] == 0 {
 		t.Fatalf("expected co-change edge diagnostics, got %#v", result.GitEvidence)
 	}
+	if len(result.GitEvidence.TopEdges) == 0 {
+		t.Fatalf("expected pathful git edge examples, got %#v", result.GitEvidence)
+	}
+	example := result.GitEvidence.TopEdges[0]
+	if example.SourcePath == "" || example.TargetPath == "" || len(example.Commits) == 0 || example.ConfidenceRule == "" {
+		t.Fatalf("git edge example should include paths, commits, and confidence rule: %#v", example)
+	}
 	counts, err := db.CountGitFacts(resultRepoID(t, db))
 	if err != nil {
 		t.Fatal(err)
