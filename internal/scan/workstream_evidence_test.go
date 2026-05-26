@@ -70,6 +70,9 @@ func TestWorkstreamEvidence_TaskIDConnectsPlanAndChangedSource(t *testing.T) {
 	if edge.Confidence < 0.9 {
 		t.Fatalf("expected high-confidence task edge, got %.3f", edge.Confidence)
 	}
+	if len(built.diagnostics.TopClusters) == 0 || built.diagnostics.TopClusters[0].PackStrength != workstreamPackStrengthStrong {
+		t.Fatalf("expected strong pack candidate, got %#v", built.diagnostics.TopClusters)
+	}
 }
 
 func TestWorkstreamEvidence_SlugWindowsConnectPlanAndChangedSource(t *testing.T) {
@@ -128,6 +131,136 @@ func TestWorkstreamEvidence_SlugWindowsConnectPlanAndChangedSource(t *testing.T)
 	if !found {
 		t.Fatalf("expected slug-window workstream edge, got %#v", built.diagnostics.TopClusters)
 	}
+}
+
+func TestWorkstreamEvidence_SourceTestOnlySlugIsSupportingConfidence(t *testing.T) {
+	artifacts := []evidenceArtifact{
+		{
+			id:      "art_source",
+			repoID:  "repo",
+			kind:    "source_context",
+			subtype: "code_comment",
+			title:   "Entity Relation",
+			sources: []store.SourceRow{{ArtifactID: "art_source", SourceType: "source_context", Path: "internal/entity_relation.go", SourceIdentity: "internal/entity_relation.go"}},
+		},
+		{
+			id:      "art_test",
+			repoID:  "repo",
+			kind:    "source_context",
+			subtype: "test_case",
+			title:   "TestEntityRelation",
+			sources: []store.SourceRow{{ArtifactID: "art_test", SourceType: "source_context", Path: "internal/entity_relation_test.go", SourceIdentity: "internal/entity_relation_test.go"}},
+		},
+	}
+	byPath := map[string][]gitArtifactRef{
+		"internal/entity_relation.go": {
+			{id: "art_source", kind: "source_context", subtype: "code_comment", title: "Entity Relation", path: "internal/entity_relation.go"},
+		},
+		"internal/entity_relation_test.go": {
+			{id: "art_test", kind: "source_context", subtype: "test_case", title: "TestEntityRelation", path: "internal/entity_relation_test.go"},
+		},
+	}
+	byID := map[string]gitArtifactRef{
+		"art_source": byPath["internal/entity_relation.go"][0],
+		"art_test":   byPath["internal/entity_relation_test.go"][0],
+	}
+	facts := gitfacts.Facts{
+		Commits: []gitfacts.Commit{{
+			SHA:          "abcdef1234567890",
+			Message:      "test entity relation handling",
+			CommittedAt:  "2026-05-26T12:00:00Z",
+			HistoryShape: gitfacts.ShapeFull,
+		}},
+		Files: []gitfacts.FileChange{
+			{CommitSHA: "abcdef1234567890", FilePath: "internal/entity_relation.go"},
+			{CommitSHA: "abcdef1234567890", FilePath: "internal/entity_relation_test.go"},
+		},
+		Diagnostics: gitfacts.Diagnostics{Enabled: true, HistoryShape: gitfacts.ShapeFull},
+	}
+
+	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, facts)
+	if len(built.edges) == 0 {
+		t.Fatalf("expected source/test relation edge")
+	}
+	for _, edge := range built.edges {
+		if edge.SrcArtifactID == "art_source" && edge.DstArtifactID == "art_test" && edge.Confidence > 0.67 {
+			t.Fatalf("expected source/test-only slug to stay supporting confidence, got %.3f", edge.Confidence)
+		}
+	}
+	if len(built.diagnostics.TopClusters) == 0 || built.diagnostics.TopClusters[0].PackStrength != workstreamPackStrengthSupport {
+		t.Fatalf("expected supporting pack cluster, got %#v", built.diagnostics.TopClusters)
+	}
+}
+
+func TestWorkstreamEvidence_CappedClusterPreservesImplementationRepresentative(t *testing.T) {
+	var artifacts []evidenceArtifact
+	byPath := map[string][]gitArtifactRef{}
+	byID := map[string]gitArtifactRef{}
+	for i := 0; i < maxWorkstreamArtifactsPerAnchor+3; i++ {
+		id := "art_spec_" + string(rune('a'+i))
+		path := "docs/billing-entitlements/spec-" + string(rune('a'+i)) + ".md"
+		ref := gitArtifactRef{id: id, kind: "spec", subtype: "openspec_child", title: "Billing Entitlements", path: path}
+		artifacts = append(artifacts, evidenceArtifact{
+			id:      id,
+			repoID:  "repo",
+			kind:    "spec",
+			subtype: "openspec_child",
+			title:   "Billing Entitlements",
+			sources: []store.SourceRow{{ArtifactID: id, SourceType: "markdown", Path: path, SourceIdentity: path}},
+		})
+		byPath[path] = []gitArtifactRef{ref}
+		byID[id] = ref
+	}
+	sourceRef := gitArtifactRef{id: "art_source", kind: "source_context", subtype: "code_comment", title: "Billing Entitlements", path: "internal/billing/entitlements.go"}
+	artifacts = append(artifacts, evidenceArtifact{
+		id:      "art_source",
+		repoID:  "repo",
+		kind:    "source_context",
+		subtype: "code_comment",
+		title:   "Billing Entitlements",
+		sources: []store.SourceRow{{ArtifactID: "art_source", SourceType: "source_context", Path: "internal/billing/entitlements.go", SourceIdentity: "internal/billing/entitlements.go"}},
+	})
+	byPath["internal/billing/entitlements.go"] = []gitArtifactRef{sourceRef}
+	byID["art_source"] = sourceRef
+	for i := 0; i < 30; i++ {
+		id := "art_unrelated_" + string(rune('a'+i))
+		path := "docs/notes-" + string(rune('a'+i)) + ".md"
+		ref := gitArtifactRef{id: id, kind: "markdown_artifact", title: "Notes", path: path}
+		artifacts = append(artifacts, evidenceArtifact{
+			id:      id,
+			repoID:  "repo",
+			kind:    "markdown_artifact",
+			title:   "Notes",
+			sources: []store.SourceRow{{ArtifactID: id, SourceType: "markdown", Path: path, SourceIdentity: path}},
+		})
+		byPath[path] = []gitArtifactRef{ref}
+		byID[id] = ref
+	}
+	facts := gitfacts.Facts{
+		Commits: []gitfacts.Commit{{
+			SHA:          "fedcba1234567890",
+			Message:      "implement billing entitlements",
+			CommittedAt:  "2026-05-26T13:00:00Z",
+			HistoryShape: gitfacts.ShapeFull,
+		}},
+		Files:       []gitfacts.FileChange{{CommitSHA: "fedcba1234567890", FilePath: "internal/billing/entitlements.go"}},
+		Diagnostics: gitfacts.Diagnostics{Enabled: true, HistoryShape: gitfacts.ShapeFull},
+	}
+
+	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, facts)
+	for _, cluster := range built.diagnostics.TopClusters {
+		if cluster.Anchor != "billing-entitlements" {
+			continue
+		}
+		if cluster.PackStrength != workstreamPackStrengthStrong {
+			t.Fatalf("expected capped doc/source cluster to stay strong, got %#v", cluster)
+		}
+		if cluster.RoleFamilyMix["source"] == 0 {
+			t.Fatalf("expected capped cluster to keep source representative, got %#v", cluster)
+		}
+		return
+	}
+	t.Fatalf("expected billing-entitlements cluster, got %#v", built.diagnostics.TopClusters)
 }
 
 func TestWorkstreamEvidence_RejectsDateLikeBareGithubRef(t *testing.T) {

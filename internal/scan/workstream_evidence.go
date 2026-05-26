@@ -33,6 +33,10 @@ const (
 	maxWorkstreamTopClusters         = 10
 	maxWorkstreamBodyBytes           = 128 * 1024
 	workstreamHighDFRatio            = 0.35
+
+	workstreamPackStrengthStrong  = "strong"
+	workstreamPackStrengthSupport = "support"
+	workstreamPackStrengthWeak    = "weak"
 )
 
 var (
@@ -59,11 +63,13 @@ type WorkstreamEvidenceDiagnostics struct {
 type WorkstreamClusterExample struct {
 	Anchor           string                      `json:"anchor"`
 	AnchorType       string                      `json:"anchor_type"`
+	PackStrength     string                      `json:"pack_strength,omitempty"`
 	Confidence       float64                     `json:"confidence"`
 	ConfidenceRule   string                      `json:"confidence_rule"`
 	ArtifactCount    int                         `json:"artifact_count"`
 	EvidenceCount    int                         `json:"evidence_count"`
 	RoleMix          map[string]int              `json:"role_mix,omitempty"`
+	RoleFamilyMix    map[string]int              `json:"role_family_mix,omitempty"`
 	EvidenceSources  []string                    `json:"evidence_sources,omitempty"`
 	ExampleArtifacts []WorkstreamArtifactExample `json:"example_artifacts,omitempty"`
 	ExampleCommits   []string                    `json:"example_commits,omitempty"`
@@ -144,19 +150,22 @@ type workstreamAcceptedCluster struct {
 	weight         float64
 	confidence     float64
 	confidenceRule string
+	packStrength   string
 	capped         bool
 	caveats        []string
 }
 
 type workstreamPairAccumulator struct {
-	src        string
-	dst        string
-	anchors    []map[string]any
-	weight     float64
-	confidence float64
-	evidence   int
-	freshness  string
-	roleMix    map[string]int
+	src           string
+	dst           string
+	anchors       []map[string]any
+	weight        float64
+	confidence    float64
+	packStrength  string
+	evidence      int
+	freshness     string
+	roleMix       map[string]int
+	roleFamilyMix map[string]int
 }
 
 func (s *Scanner) rebuildWorkstreamEvidence(repoID, now string, facts gitfacts.Facts) (*WorkstreamEvidenceDiagnostics, error) {
@@ -470,31 +479,32 @@ func acceptedWorkstreamClusters(accs map[string]*workstreamAnchorAccumulator, ar
 				continue
 			}
 			diag.ClustersCapped++
-			sort.Slice(artifactIDs, func(i, j int) bool {
-				left := acc.artifacts[artifactIDs[i]]
-				right := acc.artifacts[artifactIDs[j]]
-				if left.weight == right.weight {
-					return artifactIDs[i] < artifactIDs[j]
-				}
-				return left.weight > right.weight
-			})
-			artifactIDs = artifactIDs[:maxWorkstreamArtifactsPerAnchor]
+			artifactIDs = selectWorkstreamArtifactIDs(acc, artifactIDs, maxWorkstreamArtifactsPerAnchor)
 		}
-		weight, confidence, rule := workstreamScore(acc)
+		weight, confidence, rule, packStrength := workstreamScore(acc, artifactIDs)
 		cluster := workstreamAcceptedCluster{
 			acc:            acc,
 			artifactIDs:    artifactIDs,
 			weight:         weight,
 			confidence:     confidence,
 			confidenceRule: rule,
+			packStrength:   packStrength,
 			capped:         len(acc.artifacts) > len(artifactIDs),
 		}
 		if acc.gitOnlySupport() {
 			cluster.caveats = append(cluster.caveats, "supported mostly by git/file evidence")
 		}
+		if packStrength == workstreamPackStrengthWeak {
+			cluster.caveats = append(cluster.caveats, "weak pack candidate; evidence is mostly single-family code/test locality")
+		} else if packStrength == workstreamPackStrengthSupport && !workstreamHasDocBackedFamilyMix(workstreamRoleFamilyMix(acc, artifactIDs)) {
+			cluster.caveats = append(cluster.caveats, "supporting relation; no doc/model artifact in cluster")
+		}
 		accepted = append(accepted, cluster)
 	}
 	sort.Slice(accepted, func(i, j int) bool {
+		if workstreamPackStrengthRank(accepted[i].packStrength) != workstreamPackStrengthRank(accepted[j].packStrength) {
+			return workstreamPackStrengthRank(accepted[i].packStrength) > workstreamPackStrengthRank(accepted[j].packStrength)
+		}
 		if accepted[i].confidence == accepted[j].confidence {
 			if len(accepted[i].artifactIDs) == len(accepted[j].artifactIDs) {
 				return accepted[i].acc.canonical < accepted[j].acc.canonical
@@ -535,13 +545,15 @@ func workstreamConceptsAndMentions(repoID string, clusters []workstreamAcceptedC
 				Field:      "workstream_anchor",
 				Weight:     art.weight,
 				EvidenceJSON: evidenceJSON(map[string]any{
-					"anchor":      acc.display,
-					"anchor_type": acc.primaryType(),
-					"forms":       limitedSortedMapKeys(art.forms, maxWorkstreamFormsPerAnchor),
-					"sources":     sortedMapKeys(art.sources),
-					"fields":      sortedMapKeys(art.fields),
-					"commits":     art.commits,
-					"evidence":    art.evidence,
+					"anchor":        acc.display,
+					"anchor_type":   acc.primaryType(),
+					"pack_strength": cluster.packStrength,
+					"role_family":   workstreamRoleFamily(art.ref),
+					"forms":         limitedSortedMapKeys(art.forms, maxWorkstreamFormsPerAnchor),
+					"sources":       sortedMapKeys(art.sources),
+					"fields":        sortedMapKeys(art.fields),
+					"commits":       art.commits,
+					"evidence":      art.evidence,
 				}),
 			})
 		}
@@ -573,13 +585,14 @@ func workstreamEdges(repoID string, clusters []workstreamAcceptedCluster, refsBy
 				key := src + "\x00" + dst
 				pair := pairs[key]
 				if pair == nil {
-					pair = &workstreamPairAccumulator{src: src, dst: dst, roleMix: map[string]int{}}
+					pair = &workstreamPairAccumulator{src: src, dst: dst, roleMix: map[string]int{}, roleFamilyMix: map[string]int{}}
 					pairs[key] = pair
 				}
 				anchorMeta := map[string]any{
 					"anchor":          cluster.acc.display,
 					"canonical":       cluster.acc.canonical,
 					"anchor_type":     cluster.acc.primaryType(),
+					"pack_strength":   cluster.packStrength,
 					"confidence_rule": cluster.confidenceRule,
 					"sources":         sortedMapKeys(cluster.acc.sources),
 					"commits":         cluster.acc.commits,
@@ -593,8 +606,13 @@ func workstreamEdges(repoID string, clusters []workstreamAcceptedCluster, refsBy
 				if cluster.confidence > pair.confidence {
 					pair.confidence = cluster.confidence
 				}
+				if workstreamPackStrengthRank(cluster.packStrength) > workstreamPackStrengthRank(pair.packStrength) {
+					pair.packStrength = cluster.packStrength
+				}
 				pair.roleMix[workstreamArtifactRole(refsByArtifact[src])]++
 				pair.roleMix[workstreamArtifactRole(refsByArtifact[dst])]++
+				pair.roleFamilyMix[workstreamRoleFamily(refsByArtifact[src])]++
+				pair.roleFamilyMix[workstreamRoleFamily(refsByArtifact[dst])]++
 				emittedForAnchor++
 			}
 		}
@@ -604,6 +622,9 @@ func workstreamEdges(repoID string, clusters []workstreamAcceptedCluster, refsBy
 		values = append(values, pair)
 	}
 	sort.Slice(values, func(i, j int) bool {
+		if workstreamPackStrengthRank(values[i].packStrength) != workstreamPackStrengthRank(values[j].packStrength) {
+			return workstreamPackStrengthRank(values[i].packStrength) > workstreamPackStrengthRank(values[j].packStrength)
+		}
 		if values[i].confidence == values[j].confidence {
 			if values[i].evidence == values[j].evidence {
 				if values[i].src == values[j].src {
@@ -642,8 +663,10 @@ func workstreamEdges(repoID string, clusters []workstreamAcceptedCluster, refsBy
 			SourceSignal:  sourceSignalWorkstreamAnchor,
 			Explanation:   explanation,
 			MetadataJSON: evidenceJSON(map[string]any{
-				"anchors":  pair.anchors,
-				"role_mix": pair.roleMix,
+				"anchors":         pair.anchors,
+				"pack_strength":   pair.packStrength,
+				"role_mix":        pair.roleMix,
+				"role_family_mix": pair.roleFamilyMix,
 			}),
 		})
 	}
@@ -655,10 +678,12 @@ func topWorkstreamClusters(clusters []workstreamAcceptedCluster, refsByArtifact 
 	out := make([]WorkstreamClusterExample, 0, limit)
 	for _, cluster := range clusters[:limit] {
 		roleMix := map[string]int{}
+		roleFamilyMix := map[string]int{}
 		var examples []WorkstreamArtifactExample
 		for _, artifactID := range cluster.artifactIDs {
 			ref := refsByArtifact[artifactID]
 			roleMix[workstreamArtifactRole(ref)]++
+			roleFamilyMix[workstreamRoleFamily(ref)]++
 			if len(examples) < maxWorkstreamArtifactExamples {
 				examples = append(examples, WorkstreamArtifactExample{
 					ID:      artifactID,
@@ -672,11 +697,13 @@ func topWorkstreamClusters(clusters []workstreamAcceptedCluster, refsByArtifact 
 		out = append(out, WorkstreamClusterExample{
 			Anchor:           cluster.acc.display,
 			AnchorType:       cluster.acc.primaryType(),
+			PackStrength:     cluster.packStrength,
 			Confidence:       roundEvidence(cluster.confidence),
 			ConfidenceRule:   cluster.confidenceRule,
 			ArtifactCount:    len(cluster.artifactIDs),
 			EvidenceCount:    cluster.acc.evidenceCount(),
 			RoleMix:          roleMix,
+			RoleFamilyMix:    roleFamilyMix,
 			EvidenceSources:  sortedMapKeys(cluster.acc.sources),
 			ExampleArtifacts: examples,
 			ExampleCommits:   cluster.acc.commits,
@@ -986,24 +1013,167 @@ func sortedWorkstreamArtifactIDs(values map[string]*workstreamArtifactAccumulato
 	return out
 }
 
-func workstreamScore(acc *workstreamAnchorAccumulator) (float64, float64, string) {
+func selectWorkstreamArtifactIDs(acc *workstreamAnchorAccumulator, artifactIDs []string, limit int) []string {
+	if len(artifactIDs) <= limit {
+		return artifactIDs
+	}
+	ordered := append([]string(nil), artifactIDs...)
+	sort.Slice(ordered, func(i, j int) bool {
+		left := acc.artifacts[ordered[i]]
+		right := acc.artifacts[ordered[j]]
+		leftScore := workstreamArtifactSelectionScore(left)
+		rightScore := workstreamArtifactSelectionScore(right)
+		if leftScore == rightScore {
+			return ordered[i] < ordered[j]
+		}
+		return leftScore > rightScore
+	})
+
+	var selected []string
+	seen := map[string]bool{}
+	add := func(id string) {
+		if id == "" || seen[id] || len(selected) >= limit {
+			return
+		}
+		seen[id] = true
+		selected = append(selected, id)
+	}
+	addBest := func(match func(string) bool) {
+		for _, id := range ordered {
+			art := acc.artifacts[id]
+			if art == nil || !match(workstreamRoleFamily(art.ref)) {
+				continue
+			}
+			add(id)
+			return
+		}
+	}
+
+	addBest(workstreamRoleFamilyDocLike)
+	addBest(workstreamRoleFamilyImplementationLike)
+	for _, id := range ordered {
+		add(id)
+	}
+	return selected
+}
+
+func workstreamArtifactSelectionScore(art *workstreamArtifactAccumulator) float64 {
+	if art == nil {
+		return 0
+	}
+	score := art.weight + math.Min(float64(art.evidence), 8)*0.01
+	family := workstreamRoleFamily(art.ref)
+	if workstreamRoleFamilyDocLike(family) {
+		score += 0.18
+	}
+	if workstreamRoleFamilyImplementationLike(family) {
+		score += 0.08
+	}
+	return score
+}
+
+func workstreamScore(acc *workstreamAnchorAccumulator, artifactIDs []string) (float64, float64, string, string) {
 	sourceCount := len(acc.sources)
 	artifactCount := len(acc.artifacts)
 	anchorType := acc.primaryType()
 	hasGit := acc.hasGitSource()
+	roleFamilies := workstreamRoleFamilyMix(acc, artifactIDs)
+	roleDiverse := len(roleFamilies) >= 2
+	docBacked := workstreamHasDocBackedFamilyMix(roleFamilies)
+	packStrength := workstreamPackStrength(acc, roleFamilies)
 	switch {
+	case anchorType == "task_id" && hasGit && artifactCount >= 2 && roleDiverse:
+		return 0.88, 0.93, "high_task_id_role_diverse_git", packStrength
 	case anchorType == "task_id" && hasGit && artifactCount >= 2:
-		return 0.86, 0.92, "high_task_id_with_git_and_artifacts"
+		return 0.82, 0.9, "high_task_id_with_git_and_artifacts", packStrength
 	case anchorType == "task_id" && artifactCount >= 2:
-		return 0.78, 0.86, "high_task_id_across_artifacts"
+		return 0.78, 0.86, "high_task_id_across_artifacts", packStrength
+	case anchorType == "github_ref" && hasGit && artifactCount >= 2 && roleDiverse:
+		return 0.78, 0.84, "medium_github_ref_role_diverse_git", packStrength
 	case anchorType == "github_ref" && hasGit && artifactCount >= 2:
-		return 0.74, 0.82, "medium_github_ref_with_git"
+		return 0.7, 0.78, "medium_github_ref_with_git", packStrength
+	case docBacked && hasGit && sourceCount >= 3 && artifactCount >= 2:
+		return 0.72, 0.8, "medium_slug_docbacked_git", packStrength
+	case docBacked && sourceCount >= 3 && artifactCount >= 2:
+		return 0.64, 0.72, "medium_slug_docbacked", packStrength
+	case roleDiverse && hasGit && sourceCount >= 3 && artifactCount >= 2:
+		return 0.56, 0.66, "support_slug_source_test_git", packStrength
 	case hasGit && sourceCount >= 3 && artifactCount >= 2:
-		return 0.7, 0.78, "medium_slug_with_git_source_mix"
+		return 0.5, 0.62, "low_slug_single_family_git", packStrength
 	case sourceCount >= 3 && artifactCount >= 2:
-		return 0.62, 0.7, "medium_slug_source_mix"
+		return 0.46, 0.58, "low_slug_source_mix", packStrength
 	default:
-		return 0.46, 0.58, "low_bounded_anchor"
+		return 0.42, 0.54, "low_bounded_anchor", packStrength
+	}
+}
+
+func workstreamPackStrength(acc *workstreamAnchorAccumulator, roleFamilies map[string]int) string {
+	if acc.formalAnchor() && workstreamHasDocBackedFamilyMix(roleFamilies) {
+		return workstreamPackStrengthStrong
+	}
+	if workstreamHasDocBackedFamilyMix(roleFamilies) && len(acc.sources) >= 3 && len(acc.artifacts) >= 2 {
+		return workstreamPackStrengthStrong
+	}
+	if acc.formalAnchor() || len(roleFamilies) >= 2 {
+		return workstreamPackStrengthSupport
+	}
+	return workstreamPackStrengthWeak
+}
+
+func workstreamRoleFamilyMix(acc *workstreamAnchorAccumulator, artifactIDs []string) map[string]int {
+	out := map[string]int{}
+	for _, artifactID := range artifactIDs {
+		art := acc.artifacts[artifactID]
+		if art == nil {
+			continue
+		}
+		out[workstreamRoleFamily(art.ref)]++
+	}
+	return out
+}
+
+func workstreamHasDocBackedFamilyMix(roleFamilies map[string]int) bool {
+	hasDocLike := false
+	hasImplementationLike := false
+	for family := range roleFamilies {
+		if workstreamRoleFamilyDocLike(family) {
+			hasDocLike = true
+		}
+		if workstreamRoleFamilyImplementationLike(family) {
+			hasImplementationLike = true
+		}
+	}
+	return hasDocLike && hasImplementationLike
+}
+
+func workstreamRoleFamilyDocLike(family string) bool {
+	switch family {
+	case "adr", "design", "doc", "intent", "model", "plan", "requirements", "spec", "trace":
+		return true
+	default:
+		return false
+	}
+}
+
+func workstreamRoleFamilyImplementationLike(family string) bool {
+	switch family {
+	case "config", "source", "test":
+		return true
+	default:
+		return false
+	}
+}
+
+func workstreamPackStrengthRank(value string) int {
+	switch value {
+	case workstreamPackStrengthStrong:
+		return 3
+	case workstreamPackStrengthSupport:
+		return 2
+	case workstreamPackStrengthWeak:
+		return 1
+	default:
+		return 0
 	}
 }
 
@@ -1090,6 +1260,36 @@ func workstreamArtifactRole(ref gitArtifactRef) string {
 		return ref.kind + ":" + ref.subtype
 	}
 	return ref.kind
+}
+
+func workstreamRoleFamily(ref gitArtifactRef) string {
+	kind := strings.ToLower(strings.TrimSpace(ref.kind))
+	subtype := strings.ToLower(strings.TrimSpace(ref.subtype))
+	path := strings.ToLower(strings.TrimSpace(ref.path))
+	switch {
+	case subtype == "test_case" || strings.Contains(path, "_test."):
+		return "test"
+	case kind == "source_context":
+		return "source"
+	case subtype == "agent_instruction" || subtype == "skill" || strings.Contains(path, "/skills/") || strings.HasSuffix(path, "/skill.md"):
+		return "protocol"
+	case subtype == "schema_model" || strings.Contains(subtype, "model"):
+		return "model"
+	case subtype == "template" || strings.Contains(path, "template"):
+		return "template"
+	case subtype == "trace":
+		return "trace"
+	case subtype == "plan":
+		return "plan"
+	case kind == "config" || strings.Contains(path, ".github/workflows/") || strings.HasSuffix(path, "makefile"):
+		return "config"
+	case kind == "markdown_artifact" || kind == "intent":
+		return "doc"
+	case kind != "":
+		return kind
+	default:
+		return "unknown"
+	}
 }
 
 func stripConventionalCommitPrefix(subject string) string {
