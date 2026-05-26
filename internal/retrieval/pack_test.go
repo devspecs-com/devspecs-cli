@@ -212,6 +212,29 @@ func TestBuildRoleGroupedPackIncludesSkillByRarePathToken(t *testing.T) {
 	assertGroupCount(t, pack, PackRoleSupportingContext, 1)
 }
 
+func TestBuildRoleGroupedPackIncludesSkillUnderAgentDirectoryWhenRequested(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:      "skill-1",
+			Path:    "external/agents/biology-agent/skills/metabolic-simulator/SKILL.md",
+			Kind:    "markdown_artifact",
+			Subtype: "skill",
+			Title:   "Run Metabolic Simulation",
+			Body:    "workflow for flux balance analysis",
+			Metadata: map[string]string{
+				"classifier_model": "protocol",
+			},
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "run flux balance analysis for a biology agent experiment")
+
+	if len(pack.ExcludedNoise) != 0 {
+		t.Fatalf("expected requested skill under agent directory to stay included, got excluded: %#v", pack.ExcludedNoise)
+	}
+	assertGroupCount(t, pack, PackRoleSupportingContext, 1)
+}
+
 func TestBuildRoleGroupedPackExcludesUnrequestedGenericSkill(t *testing.T) {
 	candidates := []Candidate{
 		{
@@ -336,6 +359,56 @@ func TestBuildRoleGroupedPackKeepsCurrentDesignDocWithDeprecatedBodyText(t *test
 		t.Fatalf("expected current design doc to stay included, got excluded: %#v", pack.ExcludedNoise)
 	}
 	assertGroupCount(t, pack, PackRoleBackgroundDecisions, 1)
+}
+
+func TestBuildRoleGroupedPackKeepsRequestedInstructionWithWeakStaleMetadata(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:      "agent-1",
+			Path:    "AGENTS.md",
+			Kind:    "markdown_artifact",
+			Subtype: "agent_instruction",
+			Title:   "Repository Guidelines",
+			Status:  "unknown",
+			Body:    "current project instructions and constraints",
+			Metadata: map[string]string{
+				"classifier_model":     "protocol",
+				"classifier_subtype":   "agent_instruction",
+				"classifier_lifecycle": "stale",
+			},
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "load the project-specific instructions and constraints before editing")
+
+	if len(pack.ExcludedNoise) != 0 {
+		t.Fatalf("expected requested root instructions with weak stale metadata to stay included, got excluded: %#v", pack.ExcludedNoise)
+	}
+	assertGroupCount(t, pack, PackRoleSupportingContext, 1)
+}
+
+func TestBuildRoleGroupedPackExcludesArchivedInstructionWhenCurrentRulesRequested(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:      "agent-1",
+			Path:    "docs/archive/AGENTS.md",
+			Kind:    "markdown_artifact",
+			Subtype: "agent_instruction",
+			Title:   "Archived Repository Guidelines",
+			Status:  "unknown",
+			Body:    "old project instructions",
+			Metadata: map[string]string{
+				"classifier_model":   "protocol",
+				"classifier_subtype": "agent_instruction",
+			},
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "load the project-specific instructions and constraints before editing")
+
+	if len(pack.ExcludedNoise) != 1 {
+		t.Fatalf("expected archived instructions to stay excluded for current-rules query, got %#v", pack)
+	}
 }
 
 func TestBuildRoleGroupedPackKeepsArchivedArtifactWhenQueryRequestsHistory(t *testing.T) {

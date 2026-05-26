@@ -198,21 +198,41 @@ func PackRoleTitle(role string) string {
 
 func classifyExcludedNoise(c Candidate, role, queryLower string) (bool, string) {
 	pathLower := strings.ToLower(filepath.ToSlash(c.Path))
+	skillLike := role == "skill" || strings.EqualFold(strings.TrimSpace(c.Subtype), "skill") || isSkillPathCandidate(pathLower)
+	agentInstructionLike := !skillLike && (role == "agent_instruction" || isAgentInstructionPath(c.Path))
 	switch {
-	case isStaleArchiveCandidate(c) && !queryRequestsStaleOrHistory(queryLower) && packQueryTitlePathOverlap(c, queryLower) < 2:
+	case isStaleArchiveCandidate(c) && !queryRequestsStaleOrHistory(queryLower) && !queryRequestsCurrentPackArtifact(c, role, queryLower, skillLike, agentInstructionLike) && packQueryTitlePathOverlap(c, queryLower) < 2:
 		return true, "stale, archived, deprecated, or superseded artifact; query does not ask for historical context"
 	case (role == "template" || isTemplatePathCandidate(pathLower)) && !queryRequestsTemplate(queryLower):
 		return true, "template-like artifact; query does not ask for templates"
-	case (role == "agent_instruction" || isAgentInstructionPath(c.Path)) && !queryRequestsAgentInstructions(queryLower):
-		return true, "agent instruction artifact; query does not ask for repo agent rules"
-	case role == "skill" && !queryRequestsSkill(c, queryLower):
+	case skillLike && !queryRequestsSkill(c, queryLower):
 		return true, "skill/protocol artifact; query does not ask for skills"
-	case role == "protocol" && !queryRequestsProtocol(queryLower):
+	case agentInstructionLike && !queryRequestsAgentInstructions(queryLower):
+		return true, "agent instruction artifact; query does not ask for repo agent rules"
+	case role == "protocol" && !skillLike && !queryRequestsProtocol(queryLower):
 		return true, "process or protocol artifact; query does not ask for procedures or policies"
 	case isGeneratedOrVendorCandidate(c) && !queryRequestsGeneratedOrVendor(queryLower):
 		return true, "generated, vendor, or dependency artifact; query does not ask for generated/vendor context"
 	default:
 		return false, ""
+	}
+}
+
+func queryRequestsCurrentPackArtifact(c Candidate, role, queryLower string, skillLike, agentInstructionLike bool) bool {
+	if hasExplicitStalePathOrStatus(c) {
+		return false
+	}
+	switch {
+	case skillLike:
+		return queryRequestsSkill(c, queryLower)
+	case agentInstructionLike:
+		return queryRequestsAgentInstructions(queryLower)
+	case role == "template" || isTemplatePathCandidate(strings.ToLower(filepath.ToSlash(c.Path))):
+		return queryRequestsTemplate(queryLower)
+	case role == "protocol":
+		return queryRequestsProtocol(queryLower)
+	default:
+		return false
 	}
 }
 
@@ -298,6 +318,30 @@ func isStaleArchiveCandidate(c Candidate) bool {
 		strings.HasSuffix(base, ".deprecated.md")
 }
 
+func hasExplicitStalePathOrStatus(c Candidate) bool {
+	statusLower := strings.ToLower(strings.TrimSpace(c.Status))
+	if isActivePackStatus(statusLower) {
+		return false
+	}
+	if containsAny(statusLower, "archived", "deprecated", "superseded", "obsolete", "stale") {
+		return true
+	}
+	pathLower := strings.ToLower(filepath.ToSlash(c.Path))
+	if hasPathSegment(pathLower, "archive") ||
+		hasPathSegment(pathLower, "archives") ||
+		hasPathSegment(pathLower, "archived") ||
+		hasPathSegment(pathLower, "deprecated") ||
+		hasPathSegment(pathLower, "obsolete") {
+		return true
+	}
+	base := strings.ToLower(filepath.Base(pathLower))
+	return strings.HasPrefix(base, "deprecated-") ||
+		strings.HasPrefix(base, "deprecated_") ||
+		strings.HasPrefix(base, "obsolete-") ||
+		strings.HasPrefix(base, "obsolete_") ||
+		strings.HasSuffix(base, ".deprecated.md")
+}
+
 func isActivePackStatus(statusLower string) bool {
 	switch statusLower {
 	case "active", "accepted", "approved", "current", "implementing", "in_progress", "in-progress", "proposed":
@@ -333,6 +377,15 @@ func isTemplatePathCandidate(pathLower string) bool {
 	base := strings.ToLower(filepath.Base(pathLower))
 	return strings.Contains(base, "template") &&
 		(strings.HasSuffix(base, ".md") || strings.HasSuffix(base, ".mdx") || strings.HasSuffix(base, ".txt"))
+}
+
+func isSkillPathCandidate(pathLower string) bool {
+	base := strings.ToLower(filepath.Base(pathLower))
+	return base == "skill.md" ||
+		base == "skills.md" ||
+		strings.Contains(pathLower, "/skills/") ||
+		strings.Contains(pathLower, ".claude/skills/") ||
+		strings.Contains(pathLower, ".codex/skills/")
 }
 
 func queryRequestsTemplate(queryLower string) bool {
