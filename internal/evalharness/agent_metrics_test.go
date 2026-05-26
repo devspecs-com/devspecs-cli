@@ -76,3 +76,30 @@ func TestGradeArtifactForAgentMetricsHardNegativeWinsOverSameFamily(t *testing.T
 		t.Fatalf("hard negative should win over same-family sanitation, got %#v", got)
 	}
 }
+
+func TestGradeArtifactForAgentMetricsTreatsFileAndLineAsSameArtifact(t *testing.T) {
+	expected := map[string]string{
+		"src/auth/session.go": "must",
+	}
+	ctx := sameClusterContext{expectedPaths: expectedPathList(expected)}
+
+	got := gradeArtifactForAgentMetrics("src/auth/session.go#L24-L39", expected, nil, ctx)
+	if got.grade != "must" || got.weight != 1 || !got.exact {
+		t.Fatalf("file expectation should accept line-scoped artifact exactly, got %#v", got)
+	}
+}
+
+func TestGradeArtifactForAgentMetricsKeepsDifferentLineRefsSameCluster(t *testing.T) {
+	expected := map[string]string{
+		"src/auth/session.go#L24-L39": "must",
+	}
+	ctx := sameClusterContext{
+		lineExpectedBases: map[string]bool{"src/auth/session.go": true},
+		expectedPaths:     expectedPathList(expected),
+	}
+
+	got := gradeArtifactForAgentMetrics("src/auth/session.go#L60", expected, nil, ctx)
+	if got.grade != "same_cluster" || got.weight != 0.5 || !got.sameCluster || got.exact {
+		t.Fatalf("different line refs in the same file should be same-cluster, got %#v", got)
+	}
+}

@@ -196,6 +196,67 @@ func TestDiagnostics_ClassifiesAsciiDocGaps(t *testing.T) {
 	}
 }
 
+func TestApplyArtifactMetricsMatchesFileExpectedToLineArtifact(t *testing.T) {
+	cr := CaseResult{ArtifactsIncluded: []string{"src/auth/session.go#L24-L39"}}
+	spec := CaseSpec{ExpectedRelevant: []ExpectedArtifact{{Path: "src/auth/session.go", Importance: "must"}}}
+
+	applyArtifactMetrics(&cr, spec)
+
+	if cr.ArtifactRecall != 1 || cr.MustHaveRecall != 1 {
+		t.Fatalf("expected full recall for file/line identity, recall=%.3f must=%.3f missed=%v", cr.ArtifactRecall, cr.MustHaveRecall, cr.MissedExpectedRelevant)
+	}
+	if len(cr.RelevantIncluded) != 1 || cr.RelevantIncluded[0] != "src/auth/session.go#L24-L39" {
+		t.Fatalf("relevant included = %#v", cr.RelevantIncluded)
+	}
+	if len(cr.MissedExpectedRelevant) != 0 {
+		t.Fatalf("missed = %#v", cr.MissedExpectedRelevant)
+	}
+}
+
+func TestApplyArtifactMetricsMatchesLineExpectedToFileArtifact(t *testing.T) {
+	cr := CaseResult{ArtifactsIncluded: []string{"src/auth/session.go"}}
+	spec := CaseSpec{ExpectedRelevant: []ExpectedArtifact{{Path: "src/auth/session.go#L24-L39", Importance: "must"}}}
+
+	applyArtifactMetrics(&cr, spec)
+
+	if cr.ArtifactRecall != 1 || cr.MustHaveRecall != 1 {
+		t.Fatalf("expected full recall for line/file identity, recall=%.3f must=%.3f missed=%v", cr.ArtifactRecall, cr.MustHaveRecall, cr.MissedExpectedRelevant)
+	}
+	if len(cr.RelevantIncluded) != 1 || cr.RelevantIncluded[0] != "src/auth/session.go" {
+		t.Fatalf("relevant included = %#v", cr.RelevantIncluded)
+	}
+	if len(cr.MissedExpectedRelevant) != 0 {
+		t.Fatalf("missed = %#v", cr.MissedExpectedRelevant)
+	}
+}
+
+func TestApplyArtifactMetricsDoesNotExactMatchDifferentLineRefs(t *testing.T) {
+	cr := CaseResult{ArtifactsIncluded: []string{"src/auth/session.go#L60"}}
+	spec := CaseSpec{ExpectedRelevant: []ExpectedArtifact{{Path: "src/auth/session.go#L24-L39", Importance: "must"}}}
+
+	applyArtifactMetrics(&cr, spec)
+
+	if cr.ArtifactRecall != 0 || cr.MustHaveRecall != 0 {
+		t.Fatalf("different line refs should not be exact, recall=%.3f must=%.3f", cr.ArtifactRecall, cr.MustHaveRecall)
+	}
+	if len(cr.MissedExpectedRelevant) != 1 || cr.MissedExpectedRelevant[0] != "src/auth/session.go#L24-L39" {
+		t.Fatalf("missed = %#v", cr.MissedExpectedRelevant)
+	}
+}
+
+func TestApplyDiscoveryDiagnosticsUsesFileLineIdentity(t *testing.T) {
+	cr := CaseResult{ArtifactsIncluded: []string{"src/auth/session.go"}}
+	spec := CaseSpec{ExpectedRelevant: []ExpectedArtifact{{Path: "src/auth/session.go#L24-L39", Importance: "must"}}}
+	corpusPaths := map[string]bool{"src/auth/session.go": true}
+
+	applyArtifactMetrics(&cr, spec)
+	applyDiscoveryDiagnostics(&cr, spec, corpusPaths)
+
+	if cr.ExpectedAvailableCount != 1 || len(cr.ExpectedMissingFromCorpus) != 0 || len(cr.MissedAfterDiscovery) != 0 {
+		t.Fatalf("expected line artifact to be available and retrieved through file identity, available=%d missing=%v missed=%v", cr.ExpectedAvailableCount, cr.ExpectedMissingFromCorpus, cr.MissedAfterDiscovery)
+	}
+}
+
 func TestRun_DefaultUsesIndexedCorpus(t *testing.T) {
 	result, err := Run(fixturePath(t), Options{})
 	if err != nil {

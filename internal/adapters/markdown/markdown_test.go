@@ -606,7 +606,10 @@ func TestDefaultRepoConfigMarkdownPathsMatchAdapterDefaults(t *testing.T) {
 
 func TestRootGlobs_AllPatterns(t *testing.T) {
 	globs := rootGlobs()
-	expected := []string{"*.spec.md", "*.plan.md", "*.prd.md", "*.rfc.md", "*.roadmap.md", "*.design.md", "*.contract.md", "*.requirements.md", "REQ_*.md", "REQ-*.md", "*_REQ.md", "*-REQ.md"}
+	expected := []string{
+		"*.spec.md", "*.plan.md", "*.prd.md", "*.rfc.md", "*.roadmap.md", "*.design.md", "*.contract.md", "*.requirements.md", "REQ_*.md", "REQ-*.md", "*_REQ.md", "*-REQ.md",
+		"*.spec.mdx", "*.plan.mdx", "*.prd.mdx", "*.rfc.mdx", "*.roadmap.mdx", "*.design.mdx", "*.contract.mdx", "*.requirements.mdx", "REQ_*.mdx", "REQ-*.mdx", "*_REQ.mdx", "*-REQ.mdx",
+	}
 	if len(globs) != len(expected) {
 		t.Fatalf("expected %d root globs, got %d", len(expected), len(globs))
 	}
@@ -624,21 +627,22 @@ func TestDiscover_RootGlobs(t *testing.T) {
 	os.WriteFile(filepath.Join(tmp, "api.design.md"), []byte("# Design"), 0o644)
 	os.WriteFile(filepath.Join(tmp, "auth.contract.md"), []byte("# Contract"), 0o644)
 	os.WriteFile(filepath.Join(tmp, "reqs.requirements.md"), []byte("# Reqs"), 0o644)
+	os.WriteFile(filepath.Join(tmp, "sdk.plan.mdx"), []byte("# SDK Plan"), 0o644)
 
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), tmp, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != 5 {
-		t.Fatalf("expected 5 root glob candidates, got %d", len(candidates))
+	if len(candidates) != 6 {
+		t.Fatalf("expected 6 root glob candidates, got %d", len(candidates))
 	}
 }
 
 func TestDiscover_DefaultHighSignalMarkdownFiles(t *testing.T) {
 	tmp := t.TempDir()
 	writeMarkdown(t, tmp, "contributingGuides/PROPOSAL_TEMPLATE.md", "# Proposal Template\n")
-	writeMarkdown(t, tmp, "packages/assistant/agents/specification.agent.md", "# Specification Agent\n")
+	writeMarkdown(t, tmp, "packages/assistant/agents/specification.agent.mdx", "# Specification Agent\n")
 	writeMarkdown(t, tmp, "project/GOVERNANCE.md", "# Governance\n")
 	writeMarkdown(t, tmp, "project/MAINTAINERS.md", "# Maintainers\n")
 	writeMarkdown(t, tmp, "docs/random-note.md", "# Random\n")
@@ -651,7 +655,7 @@ func TestDiscover_DefaultHighSignalMarkdownFiles(t *testing.T) {
 	got := candidateRelPaths(candidates)
 	for _, want := range []string{
 		"contributingGuides/PROPOSAL_TEMPLATE.md",
-		"packages/assistant/agents/specification.agent.md",
+		"packages/assistant/agents/specification.agent.mdx",
 		"project/GOVERNANCE.md",
 		"project/MAINTAINERS.md",
 	} {
@@ -669,6 +673,7 @@ func TestDiscover_DocsDir(t *testing.T) {
 	docsDir := filepath.Join(tmp, "docs")
 	os.MkdirAll(docsDir, 0o755)
 	os.WriteFile(filepath.Join(docsDir, "guide.md"), []byte("# Guide"), 0o644)
+	os.WriteFile(filepath.Join(docsDir, "intent.mdx"), []byte("# Intent"), 0o644)
 
 	a := &Adapter{}
 	cfg := &config.RepoConfig{
@@ -681,11 +686,14 @@ func TestDiscover_DocsDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(candidates) != 1 {
-		t.Fatalf("expected 1 candidate from configured docs/, got %d", len(candidates))
+	if len(candidates) != 2 {
+		t.Fatalf("expected 2 candidates from configured docs/, got %d", len(candidates))
 	}
-	if candidates[0].RelPath != "docs/guide.md" {
-		t.Errorf("expected 'docs/guide.md', got %q", candidates[0].RelPath)
+	got := candidateRelPaths(candidates)
+	for _, want := range []string{"docs/guide.md", "docs/intent.mdx"} {
+		if !stringSliceContains(got, want) {
+			t.Errorf("missing %q from configured docs/: %v", want, got)
+		}
 	}
 }
 

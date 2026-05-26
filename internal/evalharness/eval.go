@@ -1611,17 +1611,22 @@ func shouldIgnore(rel string, isDir bool) bool {
 
 func isTextArtifact(rel string) bool {
 	switch strings.ToLower(filepath.Ext(rel)) {
-	case ".md", ".mdx", ".ts", ".tsx", ".js", ".jsx", ".sql", ".yaml", ".yml", ".json":
+	case ".md", ".mdx", ".py", ".go", ".rs", ".java",
+		".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue",
+		".toml", ".sql", ".yaml", ".yml", ".json":
 		return true
 	default:
-		return false
+		base := strings.ToLower(filepath.Base(filepath.ToSlash(rel)))
+		return base == "dockerfile" || base == "containerfile" ||
+			strings.HasPrefix(base, "dockerfile.") || strings.HasPrefix(base, "containerfile.") ||
+			strings.HasSuffix(base, ".dockerfile") || strings.HasSuffix(base, ".containerfile")
 	}
 }
 
 func fullPlanningCorpus(files []File) []File {
 	return filterFiles(files, func(f File) bool {
 		rel := f.Path
-		if !strings.EqualFold(filepath.Ext(rel), ".md") {
+		if !evalMarkdownLikePath(rel) {
 			return false
 		}
 		for _, prefix := range []string{"openspec/", "docs/", ".cursor/", ".claude/", "plans/", "scratch/"} {
@@ -1635,7 +1640,7 @@ func fullPlanningCorpus(files []File) []File {
 
 func sourceContextCandidates(files []File) []File {
 	return filterFiles(files, func(f File) bool {
-		if strings.EqualFold(filepath.Ext(f.Path), ".md") {
+		if evalMarkdownLikePath(f.Path) {
 			return false
 		}
 		if retrieval.IsPlanningIntentPath(f.Path) {
@@ -1826,7 +1831,7 @@ func evaluateSufficiency(criteria SuccessCriteria, context string, included []st
 		if artifact == "" {
 			continue
 		}
-		if !includedSet[artifact] {
+		if !evalArtifactPathInSetByIdentity(artifact, includedSet) {
 			result.MissingArtifacts = append(result.MissingArtifacts, artifact)
 		}
 	}
@@ -1853,7 +1858,7 @@ func evaluateSufficiency(criteria SuccessCriteria, context string, included []st
 		if artifact == "" {
 			continue
 		}
-		if includedSet[artifact] {
+		if evalArtifactPathInSetByIdentity(artifact, includedSet) {
 			result.ForbiddenArtifactsPresent = append(result.ForbiddenArtifactsPresent, artifact)
 		}
 	}
@@ -1878,7 +1883,7 @@ func baselineMetrics(name, scope string, includesSource bool, files []File, expe
 	expectedSet := stringSet(expected)
 	relevant := 0
 	for _, path := range rel {
-		if expectedSet[path] {
+		if evalArtifactPathInSetByIdentity(path, expectedSet) {
 			relevant++
 		}
 	}
@@ -1915,7 +1920,7 @@ func applyPackingMetrics(cr *CaseResult, files []File) {
 			}
 			continue
 		}
-		if strings.EqualFold(filepath.Ext(f.Path), ".md") || strings.EqualFold(filepath.Ext(f.Path), ".mdx") {
+		if evalMarkdownLikePath(f.Path) {
 			cr.FullFileArtifactCount++
 		}
 	}
@@ -1945,6 +1950,7 @@ func applyArtifactMetrics(cr *CaseResult, spec CaseSpec) {
 	expected := expectedImportanceSet(spec.ExpectedRelevant)
 	excluded := stringSet(spec.ExpectedExcluded)
 	included := stringSet(cr.ArtifactsIncluded)
+	matchedExpected := map[string]bool{}
 
 	cr.RelevantIncluded = []string{}
 	cr.IrrelevantIncluded = []string{}
@@ -1962,7 +1968,8 @@ func applyArtifactMetrics(cr *CaseResult, spec CaseSpec) {
 		}
 	}
 	for _, rel := range cr.ArtifactsIncluded {
-		if importance, ok := expected[rel]; ok {
+		if importance, expectedPath, ok := matchExpectedIncludedArtifact(rel, expected, included, matchedExpected); ok {
+			matchedExpected[expectedPath] = true
 			cr.RelevantIncluded = append(cr.RelevantIncluded, rel)
 			switch importance {
 			case "must":
@@ -1975,13 +1982,14 @@ func applyArtifactMetrics(cr *CaseResult, spec CaseSpec) {
 		} else {
 			cr.IrrelevantIncluded = append(cr.IrrelevantIncluded, rel)
 		}
-		if excluded[rel] {
+		if evalArtifactPathInSetByIdentity(rel, excluded) {
 			cr.UnexpectedExcludedHits = append(cr.UnexpectedExcludedHits, rel)
 		}
 	}
 	for _, artifact := range spec.ExpectedRelevant {
-		if !included[artifact.Path] {
-			cr.MissedExpectedRelevant = append(cr.MissedExpectedRelevant, artifact.Path)
+		path := filepath.ToSlash(artifact.Path)
+		if !matchedExpected[path] {
+			cr.MissedExpectedRelevant = append(cr.MissedExpectedRelevant, path)
 		}
 	}
 	cr.RelevantRetrieved = len(cr.RelevantIncluded)
@@ -2000,6 +2008,22 @@ func applyArtifactMetrics(cr *CaseResult, spec CaseSpec) {
 	if len(cr.ArtifactsIncluded) > 0 {
 		cr.ArtifactPrecision = float64(len(cr.RelevantIncluded)) / float64(len(cr.ArtifactsIncluded))
 	}
+}
+
+func matchExpectedIncludedArtifact(path string, expected map[string]string, included map[string]bool, matched map[string]bool) (string, string, bool) {
+	path = filepath.ToSlash(path)
+	if importance, ok := expected[path]; ok {
+		return importance, path, true
+	}
+	for expectedPath, importance := range expected {
+		if matched[expectedPath] || included[expectedPath] {
+			continue
+		}
+		if evalArtifactIdentityMatch(path, expectedPath) {
+			return importance, expectedPath, true
+		}
+	}
+	return "", "", false
 }
 
 func applyRelatedTierMetrics(cr *CaseResult, spec CaseSpec, relatedFiles []File, relatedReasons []ArtifactReason) {
@@ -2138,9 +2162,9 @@ func applyDiscoveryDiagnostics(cr *CaseResult, spec CaseSpec, corpusPaths map[st
 	cr.MissedAfterDiscovery = nil
 	for _, artifact := range spec.ExpectedRelevant {
 		path := filepath.ToSlash(artifact.Path)
-		if corpusPaths[path] {
+		if evalArtifactPathInSetByIdentity(path, corpusPaths) {
 			cr.ExpectedAvailableCount++
-			if included[path] {
+			if evalArtifactPathInSetByIdentity(path, included) {
 				availableRetrieved++
 			} else {
 				cr.MissedAfterDiscovery = append(cr.MissedAfterDiscovery, path)
@@ -2193,18 +2217,32 @@ func applyConceptMissDiagnostics(cr *CaseResult, spec CaseSpec, candidatePool []
 			continue
 		}
 		path := filepath.ToSlash(artifact.Path)
-		if included[path] {
+		if evalArtifactPathInSetByIdentity(path, included) {
 			continue
 		}
 		if diag, ok := rankByPath[path]; ok {
 			cr.MissedMustConceptDiagnostics = append(cr.MissedMustConceptDiagnostics, diag)
 			continue
 		}
+		if diag, ok := conceptDiagnosticByIdentity(path, rankByPath); ok {
+			cr.MissedMustConceptDiagnostics = append(cr.MissedMustConceptDiagnostics, diag)
+			continue
+		}
 		cr.MissedMustConceptDiagnostics = append(cr.MissedMustConceptDiagnostics, ConceptMissDiagnostic{
 			ExpectedPath:    path,
-			InCandidatePool: poolPaths[path],
+			InCandidatePool: evalArtifactPathInSetByIdentity(path, poolPaths),
 		})
 	}
+}
+
+func conceptDiagnosticByIdentity(path string, rankByPath map[string]ConceptMissDiagnostic) (ConceptMissDiagnostic, bool) {
+	for candidate, diag := range rankByPath {
+		if evalArtifactIdentityMatch(path, candidate) {
+			diag.ExpectedPath = path
+			return diag, true
+		}
+	}
+	return ConceptMissDiagnostic{}, false
 }
 
 func summarizeDiagnostics(cases []CaseResult) Diagnostics {

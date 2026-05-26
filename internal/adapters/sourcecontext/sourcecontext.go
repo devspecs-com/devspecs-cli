@@ -211,12 +211,64 @@ func withinConfiguredSourcePath(rel string, paths []string) bool {
 }
 
 func isSourceContextFile(rel string) bool {
-	switch strings.ToLower(filepath.Ext(rel)) {
-	case ".ts", ".tsx", ".js", ".jsx", ".sql":
+	rel = filepath.ToSlash(strings.TrimSpace(rel))
+	base := strings.ToLower(filepath.Base(rel))
+	if isDefaultSourceContextBase(base) {
+		return true
+	}
+	if !isExpandedSourceContextBase(base) {
+		return false
+	}
+	return isIntentBearingSourceContextPath(rel)
+}
+
+func isDefaultSourceContextBase(base string) bool {
+	switch strings.ToLower(filepath.Ext(base)) {
+	case ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".sql":
 		return true
 	default:
 		return false
 	}
+}
+
+func isExpandedSourceContextBase(base string) bool {
+	switch base {
+	case "dockerfile", "containerfile":
+		return true
+	}
+	if strings.HasPrefix(base, "dockerfile.") || strings.HasPrefix(base, "containerfile.") ||
+		strings.HasSuffix(base, ".dockerfile") || strings.HasSuffix(base, ".containerfile") {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(base)) {
+	case ".py", ".go", ".rs", ".java", ".toml":
+		return true
+	default:
+		return false
+	}
+}
+
+func isIntentBearingSourceContextPath(rel string) bool {
+	rel = strings.ToLower(filepath.ToSlash(rel))
+	base := filepath.Base(rel)
+	stem := strings.TrimSuffix(base, filepath.Ext(base))
+	tokens := sourceContextIntentTokens(rel + "/" + stem)
+	for _, token := range tokens {
+		switch token {
+		case "adr", "architecture", "behavior", "behaviour", "constraint", "contract",
+			"decision", "design", "devspec", "devspecs", "intent", "invariant",
+			"plan", "policy", "proposal", "requirement", "requirements", "rfc",
+			"roadmap", "rule", "rules", "spec":
+			return true
+		}
+	}
+	return false
+}
+
+func sourceContextIntentTokens(text string) []string {
+	return strings.FieldsFunc(text, func(r rune) bool {
+		return r == '/' || r == '\\' || r == '-' || r == '_' || r == '.' || r == ' ' || r == '@'
+	})
 }
 
 func isBuiltinIgnoredDir(name string) bool {
@@ -238,7 +290,24 @@ func sourceTitle(rel string) string {
 }
 
 func sourceLanguage(rel string) string {
-	switch strings.ToLower(filepath.Ext(rel)) {
+	base := strings.ToLower(filepath.Base(filepath.ToSlash(rel)))
+	switch base {
+	case "dockerfile", "containerfile":
+		return "dockerfile"
+	}
+	if strings.HasPrefix(base, "dockerfile.") || strings.HasPrefix(base, "containerfile.") ||
+		strings.HasSuffix(base, ".dockerfile") || strings.HasSuffix(base, ".containerfile") {
+		return "dockerfile"
+	}
+	switch strings.ToLower(filepath.Ext(base)) {
+	case ".py":
+		return "python"
+	case ".go":
+		return "go"
+	case ".rs":
+		return "rust"
+	case ".java":
+		return "java"
 	case ".ts":
 		return "typescript"
 	case ".tsx":
@@ -247,6 +316,12 @@ func sourceLanguage(rel string) string {
 		return "javascript"
 	case ".jsx":
 		return "javascript-react"
+	case ".mjs", ".cjs":
+		return "javascript"
+	case ".vue":
+		return "vue"
+	case ".toml":
+		return "toml"
 	case ".sql":
 		return "sql"
 	default:

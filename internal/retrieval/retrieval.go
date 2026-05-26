@@ -176,7 +176,7 @@ func IsSourceContextCandidate(c Candidate) bool {
 	if isTestCaseCandidate(c) || isCodeCommentCandidate(c) {
 		return false
 	}
-	return !strings.EqualFold(filepath.Ext(c.Path), ".md") && !IsPlanningIntentPath(c.Path)
+	return !isMarkdownCandidatePath(c.Path) && !IsPlanningIntentPath(c.Path)
 }
 
 func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode string, conceptBackfill, glossaryConcepts, tieredConceptOutput, anchorFirstRanking bool, anchorFirstMode string) []Candidate {

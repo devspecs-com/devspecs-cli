@@ -177,7 +177,7 @@ func applyAgentCaseMetrics(cr *CaseResult, spec CaseSpec, files []File) {
 		} else {
 			penalizedWeight += grade.weight
 		}
-		if must[norm] && cr.AgentMetrics.FirstMustRank == 0 {
+		if evalArtifactPathInSetByIdentity(norm, must) && cr.AgentMetrics.FirstMustRank == 0 {
 			cr.AgentMetrics.FirstMustRank = i + 1
 		}
 		if grade.exact {
@@ -456,8 +456,13 @@ func gradeArtifactForAgentMetrics(path string, expected map[string]string, hardN
 		return artifactGradeResult{grade: importance, weight: gradeWeight(importance), exact: true}
 	}
 	base := metricBasePath(path)
-	if hardNegatives[path] || hardNegatives[base] {
+	if hardNegatives[path] || hardNegatives[base] || evalArtifactPathInSetByIdentity(path, hardNegatives) {
 		return artifactGradeResult{grade: "hard_negative", weight: -1.0, hardNegative: true}
+	}
+	for expectedPath, importance := range expected {
+		if evalArtifactIdentityMatch(path, expectedPath) {
+			return artifactGradeResult{grade: importance, weight: gradeWeight(importance), exact: true}
+		}
 	}
 	if hasMetricLineRef(path) && sameCluster.lineExpectedBases[base] {
 		return artifactGradeResult{grade: "same_cluster", weight: 0.5, sameCluster: true}
@@ -723,19 +728,11 @@ func addLaneCount(counts *LaneCounts, lane string) {
 }
 
 func metricBasePath(path string) string {
-	path = normalizeMetricPath(path)
-	if idx := strings.LastIndex(path, "#l"); idx >= 0 {
-		if allDigits(path[idx+2:]) {
-			return path[:idx]
-		}
-	}
-	return path
+	return evalArtifactBasePath(path)
 }
 
 func hasMetricLineRef(path string) bool {
-	path = normalizeMetricPath(path)
-	idx := strings.LastIndex(path, "#l")
-	return idx >= 0 && allDigits(path[idx+2:])
+	return evalArtifactHasLineRef(path)
 }
 
 func normalizeMetricPath(path string) string {
