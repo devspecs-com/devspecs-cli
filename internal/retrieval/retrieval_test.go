@@ -37,6 +37,124 @@ func TestWeightedFilesRetrieverV0_RetrievesAndExplainsCandidates(t *testing.T) {
 	}
 }
 
+func TestArtifactRolePrefersDetectedSubtypeBeforeClassifierFallback(t *testing.T) {
+	cases := []struct {
+		name string
+		in   Candidate
+		want string
+	}{
+		{
+			name: "protocol skill subtype beats conflicting classifier family",
+			in: Candidate{
+				Path:    ".codex/skills/review/SKILL.md",
+				Kind:    "markdown_artifact",
+				Subtype: "skill",
+				Metadata: map[string]string{
+					"classifier_model":   "protocol",
+					"classifier_subtype": "agent_instruction",
+					"classifier_family":  "protocol.agent_instruction",
+				},
+			},
+			want: "skill",
+		},
+		{
+			name: "template subtype beats conflicting classifier model",
+			in: Candidate{
+				Path:    ".github/PULL_REQUEST_TEMPLATE.md",
+				Kind:    "markdown_artifact",
+				Subtype: "pull_request_template",
+				Metadata: map[string]string{
+					"classifier_model":   "protocol",
+					"classifier_subtype": "agent_instruction",
+				},
+			},
+			want: "template",
+		},
+		{
+			name: "classifier metadata remains fallback for older candidates",
+			in: Candidate{
+				Path: "docs/process/repo-rules.md",
+				Metadata: map[string]string{
+					"classifier_model":   "protocol",
+					"classifier_subtype": "agent_instruction",
+				},
+			},
+			want: "agent_instruction",
+		},
+		{
+			name: "openspec path refines broad subtype",
+			in: Candidate{
+				Path:    "openspec/changes/harden-entitlement-sync/design.md",
+				Kind:    "spec",
+				Subtype: "openspec_child",
+			},
+			want: "openspec_design",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := artifactRole(tc.in); got != tc.want {
+				t.Fatalf("artifactRole() = %q, want %q", got, tc.want)
+			}
+			if got := candidateRole(tc.in); got != tc.want {
+				t.Fatalf("candidateRole() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNonIntentCandidateModePrefersDetectedSubtypeBeforeFallback(t *testing.T) {
+	cases := []struct {
+		name string
+		in   Candidate
+		want string
+	}{
+		{
+			name: "template subtype beats conflicting classifier model",
+			in: Candidate{
+				Subtype: "pull_request_template",
+				Metadata: map[string]string{
+					"classifier_model": "protocol",
+				},
+			},
+			want: "template",
+		},
+		{
+			name: "protocol skill subtype beats conflicting classifier model",
+			in: Candidate{
+				Subtype: "skill",
+				Metadata: map[string]string{
+					"classifier_model": "template",
+				},
+			},
+			want: "protocol",
+		},
+		{
+			name: "classifier model remains fallback",
+			in: Candidate{
+				Metadata: map[string]string{
+					"classifier_model": "protocol",
+				},
+			},
+			want: "protocol",
+		},
+		{
+			name: "skill path remains fallback for partially normalized candidates",
+			in: Candidate{
+				Path: ".codex/skills/review/SKILL.md",
+			},
+			want: "protocol",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := nonIntentCandidateMode(tc.in); got != tc.want {
+				t.Fatalf("nonIntentCandidateMode() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestWeightedFilesRetrieverV0_UsesIndexedSectionEvidence(t *testing.T) {
 	candidates := []Candidate{
 		{

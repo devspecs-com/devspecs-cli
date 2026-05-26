@@ -3469,7 +3469,10 @@ func hasOpenSpecChildRoleIntent(queryLower string) bool {
 }
 
 func nonIntentCandidateMode(c Candidate) string {
-	for _, key := range []string{"classifier_mode", "mode"} {
+	if mode := nonIntentModeFromSubtype(c.Subtype); mode != "" {
+		return mode
+	}
+	for _, key := range []string{"classifier_mode", "classifier_model", "mode"} {
 		if c.Metadata != nil {
 			switch strings.ToLower(strings.TrimSpace(c.Metadata[key])) {
 			case "protocol", "model", "template", "trace":
@@ -3477,10 +3480,15 @@ func nonIntentCandidateMode(c Candidate) string {
 			}
 		}
 	}
-	if isAgentInstructionPath(c.Path) {
+	pathLower := strings.ToLower(filepath.ToSlash(c.Path))
+	if isAgentInstructionPath(c.Path) || isSkillPathCandidate(pathLower) {
 		return "protocol"
 	}
-	switch strings.ToLower(strings.TrimSpace(c.Subtype)) {
+	return ""
+}
+
+func nonIntentModeFromSubtype(subtype string) string {
+	switch strings.ToLower(strings.TrimSpace(subtype)) {
 	case "agent_instruction", "skill", "maintainer_policy", "ownership_policy",
 		"governance_policy", "contribution_policy", "security_policy", "procedure",
 		"runbook", "standard":
@@ -3594,17 +3602,24 @@ func fileRole(path string) string {
 }
 
 func candidateRole(c Candidate) string {
+	return artifactRole(c)
+}
+
+// artifactRole is a retrieval-local artifact family, not a spec lane and not a
+// pack output bucket. Prefer normalized Kind/Subtype written by scan; use
+// classifier metadata for older or partially normalized candidates; use path
+// heuristics only as a final fallback. OpenSpec path roles are the one exception
+// because the filename refines broad OpenSpec subtypes into proposal/design/task
+// pack roles.
+func artifactRole(c Candidate) string {
 	pathRole := fileRole(c.Path)
 	if strings.HasPrefix(pathRole, "openspec_") {
 		return pathRole
 	}
-	if role := kindSubtypeRole(c); role == "test_case" || role == "code_comment" {
+	if role := kindSubtypeRole(c); role != "" {
 		return role
 	}
 	if role := classifierRole(c); role != "" {
-		return role
-	}
-	if role := kindSubtypeRole(c); role != "" {
 		return role
 	}
 	return pathRole
