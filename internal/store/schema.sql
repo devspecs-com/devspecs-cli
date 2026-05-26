@@ -1,4 +1,4 @@
--- DevSpecs v0.1 schema (version 9)
+-- DevSpecs v0.1 schema (version 10)
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version    INTEGER PRIMARY KEY,
@@ -169,6 +169,31 @@ CREATE TABLE IF NOT EXISTS artifact_edges (
   updated_at      TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS git_commits (
+  repo_id       TEXT NOT NULL,
+  sha           TEXT NOT NULL,
+  branch        TEXT NOT NULL DEFAULT '',
+  author_name   TEXT NOT NULL DEFAULT '',
+  author_email  TEXT NOT NULL DEFAULT '',
+  message       TEXT NOT NULL,
+  committed_at  TEXT NOT NULL,
+  files_changed INTEGER NOT NULL DEFAULT 0,
+  is_merge      INTEGER NOT NULL DEFAULT 0,
+  history_shape TEXT NOT NULL DEFAULT '',
+  indexed_at    TEXT NOT NULL,
+  PRIMARY KEY (repo_id, sha)
+);
+
+CREATE TABLE IF NOT EXISTS git_commit_files (
+  repo_id     TEXT NOT NULL,
+  commit_sha  TEXT NOT NULL,
+  file_path   TEXT NOT NULL,
+  change_type TEXT NOT NULL DEFAULT '',
+  old_path    TEXT NOT NULL DEFAULT '',
+  indexed_at  TEXT NOT NULL,
+  PRIMARY KEY (repo_id, commit_sha, file_path)
+);
+
 CREATE INDEX IF NOT EXISTS idx_todos_artifact ON artifact_todos(artifact_id);
 CREATE INDEX IF NOT EXISTS idx_todos_revision ON artifact_todos(revision_id);
 CREATE INDEX IF NOT EXISTS idx_todos_section ON artifact_todos(section_id);
@@ -191,6 +216,9 @@ CREATE INDEX IF NOT EXISTS idx_artifact_edges_src ON artifact_edges(repo_id, src
 CREATE INDEX IF NOT EXISTS idx_artifact_edges_dst ON artifact_edges(repo_id, dst_artifact_id);
 CREATE INDEX IF NOT EXISTS idx_artifact_edges_type ON artifact_edges(repo_id, edge_type);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_edges_identity ON artifact_edges(repo_id, src_artifact_id, dst_artifact_id, edge_type, source_signal);
+CREATE INDEX IF NOT EXISTS idx_git_commits_repo_committed ON git_commits(repo_id, committed_at);
+CREATE INDEX IF NOT EXISTS idx_git_commit_files_repo_file ON git_commit_files(repo_id, file_path);
+CREATE INDEX IF NOT EXISTS idx_git_commit_files_commit ON git_commit_files(commit_sha);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS artifacts_fts USING fts5(
   artifact_id UNINDEXED,

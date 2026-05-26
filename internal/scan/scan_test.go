@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -142,6 +143,98 @@ func TestScan_RebuildsEvidenceGraphDiagnostics(t *testing.T) {
 	}
 	if got := tableCount(t, db, "artifact_edges"); got != firstEdges {
 		t.Fatalf("edge count changed after rescan: got %d want %d", got, firstEdges)
+	}
+}
+
+func TestScan_ExperimentalGitEvidenceStoresFactsAndEdges(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git executable not available")
+	}
+	repoRoot, db := setupTestRepo(t)
+	if err := os.WriteFile(filepath.Join(repoRoot, "plans", "auth-tests.md"), []byte("# Auth Tests\n\n- [ ] Verify auth flow\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitCommand(t, repoRoot, "init")
+	runGitCommand(t, repoRoot, "checkout", "-b", "main")
+	runGitCommand(t, repoRoot, "config", "user.email", "test@example.com")
+	runGitCommand(t, repoRoot, "config", "user.name", "Test User")
+	runGitCommand(t, repoRoot, "add", ".")
+	runGitCommand(t, repoRoot, "commit", "-m", "add auth docs")
+
+	s := New(db, idgen.NewFactory(), []adapters.Adapter{&markdown.Adapter{}})
+	result, err := s.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{
+		UseTransaction:     true,
+		IncludeGitEvidence: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.GitEvidence == nil {
+		t.Fatal("expected git evidence diagnostics")
+	}
+	if result.GitEvidence.HistoryShape != "single_commit" {
+		t.Fatalf("expected single_commit history shape, got %#v", result.GitEvidence)
+	}
+	if result.GitEvidence.CommitsStored != 1 {
+		t.Fatalf("expected one stored git commit, got %#v", result.GitEvidence)
+	}
+	if result.GitEvidence.EdgesByType[edgeTypeCoChangedWith] == 0 {
+		t.Fatalf("expected co-change edge diagnostics, got %#v", result.GitEvidence)
+	}
+	counts, err := db.CountGitFacts(resultRepoID(t, db))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.Commits != 1 || counts.Files != 2 {
+		t.Fatalf("unexpected git fact counts: %#v", counts)
+	}
+	if _, err := s.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{
+		UseTransaction:     true,
+		IncludeGitEvidence: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nextCounts, err := db.CountGitFacts(resultRepoID(t, db))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nextCounts != counts {
+		t.Fatalf("git facts should be idempotent: got %#v want %#v", nextCounts, counts)
+	}
+	defaultResult, err := s.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{UseTransaction: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaultResult.GitEvidence != nil {
+		t.Fatalf("default scan should not emit git diagnostics: %#v", defaultResult.GitEvidence)
+	}
+	clearedCounts, err := db.CountGitFacts(resultRepoID(t, db))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clearedCounts.Commits != 0 || clearedCounts.Files != 0 {
+		t.Fatalf("default scan should clear opt-in git facts, got %#v", clearedCounts)
+	}
+}
+
+func TestScan_ExperimentalGitEvidenceNonGitDirectory(t *testing.T) {
+	repoRoot, db := setupTestRepo(t)
+	s := New(db, idgen.NewFactory(), []adapters.Adapter{&markdown.Adapter{}})
+	result, err := s.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{
+		UseTransaction:     true,
+		IncludeGitEvidence: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.GitEvidence == nil {
+		t.Fatal("expected git evidence diagnostics")
+	}
+	if result.GitEvidence.HistoryShape != "non_git" && result.GitEvidence.HistoryShape != "unavailable" {
+		t.Fatalf("expected non_git/unavailable history shape, got %#v", result.GitEvidence)
+	}
+	if result.GitEvidence.CommitsStored != 0 || result.GitEvidence.EdgesIndexed != 0 {
+		t.Fatalf("expected no stored git facts or edges, got %#v", result.GitEvidence)
 	}
 }
 
@@ -944,6 +1037,24 @@ func tableCount(t *testing.T, db *store.DB, table string) int {
 		t.Fatalf("count %s: %v", table, err)
 	}
 	return count
+}
+
+func resultRepoID(t *testing.T, db *store.DB) string {
+	t.Helper()
+	var repoID string
+	if err := db.QueryRow("SELECT id FROM repos LIMIT 1").Scan(&repoID); err != nil {
+		t.Fatal(err)
+	}
+	return repoID
+}
+
+func runGitCommand(t *testing.T, root string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
 }
 
 func artifactIdentitySnapshot(t *testing.T, db *store.DB) []string {

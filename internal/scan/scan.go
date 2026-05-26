@@ -44,6 +44,9 @@ type RunOptions struct {
 	UseTransaction         bool
 	SkipAuthoredAtLookup   bool
 	FreshIndex             bool
+	IncludeGitEvidence     bool
+	GitMaxCommits          int
+	GitMaxFilesPerCommit   int
 	Progress               func(ProgressEvent)
 	ProgressInterval       time.Duration
 }
@@ -234,6 +237,15 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 		return nil, fmt.Errorf("rebuild evidence graph: %w", err)
 	} else {
 		result.EvidenceGraph = diagnostics
+	}
+	if opts.IncludeGitEvidence {
+		if diagnostics, err := s.rebuildGitEvidence(ctx, repoRoot, repoID, now, opts); err != nil {
+			return nil, fmt.Errorf("rebuild git evidence: %w", err)
+		} else {
+			result.GitEvidence = diagnostics
+		}
+	} else if err := s.db.DeleteRepoGitFacts(repoID); err != nil {
+		return nil, fmt.Errorf("delete git facts: %w", err)
 	}
 	if metrics, err := s.computeOpenSpecMetrics(repoRoot, repoID); err != nil {
 		return nil, fmt.Errorf("compute openspec metrics: %w", err)

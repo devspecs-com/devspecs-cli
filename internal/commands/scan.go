@@ -40,6 +40,7 @@ func NewScanCmd() *cobra.Command {
 		ifChanged                   bool
 		rebuild                     bool
 		experimentalIntentDiscovery bool
+		experimentalGitEvidence     bool
 		includeTests                bool
 		includeCodeComments         bool
 	)
@@ -48,7 +49,7 @@ func NewScanCmd() *cobra.Command {
 		Use:   "scan",
 		Short: "Scan repository for specs, plans, and ADRs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, includeTests, includeCodeComments)
+			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, includeTests, includeCodeComments)
 		},
 	}
 
@@ -59,6 +60,7 @@ func NewScanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&ifChanged, "if-changed", false, "Only scan if source paths were touched in the last commit")
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "Remove the global index database and create a fresh index (requires re-scan)")
 	cmd.Flags().BoolVar(&experimentalIntentDiscovery, "experimental-intent-discovery", false, "Deprecated: broad scored markdown intent candidate discovery is enabled by default")
+	cmd.Flags().BoolVar(&experimentalGitEvidence, "experimental-git-evidence", false, "Index bounded local git history facts as diagnostic evidence")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Index executable test cases as behavioral intent artifacts")
 	cmd.Flags().BoolVar(&includeTests, "experimental-test-cases", false, "Deprecated alias for --include-tests")
 	cmd.Flags().BoolVar(&includeCodeComments, "include-code-comments", false, "Index high-signal code comments as implementation intent artifacts")
@@ -66,16 +68,17 @@ func NewScanCmd() *cobra.Command {
 	return cmd
 }
 
-func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, includeTests, includeCodeComments bool) error {
+func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, includeTests, includeCodeComments bool) error {
 	start := time.Now()
 	success := false
 	props := map[string]any{
-		"include_tests":         includeTests,
-		"include_code_comments": includeCodeComments,
-		"if_changed":            ifChanged,
-		"rebuild":               rebuild,
-		"json":                  asJSON,
-		"quiet":                 quiet,
+		"include_tests":             includeTests,
+		"include_code_comments":     includeCodeComments,
+		"experimental_git_evidence": experimentalGitEvidence,
+		"if_changed":                ifChanged,
+		"rebuild":                   rebuild,
+		"json":                      asJSON,
+		"quiet":                     quiet,
 	}
 	defer func() {
 		telemetry.RecordCommand("scan", success, time.Since(start), props)
@@ -149,6 +152,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	props["transaction_enabled"] = scanOpts.UseTransaction
 	props["fresh_index"] = scanOpts.FreshIndex
 	props["skip_authored_at_lookup"] = scanOpts.SkipAuthoredAtLookup
+	scanOpts.IncludeGitEvidence = experimentalGitEvidence
 	if verbose && !quiet && scanOpts.FreshIndex {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Using fresh-index scan path for empty/rebuilt index\n")
 	}

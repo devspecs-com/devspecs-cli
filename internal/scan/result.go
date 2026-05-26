@@ -72,6 +72,7 @@ type Result struct {
 	Hints            []ScanHint                `json:"hints,omitempty"`
 	OpenSpec         *openspecmetrics.Metrics  `json:"openspec,omitempty"`
 	EvidenceGraph    *EvidenceGraphDiagnostics `json:"evidence_graph,omitempty"`
+	GitEvidence      *GitEvidenceDiagnostics   `json:"git_evidence,omitempty"`
 
 	sourcesAgg map[string]*sourceAgg `json:"-"`
 }
