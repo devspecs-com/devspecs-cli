@@ -31,8 +31,18 @@ const (
 	edgeTypeSameLayoutGroup       = "same_layout_group"
 	edgeTypeOpenSpecCompanion     = "openspec_companion"
 
-	maxSharedConceptArtifacts = 8
-	maxSharedConceptEdges     = 5000
+	maxConceptForms                  = 6
+	maxMentionEvidenceFormLength     = 120
+	maxSymbolConceptsPerArtifact     = 12
+	maxSharedConceptArtifacts        = 6
+	maxSharedConceptEdges            = 1500
+	maxSharedConceptEdgesPerArtifact = 48
+	maxSharedConceptsPerPair         = 5
+	maxSharedConceptMetadataPerEdge  = 3
+	maxPathReferenceEdgesPerTarget   = 32
+	maxPathReferenceEdgesPerSource   = 4
+	maxSameSourcePathEdgesPerPath    = 24
+	maxLayoutGroupEdgesPerGroup      = 24
 )
 
 // EvidenceGraphDiagnostics is a scan-time summary of persisted graph evidence.
@@ -117,10 +127,17 @@ type edgeConceptEvidence struct {
 	kind      string
 	canonical string
 	idf       float64
+	strong    bool
 }
 
 type edgeAccumulator struct {
 	input store.ArtifactEdgeInput
+}
+
+type pathReferenceEdge struct {
+	src    string
+	dst    string
+	target string
 }
 
 var pathReferencePattern = regexp.MustCompile(`(?i)([A-Za-z0-9_.@+-]+(?:/[A-Za-z0-9_.@+-]+)+\.(?:md|markdown|txt|adoc|rst|go|py|rs|java|kt|ts|tsx|js|jsx|vue|sql|toml|yaml|yml|json|dockerfile))`)
@@ -200,6 +217,9 @@ func buildEvidenceGraph(repoID string, artifacts []evidenceArtifact) evidenceBui
 		if mention.kind == "" || mention.canonical == "" || mention.artifactID == "" {
 			continue
 		}
+		if !persistEvidenceMention(mention) {
+			continue
+		}
 		key := conceptKey(mention.kind, mention.canonical)
 		acc := conceptsByKey[key]
 		if acc == nil {
@@ -225,7 +245,7 @@ func buildEvidenceGraph(repoID string, artifacts []evidenceArtifact) evidenceBui
 	conceptByKey := map[string]store.ConceptInput{}
 	totalDocs := float64(maxInt(1, artifactCount))
 	for key, acc := range conceptsByKey {
-		acc.input.Forms = sortedMapKeys(acc.forms)
+		acc.input.Forms = limitedSortedMapKeys(acc.forms, maxConceptForms)
 		acc.input.DocumentFrequency = len(acc.artifactIDs)
 		acc.input.InverseDocumentFrequency = math.Log((1.0+totalDocs)/(1.0+float64(acc.input.DocumentFrequency))) + 1.0
 		conceptInputs = append(conceptInputs, acc.input)
@@ -240,6 +260,9 @@ func buildEvidenceGraph(repoID string, artifacts []evidenceArtifact) evidenceBui
 
 	mentionInputs := make([]store.ConceptMentionInput, 0, len(rawMentions))
 	for _, mention := range rawMentions {
+		if !persistEvidenceMention(mention) {
+			continue
+		}
 		concept, ok := conceptByKey[conceptKey(mention.kind, mention.canonical)]
 		if !ok {
 			continue
@@ -256,7 +279,7 @@ func buildEvidenceGraph(repoID string, artifacts []evidenceArtifact) evidenceBui
 			SectionID:    mention.sectionID,
 			Field:        mention.field,
 			Weight:       mention.weight,
-			EvidenceJSON: evidenceJSON(map[string]any{"form": mention.form, "source": mention.source, "canonical": mention.canonical, "kind": mention.kind}),
+			EvidenceJSON: evidenceJSON(compactMentionEvidence(mention)),
 		})
 	}
 	sort.Slice(mentionInputs, func(i, j int) bool {
@@ -374,14 +397,15 @@ func addMetadataMentions(artifact evidenceArtifact, add func(kind, canonical, fo
 			add(conceptKindArtifactRole, key+":"+value, value, key, "metadata", "", 0.45)
 		}
 	}
+	symbolsAdded := 0
 	for _, symbol := range evidenceStringSlice(artifact.extracted["symbols"]) {
+		if symbolsAdded >= maxSymbolConceptsPerArtifact {
+			break
+		}
 		compact := compactIdentifier(symbol)
 		if compact != "" {
 			add(conceptKindSymbol, compact, symbol, "symbol", "metadata", "", 1.0)
-			add(conceptKindIdentifier, compact, symbol, "symbol", "metadata", "", 0.95)
-		}
-		for _, phrase := range phraseConcepts(symbol) {
-			add(conceptKindPhrase, phrase, symbol, "symbol", "metadata", "", 0.8)
+			symbolsAdded++
 		}
 	}
 	for _, assertion := range evidenceStringSlice(artifact.extracted["assertion_terms"]) {
@@ -393,8 +417,9 @@ func addMetadataMentions(artifact evidenceArtifact, add func(kind, canonical, fo
 
 func addSectionMentions(section store.SectionRow, add func(kind, canonical, form, field, source, sectionID string, weight float64)) {
 	values := []string{section.Title}
-	if section.HeadingPath != "" {
-		values = append(values, strings.Split(section.HeadingPath, ">")...)
+	if strings.TrimSpace(section.Title) == "" && section.HeadingPath != "" {
+		parts := strings.Split(section.HeadingPath, ">")
+		values = append(values, parts[len(parts)-1])
 	}
 	for _, value := range values {
 		for _, phrase := range phraseConcepts(value) {
@@ -473,6 +498,7 @@ func (b *evidenceEdgeBuilder) edges() []store.ArtifactEdgeInput {
 
 func materializeSharedConceptEdges(artifacts []evidenceArtifact, concepts map[string]*conceptAccumulator, mentions []rawConceptMention, builder *evidenceEdgeBuilder) []EvidenceConceptExample {
 	conceptInputByKey := map[string]store.ConceptInput{}
+	conceptStrengthByKey := map[string]int{}
 	noisyByKey := map[string]EvidenceConceptExample{}
 	artifactCount := len(artifacts)
 	for key, acc := range concepts {
@@ -491,6 +517,12 @@ func materializeSharedConceptEdges(artifacts []evidenceArtifact, concepts map[st
 			noisyByKey[key] = EvidenceConceptExample{Kind: input.Kind, Canonical: input.Canonical, DocumentFrequency: input.DocumentFrequency, Reason: reason}
 			continue
 		}
+		strength := sharedConceptEdgeStrength(input)
+		if strength == 0 {
+			noisyByKey[key] = EvidenceConceptExample{Kind: input.Kind, Canonical: input.Canonical, DocumentFrequency: input.DocumentFrequency, Reason: "not_edge_eligible"}
+			continue
+		}
+		conceptStrengthByKey[key] = strength
 		byArtifact := mentionsByConcept[key]
 		if byArtifact == nil {
 			byArtifact = map[string]bool{}
@@ -510,7 +542,7 @@ func materializeSharedConceptEdges(artifacts []evidenceArtifact, concepts map[st
 			noisyByKey[key] = EvidenceConceptExample{Kind: input.Kind, Canonical: input.Canonical, DocumentFrequency: input.DocumentFrequency, Reason: "too_many_artifacts_for_edge_materialization"}
 			continue
 		}
-		ev := edgeConceptEvidence{kind: input.Kind, canonical: input.Canonical, idf: input.InverseDocumentFrequency}
+		ev := edgeConceptEvidence{kind: input.Kind, canonical: input.Canonical, idf: input.InverseDocumentFrequency, strong: conceptStrengthByKey[key] >= 2}
 		for i := 0; i < len(ids); i++ {
 			for j := i + 1; j < len(ids); j++ {
 				src, dst := orderedArtifactPair(ids[i], ids[j])
@@ -520,15 +552,16 @@ func materializeSharedConceptEdges(artifacts []evidenceArtifact, concepts map[st
 					pair = &pairEvidence{src: src, dst: dst}
 					pairs[pairKey] = pair
 				}
-				if len(pair.concepts) < 8 {
-					pair.concepts = append(pair.concepts, ev)
-				}
+				pair.concepts = append(pair.concepts, ev)
 			}
 		}
 	}
 	pairList := make([]*pairEvidence, 0, len(pairs))
 	for _, pair := range pairs {
 		sort.Slice(pair.concepts, func(i, j int) bool {
+			if pair.concepts[i].strong != pair.concepts[j].strong {
+				return pair.concepts[i].strong
+			}
 			if pair.concepts[i].idf == pair.concepts[j].idf {
 				if pair.concepts[i].kind == pair.concepts[j].kind {
 					return pair.concepts[i].canonical < pair.concepts[j].canonical
@@ -537,38 +570,61 @@ func materializeSharedConceptEdges(artifacts []evidenceArtifact, concepts map[st
 			}
 			return pair.concepts[i].idf > pair.concepts[j].idf
 		})
+		if len(pair.concepts) > maxSharedConceptsPerPair {
+			pair.concepts = pair.concepts[:maxSharedConceptsPerPair]
+		}
 		pairList = append(pairList, pair)
 	}
 	sort.Slice(pairList, func(i, j int) bool {
-		if len(pairList[i].concepts) == len(pairList[j].concepts) {
+		leftScore := sharedConceptPairScore(pairList[i])
+		rightScore := sharedConceptPairScore(pairList[j])
+		if leftScore == rightScore {
 			if pairList[i].src == pairList[j].src {
 				return pairList[i].dst < pairList[j].dst
 			}
 			return pairList[i].src < pairList[j].src
 		}
-		return len(pairList[i].concepts) > len(pairList[j].concepts)
+		return leftScore > rightScore
 	})
-	if len(pairList) > maxSharedConceptEdges {
-		pairList = pairList[:maxSharedConceptEdges]
-	}
+	selectedPairs := make([]*pairEvidence, 0, minInt(maxSharedConceptEdges, len(pairList)))
+	edgeDegreeByArtifact := map[string]int{}
 	for _, pair := range pairList {
+		if len(selectedPairs) >= maxSharedConceptEdges {
+			break
+		}
+		if edgeDegreeByArtifact[pair.src] >= maxSharedConceptEdgesPerArtifact || edgeDegreeByArtifact[pair.dst] >= maxSharedConceptEdgesPerArtifact {
+			continue
+		}
+		selectedPairs = append(selectedPairs, pair)
+		edgeDegreeByArtifact[pair.src]++
+		edgeDegreeByArtifact[pair.dst]++
+	}
+	for _, pair := range selectedPairs {
 		maxIDF := 0.0
+		strongCount := 0
 		names := make([]string, 0, minInt(3, len(pair.concepts)))
-		metaConcepts := make([]map[string]any, 0, minInt(5, len(pair.concepts)))
+		metaConcepts := make([]map[string]any, 0, minInt(maxSharedConceptMetadataPerEdge, len(pair.concepts)))
 		for i, concept := range pair.concepts {
 			if concept.idf > maxIDF {
 				maxIDF = concept.idf
 			}
+			if concept.strong {
+				strongCount++
+			}
 			if i < 3 {
 				names = append(names, concept.canonical)
 			}
-			if i < 5 {
-				metaConcepts = append(metaConcepts, map[string]any{"kind": concept.kind, "canonical": concept.canonical, "idf": roundEvidence(concept.idf)})
+			if i < maxSharedConceptMetadataPerEdge {
+				metaConcepts = append(metaConcepts, map[string]any{"kind": concept.kind, "canonical": concept.canonical, "idf": roundEvidence(concept.idf), "strong": concept.strong})
 			}
 		}
 		evidenceCount := len(pair.concepts)
-		weight := 0.35 + float64(evidenceCount)*0.10 + maxIDF*0.05
-		confidence := 0.55 + float64(evidenceCount)*0.08 + maxIDF*0.04
+		weakCount := evidenceCount - strongCount
+		weight := 0.32 + float64(strongCount)*0.12 + float64(weakCount)*0.06 + maxIDF*0.04
+		confidence := 0.56 + float64(strongCount)*0.10 + float64(weakCount)*0.04 + maxIDF*0.03
+		if strongCount == 0 {
+			confidence = minFloat(confidence, 0.84)
+		}
 		explanation := fmt.Sprintf("shares rare concept %q", names[0])
 		if len(names) > 1 {
 			explanation = fmt.Sprintf("shares %d rare concepts including %q", evidenceCount, names[0])
@@ -610,10 +666,15 @@ func materializeLayoutGroupEdges(artifacts []evidenceArtifact, builder *evidence
 		if len(ids) < 2 || len(ids) > 8 {
 			continue
 		}
+		emitted := 0
 		for i := 0; i < len(ids); i++ {
 			for j := i + 1; j < len(ids); j++ {
+				if emitted >= maxLayoutGroupEdgesPerGroup {
+					break
+				}
 				src, dst := orderedArtifactPair(ids[i], ids[j])
 				builder.add(src, dst, edgeTypeSameLayoutGroup, "layout_group", 0.62, 0.72, 1, "same layout group "+group, map[string]any{"layout_group": group})
+				emitted++
 			}
 		}
 	}
@@ -635,10 +696,15 @@ func materializeSameSourcePathEdges(artifacts []evidenceArtifact, builder *evide
 		if len(ids) < 2 || len(ids) > 12 {
 			continue
 		}
+		emitted := 0
 		for i := 0; i < len(ids); i++ {
 			for j := i + 1; j < len(ids); j++ {
+				if emitted >= maxSameSourcePathEdgesPerPath {
+					break
+				}
 				src, dst := orderedArtifactPair(ids[i], ids[j])
 				builder.add(src, dst, edgeTypeSameFileOrLineVariant, "source_path", 0.68, 0.78, 1, "same source path "+path, map[string]any{"source_path": path})
+				emitted++
 			}
 		}
 	}
@@ -675,15 +741,35 @@ func materializePathReferenceEdges(artifacts []evidenceArtifact, builder *eviden
 			byPath[path] = appendUnique(byPath[path], artifact.id)
 		}
 	}
+	var candidates []pathReferenceEdge
 	for _, artifact := range artifacts {
 		for _, ref := range extractPathReferences(artifact.body) {
 			for _, targetID := range byPath[ref] {
 				if targetID == artifact.id {
 					continue
 				}
-				builder.add(artifact.id, targetID, edgeTypeExplicitReference, "path_reference", 0.78, 0.78, 1, "references path "+ref, map[string]any{"path": ref})
+				candidates = append(candidates, pathReferenceEdge{src: artifact.id, dst: targetID, target: ref})
 			}
 		}
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].target == candidates[j].target {
+			if candidates[i].src == candidates[j].src {
+				return candidates[i].dst < candidates[j].dst
+			}
+			return candidates[i].src < candidates[j].src
+		}
+		return candidates[i].target < candidates[j].target
+	})
+	byTargetCount := map[string]int{}
+	bySourceCount := map[string]int{}
+	for _, edge := range candidates {
+		if byTargetCount[edge.target] >= maxPathReferenceEdgesPerTarget || bySourceCount[edge.src] >= maxPathReferenceEdgesPerSource {
+			continue
+		}
+		builder.add(edge.src, edge.dst, edgeTypeExplicitReference, "path_reference", 0.78, 0.78, 1, "references path "+edge.target, map[string]any{"path": edge.target})
+		byTargetCount[edge.target]++
+		bySourceCount[edge.src]++
 	}
 }
 
@@ -821,14 +907,18 @@ func phraseConcepts(text string) []string {
 	if len(words) <= 5 {
 		out = append(out, strings.Join(words, " "))
 	}
-	for n := minInt(4, len(words)); n >= 2; n-- {
-		for i := 0; i+n <= len(words); i++ {
-			part := words[i : i+n]
-			if allStopWords(part) {
-				continue
-			}
-			out = append(out, strings.Join(part, " "))
-		}
+	if len(words) == 2 {
+		return uniqueSorted(out)
+	}
+	if len(words) == 3 {
+		out = append(out, strings.Join(words[:2], " "))
+		out = append(out, strings.Join(words[1:], " "))
+		return uniqueSorted(out)
+	}
+	out = append(out, strings.Join(words[:2], " "))
+	out = append(out, strings.Join(words[len(words)-2:], " "))
+	if len(words) == 4 {
+		out = append(out, strings.Join(words[1:3], " "))
 	}
 	return uniqueSorted(out)
 }
@@ -928,6 +1018,29 @@ func normalizeRoleValue(value string) string {
 	return value
 }
 
+func persistEvidenceMention(mention rawConceptMention) bool {
+	return mention.kind != conceptKindArtifactRole
+}
+
+func compactMentionEvidence(mention rawConceptMention) map[string]any {
+	out := map[string]any{"source": mention.source}
+	if form := truncateEvidenceValue(mention.form, maxMentionEvidenceFormLength); form != "" {
+		out["form"] = form
+	}
+	return out
+}
+
+func truncateEvidenceValue(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	if limit <= 3 {
+		return value[:limit]
+	}
+	return value[:limit-3] + "..."
+}
+
 func sharedConceptEdgeKind(kind string) bool {
 	switch kind {
 	case conceptKindIdentifier, conceptKindCompactIdentifier, conceptKindPathFragment, conceptKindPhrase, conceptKindSymbol, conceptKindTestBehavior:
@@ -935,6 +1048,138 @@ func sharedConceptEdgeKind(kind string) bool {
 	default:
 		return false
 	}
+}
+
+func sharedConceptEdgeStrength(concept store.ConceptInput) int {
+	canonical := strings.TrimSpace(concept.Canonical)
+	if canonical == "" || genericEdgeConcept(canonical) {
+		return 0
+	}
+	words := strings.Fields(canonical)
+	switch concept.Kind {
+	case conceptKindSymbol, conceptKindIdentifier, conceptKindTestBehavior:
+		if len(canonical) >= 4 {
+			return 2
+		}
+	case conceptKindCompactIdentifier:
+		if compactConceptFormsAreGeneric(concept.Forms) || compactConceptIsGeneric(canonical) {
+			return 0
+		}
+		if len(canonical) >= 7 || containsDigit(canonical) {
+			return 2
+		}
+		if len(canonical) >= 5 {
+			return 1
+		}
+	case conceptKindPhrase:
+		if len(words) >= 2 && meaningfulEdgeWordCount(words) >= 2 {
+			return 2
+		}
+		if len(canonical) >= 8 && meaningfulEdgeWordCount(words) >= 1 {
+			return 1
+		}
+	case conceptKindPathFragment:
+		if len(canonical) >= 8 || containsDigit(canonical) {
+			return 2
+		}
+		if len(canonical) >= 4 {
+			return 1
+		}
+	}
+	return 0
+}
+
+func compactConceptFormsAreGeneric(forms []string) bool {
+	if len(forms) == 0 {
+		return false
+	}
+	sawWords := false
+	for _, form := range forms {
+		words := conceptWords(form)
+		if len(words) == 0 {
+			continue
+		}
+		sawWords = true
+		if meaningfulEdgeWordCount(words) > 0 {
+			return false
+		}
+	}
+	return sawWords
+}
+
+func compactConceptIsGeneric(canonical string) bool {
+	canonical = strings.TrimSpace(strings.ToLower(canonical))
+	if canonical == "" || len(canonical) > 48 {
+		return false
+	}
+	memo := map[string]bool{"": true}
+	var canSegment func(string) bool
+	canSegment = func(rest string) bool {
+		if value, ok := memo[rest]; ok {
+			return value
+		}
+		for term := range genericEdgeTerms {
+			if len(term) < 3 {
+				continue
+			}
+			if strings.HasPrefix(rest, term) && canSegment(rest[len(term):]) {
+				memo[rest] = true
+				return true
+			}
+		}
+		memo[rest] = false
+		return false
+	}
+	return canSegment(canonical)
+}
+
+func sharedConceptPairScore(pair *pairEvidence) float64 {
+	score := 0.0
+	for _, concept := range pair.concepts {
+		if concept.strong {
+			score += 4.0
+		} else {
+			score += 1.0
+		}
+		score += concept.idf * 0.2
+	}
+	return score
+}
+
+func genericEdgeConcept(canonical string) bool {
+	canonical = strings.TrimSpace(strings.ToLower(canonical))
+	if canonical == "" {
+		return true
+	}
+	if genericEdgeTerms[canonical] || evidenceStopWords[canonical] {
+		return true
+	}
+	words := strings.Fields(canonical)
+	if len(words) == 0 {
+		return false
+	}
+	return meaningfulEdgeWordCount(words) == 0
+}
+
+func meaningfulEdgeWordCount(words []string) int {
+	count := 0
+	for _, word := range words {
+		word = strings.TrimSpace(strings.ToLower(word))
+		if word == "" || evidenceStopWords[word] || genericEdgeTerms[word] {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func containsDigit(value string) bool {
+	for _, r := range value {
+		if unicode.IsDigit(r) {
+			return true
+		}
+	}
+	return false
 }
 
 func noisyConceptReason(concept store.ConceptInput, artifactCount int) string {
@@ -1012,6 +1257,14 @@ func sortedMapKeys(values map[string]bool) []string {
 	return out
 }
 
+func limitedSortedMapKeys(values map[string]bool, limit int) []string {
+	out := sortedMapKeys(values)
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
 func uniqueSorted(values []string) []string {
 	seen := map[string]bool{}
 	for _, value := range values {
@@ -1021,18 +1274,6 @@ func uniqueSorted(values []string) []string {
 		}
 	}
 	return sortedMapKeys(seen)
-}
-
-func allStopWords(words []string) bool {
-	if len(words) == 0 {
-		return true
-	}
-	for _, word := range words {
-		if !evidenceStopWords[word] {
-			return false
-		}
-	}
-	return true
 }
 
 func clampEvidence(value, min, max float64) float64 {
@@ -1050,6 +1291,13 @@ func roundEvidence(value float64) float64 {
 }
 
 func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func minFloat(a, b float64) float64 {
 	if a < b {
 		return a
 	}
@@ -1075,4 +1323,13 @@ var evidenceStopWords = map[string]bool{
 	"our": true, "should": true, "that": true, "the": true, "their": true,
 	"this": true, "to": true, "up": true, "use": true, "used": true,
 	"using": true, "when": true, "where": true, "which": true, "with": true,
+}
+
+var genericEdgeTerms = map[string]bool{
+	"additions": true, "architecture": true, "config": true, "context": true,
+	"current": true, "discover": true, "discovery": true, "infrastructure": true,
+	"doc": true, "docs": true, "documentation": true, "layer": true,
+	"local": true, "model": true, "notes": true, "page": true, "quick": true,
+	"rationale": true, "requirements": true, "states": true, "test": true,
+	"testing": true, "validate": true, "validation": true, "works": true,
 }

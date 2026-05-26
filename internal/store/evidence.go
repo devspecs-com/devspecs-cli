@@ -159,31 +159,96 @@ func (db *DB) DeleteArtifactEvidence(artifactID string) error {
 
 // ReplaceRepoEvidence rebuilds derived graph evidence for a repo.
 func (db *DB) ReplaceRepoEvidence(repoID string, concepts []ConceptInput, mentions []ConceptMentionInput, edges []ArtifactEdgeInput, now string) error {
-	if err := db.DeleteRepoEvidence(repoID); err != nil {
+	const savepoint = "evidence_graph_replace"
+	if _, err := db.Exec("SAVEPOINT " + savepoint); err != nil {
 		return err
 	}
+	rollback := func(err error) error {
+		_, _ = db.Exec("ROLLBACK TO SAVEPOINT " + savepoint)
+		_, _ = db.Exec("RELEASE SAVEPOINT " + savepoint)
+		return err
+	}
+	if _, err := db.Exec("DELETE FROM artifact_edges WHERE repo_id = ?", repoID); err != nil {
+		return rollback(err)
+	}
+	if _, err := db.Exec("DELETE FROM concept_mentions WHERE artifact_id IN (SELECT id FROM artifacts WHERE repo_id = ?)", repoID); err != nil {
+		return rollback(err)
+	}
+	if _, err := db.Exec("DELETE FROM concepts WHERE repo_id = ?", repoID); err != nil {
+		return rollback(err)
+	}
+	conceptStmt, err := db.Prepare(
+		`INSERT INTO concepts
+			(id, repo_id, canonical, kind, forms_json, document_frequency, inverse_document_frequency, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(repo_id, kind, canonical) DO UPDATE SET
+			id = excluded.id,
+			forms_json = excluded.forms_json,
+			document_frequency = excluded.document_frequency,
+			inverse_document_frequency = excluded.inverse_document_frequency,
+			updated_at = excluded.updated_at`,
+	)
+	if err != nil {
+		return rollback(err)
+	}
+	defer conceptStmt.Close()
 	for _, c := range concepts {
-		if err := db.UpsertConcept(c, now); err != nil {
-			return err
+		forms, err := json.Marshal(c.Forms)
+		if err != nil {
+			return rollback(fmt.Errorf("marshal concept forms: %w", err))
+		}
+		if _, err := conceptStmt.Exec(c.ID, c.RepoID, c.Canonical, c.Kind, string(forms), c.DocumentFrequency, c.InverseDocumentFrequency, now, now); err != nil {
+			return rollback(err)
 		}
 	}
+	mentionStmt, err := db.Prepare(
+		`INSERT INTO concept_mentions
+			(id, concept_id, artifact_id, section_id, field, weight, evidence_json, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+	)
+	if err != nil {
+		return rollback(err)
+	}
+	defer mentionStmt.Close()
 	for _, m := range mentions {
 		if m.EvidenceJSON == "" {
 			m.EvidenceJSON = "{}"
 		}
-		if _, err := db.Exec(
-			`INSERT INTO concept_mentions
-				(id, concept_id, artifact_id, section_id, field, weight, evidence_json, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			m.ID, m.ConceptID, m.ArtifactID, m.SectionID, m.Field, m.Weight, m.EvidenceJSON, now,
-		); err != nil {
-			return err
+		if _, err := mentionStmt.Exec(m.ID, m.ConceptID, m.ArtifactID, m.SectionID, m.Field, m.Weight, m.EvidenceJSON, now); err != nil {
+			return rollback(err)
 		}
 	}
+	edgeStmt, err := db.Prepare(
+		`INSERT INTO artifact_edges
+			(id, repo_id, src_artifact_id, dst_artifact_id, edge_type, weight, confidence, evidence_count, freshness, source_signal, explanation, metadata_json, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(repo_id, src_artifact_id, dst_artifact_id, edge_type, source_signal) DO UPDATE SET
+			id = excluded.id,
+			weight = excluded.weight,
+			confidence = excluded.confidence,
+			evidence_count = excluded.evidence_count,
+			freshness = excluded.freshness,
+			explanation = excluded.explanation,
+			metadata_json = excluded.metadata_json,
+			updated_at = excluded.updated_at`,
+	)
+	if err != nil {
+		return rollback(err)
+	}
+	defer edgeStmt.Close()
 	for _, e := range edges {
-		if err := db.UpsertArtifactEdge(e, now); err != nil {
-			return err
+		if e.EvidenceCount <= 0 {
+			e.EvidenceCount = 1
 		}
+		if e.MetadataJSON == "" {
+			e.MetadataJSON = "{}"
+		}
+		if _, err := edgeStmt.Exec(e.ID, e.RepoID, e.SrcArtifactID, e.DstArtifactID, e.EdgeType, e.Weight, e.Confidence, e.EvidenceCount, e.Freshness, e.SourceSignal, e.Explanation, e.MetadataJSON, now, now); err != nil {
+			return rollback(err)
+		}
+	}
+	if _, err := db.Exec("RELEASE SAVEPOINT " + savepoint); err != nil {
+		return rollback(err)
 	}
 	return nil
 }
