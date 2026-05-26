@@ -97,6 +97,51 @@ func TestBuildRoleGroupedPackIncludesAgentInstructionsWhenRequested(t *testing.T
 	assertGroupCount(t, pack, PackRoleSupportingContext, 1)
 }
 
+func TestBuildRoleGroupedPackIncludesProjectGuidelinesWhenRequested(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "agent-1",
+			Path:  "docs/project/AGENTS.md",
+			Kind:  "protocol",
+			Title: "Project Guidelines",
+			Body:  "coding standards and constraints for contributors",
+			Metadata: map[string]string{
+				"classifier_model":   "protocol",
+				"classifier_subtype": "agent_instruction",
+			},
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "before editing payment code load the project guidelines and constraints")
+
+	if len(pack.ExcludedNoise) != 0 {
+		t.Fatalf("expected requested project guidelines to stay included, got excluded: %#v", pack.ExcludedNoise)
+	}
+	assertGroupCount(t, pack, PackRoleSupportingContext, 1)
+}
+
+func TestBuildRoleGroupedPackExcludesUnrequestedAgentInstructionsForAgentFeature(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "agent-1",
+			Path:  "AGENTS.md",
+			Kind:  "protocol",
+			Title: "Agent instructions",
+			Body:  "rules for working in this repo",
+			Metadata: map[string]string{
+				"classifier_model":   "protocol",
+				"classifier_subtype": "agent_instruction",
+			},
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "implement the support agent routing feature")
+
+	if len(pack.ExcludedNoise) != 1 {
+		t.Fatalf("expected unrequested agent instructions to be excluded, got %#v", pack)
+	}
+}
+
 func TestBuildRoleGroupedPackDoesNotExcludeAgentNotesAsInstructions(t *testing.T) {
 	candidates := []Candidate{
 		{
@@ -118,6 +163,127 @@ func TestBuildRoleGroupedPackDoesNotExcludeAgentNotesAsInstructions(t *testing.T
 	}
 	if got := includedPackItemCount(pack); got != 1 {
 		t.Fatalf("expected one included agent note, got %d in %#v", got, pack.Groups)
+	}
+}
+
+func TestBuildRoleGroupedPackIncludesRequestedSkillWorkflow(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "skill-1",
+			Path:  ".codex/skills/data-repair/SKILL.md",
+			Kind:  "protocol",
+			Title: "Data Repair Workflow",
+			Body:  "workflow for reconciling account records",
+			Metadata: map[string]string{
+				"classifier_model":   "protocol",
+				"classifier_subtype": "skill",
+			},
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "use the data repair workflow to reconcile account records")
+
+	if len(pack.ExcludedNoise) != 0 {
+		t.Fatalf("expected requested skill workflow to stay included, got excluded: %#v", pack.ExcludedNoise)
+	}
+	assertGroupCount(t, pack, PackRoleSupportingContext, 1)
+}
+
+func TestBuildRoleGroupedPackIncludesSkillByRarePathToken(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "skill-1",
+			Path:  ".claude/skills/invoice-reconciler/SKILL.md",
+			Kind:  "protocol",
+			Title: "Invoice Reconciler",
+			Body:  "specialized workflow for invoice matching",
+			Metadata: map[string]string{
+				"classifier_model":   "protocol",
+				"classifier_subtype": "skill",
+			},
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "run invoice reconciler for vendor matching")
+
+	if len(pack.ExcludedNoise) != 0 {
+		t.Fatalf("expected skill with rare title/path overlap to stay included, got excluded: %#v", pack.ExcludedNoise)
+	}
+	assertGroupCount(t, pack, PackRoleSupportingContext, 1)
+}
+
+func TestBuildRoleGroupedPackExcludesUnrequestedGenericSkill(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "skill-1",
+			Path:  ".codex/skills/documentation/SKILL.md",
+			Kind:  "protocol",
+			Title: "Documentation Skill",
+			Body:  "generic documentation writing workflow",
+			Metadata: map[string]string{
+				"classifier_model":   "protocol",
+				"classifier_subtype": "skill",
+			},
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "implement refresh token rotation")
+
+	if len(pack.ExcludedNoise) != 1 {
+		t.Fatalf("expected unrequested generic skill to be excluded, got %#v", pack)
+	}
+}
+
+func TestBuildRoleGroupedPackIncludesRequestedProtocolAndTemplateArtifacts(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "contrib-1",
+			Path:  "CONTRIBUTING.md",
+			Kind:  "protocol",
+			Title: "Contribution Guidelines",
+			Body:  "repository contribution constraints",
+			Metadata: map[string]string{
+				"classifier_model": "protocol",
+			},
+		},
+		{
+			ID:    "pr-template-1",
+			Path:  ".github/PULL_REQUEST_TEMPLATE/default.md",
+			Kind:  "template",
+			Title: "Pull Request Template",
+			Body:  "checklist for pull requests",
+			Metadata: map[string]string{
+				"classifier_model": "template",
+			},
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "prepare the pull request workflow and contribution guidelines")
+
+	if len(pack.ExcludedNoise) != 0 {
+		t.Fatalf("expected requested protocol/template artifacts to stay included, got excluded: %#v", pack.ExcludedNoise)
+	}
+	assertGroupCount(t, pack, PackRoleSupportingContext, 2)
+}
+
+func TestBuildRoleGroupedPackExcludesUnrequestedTemplateForImplementationQuery(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "pr-template-1",
+			Path:  ".github/PULL_REQUEST_TEMPLATE/default.md",
+			Kind:  "template",
+			Title: "Pull Request Template",
+			Body:  "checklist for pull requests",
+			Metadata: map[string]string{
+				"classifier_model": "template",
+			},
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "implement refresh token rotation")
+
+	if len(pack.ExcludedNoise) != 1 {
+		t.Fatalf("expected unrequested template to be excluded, got %#v", pack)
 	}
 }
 
@@ -148,6 +314,46 @@ func TestBuildRoleGroupedPackKeepsStaleArtifactWhenQueryTargetsIt(t *testing.T) 
 
 	if len(pack.ExcludedNoise) != 0 {
 		t.Fatalf("expected targeted stale artifact to stay included, got excluded: %#v", pack.ExcludedNoise)
+	}
+	assertGroupCount(t, pack, PackRoleBackgroundDecisions, 1)
+}
+
+func TestBuildRoleGroupedPackKeepsCurrentDesignDocWithDeprecatedBodyText(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:     "design-1",
+			Path:   "docs/design/session-model.md",
+			Kind:   "design",
+			Title:  "Session Model",
+			Status: "current",
+			Body:   "The previous cookie strategy is deprecated; this document describes the current token session model.",
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "understand token session model")
+
+	if len(pack.ExcludedNoise) != 0 {
+		t.Fatalf("expected current design doc to stay included, got excluded: %#v", pack.ExcludedNoise)
+	}
+	assertGroupCount(t, pack, PackRoleBackgroundDecisions, 1)
+}
+
+func TestBuildRoleGroupedPackKeepsArchivedArtifactWhenQueryRequestsHistory(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:      "adr-stale",
+			Path:    "docs/archive/adr/0003-token-cache.md",
+			Kind:    "decision",
+			Subtype: "adr",
+			Title:   "ADR 0003: Token Cache",
+			Status:  "archived",
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "review token cache history and drift")
+
+	if len(pack.ExcludedNoise) != 0 {
+		t.Fatalf("expected historical archive artifact to stay included, got excluded: %#v", pack.ExcludedNoise)
 	}
 	assertGroupCount(t, pack, PackRoleBackgroundDecisions, 1)
 }

@@ -205,7 +205,7 @@ func classifyExcludedNoise(c Candidate, role, queryLower string) (bool, string) 
 		return true, "template-like artifact; query does not ask for templates"
 	case (role == "agent_instruction" || isAgentInstructionPath(c.Path)) && !queryRequestsAgentInstructions(queryLower):
 		return true, "agent instruction artifact; query does not ask for repo agent rules"
-	case role == "skill" && !queryRequestsSkill(queryLower):
+	case role == "skill" && !queryRequestsSkill(c, queryLower):
 		return true, "skill/protocol artifact; query does not ask for skills"
 	case role == "protocol" && !queryRequestsProtocol(queryLower):
 		return true, "process or protocol artifact; query does not ask for procedures or policies"
@@ -324,7 +324,9 @@ func isGeneratedOrVendorCandidate(c Candidate) bool {
 
 func isTemplatePathCandidate(pathLower string) bool {
 	if strings.Contains(pathLower, "/templates/") ||
+		strings.Contains(pathLower, ".github/issue_template/") ||
 		strings.Contains(pathLower, "/.github/issue_template/") ||
+		strings.Contains(pathLower, ".github/pull_request_template/") ||
 		strings.Contains(pathLower, "/.github/pull_request_template/") {
 		return true
 	}
@@ -334,22 +336,89 @@ func isTemplatePathCandidate(pathLower string) bool {
 }
 
 func queryRequestsTemplate(queryLower string) bool {
-	return containsAny(queryLower, "template", "issue template", "pull request template", "pr template")
+	return containsAny(queryLower,
+		"template",
+		"issue template",
+		"pull request template",
+		"pr template",
+		"pull request workflow",
+		"pull request requirements",
+		"pull requests",
+		"pull request",
+	)
 }
 
 func queryRequestsAgentInstructions(queryLower string) bool {
-	if containsAny(queryLower, "agent instruction", "agent instructions", "agents.md", "claude.md", ".cursorrules", "repo instructions", "project instructions", "coding instructions", "developer instructions", "rules for agents") {
+	if containsAny(queryLower,
+		"agent instruction",
+		"agent instructions",
+		"agents.md",
+		"claude.md",
+		".cursorrules",
+		"repo instructions",
+		"repository instructions",
+		"project instructions",
+		"coding instructions",
+		"developer instructions",
+		"repo rules",
+		"repository rules",
+		"project rules",
+		"coding rules",
+		"developer rules",
+		"repo guidelines",
+		"repository guidelines",
+		"project guidelines",
+		"developer guidelines",
+		"development guidelines",
+		"coding guidelines",
+		"repo constraints",
+		"repository constraints",
+		"project constraints",
+		"coding standards",
+		"contributor guidelines",
+		"rules for agents",
+		"before editing",
+		"before changing",
+		"load the project-specific",
+		"load project-specific",
+	) {
 		return true
 	}
-	return (containsAny(queryLower, "claude", "cursor", "codex", "assistant", "agent") && containsAny(queryLower, "instruction", "instructions", "rules", "guidelines"))
+	return (containsAny(queryLower, "claude", "cursor", "codex", "assistant", "agent") && containsAny(queryLower, "instruction", "instructions", "rules", "guidelines", "constraints", "standards")) ||
+		(containsAny(queryLower, "repo", "repository", "project", "developer", "development", "coding", "contributor", "contributors") && containsAny(queryLower, "instruction", "instructions", "rules", "guidelines", "constraints", "standards"))
 }
 
-func queryRequestsSkill(queryLower string) bool {
-	return containsAny(queryLower, "skill", "skills")
+func queryRequestsSkill(c Candidate, queryLower string) bool {
+	if containsAny(queryLower, "skill", "skills", "workflow", "workflows", "playbook", "playbooks") {
+		return true
+	}
+	return packQueryTitlePathOverlap(c, queryLower) >= 2
 }
 
 func queryRequestsProtocol(queryLower string) bool {
-	return containsAny(queryLower, "protocol", "policy", "procedure", "procedures", "runbook", "governance", "contributing", "security policy")
+	return containsAny(queryLower,
+		"protocol",
+		"policy",
+		"policies",
+		"procedure",
+		"procedures",
+		"runbook",
+		"governance",
+		"contributing",
+		"contribution",
+		"guideline",
+		"guidelines",
+		"constraint",
+		"constraints",
+		"rules",
+		"standard",
+		"standards",
+		"security policy",
+		"pull request workflow",
+		"pr workflow",
+		"review workflow",
+		"release workflow",
+	)
 }
 
 func queryRequestsStaleOrHistory(queryLower string) bool {
