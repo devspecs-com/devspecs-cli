@@ -89,7 +89,7 @@ func TestSharedConceptEdgesCapCompactOnlyConfidence(t *testing.T) {
 	})
 
 	edge := singleEdgeByType(t, result.edges, edgeTypeMentionsSameConcept)
-	if edge.Confidence > 0.88 {
+	if edge.Confidence > 0.84 {
 		t.Fatalf("compact/path-only shared concepts should not become high confidence: %.3f", edge.Confidence)
 	}
 }

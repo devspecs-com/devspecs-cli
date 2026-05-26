@@ -754,7 +754,7 @@ func materializeSharedConceptEdges(artifacts []evidenceArtifact, concepts map[st
 			confidence = minFloat(confidence, 0.84)
 		}
 		if semanticCount == 0 {
-			confidence = minFloat(confidence, 0.88)
+			confidence = minFloat(confidence, 0.84)
 		}
 		explanation := fmt.Sprintf("shares rare concept %q", names[0])
 		if len(names) > 1 {
@@ -1469,10 +1469,12 @@ var genericEdgeTerms = map[string]bool{
 	"additions": true, "architecture": true, "config": true, "context": true,
 	"current": true, "deliverables": true, "descriptive": true, "discover": true,
 	"discovery": true, "doc": true, "docs": true, "documentation": true,
-	"file": true, "files": true, "infrastructure": true, "implementation": true,
+	"example": true, "examples": true, "file": true, "files": true,
+	"framework": true, "infrastructure": true, "implementation": true,
 	"layer": true, "local": true, "model": true, "notes": true, "overview": true,
-	"page": true, "preconditions": true, "quick": true, "rationale": true,
-	"requirements": true, "resolution": true, "short": true, "states": true,
+	"ownership": true, "page": true, "preconditions": true, "public": true,
+	"quick": true, "rationale": true, "requirements": true, "resolution": true,
+	"short": true, "states": true, "surface": true, "table": true,
 	"template": true, "test": true, "testing": true, "title": true,
 	"validate": true, "validation": true, "works": true, "your": true,
 }
