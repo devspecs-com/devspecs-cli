@@ -85,6 +85,41 @@ func TestEvidenceStore_DeleteArtifactEvidence(t *testing.T) {
 	assertTableCount(t, db, "concepts", 1)
 }
 
+func TestEvidenceStore_ReplaceRepoEvidenceScopePreservesOtherEvidence(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "devspecs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := "2026-05-26T00:00:00Z"
+	mustNoErr(t, insertEvidenceRepo(db, "repo_evidence", now))
+	mustNoErr(t, db.InsertArtifactDirect("ds_A", "repo_evidence", "plan", "", "A", "draft", "rev_a", now, now))
+	mustNoErr(t, db.InsertArtifactDirect("ds_B", "repo_evidence", "plan", "", "B", "draft", "rev_b", now, now))
+	mustNoErr(t, db.ReplaceRepoEvidence("repo_evidence",
+		[]ConceptInput{{ID: "concept_auth", RepoID: "repo_evidence", Canonical: "auth", Kind: "term", Forms: []string{"auth"}, DocumentFrequency: 2}},
+		[]ConceptMentionInput{{ID: "mention_auth", ConceptID: "concept_auth", ArtifactID: "ds_A", Field: "title", Weight: 0.8}},
+		[]ArtifactEdgeInput{{ID: "edge_auth", RepoID: "repo_evidence", SrcArtifactID: "ds_A", DstArtifactID: "ds_B", EdgeType: "mentions_same_concept", Weight: 0.7, Confidence: 0.8, SourceSignal: "shared_rare_concept"}},
+		now,
+	))
+	scopeConcepts := []ConceptInput{{ID: "concept_ws", RepoID: "repo_evidence", Canonical: "DEV-123", Kind: "workstream_anchor", Forms: []string{"DEV-123"}, DocumentFrequency: 2}}
+	scopeMentions := []ConceptMentionInput{{ID: "mention_ws", ConceptID: "concept_ws", ArtifactID: "ds_A", Field: "workstream_anchor", Weight: 0.9}}
+	scopeEdges := []ArtifactEdgeInput{{ID: "edge_ws", RepoID: "repo_evidence", SrcArtifactID: "ds_A", DstArtifactID: "ds_B", EdgeType: "same_workstream_anchor", Weight: 0.8, Confidence: 0.9, SourceSignal: "workstream_anchor"}}
+	for i := 0; i < 2; i++ {
+		mustNoErr(t, db.ReplaceRepoEvidenceScope("repo_evidence", "workstream_anchor", "same_workstream_anchor", scopeConcepts, scopeMentions, scopeEdges, now))
+	}
+
+	assertTableCount(t, db, "concepts", 2)
+	assertTableCount(t, db, "concept_mentions", 2)
+	assertTableCount(t, db, "artifact_edges", 2)
+	got, err := db.GetArtifactEdges(ArtifactEdgeFilter{RepoID: "repo_evidence", EdgeType: "mentions_same_concept"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("base evidence edge should be preserved, got %d", len(got))
+	}
+}
+
 func insertEvidenceRepo(db *DB, repoID, now string) error {
 	_, err := db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES (?, ?, ?, ?)", repoID, "/tmp/"+repoID, now, now)
 	return err

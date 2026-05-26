@@ -39,16 +39,17 @@ type Scanner struct {
 }
 
 type RunOptions struct {
-	MaxCandidatesByAdapter map[string]int
-	FileWorkerCount        int
-	UseTransaction         bool
-	SkipAuthoredAtLookup   bool
-	FreshIndex             bool
-	IncludeGitEvidence     bool
-	GitMaxCommits          int
-	GitMaxFilesPerCommit   int
-	Progress               func(ProgressEvent)
-	ProgressInterval       time.Duration
+	MaxCandidatesByAdapter    map[string]int
+	FileWorkerCount           int
+	UseTransaction            bool
+	SkipAuthoredAtLookup      bool
+	FreshIndex                bool
+	IncludeGitEvidence        bool
+	IncludeWorkstreamEvidence bool
+	GitMaxCommits             int
+	GitMaxFilesPerCommit      int
+	Progress                  func(ProgressEvent)
+	ProgressInterval          time.Duration
 }
 
 // New creates a Scanner with the given store and adapters.
@@ -238,11 +239,12 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 	} else {
 		result.EvidenceGraph = diagnostics
 	}
-	if opts.IncludeGitEvidence {
-		if diagnostics, err := s.rebuildGitEvidence(ctx, repoRoot, repoID, now, opts); err != nil {
+	if opts.IncludeGitEvidence || opts.IncludeWorkstreamEvidence {
+		if gitDiagnostics, workstreamDiagnostics, err := s.rebuildGitEvidence(ctx, repoRoot, repoID, now, opts); err != nil {
 			return nil, fmt.Errorf("rebuild git evidence: %w", err)
 		} else {
-			result.GitEvidence = diagnostics
+			result.GitEvidence = gitDiagnostics
+			result.WorkstreamEvidence = workstreamDiagnostics
 		}
 	} else if err := s.db.DeleteRepoGitFacts(repoID); err != nil {
 		return nil, fmt.Errorf("delete git facts: %w", err)

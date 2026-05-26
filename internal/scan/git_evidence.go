@@ -124,7 +124,7 @@ type gitArtifactRef struct {
 	highDensity    bool
 }
 
-func (s *Scanner) rebuildGitEvidence(ctx context.Context, repoRoot, repoID, now string, opts RunOptions) (*GitEvidenceDiagnostics, error) {
+func (s *Scanner) rebuildGitEvidence(ctx context.Context, repoRoot, repoID, now string, opts RunOptions) (*GitEvidenceDiagnostics, *WorkstreamEvidenceDiagnostics, error) {
 	maxCommits := opts.GitMaxCommits
 	if maxCommits <= 0 {
 		maxCommits = defaultGitMaxCommits
@@ -138,7 +138,7 @@ func (s *Scanner) rebuildGitEvidence(ctx context.Context, repoRoot, repoID, now 
 		MaxFilesPerCommit: maxFiles,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	diag := gitEvidenceDiagnosticsFromFacts(facts.Diagnostics)
 	commits := make([]store.GitCommitInput, 0, len(facts.Commits))
@@ -167,15 +167,15 @@ func (s *Scanner) rebuildGitEvidence(ctx context.Context, repoRoot, repoID, now 
 		})
 	}
 	if err := s.db.ReplaceRepoGitFacts(repoID, commits, files, now); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	edges, edgeDiag, err := s.materializeGitEdges(repoID, facts)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, edge := range edges {
 		if err := s.db.UpsertArtifactEdge(edge, now); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	diag.EdgesIndexed = len(edges)
@@ -191,7 +191,15 @@ func (s *Scanner) rebuildGitEvidence(ctx context.Context, repoRoot, repoID, now 
 	diag.CappedPathPairs = edgeDiag.cappedPathPairs
 	diag.CappedArtifactEdges = edgeDiag.cappedArtifactEdges
 	diag.TopEdges = edgeDiag.topEdges
-	return diag, nil
+	var workstreamDiag *WorkstreamEvidenceDiagnostics
+	if opts.IncludeWorkstreamEvidence {
+		var err error
+		workstreamDiag, err = s.rebuildWorkstreamEvidence(repoID, now, facts)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return diag, workstreamDiag, nil
 }
 
 func gitEvidenceDiagnosticsFromFacts(d gitfacts.Diagnostics) *GitEvidenceDiagnostics {
