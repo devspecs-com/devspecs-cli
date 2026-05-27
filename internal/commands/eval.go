@@ -53,6 +53,7 @@ func NewEvalCmd() *cobra.Command {
 		experimentalAnchorFirstRanking  bool
 		experimentalAnchorFirstMode     string
 		packDiagnostics                 bool
+		graphDiagnostics                bool
 		contextTokenBudget              int
 		evalIndexCacheDir               string
 		refreshIndexCache               bool
@@ -110,7 +111,7 @@ func NewEvalCmd() *cobra.Command {
 			if cmd.Flags().Changed("experimental-anchor-first-mode") {
 				experimentalAnchorFirstRanking = true
 			}
-			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, findRuntime, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput, experimentalAnchorFirstRanking, experimentalAnchorFirstMode, packDiagnostics, evalIndexCacheDir, refreshIndexCache, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
+			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, findRuntime, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput, experimentalAnchorFirstRanking, experimentalAnchorFirstMode, packDiagnostics, graphDiagnostics, evalIndexCacheDir, refreshIndexCache, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
 			if err != nil {
 				return err
 			}
@@ -214,6 +215,7 @@ func NewEvalCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&experimentalAnchorFirstRanking, "experimental-anchor-first-ranking", false, "Use opt-in repo-local TF-IDF anchor-first ranking during retrieval evals")
 	cmd.Flags().StringVar(&experimentalAnchorFirstMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, strong_field, or strict")
 	cmd.Flags().BoolVar(&packDiagnostics, "pack-diagnostics", false, "Record role-grouped pack diagnostics in per-case eval JSON without changing scoring")
+	cmd.Flags().BoolVar(&graphDiagnostics, "graph-diagnostics", false, "Record opt-in find graph context diagnostics in live command eval JSON without changing scoring")
 	cmd.Flags().StringVar(&evalIndexCacheDir, "eval-index-cache-dir", "", "Directory for strict indexed eval corpus cache; disabled when empty")
 	cmd.Flags().BoolVar(&refreshIndexCache, "refresh-index-cache", false, "Refresh the indexed eval corpus cache entry instead of reusing it")
 	cmd.Flags().IntVar(&maxCorpusFiles, "eval-max-corpus-files", 0, "Maximum indexed eval corpus artifacts after indexing; 0 means unlimited")
@@ -320,7 +322,7 @@ func normalizeEvalCommand(command string) (string, error) {
 	}
 }
 
-func runLiveCommandEval(command, findRuntime, fixtureAbs string, cases []evalharness.CaseSpec, includeTests, includeCodeComments, experimentalAnchorFirstRanking bool, experimentalAnchorFirstMode string) (map[string]evalharness.CommandCaseOutput, error) {
+func runLiveCommandEval(command, findRuntime, fixtureAbs string, cases []evalharness.CaseSpec, includeTests, includeCodeComments, experimentalAnchorFirstRanking bool, experimentalAnchorFirstMode string, graphDiagnostics bool) (map[string]evalharness.CommandCaseOutput, error) {
 	tempHome, err := os.MkdirTemp("", "devspecs-live-eval-*")
 	if err != nil {
 		return nil, fmt.Errorf("create live command eval home: %w", err)
@@ -393,7 +395,7 @@ func runLiveCommandEval(command, findRuntime, fixtureAbs string, cases []evalhar
 	for _, spec := range cases {
 		switch command {
 		case "find":
-			output, err := runFindForEval(spec, candidatesByPath, experimentalAnchorFirstRanking, experimentalAnchorFirstMode)
+			output, err := runFindForEval(spec, candidatesByPath, experimentalAnchorFirstRanking, experimentalAnchorFirstMode, graphDiagnostics)
 			if err != nil {
 				return nil, err
 			}
@@ -411,9 +413,12 @@ func runLiveCommandEval(command, findRuntime, fixtureAbs string, cases []evalhar
 	return out, nil
 }
 
-func runFindForEval(spec evalharness.CaseSpec, candidatesByPath map[string]retrieval.Candidate, experimentalAnchorFirstRanking bool, experimentalAnchorFirstMode string) (evalharness.CommandCaseOutput, error) {
+func runFindForEval(spec evalharness.CaseSpec, candidatesByPath map[string]retrieval.Candidate, experimentalAnchorFirstRanking bool, experimentalAnchorFirstMode string, graphDiagnostics bool) (evalharness.CommandCaseOutput, error) {
 	cmd := NewFindCmd()
 	args := []string{"--json", "--no-refresh"}
+	if graphDiagnostics {
+		args = append(args, "--pack", "--graph-diagnostics")
+	}
 	if experimentalAnchorFirstRanking {
 		args = append(args, "--experimental-anchor-first-ranking")
 		if mode := retrieval.NormalizeAnchorFirstMode(experimentalAnchorFirstMode); mode != "" && mode != retrieval.DefaultAnchorFirstMode {
@@ -429,7 +434,17 @@ func runFindForEval(spec evalharness.CaseSpec, candidatesByPath map[string]retri
 		return evalharness.CommandCaseOutput{}, fmt.Errorf("run find for case %s: %w", spec.ID, err)
 	}
 	var rows []FindResult
-	if err := json.Unmarshal(buf.Bytes(), &rows); err != nil {
+	var graphContext *evalharness.GraphContext
+	var graphDiagnosticsOutput *evalharness.GraphDiagnostics
+	if graphDiagnostics {
+		var obj FindPackOutput
+		if err := json.Unmarshal(buf.Bytes(), &obj); err != nil {
+			return evalharness.CommandCaseOutput{}, fmt.Errorf("parse find graph JSON for case %s: %w", spec.ID, err)
+		}
+		rows = obj.RankedResults
+		graphContext = evalGraphContext(obj.GraphContext)
+		graphDiagnosticsOutput = evalGraphDiagnostics(obj.GraphDiagnostics)
+	} else if err := json.Unmarshal(buf.Bytes(), &rows); err != nil {
 		return evalharness.CommandCaseOutput{}, fmt.Errorf("parse find JSON for case %s: %w", spec.ID, err)
 	}
 	artifacts := make([]retrieval.Candidate, 0, len(rows))
@@ -459,7 +474,153 @@ func runFindForEval(spec evalharness.CaseSpec, candidatesByPath map[string]retri
 		artifacts = append(artifacts, candidate)
 		reasons = append(reasons, evalharness.ArtifactReason{Path: candidate.Path, Reasons: row.Reasons})
 	}
-	return evalharness.CommandCaseOutput{Artifacts: artifacts, ArtifactReasons: reasons}, nil
+	graphArtifacts, graphReasons := evalGraphContextArtifacts(graphContext, candidatesByPath)
+	return evalharness.CommandCaseOutput{
+		Artifacts:                   artifacts,
+		ArtifactReasons:             reasons,
+		GraphContext:                graphContext,
+		GraphDiagnostics:            graphDiagnosticsOutput,
+		GraphContextArtifacts:       graphArtifacts,
+		GraphContextArtifactReasons: graphReasons,
+	}, nil
+}
+
+func evalGraphContext(ctx *FindGraphPackContext) *evalharness.GraphContext {
+	if ctx == nil {
+		return nil
+	}
+	out := &evalharness.GraphContext{
+		Mode:            ctx.Mode,
+		EvidenceMode:    ctx.EvidenceMode,
+		Title:           ctx.Title,
+		CandidateCount:  ctx.CandidateCount,
+		SuppressedCount: ctx.SuppressedCount,
+		Counts:          ctx.Counts,
+		Notes:           ctx.Notes,
+	}
+	for _, group := range ctx.Groups {
+		items := make([]evalharness.GraphCandidate, 0, len(group.Items))
+		for _, item := range group.Items {
+			items = append(items, evalGraphCandidate(item))
+		}
+		out.Groups = append(out.Groups, evalharness.GraphContextGroup{
+			Role:  group.Role,
+			Title: group.Title,
+			Items: items,
+		})
+	}
+	return out
+}
+
+func evalGraphDiagnostics(diag *FindGraphDiagnostics) *evalharness.GraphDiagnostics {
+	if diag == nil {
+		return nil
+	}
+	out := &evalharness.GraphDiagnostics{
+		Mode:            diag.Mode,
+		SeedCount:       diag.SeedCount,
+		CandidateCount:  diag.CandidateCount,
+		SuppressedCount: diag.SuppressedCount,
+		Counts:          diag.Counts,
+		Notes:           diag.Notes,
+	}
+	for _, candidate := range diag.Candidates {
+		out.Candidates = append(out.Candidates, evalGraphCandidate(candidate))
+	}
+	for _, suppression := range diag.Suppressed {
+		out.Suppressed = append(out.Suppressed, evalharness.GraphSuppression{
+			Path:       suppression.Path,
+			SeedPath:   suppression.SeedPath,
+			EdgeType:   suppression.EdgeType,
+			Confidence: suppression.Confidence,
+			Reason:     suppression.Reason,
+		})
+	}
+	return out
+}
+
+func evalGraphCandidate(candidate FindGraphCandidate) evalharness.GraphCandidate {
+	return evalharness.GraphCandidate{
+		ID:                candidate.ID,
+		ShortID:           candidate.ShortID,
+		Path:              candidate.Path,
+		SourcePath:        candidate.SourcePath,
+		Kind:              candidate.Kind,
+		Subtype:           candidate.Subtype,
+		Title:             candidate.Title,
+		Role:              candidate.Role,
+		RoleReason:        candidate.RoleReason,
+		SeedPath:          candidate.SeedPath,
+		AdmissionEdgeType: candidate.AdmissionEdgeType,
+		Confidence:        candidate.Confidence,
+		Weight:            candidate.Weight,
+		SourceSignal:      candidate.SourceSignal,
+		CompanionDerived:  candidate.CompanionDerived,
+		Receipt:           candidate.Receipt,
+		SupportReceipts:   candidate.SupportReceipts,
+	}
+}
+
+func evalGraphContextArtifacts(ctx *evalharness.GraphContext, candidatesByPath map[string]retrieval.Candidate) ([]retrieval.Candidate, []evalharness.ArtifactReason) {
+	if ctx == nil {
+		return nil, nil
+	}
+	var artifacts []retrieval.Candidate
+	var reasons []evalharness.ArtifactReason
+	seen := map[string]bool{}
+	for _, group := range ctx.Groups {
+		for _, item := range group.Items {
+			path := filepath.ToSlash(firstNonEmpty(item.Path, item.SourcePath))
+			if path == "" || seen[path] {
+				continue
+			}
+			seen[path] = true
+			candidate := candidatesByPath[path]
+			if candidate.Path == "" && item.SourcePath != "" {
+				candidate = candidatesByPath[filepath.ToSlash(item.SourcePath)]
+			}
+			if candidate.Path == "" {
+				candidate = retrieval.Candidate{
+					ID:      item.ID,
+					Path:    path,
+					Kind:    item.Kind,
+					Subtype: item.Subtype,
+					Title:   item.Title,
+					Source:  filepath.ToSlash(item.SourcePath),
+					Metadata: map[string]string{
+						"short_id": item.ShortID,
+					},
+				}
+			}
+			candidate.Path = path
+			if item.SourcePath != "" {
+				candidate.Source = filepath.ToSlash(item.SourcePath)
+			}
+			artifacts = append(artifacts, candidate)
+			reasons = append(reasons, evalharness.ArtifactReason{
+				Path:    candidate.Path,
+				Reasons: evalGraphCandidateReasons(item),
+			})
+		}
+	}
+	return artifacts, reasons
+}
+
+func evalGraphCandidateReasons(item evalharness.GraphCandidate) []string {
+	var reasons []string
+	if item.AdmissionEdgeType != "" {
+		reasons = append(reasons, "graph edge: "+item.AdmissionEdgeType)
+	}
+	if item.SourceSignal != "" {
+		reasons = append(reasons, "graph source signal: "+item.SourceSignal)
+	}
+	if item.SeedPath != "" {
+		reasons = append(reasons, "graph seed: "+item.SeedPath)
+	}
+	if item.Receipt != "" {
+		reasons = append(reasons, item.Receipt)
+	}
+	return reasons
 }
 
 func runResumeQueryForEval(spec evalharness.CaseSpec, candidatesByPath map[string]retrieval.Candidate) (evalharness.CommandCaseOutput, error) {

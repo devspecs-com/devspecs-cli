@@ -559,7 +559,7 @@ func TestRunFindForEvalUsesLineScopedPath(t *testing.T) {
 	output, err := runFindForEval(evalharness.CaseSpec{
 		ID:    "camel-tool-cache",
 		Query: "what tests cover testputandgetexposedtool behavior",
-	}, candidatesByArtifactPath(candidates), false, retrieval.AnchorFirstModeV1)
+	}, candidatesByArtifactPath(candidates), false, retrieval.AnchorFirstModeV1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,5 +572,56 @@ func TestRunFindForEvalUsesLineScopedPath(t *testing.T) {
 	}
 	if output.Artifacts[0].Source != filepath.ToSlash(relPath) {
 		t.Fatalf("first eval artifact source = %q, want %q", output.Artifacts[0].Source, filepath.ToSlash(relPath))
+	}
+}
+
+func TestRunFindForEvalRecordsGraphContextSeparately(t *testing.T) {
+	repoDir, _ := setupReadEnv(t)
+	seedGraphDiagnosticArtifacts(t, repoDir)
+
+	db, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	candidates, err := loadRetrievalCandidates(db, store.FilterParams{RepoRoot: canonicalRepoRoot(repoDir)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := runFindForEval(evalharness.CaseSpec{
+		ID:    "session-graph",
+		Query: "rotatetoken implementation",
+	}, candidatesByArtifactPath(candidates), false, retrieval.AnchorFirstModeV1, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(output.Artifacts) == 0 {
+		t.Fatal("runFindForEval returned no direct artifacts")
+	}
+	if output.GraphContext == nil || output.GraphDiagnostics == nil {
+		t.Fatalf("expected graph context and diagnostics: %#v", output)
+	}
+	if output.GraphContext.CandidateCount != 1 || len(output.GraphContextArtifacts) != 1 {
+		t.Fatalf("expected one graph context artifact: %#v", output.GraphContext)
+	}
+	graphPath := output.GraphContextArtifacts[0].Path
+	for _, direct := range output.Artifacts {
+		if direct.Path == graphPath {
+			t.Fatalf("graph context artifact leaked into direct artifacts: %s", graphPath)
+		}
+	}
+	if output.GraphContextArtifacts[0].Source != "src/session.test.ts" {
+		t.Fatalf("graph artifact source = %q", output.GraphContextArtifacts[0].Source)
+	}
+}
+
+func TestEvalCommand_GraphDiagnosticsRequiresFindCommand(t *testing.T) {
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented"), "--graph-diagnostics", "--no-save"})
+	cmd.SetOut(&bytes.Buffer{})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "--graph-diagnostics requires --command find") {
+		t.Fatalf("expected graph diagnostics command validation error, got %v", err)
 	}
 }

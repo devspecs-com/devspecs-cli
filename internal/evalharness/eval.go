@@ -111,6 +111,7 @@ type Options struct {
 	ExperimentalAnchorFirstRanking  bool
 	ExperimentalAnchorFirstMode     string
 	PackDiagnostics                 bool
+	GraphDiagnostics                bool
 	ContextTokenBudget              int
 	IndexCacheDir                   string
 	RefreshIndexCache               bool
@@ -126,9 +127,69 @@ type Options struct {
 type CommandRunner func(fixtureAbs string, cases []CaseSpec) (map[string]CommandCaseOutput, error)
 
 type CommandCaseOutput struct {
-	Artifacts       []retrieval.Candidate
-	Context         string
-	ArtifactReasons []ArtifactReason
+	Artifacts                   []retrieval.Candidate
+	Context                     string
+	ArtifactReasons             []ArtifactReason
+	GraphContext                *GraphContext
+	GraphDiagnostics            *GraphDiagnostics
+	GraphContextArtifacts       []retrieval.Candidate
+	GraphContextArtifactReasons []ArtifactReason
+}
+
+type GraphContext struct {
+	Mode            string              `json:"mode"`
+	EvidenceMode    string              `json:"evidence_mode,omitempty"`
+	Title           string              `json:"title,omitempty"`
+	CandidateCount  int                 `json:"candidate_count"`
+	SuppressedCount int                 `json:"suppressed_count,omitempty"`
+	Counts          map[string]int      `json:"counts,omitempty"`
+	Groups          []GraphContextGroup `json:"groups,omitempty"`
+	Notes           []string            `json:"notes,omitempty"`
+}
+
+type GraphContextGroup struct {
+	Role  string           `json:"role"`
+	Title string           `json:"title"`
+	Items []GraphCandidate `json:"items"`
+}
+
+type GraphDiagnostics struct {
+	Mode            string             `json:"mode"`
+	SeedCount       int                `json:"seed_count"`
+	CandidateCount  int                `json:"candidate_count"`
+	SuppressedCount int                `json:"suppressed_count,omitempty"`
+	Counts          map[string]int     `json:"counts,omitempty"`
+	Candidates      []GraphCandidate   `json:"candidates,omitempty"`
+	Suppressed      []GraphSuppression `json:"suppressed,omitempty"`
+	Notes           []string           `json:"notes,omitempty"`
+}
+
+type GraphCandidate struct {
+	ID                string   `json:"id,omitempty"`
+	ShortID           string   `json:"short_id,omitempty"`
+	Path              string   `json:"path,omitempty"`
+	SourcePath        string   `json:"source_path,omitempty"`
+	Kind              string   `json:"kind,omitempty"`
+	Subtype           string   `json:"subtype,omitempty"`
+	Title             string   `json:"title,omitempty"`
+	Role              string   `json:"role,omitempty"`
+	RoleReason        string   `json:"role_reason,omitempty"`
+	SeedPath          string   `json:"seed_path,omitempty"`
+	AdmissionEdgeType string   `json:"admission_edge_type,omitempty"`
+	Confidence        float64  `json:"confidence,omitempty"`
+	Weight            float64  `json:"weight,omitempty"`
+	SourceSignal      string   `json:"source_signal,omitempty"`
+	CompanionDerived  bool     `json:"companion_derived,omitempty"`
+	Receipt           string   `json:"receipt,omitempty"`
+	SupportReceipts   []string `json:"support_receipts,omitempty"`
+}
+
+type GraphSuppression struct {
+	Path       string  `json:"path,omitempty"`
+	SeedPath   string  `json:"seed_path,omitempty"`
+	EdgeType   string  `json:"edge_type,omitempty"`
+	Confidence float64 `json:"confidence,omitempty"`
+	Reason     string  `json:"reason"`
 }
 
 type CaseFile struct {
@@ -312,6 +373,17 @@ type CaseResult struct {
 	ArtifactsIncluded                []string                   `json:"artifacts_included"`
 	ArtifactReasons                  []ArtifactReason           `json:"artifact_reasons"`
 	PackDiagnostics                  *retrieval.RoleGroupedPack `json:"pack_diagnostics,omitempty"`
+	GraphContext                     *GraphContext              `json:"graph_context,omitempty"`
+	GraphDiagnostics                 *GraphDiagnostics          `json:"graph_diagnostics,omitempty"`
+	GraphContextArtifacts            []string                   `json:"graph_context_artifacts,omitempty"`
+	GraphContextArtifactReasons      []ArtifactReason           `json:"graph_context_artifact_reasons,omitempty"`
+	GraphContextDevSpecsTokens       int                        `json:"graph_context_devspecs_tokens,omitempty"`
+	GraphContextRelevantIncluded     []string                   `json:"graph_context_relevant_included,omitempty"`
+	GraphContextIrrelevantIncluded   []string                   `json:"graph_context_irrelevant_included,omitempty"`
+	GraphContextArtifactPrecision    float64                    `json:"graph_context_artifact_precision,omitempty"`
+	GraphContextAgentMetrics         *CaseAgentMetrics          `json:"graph_context_agent_metrics,omitempty"`
+	GraphContextArtifactGrades       []ArtifactGrade            `json:"graph_context_artifact_grades,omitempty"`
+	GraphAssistedRelevantIncluded    []string                   `json:"graph_assisted_relevant_included,omitempty"`
 	RelatedArtifacts                 []string                   `json:"related_artifacts,omitempty"`
 	RelatedArtifactReasons           []ArtifactReason           `json:"related_artifact_reasons,omitempty"`
 	RelatedDevSpecsTokens            int                        `json:"related_devspecs_tokens,omitempty"`
@@ -381,6 +453,13 @@ type Summary struct {
 	MeanRelatedArtifactPrecision             float64       `json:"mean_related_artifact_precision,omitempty"`
 	MeanRelatedGradedPrecision               float64       `json:"mean_related_graded_precision,omitempty"`
 	RelatedGradeCounts                       GradeCounts   `json:"related_grade_counts,omitempty"`
+	GraphContextCases                        int           `json:"graph_context_cases,omitempty"`
+	GraphContextArtifactCount                int           `json:"graph_context_artifact_count,omitempty"`
+	GraphContextRelevantCount                int           `json:"graph_context_relevant_count,omitempty"`
+	GraphAssistedRelevantCount               int           `json:"graph_assisted_relevant_count,omitempty"`
+	MeanGraphContextArtifactPrecision        float64       `json:"mean_graph_context_artifact_precision,omitempty"`
+	MeanGraphContextGradedPrecision          float64       `json:"mean_graph_context_graded_precision,omitempty"`
+	GraphContextGradeCounts                  GradeCounts   `json:"graph_context_grade_counts,omitempty"`
 	CombinedTieredContextSufficiencyCases    int           `json:"combined_tiered_context_sufficiency_cases,omitempty"`
 	CombinedTieredContextSufficiencyPassed   int           `json:"combined_tiered_context_sufficiency_passed,omitempty"`
 	CombinedTieredContextSufficiencyPassRate float64       `json:"combined_tiered_context_sufficiency_pass_rate,omitempty"`
@@ -644,6 +723,21 @@ func Run(fixture string, opts Options) (*Result, error) {
 		if len(relatedFiles) > 0 {
 			relatedTokens = counter.Count(relatedContext)
 		}
+		var graphContext *GraphContext
+		var graphDiagnostics *GraphDiagnostics
+		var graphContextFiles []File
+		var graphContextReasons []ArtifactReason
+		graphContextTokens := 0
+		if commandOutputs != nil {
+			output := commandOutputs[c.ID]
+			graphContext = output.GraphContext
+			graphDiagnostics = output.GraphDiagnostics
+			graphContextFiles = output.GraphContextArtifacts
+			graphContextReasons = output.GraphContextArtifactReasons
+			if len(graphContextFiles) > 0 {
+				graphContextTokens = counter.Count(renderContext(c.Query+" graph context", graphContextFiles))
+			}
+		}
 		queryContext := renderContext(c.Query, queryFiles)
 
 		cr := CaseResult{
@@ -658,6 +752,11 @@ func Run(fixture string, opts Options) (*Result, error) {
 			ContextTokenBudget:           contextTokenBudgetForCase(opts),
 			ArtifactsIncluded:            rels(devspecsFiles),
 			ArtifactReasons:              artifactReasons,
+			GraphContext:                 graphContext,
+			GraphDiagnostics:             graphDiagnostics,
+			GraphContextArtifacts:        rels(graphContextFiles),
+			GraphContextArtifactReasons:  graphContextReasons,
+			GraphContextDevSpecsTokens:   graphContextTokens,
 			RelatedArtifacts:             rels(relatedFiles),
 			RelatedArtifactReasons:       relatedReasons,
 			RelatedDevSpecsTokens:        relatedTokens,
@@ -682,6 +781,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 		}
 		applyPackingMetrics(&cr, devspecsFiles)
 		applyArtifactMetrics(&cr, c)
+		applyGraphContextMetrics(&cr, c, graphContextFiles, graphContextReasons)
 		applyDiscoveryDiagnostics(&cr, c, corpusPaths)
 		applyConceptMissDiagnostics(&cr, c, queryFiles, opts.ExperimentalGlossaryConcepts)
 		cr.ContextSufficiency = evaluateSufficiency(c.SuccessCriteria, devContext, cr.ArtifactsIncluded)
@@ -2061,6 +2161,30 @@ func applyRelatedTierMetrics(cr *CaseResult, spec CaseSpec, relatedFiles []File,
 	cr.RelatedArtifactGrades = related.ArtifactGrades
 }
 
+func applyGraphContextMetrics(cr *CaseResult, spec CaseSpec, graphFiles []File, graphReasons []ArtifactReason) {
+	if len(graphFiles) == 0 {
+		return
+	}
+	graph := CaseResult{
+		ArtifactsIncluded: rels(graphFiles),
+		ArtifactReasons:   graphReasons,
+	}
+	applyArtifactMetrics(&graph, spec)
+	applyAgentCaseMetrics(&graph, spec, graphFiles)
+	cr.GraphContextRelevantIncluded = graph.RelevantIncluded
+	cr.GraphContextIrrelevantIncluded = graph.IrrelevantIncluded
+	cr.GraphContextArtifactPrecision = graph.ArtifactPrecision
+	cr.GraphContextAgentMetrics = &graph.AgentMetrics
+	cr.GraphContextArtifactGrades = graph.ArtifactGrades
+
+	direct := stringSet(cr.ArtifactsIncluded)
+	for _, path := range graph.RelevantIncluded {
+		if !evalArtifactPathInSetByIdentity(path, direct) {
+			cr.GraphAssistedRelevantIncluded = append(cr.GraphAssistedRelevantIncluded, path)
+		}
+	}
+}
+
 func applyPrimaryFalsePositiveDiagnostics(cr *CaseResult, spec CaseSpec) {
 	if len(cr.ArtifactGrades) == 0 {
 		return
@@ -2666,6 +2790,7 @@ func summarize(cases []CaseResult) Summary {
 	helpfulCases := 0
 	backgroundCases := 0
 	relatedCases := 0
+	graphContextCases := 0
 	for _, c := range cases {
 		reductionsFull = append(reductionsFull, c.TokenReductionVsFullPlanning)
 		reductionsQueryFile = append(reductionsQueryFile, c.TokenReductionVsQueryFile)
@@ -2695,6 +2820,17 @@ func summarize(cases []CaseResult) Summary {
 			s.MeanRelatedArtifactPrecision += c.RelatedArtifactPrecision
 			s.MeanRelatedGradedPrecision += c.RelatedAgentMetrics.GradedPrecision
 			addGradeCounts(&s.RelatedGradeCounts, c.RelatedAgentMetrics.GradeCounts)
+		}
+		if len(c.GraphContextArtifacts) > 0 {
+			graphContextCases++
+			s.GraphContextArtifactCount += len(c.GraphContextArtifacts)
+			s.GraphContextRelevantCount += len(c.GraphContextRelevantIncluded)
+			s.GraphAssistedRelevantCount += len(c.GraphAssistedRelevantIncluded)
+			s.MeanGraphContextArtifactPrecision += c.GraphContextArtifactPrecision
+			if c.GraphContextAgentMetrics != nil {
+				s.MeanGraphContextGradedPrecision += c.GraphContextAgentMetrics.GradedPrecision
+				addGradeCounts(&s.GraphContextGradeCounts, c.GraphContextAgentMetrics.GradeCounts)
+			}
 		}
 		s.FailedThresholdCount += len(c.ThresholdFailures)
 		if c.ContextSufficiency.Configured {
@@ -2738,6 +2874,11 @@ func summarize(cases []CaseResult) Summary {
 	if relatedCases > 0 {
 		s.MeanRelatedArtifactPrecision /= float64(relatedCases)
 		s.MeanRelatedGradedPrecision /= float64(relatedCases)
+	}
+	s.GraphContextCases = graphContextCases
+	if graphContextCases > 0 {
+		s.MeanGraphContextArtifactPrecision /= float64(graphContextCases)
+		s.MeanGraphContextGradedPrecision /= float64(graphContextCases)
 	}
 	if s.ContextSufficiencyCases > 0 {
 		s.ContextSufficiencyPassRate = float64(s.ContextSufficiencyPassed) / float64(s.ContextSufficiencyCases)
@@ -2916,6 +3057,13 @@ func FormatText(r *Result) string {
 			r.Summary.RelatedArtifactCount,
 			pct(r.Summary.MeanRelatedArtifactPrecision),
 			pct(r.Summary.MeanRelatedGradedPrecision))
+	}
+	if r.Summary.GraphContextArtifactCount > 0 {
+		fmt.Fprintf(&b, "- Graph context: %d artifacts / %d graph-assisted relevant / precision %s / graded precision %s\n",
+			r.Summary.GraphContextArtifactCount,
+			r.Summary.GraphAssistedRelevantCount,
+			pct(r.Summary.MeanGraphContextArtifactPrecision),
+			pct(r.Summary.MeanGraphContextGradedPrecision))
 	}
 	if r.Summary.ContextSufficiencyCases > 0 {
 		fmt.Fprintf(&b, "- Context sufficiency pass rate: %d/%d = %s\n", r.Summary.ContextSufficiencyPassed, r.Summary.ContextSufficiencyCases, pct(r.Summary.ContextSufficiencyPassRate))
@@ -3113,6 +3261,11 @@ func FormatText(r *Result) string {
 			if c.CombinedTieredContextSufficiency.Configured {
 				fmt.Fprintf(&b, "- Combined tiered sufficiency: %s\n", passFail(c.CombinedTieredContextSufficiency.Passed))
 			}
+		}
+		if len(c.GraphContextArtifacts) > 0 {
+			fmt.Fprintf(&b, "- Graph context artifacts: %s\n", listOrNone(c.GraphContextArtifacts))
+			fmt.Fprintf(&b, "- Graph context precision: %d/%d = %s\n", len(c.GraphContextRelevantIncluded), len(c.GraphContextArtifacts), pct(c.GraphContextArtifactPrecision))
+			fmt.Fprintf(&b, "- Graph-assisted relevant: %s\n", listOrNone(c.GraphAssistedRelevantIncluded))
 		}
 		fmt.Fprintf(&b, "- Relevant included: %s\n", listOrNone(c.RelevantIncluded))
 		fmt.Fprintf(&b, "- Irrelevant included: %s\n", listOrNone(c.IrrelevantIncluded))

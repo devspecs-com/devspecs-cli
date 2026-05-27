@@ -193,6 +193,37 @@ func TestRun_PackDiagnostics(t *testing.T) {
 	}
 }
 
+func TestApplyGraphContextMetricsSeparatesGraphAssistedHits(t *testing.T) {
+	cr := CaseResult{
+		ArtifactsIncluded: []string{"src/auth/session.go"},
+	}
+	spec := CaseSpec{
+		ExpectedRelevant: []ExpectedArtifact{
+			{Path: "src/auth/session.go", Importance: "must"},
+			{Path: "src/auth/session_test.go", Importance: "helpful"},
+		},
+	}
+	graphFiles := []File{
+		{Path: "src/auth/session_test.go", Kind: "source_context", Subtype: "test_case", Title: "TestSession"},
+	}
+	graphReasons := []ArtifactReason{{Path: "src/auth/session_test.go", Reasons: []string{"graph edge: tests_source"}}}
+
+	applyGraphContextMetrics(&cr, spec, graphFiles, graphReasons)
+
+	if len(cr.GraphContextRelevantIncluded) != 1 || cr.GraphContextRelevantIncluded[0] != "src/auth/session_test.go" {
+		t.Fatalf("graph relevant included = %#v", cr.GraphContextRelevantIncluded)
+	}
+	if len(cr.GraphAssistedRelevantIncluded) != 1 || cr.GraphAssistedRelevantIncluded[0] != "src/auth/session_test.go" {
+		t.Fatalf("graph assisted relevant = %#v", cr.GraphAssistedRelevantIncluded)
+	}
+	if cr.GraphContextArtifactPrecision != 1 {
+		t.Fatalf("graph context precision = %.3f", cr.GraphContextArtifactPrecision)
+	}
+	if len(cr.GraphContextArtifactGrades) != 1 || cr.GraphContextArtifactGrades[0].Grade != "helpful" {
+		t.Fatalf("graph artifact grades = %#v", cr.GraphContextArtifactGrades)
+	}
+}
+
 func TestDiagnostics_ClassifiesAsciiDocGaps(t *testing.T) {
 	if got := diagnosticRole("docs/architecture/runtime.adoc"); got != "asciidoc" {
 		t.Fatalf("diagnosticRole(.adoc) = %q", got)

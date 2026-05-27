@@ -156,7 +156,7 @@ type firstIndexWeakSpot struct {
 	Message string `json:"message"`
 }
 
-func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed bool, commandUnderTest, findRuntime string, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput, experimentalAnchorFirstRanking bool, experimentalAnchorFirstMode string, packDiagnostics bool, evalIndexCacheDir string, refreshIndexCache bool, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec int, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull float64) (evalharness.Options, error) {
+func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed bool, commandUnderTest, findRuntime string, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput, experimentalAnchorFirstRanking bool, experimentalAnchorFirstMode string, packDiagnostics, graphDiagnostics bool, evalIndexCacheDir string, refreshIndexCache bool, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec int, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull float64) (evalharness.Options, error) {
 	normalizedAnchorMode := retrieval.NormalizeAnchorFirstMode(experimentalAnchorFirstMode)
 	if normalizedAnchorMode == "" {
 		return evalharness.Options{}, fmt.Errorf("unknown --experimental-anchor-first-mode; valid values: %s", strings.Join(retrieval.ValidAnchorFirstModes(), ", "))
@@ -174,6 +174,7 @@ func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed b
 		ExperimentalAnchorFirstRanking:  experimentalAnchorFirstRanking,
 		ExperimentalAnchorFirstMode:     normalizedAnchorMode,
 		PackDiagnostics:                 packDiagnostics,
+		GraphDiagnostics:                graphDiagnostics,
 		ContextTokenBudget:              contextTokenBudget,
 		IndexCacheDir:                   strings.TrimSpace(evalIndexCacheDir),
 		RefreshIndexCache:               refreshIndexCache,
@@ -206,6 +207,9 @@ func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed b
 		if err != nil {
 			return evalharness.Options{}, err
 		}
+		if graphDiagnostics && normalized != "find" {
+			return evalharness.Options{}, fmt.Errorf("--graph-diagnostics requires --command find")
+		}
 		opts.CommandUnderTest = normalized
 		normalizedRuntime, err := indexquery.ParseRuntimeMode(findRuntime)
 		if err != nil {
@@ -213,12 +217,17 @@ func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed b
 		}
 		opts.FindRuntime = string(normalizedRuntime)
 		opts.CommandRunner = func(fixtureAbs string, cases []evalharness.CaseSpec) (map[string]evalharness.CommandCaseOutput, error) {
-			return runLiveCommandEval(normalized, string(normalizedRuntime), fixtureAbs, cases, includeTests, includeCodeComments, experimentalAnchorFirstRanking, normalizedAnchorMode)
+			return runLiveCommandEval(normalized, string(normalizedRuntime), fixtureAbs, cases, includeTests, includeCodeComments, experimentalAnchorFirstRanking, normalizedAnchorMode, graphDiagnostics)
 		}
 	} else if strings.TrimSpace(findRuntime) != "" {
+		if graphDiagnostics {
+			return evalharness.Options{}, fmt.Errorf("--graph-diagnostics requires --command find")
+		}
 		if _, err := indexquery.ParseRuntimeMode(findRuntime); err != nil {
 			return evalharness.Options{}, err
 		}
+	} else if graphDiagnostics {
+		return evalharness.Options{}, fmt.Errorf("--graph-diagnostics requires --command find")
 	}
 	if cmd.Flags().Changed("min-recall") {
 		opts.MinRecall = &minRecall
