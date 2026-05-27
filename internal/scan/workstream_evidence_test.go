@@ -73,6 +73,9 @@ func TestWorkstreamEvidence_TaskIDConnectsPlanAndChangedSource(t *testing.T) {
 	if len(built.diagnostics.TopClusters) == 0 || built.diagnostics.TopClusters[0].PackStrength != workstreamPackStrengthStrong {
 		t.Fatalf("expected strong pack candidate, got %#v", built.diagnostics.TopClusters)
 	}
+	if built.diagnostics.TopClusters[0].Dialect != workstreamDialectTicketLikeUpper {
+		t.Fatalf("expected ticket-like dialect, got %#v", built.diagnostics.TopClusters[0])
+	}
 }
 
 func TestWorkstreamEvidence_SlugWindowsConnectPlanAndChangedSource(t *testing.T) {
@@ -306,4 +309,217 @@ func TestWorkstreamEvidence_RejectsDateLikeBareGithubRef(t *testing.T) {
 	if len(extracted.rejected) == 0 || extracted.rejected[0].reason != "date_like_number" {
 		t.Fatalf("expected date_like_number rejection, got %#v", extracted.rejected)
 	}
+}
+
+func TestWorkstreamEvidence_ExplicitWorkRefDialects(t *testing.T) {
+	extracted := extractFormalWorkstreamAnchors("See PR-42, pull/43, ISSUE-44, issues/45, GH-46, and #47.", "body")
+	got := map[string]string{}
+	for _, anchor := range extracted.anchors {
+		got[anchor.canonical] = anchor.dialect
+	}
+	want := map[string]string{
+		"pr-42":    workstreamDialectExplicitPRRef,
+		"pr-43":    workstreamDialectExplicitPRRef,
+		"issue-44": workstreamDialectExplicitIssueRef,
+		"issue-45": workstreamDialectExplicitIssueRef,
+		"gh-46":    workstreamDialectExplicitGHRef,
+		"gh-47":    workstreamDialectBareHashRef,
+	}
+	for canonical, dialect := range want {
+		if got[canonical] != dialect {
+			t.Fatalf("dialect for %s: got %q want %q from %#v", canonical, got[canonical], dialect, extracted.anchors)
+		}
+	}
+}
+
+func TestWorkstreamEvidence_OpenSpecChangeSlugStaysStrong(t *testing.T) {
+	artifacts := []evidenceArtifact{
+		{
+			id:        "art_change",
+			repoID:    "repo",
+			kind:      "spec",
+			subtype:   "openspec_child",
+			title:     "Add Token Refresh",
+			extracted: map[string]any{"openspec_change_id": "add-token-refresh"},
+			sources:   []store.SourceRow{{ArtifactID: "art_change", SourceType: "markdown", Path: "openspec/changes/add-token-refresh/specs/auth/spec.md", SourceIdentity: "openspec/changes/add-token-refresh/specs/auth/spec.md"}},
+		},
+		{
+			id:      "art_source",
+			repoID:  "repo",
+			kind:    "source_context",
+			subtype: "code_comment",
+			title:   "Add Token Refresh",
+			sources: []store.SourceRow{{ArtifactID: "art_source", SourceType: "source_context", Path: "internal/auth/add_token_refresh.go", SourceIdentity: "internal/auth/add_token_refresh.go"}},
+		},
+	}
+	byPath := map[string][]gitArtifactRef{
+		"openspec/changes/add-token-refresh/specs/auth/spec.md": {
+			{id: "art_change", kind: "spec", subtype: "openspec_child", title: "Add Token Refresh", path: "openspec/changes/add-token-refresh/specs/auth/spec.md"},
+		},
+		"internal/auth/add_token_refresh.go": {
+			{id: "art_source", kind: "source_context", subtype: "code_comment", title: "Add Token Refresh", path: "internal/auth/add_token_refresh.go"},
+		},
+	}
+	byID := map[string]gitArtifactRef{
+		"art_change": byPath["openspec/changes/add-token-refresh/specs/auth/spec.md"][0],
+		"art_source": byPath["internal/auth/add_token_refresh.go"][0],
+	}
+
+	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, gitfacts.Facts{})
+	cluster := findWorkstreamTestCluster(t, built.diagnostics.TopClusters, "token-refresh")
+	if cluster.Dialect != workstreamDialectOpenSpecChangeSlug {
+		t.Fatalf("expected OpenSpec change dialect, got %#v", cluster)
+	}
+	if cluster.PackStrength != workstreamPackStrengthStrong {
+		t.Fatalf("expected OpenSpec change slug to remain strong, got %#v", cluster)
+	}
+}
+
+func TestWorkstreamEvidence_BareHashRefNeverStrong(t *testing.T) {
+	artifacts := []evidenceArtifact{
+		{
+			id:      "art_plan",
+			repoID:  "repo",
+			kind:    "markdown_artifact",
+			subtype: "plan",
+			title:   "Invitation Expiry Plan",
+			body:    "Fixes #42 for the invitation expiry workflow.",
+			sources: []store.SourceRow{{ArtifactID: "art_plan", SourceType: "markdown", Path: "docs/invitation-expiry.md", SourceIdentity: "docs/invitation-expiry.md"}},
+		},
+		{
+			id:      "art_source",
+			repoID:  "repo",
+			kind:    "source_context",
+			subtype: "code_comment",
+			title:   "InvitationExpiryService",
+			sources: []store.SourceRow{{ArtifactID: "art_source", SourceType: "source_context", Path: "internal/invitations/expiry.go", SourceIdentity: "internal/invitations/expiry.go"}},
+		},
+	}
+	byPath := map[string][]gitArtifactRef{
+		"docs/invitation-expiry.md": {
+			{id: "art_plan", kind: "markdown_artifact", subtype: "plan", title: "Invitation Expiry Plan", path: "docs/invitation-expiry.md"},
+		},
+		"internal/invitations/expiry.go": {
+			{id: "art_source", kind: "source_context", subtype: "code_comment", title: "InvitationExpiryService", path: "internal/invitations/expiry.go"},
+		},
+	}
+	byID := map[string]gitArtifactRef{
+		"art_plan":   byPath["docs/invitation-expiry.md"][0],
+		"art_source": byPath["internal/invitations/expiry.go"][0],
+	}
+	facts := gitfacts.Facts{
+		Commits: []gitfacts.Commit{{
+			SHA:          "abcdef1234567890",
+			Message:      "fixes #42 implement invitation expiry",
+			CommittedAt:  "2026-05-26T10:00:00Z",
+			HistoryShape: gitfacts.ShapeFull,
+		}},
+		Files:       []gitfacts.FileChange{{CommitSHA: "abcdef1234567890", FilePath: "internal/invitations/expiry.go"}},
+		Diagnostics: gitfacts.Diagnostics{Enabled: true, HistoryShape: gitfacts.ShapeFull},
+	}
+
+	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, facts)
+	cluster := findWorkstreamTestCluster(t, built.diagnostics.TopClusters, "gh-42")
+	if cluster.Dialect != workstreamDialectBareHashRef {
+		t.Fatalf("expected bare hash dialect, got %#v", cluster)
+	}
+	if cluster.PackStrength == workstreamPackStrengthStrong {
+		t.Fatalf("expected bare hash to avoid strong evidence, got %#v", cluster)
+	}
+	for _, edge := range built.edges {
+		meta := decodeEvidenceJSON(edge.MetadataJSON)
+		anchors, _ := meta["anchors"].([]any)
+		for _, rawAnchor := range anchors {
+			anchor, _ := rawAnchor.(map[string]any)
+			if evidenceString(anchor["canonical"]) == "gh-42" && evidenceString(anchor["pack_strength"]) == workstreamPackStrengthStrong {
+				t.Fatalf("expected no strong bare-hash edge, got %#v", edge)
+			}
+		}
+	}
+}
+
+func TestWorkstreamEvidence_BranchSlugDemotedBelowStrong(t *testing.T) {
+	artifacts := []evidenceArtifact{
+		{
+			id:      "art_plan",
+			repoID:  "repo",
+			kind:    "markdown_artifact",
+			subtype: "plan",
+			title:   "Token Refresh",
+			sources: []store.SourceRow{{ArtifactID: "art_plan", SourceType: "markdown", Path: "docs/token-refresh.md", SourceIdentity: "docs/token-refresh.md"}},
+		},
+		{
+			id:      "art_source",
+			repoID:  "repo",
+			kind:    "source_context",
+			subtype: "code_comment",
+			title:   "Token Refresh",
+			sources: []store.SourceRow{{ArtifactID: "art_source", SourceType: "source_context", Path: "internal/auth/token_refresh.go", SourceIdentity: "internal/auth/token_refresh.go"}},
+		},
+	}
+	byPath := map[string][]gitArtifactRef{
+		"docs/token-refresh.md": {
+			{id: "art_plan", kind: "markdown_artifact", subtype: "plan", title: "Token Refresh", path: "docs/token-refresh.md"},
+		},
+		"internal/auth/token_refresh.go": {
+			{id: "art_source", kind: "source_context", subtype: "code_comment", title: "Token Refresh", path: "internal/auth/token_refresh.go"},
+		},
+	}
+	byID := map[string]gitArtifactRef{
+		"art_plan":   byPath["docs/token-refresh.md"][0],
+		"art_source": byPath["internal/auth/token_refresh.go"][0],
+	}
+	facts := gitfacts.Facts{
+		Diagnostics: gitfacts.Diagnostics{Enabled: true, HistoryShape: gitfacts.ShapeFull, Branch: "feature/token-refresh"},
+	}
+
+	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, facts)
+	cluster := findWorkstreamTestCluster(t, built.diagnostics.TopClusters, "token-refresh")
+	if cluster.Dialect != workstreamDialectBranchSlug {
+		t.Fatalf("expected branch dialect to be tracked, got %#v", cluster)
+	}
+	if cluster.PackStrength == workstreamPackStrengthStrong {
+		t.Fatalf("expected branch-derived slug below strong, got %#v", cluster)
+	}
+}
+
+func TestWorkstreamEvidence_GenericTechnicalTermNeverStrong(t *testing.T) {
+	acc := &workstreamAnchorAccumulator{
+		canonical: "sha-256",
+		display:   "sha-256",
+		types:     map[string]bool{"title_slug": true},
+		dialects:  map[string]bool{workstreamDialectGenericTechnical: true},
+		sources:   map[string]bool{"artifact_title": true, "body": true},
+		contexts:  map[string]bool{},
+		artifacts: map[string]*workstreamArtifactAccumulator{
+			"art_doc": {
+				ref:     gitArtifactRef{id: "art_doc", kind: "markdown_artifact", subtype: "doc", title: "SHA-256", path: "docs/sha-256.md"},
+				sources: map[string]bool{"artifact_title": true},
+			},
+			"art_source": {
+				ref:     gitArtifactRef{id: "art_source", kind: "source_context", subtype: "code_comment", title: "SHA-256", path: "internal/crypto/sha256.go"},
+				sources: map[string]bool{"body": true},
+			},
+		},
+	}
+	profile := buildWorkstreamDialectProfile(map[string]*workstreamAnchorAccumulator{"sha-256": acc})
+	ids := []string{"art_doc", "art_source"}
+	_, _, _, packStrength := workstreamScore(acc, ids, profile)
+	if packStrength == workstreamPackStrengthStrong {
+		t.Fatalf("expected generic technical term below strong")
+	}
+	if profile.trust[workstreamDialectGenericTechnical] != workstreamTrustWeak {
+		t.Fatalf("expected weak trust for generic technical term, got %#v", profile.trust)
+	}
+}
+
+func findWorkstreamTestCluster(t *testing.T, clusters []WorkstreamClusterExample, anchor string) WorkstreamClusterExample {
+	t.Helper()
+	for _, cluster := range clusters {
+		if cluster.Anchor == anchor {
+			return cluster
+		}
+	}
+	t.Fatalf("expected cluster %q, got %#v", anchor, clusters)
+	return WorkstreamClusterExample{}
 }

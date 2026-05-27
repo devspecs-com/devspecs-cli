@@ -38,6 +38,23 @@ const (
 	workstreamPackStrengthSupportCross = "support_cross_role"
 	workstreamPackStrengthSupportLocal = "support_locality"
 	workstreamPackStrengthWeak         = "weak"
+
+	workstreamDialectTicketLikeUpper    = "ticket_like_upper"
+	workstreamDialectExplicitPRRef      = "explicit_pr_ref"
+	workstreamDialectExplicitIssueRef   = "explicit_issue_ref"
+	workstreamDialectExplicitGHRef      = "explicit_gh_ref"
+	workstreamDialectBareHashRef        = "bare_hash_ref"
+	workstreamDialectOpenSpecChangeSlug = "openspec_change_slug"
+	workstreamDialectBranchSlug         = "branch_slug"
+	workstreamDialectCommitSlug         = "commit_slug"
+	workstreamDialectPathComponentSlug  = "path_or_component_slug"
+	workstreamDialectTitleHeadingSlug   = "title_or_heading_slug"
+	workstreamDialectGenericTechnical   = "generic_technical_term"
+	workstreamDialectUnknown            = "unknown"
+
+	workstreamTrustWeak     = "weak"
+	workstreamTrustModerate = "moderate"
+	workstreamTrustStrong   = "strong"
 )
 
 var (
@@ -47,27 +64,44 @@ var (
 
 // WorkstreamEvidenceDiagnostics is emitted by ds scan --json when workstream evidence is enabled.
 type WorkstreamEvidenceDiagnostics struct {
-	Enabled              bool                              `json:"enabled"`
-	AnchorsSeen          int                               `json:"anchors_seen,omitempty"`
-	AnchorsMaterialized  int                               `json:"anchors_materialized,omitempty"`
-	MentionsIndexed      int                               `json:"mentions_indexed,omitempty"`
-	EdgesIndexed         int                               `json:"edges_indexed,omitempty"`
-	EdgesByType          map[string]int                    `json:"edges_by_type,omitempty"`
-	ClustersCapped       int                               `json:"clusters_capped,omitempty"`
-	PackStrengthCounts   map[string]int                    `json:"pack_strength_counts,omitempty"`
-	CappedPackStrengths  map[string]int                    `json:"capped_pack_strength_counts,omitempty"`
-	CappedRoleFamilies   map[string]int                    `json:"capped_role_family_counts,omitempty"`
-	NoisyAnchorsRejected int                               `json:"noisy_anchors_rejected,omitempty"`
-	RejectedByReason     map[string]int                    `json:"rejected_by_reason,omitempty"`
-	TopRejectedAnchors   []WorkstreamRejectedAnchorExample `json:"top_rejected_anchors,omitempty"`
-	TopClusters          []WorkstreamClusterExample        `json:"top_clusters,omitempty"`
-	TopCappedClusters    []WorkstreamClusterExample        `json:"top_capped_clusters,omitempty"`
+	Enabled               bool                                 `json:"enabled"`
+	AnchorsSeen           int                                  `json:"anchors_seen,omitempty"`
+	AnchorsMaterialized   int                                  `json:"anchors_materialized,omitempty"`
+	MentionsIndexed       int                                  `json:"mentions_indexed,omitempty"`
+	EdgesIndexed          int                                  `json:"edges_indexed,omitempty"`
+	EdgesByType           map[string]int                       `json:"edges_by_type,omitempty"`
+	EdgesByPackStrength   map[string]int                       `json:"edges_by_pack_strength,omitempty"`
+	DialectCounts         map[string]int                       `json:"dialect_counts,omitempty"`
+	CappedDialectCounts   map[string]int                       `json:"capped_dialect_counts,omitempty"`
+	ClustersCapped        int                                  `json:"clusters_capped,omitempty"`
+	PackStrengthCounts    map[string]int                       `json:"pack_strength_counts,omitempty"`
+	CappedPackStrengths   map[string]int                       `json:"capped_pack_strength_counts,omitempty"`
+	CappedRoleFamilies    map[string]int                       `json:"capped_role_family_counts,omitempty"`
+	StrongOrCrossClusters int                                  `json:"strong_or_cross_clusters,omitempty"`
+	StrongOrCrossEdges    int                                  `json:"strong_or_cross_edges,omitempty"`
+	DialectProfile        *WorkstreamDialectProfileDiagnostics `json:"dialect_profile,omitempty"`
+	NoisyAnchorsRejected  int                                  `json:"noisy_anchors_rejected,omitempty"`
+	RejectedByReason      map[string]int                       `json:"rejected_by_reason,omitempty"`
+	TopRejectedAnchors    []WorkstreamRejectedAnchorExample    `json:"top_rejected_anchors,omitempty"`
+	TopClusters           []WorkstreamClusterExample           `json:"top_clusters,omitempty"`
+	TopCappedClusters     []WorkstreamClusterExample           `json:"top_capped_clusters,omitempty"`
+}
+
+// WorkstreamDialectProfileDiagnostics summarizes repo-local work-reference conventions.
+type WorkstreamDialectProfileDiagnostics struct {
+	DialectCounts   map[string]int            `json:"dialect_counts,omitempty"`
+	CrossRoleCounts map[string]int            `json:"cross_role_counts,omitempty"`
+	TrustedDialects map[string]string         `json:"trusted_dialects,omitempty"`
+	RiskFlags       map[string]int            `json:"risk_flags,omitempty"`
+	EvidenceSources map[string]map[string]int `json:"evidence_sources,omitempty"`
+	RoleFamilies    map[string]map[string]int `json:"role_families,omitempty"`
 }
 
 // WorkstreamClusterExample gives a compact receipt for a materialized anchor cluster.
 type WorkstreamClusterExample struct {
 	Anchor           string                      `json:"anchor"`
 	AnchorType       string                      `json:"anchor_type"`
+	Dialect          string                      `json:"dialect,omitempty"`
 	PackStrength     string                      `json:"pack_strength,omitempty"`
 	Confidence       float64                     `json:"confidence"`
 	ConfidenceRule   string                      `json:"confidence_rule"`
@@ -93,10 +127,11 @@ type WorkstreamArtifactExample struct {
 
 // WorkstreamRejectedAnchorExample explains a suppressed anchor.
 type WorkstreamRejectedAnchorExample struct {
-	Anchor string `json:"anchor"`
-	Type   string `json:"type,omitempty"`
-	Reason string `json:"reason"`
-	Source string `json:"source,omitempty"`
+	Anchor  string `json:"anchor"`
+	Type    string `json:"type,omitempty"`
+	Dialect string `json:"dialect,omitempty"`
+	Reason  string `json:"reason"`
+	Source  string `json:"source,omitempty"`
 }
 
 type workstreamEvidenceBuildResult struct {
@@ -110,14 +145,17 @@ type workstreamAnchor struct {
 	canonical  string
 	display    string
 	anchorType string
+	dialect    string
 	raw        string
 	source     string
+	context    string
 	weight     float64
 }
 
 type workstreamRejectedAnchor struct {
 	anchor     string
 	anchorType string
+	dialect    string
 	reason     string
 	source     string
 }
@@ -131,8 +169,10 @@ type workstreamAnchorAccumulator struct {
 	canonical string
 	display   string
 	types     map[string]bool
+	dialects  map[string]bool
 	forms     map[string]bool
 	sources   map[string]bool
+	contexts  map[string]bool
 	artifacts map[string]*workstreamArtifactAccumulator
 	commits   []string
 	files     []string
@@ -156,6 +196,7 @@ type workstreamAcceptedCluster struct {
 	confidence     float64
 	confidenceRule string
 	packStrength   string
+	dialect        string
 	capped         bool
 	caveats        []string
 }
@@ -171,6 +212,19 @@ type workstreamPairAccumulator struct {
 	freshness     string
 	roleMix       map[string]int
 	roleFamilyMix map[string]int
+}
+
+type workstreamDialectProfile struct {
+	stats map[string]*workstreamDialectProfileStat
+	trust map[string]string
+	risks map[string]int
+}
+
+type workstreamDialectProfileStat struct {
+	anchors      int
+	crossRole    int
+	sources      map[string]int
+	roleFamilies map[string]int
 }
 
 func (s *Scanner) rebuildWorkstreamEvidence(repoID, now string, facts gitfacts.Facts) (*WorkstreamEvidenceDiagnostics, error) {
@@ -192,9 +246,10 @@ func (s *Scanner) rebuildWorkstreamEvidence(repoID, now string, facts gitfacts.F
 
 func buildWorkstreamEvidence(repoID string, artifacts []evidenceArtifact, artifactsByPath map[string][]gitArtifactRef, artifactsByID map[string]gitArtifactRef, facts gitfacts.Facts) workstreamEvidenceBuildResult {
 	diag := &WorkstreamEvidenceDiagnostics{
-		Enabled:          true,
-		EdgesByType:      map[string]int{},
-		RejectedByReason: map[string]int{},
+		Enabled:             true,
+		EdgesByType:         map[string]int{},
+		EdgesByPackStrength: map[string]int{},
+		RejectedByReason:    map[string]int{},
 	}
 	accs := map[string]*workstreamAnchorAccumulator{}
 	addRejected := func(rej workstreamRejectedAnchor) {
@@ -205,10 +260,11 @@ func buildWorkstreamEvidence(repoID string, artifacts []evidenceArtifact, artifa
 		diag.RejectedByReason[rej.reason]++
 		if len(diag.TopRejectedAnchors) < maxWorkstreamRejectedExamples {
 			diag.TopRejectedAnchors = append(diag.TopRejectedAnchors, WorkstreamRejectedAnchorExample{
-				Anchor: rej.anchor,
-				Type:   rej.anchorType,
-				Reason: rej.reason,
-				Source: rej.source,
+				Anchor:  rej.anchor,
+				Type:    rej.anchorType,
+				Dialect: rej.dialect,
+				Reason:  rej.reason,
+				Source:  rej.source,
 			})
 		}
 	}
@@ -222,8 +278,10 @@ func buildWorkstreamEvidence(repoID string, artifacts []evidenceArtifact, artifa
 				canonical: anchor.canonical,
 				display:   anchor.display,
 				types:     map[string]bool{},
+				dialects:  map[string]bool{},
 				forms:     map[string]bool{},
 				sources:   map[string]bool{},
+				contexts:  map[string]bool{},
 				artifacts: map[string]*workstreamArtifactAccumulator{},
 			}
 			accs[anchor.canonical] = acc
@@ -234,11 +292,21 @@ func buildWorkstreamEvidence(repoID string, artifacts []evidenceArtifact, artifa
 		if anchor.anchorType != "" {
 			acc.types[anchor.anchorType] = true
 		}
+		dialect := anchor.dialect
+		if dialect == "" {
+			dialect = workstreamDialectForAnchorType(anchor.anchorType)
+		}
+		if dialect != "" {
+			acc.dialects[dialect] = true
+		}
 		if anchor.raw != "" {
 			acc.forms[anchor.raw] = true
 		}
 		if anchor.source != "" {
 			acc.sources[anchor.source] = true
+		}
+		if anchor.context != "" {
+			acc.contexts[anchor.context] = true
 		}
 		return acc
 	}
@@ -342,6 +410,7 @@ func buildWorkstreamEvidence(repoID string, artifacts []evidenceArtifact, artifa
 					break
 				}
 				anchor.anchorType = "change_slug"
+				anchor.dialect = workstreamDialectOpenSpecChangeSlug
 				addArtifact(anchor, ref, "openspec_change_id", "metadata", "", 0.92)
 				perArtifact++
 			}
@@ -423,7 +492,9 @@ func buildWorkstreamEvidence(repoID string, artifacts []evidenceArtifact, artifa
 	}
 
 	diag.AnchorsSeen = len(accs)
-	accepted := acceptedWorkstreamClusters(accs, len(artifacts), diag, addRejected)
+	profile := buildWorkstreamDialectProfile(accs)
+	diag.DialectProfile = profile.Diagnostics()
+	accepted := acceptedWorkstreamClusters(accs, len(artifacts), profile, diag, addRejected)
 	concepts, mentions := workstreamConceptsAndMentions(repoID, accepted, len(artifacts))
 	edges := workstreamEdges(repoID, accepted, refsByArtifact, diag)
 	diag.AnchorsMaterialized = len(concepts)
@@ -431,6 +502,13 @@ func buildWorkstreamEvidence(repoID string, artifacts []evidenceArtifact, artifa
 	diag.EdgesIndexed = len(edges)
 	for _, edge := range edges {
 		diag.EdgesByType[edge.EdgeType]++
+		meta := decodeGitEvidenceMetadata(edge.MetadataJSON)
+		if pack := evidenceString(meta["pack_strength"]); pack != "" {
+			diag.EdgesByPackStrength[pack]++
+			if pack == workstreamPackStrengthStrong || pack == workstreamPackStrengthSupportCross {
+				diag.StrongOrCrossEdges++
+			}
+		}
 	}
 	diag.TopClusters = topWorkstreamClusters(accepted, refsByArtifact)
 	if len(diag.RejectedByReason) == 0 {
@@ -438,6 +516,9 @@ func buildWorkstreamEvidence(repoID string, artifacts []evidenceArtifact, artifa
 	}
 	if len(diag.EdgesByType) == 0 {
 		diag.EdgesByType = nil
+	}
+	if len(diag.EdgesByPackStrength) == 0 {
+		diag.EdgesByPackStrength = nil
 	}
 	return workstreamEvidenceBuildResult{
 		concepts:    concepts,
@@ -447,7 +528,129 @@ func buildWorkstreamEvidence(repoID string, artifacts []evidenceArtifact, artifa
 	}
 }
 
-func acceptedWorkstreamClusters(accs map[string]*workstreamAnchorAccumulator, artifactCount int, diag *WorkstreamEvidenceDiagnostics, reject func(workstreamRejectedAnchor)) []workstreamAcceptedCluster {
+func buildWorkstreamDialectProfile(accs map[string]*workstreamAnchorAccumulator) workstreamDialectProfile {
+	profile := workstreamDialectProfile{
+		stats: map[string]*workstreamDialectProfileStat{},
+		trust: map[string]string{},
+		risks: map[string]int{},
+	}
+	for _, acc := range accs {
+		dialect := acc.primaryDialect()
+		if dialect == "" {
+			dialect = workstreamDialectUnknown
+		}
+		stat := profile.stats[dialect]
+		if stat == nil {
+			stat = &workstreamDialectProfileStat{
+				sources:      map[string]int{},
+				roleFamilies: map[string]int{},
+			}
+			profile.stats[dialect] = stat
+		}
+		stat.anchors++
+		artifactIDs := sortedWorkstreamArtifactIDs(acc.artifacts)
+		roleFamilies := workstreamRoleFamilyMix(acc, artifactIDs)
+		if workstreamHasDocBackedFamilyMix(roleFamilies) {
+			stat.crossRole++
+		}
+		for source := range acc.sources {
+			stat.sources[source]++
+		}
+		for family, count := range roleFamilies {
+			stat.roleFamilies[family] += count
+		}
+	}
+	for dialect, stat := range profile.stats {
+		profile.trust[dialect] = workstreamDialectTrust(dialect, stat)
+	}
+	if stat := profile.stats[workstreamDialectBareHashRef]; stat != nil && stat.anchors >= 50 {
+		profile.risks["bare_hash_ref_dominant"] = stat.anchors
+	}
+	if stat := profile.stats[workstreamDialectPathComponentSlug]; stat != nil && stat.anchors >= 100 {
+		profile.risks["component_slug_dominant"] = stat.anchors
+	}
+	return profile
+}
+
+func workstreamDialectTrust(dialect string, stat *workstreamDialectProfileStat) string {
+	if stat == nil || stat.anchors == 0 {
+		return workstreamTrustWeak
+	}
+	switch dialect {
+	case workstreamDialectTicketLikeUpper:
+		if stat.crossRole >= 2 {
+			return workstreamTrustStrong
+		}
+		if stat.crossRole >= 1 || stat.anchors >= 3 {
+			return workstreamTrustModerate
+		}
+	case workstreamDialectOpenSpecChangeSlug:
+		if stat.crossRole >= 1 {
+			return workstreamTrustStrong
+		}
+		if stat.anchors >= 2 {
+			return workstreamTrustModerate
+		}
+	case workstreamDialectExplicitPRRef, workstreamDialectExplicitIssueRef, workstreamDialectExplicitGHRef:
+		if stat.crossRole >= 2 {
+			return workstreamTrustStrong
+		}
+		if stat.crossRole >= 1 {
+			return workstreamTrustModerate
+		}
+	case workstreamDialectPathComponentSlug, workstreamDialectTitleHeadingSlug:
+		if stat.crossRole >= 10 {
+			return workstreamTrustStrong
+		}
+		if stat.crossRole >= 2 {
+			return workstreamTrustModerate
+		}
+	case workstreamDialectBareHashRef, workstreamDialectBranchSlug, workstreamDialectCommitSlug, workstreamDialectGenericTechnical:
+		return workstreamTrustWeak
+	}
+	return workstreamTrustWeak
+}
+
+func (profile workstreamDialectProfile) Diagnostics() *WorkstreamDialectProfileDiagnostics {
+	if len(profile.stats) == 0 {
+		return nil
+	}
+	out := &WorkstreamDialectProfileDiagnostics{
+		DialectCounts:   map[string]int{},
+		CrossRoleCounts: map[string]int{},
+		TrustedDialects: map[string]string{},
+		RiskFlags:       map[string]int{},
+		EvidenceSources: map[string]map[string]int{},
+		RoleFamilies:    map[string]map[string]int{},
+	}
+	for dialect, stat := range profile.stats {
+		out.DialectCounts[dialect] = stat.anchors
+		if stat.crossRole > 0 {
+			out.CrossRoleCounts[dialect] = stat.crossRole
+		}
+		if trust := profile.trust[dialect]; trust != "" {
+			out.TrustedDialects[dialect] = trust
+		}
+		if len(stat.sources) > 0 {
+			out.EvidenceSources[dialect] = copyIntMap(stat.sources)
+		}
+		if len(stat.roleFamilies) > 0 {
+			out.RoleFamilies[dialect] = copyIntMap(stat.roleFamilies)
+		}
+	}
+	for risk, count := range profile.risks {
+		out.RiskFlags[risk] = count
+	}
+	if len(out.CrossRoleCounts) == 0 {
+		out.CrossRoleCounts = nil
+	}
+	if len(out.RiskFlags) == 0 {
+		out.RiskFlags = nil
+	}
+	return out
+}
+
+func acceptedWorkstreamClusters(accs map[string]*workstreamAnchorAccumulator, artifactCount int, profile workstreamDialectProfile, diag *WorkstreamEvidenceDiagnostics, reject func(workstreamRejectedAnchor)) []workstreamAcceptedCluster {
 	values := make([]*workstreamAnchorAccumulator, 0, len(accs))
 	for _, acc := range accs {
 		values = append(values, acc)
@@ -463,30 +666,30 @@ func acceptedWorkstreamClusters(accs map[string]*workstreamAnchorAccumulator, ar
 		sourceCount := len(acc.sources)
 		artifactIDs := sortedWorkstreamArtifactIDs(acc.artifacts)
 		if len(artifactIDs) == 0 {
-			reject(workstreamRejectedAnchor{anchor: acc.display, anchorType: acc.primaryType(), reason: "no_artifacts", source: "materialization"})
+			reject(workstreamRejectedAnchor{anchor: acc.display, anchorType: acc.primaryType(), dialect: acc.primaryDialect(), reason: "no_artifacts", source: "materialization"})
 			continue
 		}
 		if sourceCount < 2 {
-			reject(workstreamRejectedAnchor{anchor: acc.display, anchorType: acc.primaryType(), reason: "single_evidence_source", source: "materialization"})
+			reject(workstreamRejectedAnchor{anchor: acc.display, anchorType: acc.primaryType(), dialect: acc.primaryDialect(), reason: "single_evidence_source", source: "materialization"})
 			continue
 		}
 		if acc.gitOnlySupport() && !acc.formalAnchor() {
-			reject(workstreamRejectedAnchor{anchor: acc.display, anchorType: acc.primaryType(), reason: "git_only_slug", source: "materialization"})
+			reject(workstreamRejectedAnchor{anchor: acc.display, anchorType: acc.primaryType(), dialect: acc.primaryDialect(), reason: "git_only_slug", source: "materialization"})
 			continue
 		}
 		if !acc.formalAnchor() && acc.nativeArtifactSourceCount() == 0 {
-			reject(workstreamRejectedAnchor{anchor: acc.display, anchorType: acc.primaryType(), reason: "no_native_artifact_source", source: "materialization"})
+			reject(workstreamRejectedAnchor{anchor: acc.display, anchorType: acc.primaryType(), dialect: acc.primaryDialect(), reason: "no_native_artifact_source", source: "materialization"})
 			continue
 		}
 		if len(artifactIDs) > maxWorkstreamArtifactsPerAnchor {
 			if artifactCount >= 10 && float64(len(artifactIDs))/float64(artifactCount) > workstreamHighDFRatio {
-				reject(workstreamRejectedAnchor{anchor: acc.display, anchorType: acc.primaryType(), reason: "high_document_frequency", source: "materialization"})
+				reject(workstreamRejectedAnchor{anchor: acc.display, anchorType: acc.primaryType(), dialect: acc.primaryDialect(), reason: "high_document_frequency", source: "materialization"})
 				continue
 			}
 			diag.ClustersCapped++
 			artifactIDs = selectWorkstreamArtifactIDs(acc, artifactIDs, maxWorkstreamArtifactsPerAnchor)
 		}
-		weight, confidence, rule, packStrength := workstreamScore(acc, artifactIDs)
+		weight, confidence, rule, packStrength := workstreamScore(acc, artifactIDs, profile)
 		cluster := workstreamAcceptedCluster{
 			acc:            acc,
 			artifactIDs:    artifactIDs,
@@ -494,6 +697,7 @@ func acceptedWorkstreamClusters(accs map[string]*workstreamAnchorAccumulator, ar
 			confidence:     confidence,
 			confidenceRule: rule,
 			packStrength:   packStrength,
+			dialect:        acc.primaryDialect(),
 			capped:         len(acc.artifacts) > len(artifactIDs),
 		}
 		if acc.gitOnlySupport() {
@@ -503,6 +707,12 @@ func acceptedWorkstreamClusters(accs map[string]*workstreamAnchorAccumulator, ar
 			cluster.caveats = append(cluster.caveats, "weak pack candidate; evidence is mostly single-family code/test locality")
 		} else if packStrength == workstreamPackStrengthSupportLocal {
 			cluster.caveats = append(cluster.caveats, "locality support only; no doc/model-to-implementation bridge")
+		}
+		if acc.primaryDialect() == workstreamDialectBareHashRef {
+			cluster.caveats = append(cluster.caveats, "bare hash reference; not eligible for strong evidence")
+		}
+		if acc.primaryDialect() == workstreamDialectGenericTechnical {
+			cluster.caveats = append(cluster.caveats, "generic technical term; requires a specific work anchor for strong evidence")
 		}
 		accepted = append(accepted, cluster)
 	}
@@ -523,8 +733,10 @@ func acceptedWorkstreamClusters(accs map[string]*workstreamAnchorAccumulator, ar
 		diag.ClustersCapped += len(capped)
 		diag.CappedPackStrengths = map[string]int{}
 		diag.CappedRoleFamilies = map[string]int{}
+		diag.CappedDialectCounts = map[string]int{}
 		for _, cluster := range capped {
 			diag.CappedPackStrengths[cluster.packStrength]++
+			diag.CappedDialectCounts[cluster.dialect]++
 			for family, count := range workstreamRoleFamilyMix(cluster.acc, cluster.artifactIDs) {
 				diag.CappedRoleFamilies[family] += count
 			}
@@ -533,8 +745,13 @@ func acceptedWorkstreamClusters(accs map[string]*workstreamAnchorAccumulator, ar
 		accepted = accepted[:maxWorkstreamAnchorsMaterialized]
 	}
 	diag.PackStrengthCounts = map[string]int{}
+	diag.DialectCounts = map[string]int{}
 	for _, cluster := range accepted {
 		diag.PackStrengthCounts[cluster.packStrength]++
+		diag.DialectCounts[cluster.dialect]++
+		if cluster.packStrength == workstreamPackStrengthStrong || cluster.packStrength == workstreamPackStrengthSupportCross {
+			diag.StrongOrCrossClusters++
+		}
 	}
 	return accepted
 }
@@ -566,6 +783,7 @@ func workstreamConceptsAndMentions(repoID string, clusters []workstreamAcceptedC
 				EvidenceJSON: evidenceJSON(map[string]any{
 					"anchor":          acc.display,
 					"anchor_type":     acc.primaryType(),
+					"dialect":         cluster.dialect,
 					"confidence":      cluster.confidence,
 					"confidence_rule": cluster.confidenceRule,
 					"pack_strength":   cluster.packStrength,
@@ -573,6 +791,7 @@ func workstreamConceptsAndMentions(repoID string, clusters []workstreamAcceptedC
 					"forms":           limitedSortedMapKeys(art.forms, maxWorkstreamFormsPerAnchor),
 					"sources":         sortedMapKeys(art.sources),
 					"fields":          sortedMapKeys(art.fields),
+					"contexts":        sortedMapKeys(acc.contexts),
 					"commits":         art.commits,
 					"evidence":        art.evidence,
 				}),
@@ -617,11 +836,13 @@ func workstreamEdges(repoID string, clusters []workstreamAcceptedCluster, refsBy
 					"anchor":          cluster.acc.display,
 					"canonical":       cluster.acc.canonical,
 					"anchor_type":     cluster.acc.primaryType(),
+					"dialect":         cluster.dialect,
 					"confidence":      cluster.confidence,
 					"weight":          cluster.weight,
 					"pack_strength":   cluster.packStrength,
 					"confidence_rule": cluster.confidenceRule,
 					"sources":         sortedMapKeys(cluster.acc.sources),
+					"contexts":        sortedMapKeys(cluster.acc.contexts),
 					"commits":         cluster.acc.commits,
 				}
 				pair.anchors = append(pair.anchors, anchorMeta)
@@ -732,6 +953,7 @@ func workstreamClusterExamples(clusters []workstreamAcceptedCluster, limit int) 
 		out = append(out, WorkstreamClusterExample{
 			Anchor:           cluster.acc.display,
 			AnchorType:       cluster.acc.primaryType(),
+			Dialect:          cluster.dialect,
 			PackStrength:     cluster.packStrength,
 			Confidence:       roundEvidence(cluster.confidence),
 			ConfidenceRule:   cluster.confidenceRule,
@@ -760,37 +982,49 @@ func extractFormalWorkstreamAnchors(text, source string) workstreamExtractResult
 			canonical:  canonical,
 			display:    canonical,
 			anchorType: "task_id",
+			dialect:    workstreamDialectTicketLikeUpper,
 			raw:        raw,
 			source:     source,
 			weight:     0.96,
 		})
 	}
-	for _, match := range workstreamRefPattern.FindAllStringSubmatch(text, 40) {
-		if len(match) < 4 {
+	for _, match := range workstreamRefPattern.FindAllStringSubmatchIndex(text, 40) {
+		if len(match) < 8 {
 			continue
 		}
-		raw := strings.TrimSpace(match[0])
-		num := strings.TrimSpace(match[3])
-		prefix := strings.ToLower(firstNonEmpty(match[1], match[2]))
+		raw := strings.TrimSpace(text[match[0]:match[1]])
+		num := strings.TrimSpace(workstreamRegexGroup(text, match, 3))
+		prefix := strings.ToLower(firstNonEmpty(workstreamRegexGroup(text, match, 1), workstreamRegexGroup(text, match, 2)))
 		if prefix == "" && dateLikeNumber(num) {
-			out.rejected = append(out.rejected, workstreamRejectedAnchor{anchor: raw, anchorType: "github_ref", reason: "date_like_number", source: source})
+			out.rejected = append(out.rejected, workstreamRejectedAnchor{anchor: raw, anchorType: "github_ref", dialect: workstreamDialectBareHashRef, reason: "date_like_number", source: source})
 			continue
 		}
 		anchorType := "github_ref"
 		canonicalPrefix := "gh"
+		dialect := workstreamDialectBareHashRef
 		switch prefix {
 		case "pr", "pull":
 			canonicalPrefix = "pr"
+			dialect = workstreamDialectExplicitPRRef
 		case "issue", "issues":
 			canonicalPrefix = "issue"
+			dialect = workstreamDialectExplicitIssueRef
+		case "gh":
+			dialect = workstreamDialectExplicitGHRef
 		}
 		canonical := canonicalPrefix + "-" + num
+		context := ""
+		if dialect == workstreamDialectBareHashRef && workstreamBareHashHasIssueContext(text, match[0], match[1]) {
+			context = "issue_or_pr_context"
+		}
 		out.anchors = append(out.anchors, workstreamAnchor{
 			canonical:  canonical,
 			display:    canonical,
 			anchorType: anchorType,
+			dialect:    dialect,
 			raw:        raw,
 			source:     source,
+			context:    context,
 			weight:     0.82,
 		})
 	}
@@ -823,6 +1057,9 @@ func extractWorkstreamAnchorsFromPath(path, source string) workstreamExtractResu
 		switch out.anchors[i].anchorType {
 		case "title_slug":
 			out.anchors[i].anchorType = "path_slug"
+			if out.anchors[i].dialect != workstreamDialectGenericTechnical {
+				out.anchors[i].dialect = workstreamDialectPathComponentSlug
+			}
 		}
 		out.anchors[i].source = source
 	}
@@ -836,6 +1073,9 @@ func extractWorkstreamAnchorsFromCommitMessage(message string) workstreamExtract
 	for i := range out.anchors {
 		if out.anchors[i].anchorType == "title_slug" {
 			out.anchors[i].anchorType = "commit_slug"
+			if out.anchors[i].dialect != workstreamDialectGenericTechnical {
+				out.anchors[i].dialect = workstreamDialectCommitSlug
+			}
 		}
 		out.anchors[i].source = "commit_message"
 		if out.anchors[i].weight < 0.74 {
@@ -858,6 +1098,9 @@ func extractWorkstreamAnchorsFromBranch(branch string) workstreamExtractResult {
 	for i := range out.anchors {
 		if out.anchors[i].anchorType == "title_slug" || out.anchors[i].anchorType == "path_slug" {
 			out.anchors[i].anchorType = "branch_slug"
+			if out.anchors[i].dialect != workstreamDialectGenericTechnical {
+				out.anchors[i].dialect = workstreamDialectBranchSlug
+			}
 		}
 		out.anchors[i].source = "branch"
 		if out.anchors[i].weight < 0.7 {
@@ -893,10 +1136,15 @@ func slugWorkstreamAnchors(text, source string) ([]workstreamAnchor, []workstrea
 		if canonical == "" {
 			return
 		}
+		dialect := workstreamDialectTitleHeadingSlug
+		if workstreamGenericTechnicalAnchor(canonical) {
+			dialect = workstreamDialectGenericTechnical
+		}
 		anchors = append(anchors, workstreamAnchor{
 			canonical:  canonical,
 			display:    canonical,
 			anchorType: "title_slug",
+			dialect:    dialect,
 			raw:        text,
 			source:     source,
 			weight:     0.7,
@@ -1107,26 +1355,38 @@ func workstreamArtifactSelectionScore(art *workstreamArtifactAccumulator) float6
 	return score
 }
 
-func workstreamScore(acc *workstreamAnchorAccumulator, artifactIDs []string) (float64, float64, string, string) {
+func workstreamScore(acc *workstreamAnchorAccumulator, artifactIDs []string, profile workstreamDialectProfile) (float64, float64, string, string) {
 	sourceCount := len(acc.sources)
 	artifactCount := len(acc.artifacts)
 	anchorType := acc.primaryType()
+	dialect := acc.primaryDialect()
 	hasGit := acc.hasGitSource()
 	roleFamilies := workstreamRoleFamilyMix(acc, artifactIDs)
 	roleDiverse := len(roleFamilies) >= 2
 	docBacked := workstreamHasDocBackedFamilyMix(roleFamilies)
-	packStrength := workstreamPackStrength(acc, roleFamilies)
+	packStrength := workstreamPackStrength(acc, roleFamilies, profile)
 	switch {
-	case anchorType == "task_id" && hasGit && artifactCount >= 2 && roleDiverse:
+	case dialect == workstreamDialectGenericTechnical:
+		if docBacked {
+			return 0.48, 0.6, "low_generic_technical_cross_role", packStrength
+		}
+		return 0.36, 0.5, "low_generic_technical_term", packStrength
+	case dialect == workstreamDialectBareHashRef && docBacked && acc.hasContext("issue_or_pr_context") && artifactCount >= 2:
+		return 0.52, 0.64, "support_bare_hash_with_issue_context", packStrength
+	case dialect == workstreamDialectBareHashRef:
+		return 0.36, 0.5, "low_bare_hash_ref", packStrength
+	case dialect == workstreamDialectTicketLikeUpper && hasGit && artifactCount >= 2 && roleDiverse:
 		return 0.88, 0.93, "high_task_id_role_diverse_git", packStrength
-	case anchorType == "task_id" && hasGit && artifactCount >= 2:
+	case dialect == workstreamDialectTicketLikeUpper && hasGit && artifactCount >= 2:
 		return 0.82, 0.9, "high_task_id_with_git_and_artifacts", packStrength
-	case anchorType == "task_id" && artifactCount >= 2:
+	case dialect == workstreamDialectTicketLikeUpper && artifactCount >= 2:
 		return 0.78, 0.86, "high_task_id_across_artifacts", packStrength
-	case anchorType == "github_ref" && hasGit && artifactCount >= 2 && roleDiverse:
-		return 0.78, 0.84, "medium_github_ref_role_diverse_git", packStrength
-	case anchorType == "github_ref" && hasGit && artifactCount >= 2:
-		return 0.7, 0.78, "medium_github_ref_with_git", packStrength
+	case workstreamExplicitWorkRefDialect(dialect) && hasGit && artifactCount >= 2 && roleDiverse:
+		return 0.74, 0.82, "medium_explicit_work_ref_role_diverse_git", packStrength
+	case workstreamExplicitWorkRefDialect(dialect) && hasGit && artifactCount >= 2:
+		return 0.66, 0.76, "medium_explicit_work_ref_with_git", packStrength
+	case dialect == workstreamDialectOpenSpecChangeSlug && docBacked && artifactCount >= 2:
+		return 0.82, 0.9, "high_openspec_change_cross_role", packStrength
 	case docBacked && hasGit && sourceCount >= 3 && artifactCount >= 2:
 		return 0.72, 0.8, "medium_slug_docbacked_git", packStrength
 	case docBacked && sourceCount >= 3 && artifactCount >= 2:
@@ -1138,18 +1398,86 @@ func workstreamScore(acc *workstreamAnchorAccumulator, artifactIDs []string) (fl
 	case sourceCount >= 3 && artifactCount >= 2:
 		return 0.46, 0.58, "low_slug_source_mix", packStrength
 	default:
+		_ = anchorType
 		return 0.42, 0.54, "low_bounded_anchor", packStrength
 	}
 }
 
-func workstreamPackStrength(acc *workstreamAnchorAccumulator, roleFamilies map[string]int) string {
-	if acc.formalAnchor() && workstreamHasDocBackedFamilyMix(roleFamilies) {
+func workstreamPackStrength(acc *workstreamAnchorAccumulator, roleFamilies map[string]int, profile workstreamDialectProfile) string {
+	dialect := acc.primaryDialect()
+	docBacked := workstreamHasDocBackedFamilyMix(roleFamilies)
+	trust := profile.trust[dialect]
+	switch dialect {
+	case workstreamDialectBareHashRef:
+		if docBacked && acc.hasContext("issue_or_pr_context") && trust != "" && trust != workstreamTrustWeak {
+			return workstreamPackStrengthSupportCross
+		}
+		if acc.formalAnchor() || len(roleFamilies) >= 2 {
+			return workstreamPackStrengthSupportLocal
+		}
+		return workstreamPackStrengthWeak
+	case workstreamDialectGenericTechnical:
+		if docBacked {
+			return workstreamPackStrengthSupportCross
+		}
+		if len(roleFamilies) >= 2 {
+			return workstreamPackStrengthSupportLocal
+		}
+		return workstreamPackStrengthWeak
+	case workstreamDialectBranchSlug:
+		if docBacked && acc.nativeArtifactSourceCount() > 0 && (acc.sources["commit_message"] || acc.sources["artifact_title"] || acc.sources["artifact_path"] || acc.sources["metadata"]) {
+			return workstreamPackStrengthSupportCross
+		}
+		if len(roleFamilies) >= 2 {
+			return workstreamPackStrengthSupportLocal
+		}
+		return workstreamPackStrengthWeak
+	case workstreamDialectCommitSlug:
+		if docBacked && acc.nativeArtifactSourceCount() > 0 {
+			return workstreamPackStrengthSupportCross
+		}
+		if len(roleFamilies) >= 2 {
+			return workstreamPackStrengthSupportLocal
+		}
+		return workstreamPackStrengthWeak
+	case workstreamDialectExplicitPRRef, workstreamDialectExplicitIssueRef, workstreamDialectExplicitGHRef:
+		if docBacked && trust == workstreamTrustStrong && acc.hasGitSource() {
+			return workstreamPackStrengthStrong
+		}
+		if docBacked {
+			return workstreamPackStrengthSupportCross
+		}
+		if acc.formalAnchor() || len(roleFamilies) >= 2 {
+			return workstreamPackStrengthSupportLocal
+		}
+		return workstreamPackStrengthWeak
+	case workstreamDialectOpenSpecChangeSlug, workstreamDialectTicketLikeUpper:
+		if docBacked {
+			return workstreamPackStrengthStrong
+		}
+		if acc.formalAnchor() || len(roleFamilies) >= 2 {
+			return workstreamPackStrengthSupportLocal
+		}
+		return workstreamPackStrengthWeak
+	case workstreamDialectTitleHeadingSlug:
+		if docBacked && len(acc.sources) >= 3 && (acc.sources["artifact_path"] || acc.sources["metadata"] || acc.hasGitSource()) && len(acc.artifacts) >= 2 {
+			return workstreamPackStrengthStrong
+		}
+		if docBacked {
+			return workstreamPackStrengthSupportCross
+		}
+		if len(roleFamilies) >= 2 {
+			return workstreamPackStrengthSupportLocal
+		}
+		return workstreamPackStrengthWeak
+	}
+	if acc.formalAnchor() && docBacked {
 		return workstreamPackStrengthStrong
 	}
-	if workstreamHasDocBackedFamilyMix(roleFamilies) && len(acc.sources) >= 3 && len(acc.artifacts) >= 2 {
+	if docBacked && len(acc.sources) >= 3 && len(acc.artifacts) >= 2 {
 		return workstreamPackStrengthStrong
 	}
-	if workstreamHasDocBackedFamilyMix(roleFamilies) {
+	if docBacked {
 		return workstreamPackStrengthSupportCross
 	}
 	if acc.formalAnchor() || len(roleFamilies) >= 2 {
@@ -1241,12 +1569,16 @@ func (acc *workstreamAnchorAccumulator) gitOnlySupport() bool {
 }
 
 func (acc *workstreamAnchorAccumulator) formalAnchor() bool {
-	switch acc.primaryType() {
-	case "task_id", "github_ref":
+	switch acc.primaryDialect() {
+	case workstreamDialectTicketLikeUpper, workstreamDialectExplicitPRRef, workstreamDialectExplicitIssueRef, workstreamDialectExplicitGHRef, workstreamDialectBareHashRef:
 		return true
 	default:
 		return false
 	}
+}
+
+func (acc *workstreamAnchorAccumulator) hasContext(value string) bool {
+	return acc != nil && acc.contexts[value]
 }
 
 func (acc *workstreamAnchorAccumulator) nativeArtifactSourceCount() int {
@@ -1281,6 +1613,61 @@ func (acc *workstreamAnchorAccumulator) primaryType() string {
 		return value
 	}
 	return ""
+}
+
+func (acc *workstreamAnchorAccumulator) primaryDialect() string {
+	priority := []string{
+		workstreamDialectTicketLikeUpper,
+		workstreamDialectExplicitPRRef,
+		workstreamDialectExplicitIssueRef,
+		workstreamDialectExplicitGHRef,
+		workstreamDialectBareHashRef,
+		workstreamDialectOpenSpecChangeSlug,
+		workstreamDialectBranchSlug,
+		workstreamDialectPathComponentSlug,
+		workstreamDialectCommitSlug,
+		workstreamDialectTitleHeadingSlug,
+		workstreamDialectGenericTechnical,
+	}
+	for _, value := range priority {
+		if acc.dialects[value] {
+			return value
+		}
+	}
+	for value := range acc.dialects {
+		return value
+	}
+	return workstreamDialectForAnchorType(acc.primaryType())
+}
+
+func workstreamDialectForAnchorType(anchorType string) string {
+	switch anchorType {
+	case "task_id":
+		return workstreamDialectTicketLikeUpper
+	case "github_ref":
+		return workstreamDialectBareHashRef
+	case "change_slug":
+		return workstreamDialectOpenSpecChangeSlug
+	case "branch_slug":
+		return workstreamDialectBranchSlug
+	case "commit_slug":
+		return workstreamDialectCommitSlug
+	case "path_slug":
+		return workstreamDialectPathComponentSlug
+	case "title_slug":
+		return workstreamDialectTitleHeadingSlug
+	default:
+		return workstreamDialectUnknown
+	}
+}
+
+func workstreamExplicitWorkRefDialect(dialect string) bool {
+	switch dialect {
+	case workstreamDialectExplicitPRRef, workstreamDialectExplicitIssueRef, workstreamDialectExplicitGHRef:
+		return true
+	default:
+		return false
+	}
 }
 
 func (acc *workstreamAnchorAccumulator) hasGitSource() bool {
@@ -1369,6 +1756,44 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func workstreamRegexGroup(text string, indexes []int, group int) string {
+	pos := group * 2
+	if pos+1 >= len(indexes) || indexes[pos] < 0 || indexes[pos+1] < 0 {
+		return ""
+	}
+	return text[indexes[pos]:indexes[pos+1]]
+}
+
+func workstreamBareHashHasIssueContext(text string, start, end int) bool {
+	left := maxInt(0, start-48)
+	right := minInt(len(text), end+48)
+	window := strings.ToLower(text[left:right])
+	for _, marker := range []string{"fixes", "fix", "fixed", "closes", "close", "closed", "resolves", "resolve", "resolved", "issue", "issues", "pull", "pr", "github", "gh-"} {
+		if strings.Contains(window, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func workstreamGenericTechnicalAnchor(value string) bool {
+	value = strings.Trim(strings.ToLower(value), "._-/ ")
+	switch value {
+	case "sha-1", "sha-224", "sha-256", "sha-384", "sha-512", "md5", "crc32", "utf-8", "http-1", "http-2", "http-3":
+		return true
+	default:
+		return false
+	}
+}
+
+func copyIntMap(values map[string]int) map[string]int {
+	out := make(map[string]int, len(values))
+	for key, value := range values {
+		out[key] = value
+	}
+	return out
 }
 
 func dateLikeNumber(value string) bool {
