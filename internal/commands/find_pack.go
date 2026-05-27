@@ -16,6 +16,7 @@ type FindPackOutput struct {
 	ExcludedNoise    []retrieval.PackItem  `json:"excluded_noise,omitempty"`
 	Counts           map[string]int        `json:"counts,omitempty"`
 	RankedResults    []FindResult          `json:"ranked_results"`
+	GraphContext     *FindGraphPackContext `json:"graph_context,omitempty"`
 	GraphDiagnostics *FindGraphDiagnostics `json:"graph_diagnostics,omitempty"`
 }
 

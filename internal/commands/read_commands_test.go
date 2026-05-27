@@ -500,6 +500,75 @@ func TestFindPack_HumanOutputShowsReceipt(t *testing.T) {
 	}
 }
 
+func TestFindPackGraphDiagnostics_HumanOutputShowsRelatedEvidenceSection(t *testing.T) {
+	repoDir, _ := setupReadEnv(t)
+	seedGraphDiagnosticArtifacts(t, repoDir)
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"--pack", "--graph-diagnostics", "--no-refresh", "rotatetoken implementation"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	output := buf.String()
+	for _, want := range []string{
+		"Working set: rotatetoken implementation",
+		"Related via test/source evidence (1)",
+		"Evidence: typed_edge_pack_scout_v1",
+		"Behavior tests (1)",
+		"Connected from: src/session.ts",
+		"Evidence: tests_source/source_symbol_match",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("pack graph output missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "Graph attachments") {
+		t.Fatalf("pack graph output should use pack presentation section, got:\n%s", output)
+	}
+}
+
+func TestFindPackGraphDiagnostics_JSONKeepsGraphContextSeparate(t *testing.T) {
+	repoDir, _ := setupReadEnv(t)
+	seedGraphDiagnosticArtifacts(t, repoDir)
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"--json", "--pack", "--graph-diagnostics", "--no-refresh", "rotatetoken implementation"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out FindPackOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("find --json --pack --graph-diagnostics invalid: %v\n%s", err, buf.String())
+	}
+	if out.GraphDiagnostics == nil {
+		t.Fatalf("expected raw graph diagnostics in pack JSON: %#v", out)
+	}
+	if out.GraphContext == nil {
+		t.Fatalf("expected graph context presentation in pack JSON: %#v", out)
+	}
+	if out.GraphContext.Mode != findGraphPackContextMode {
+		t.Fatalf("graph context mode = %q", out.GraphContext.Mode)
+	}
+	if out.GraphContext.CandidateCount != 1 || len(out.GraphContext.Groups) != 1 {
+		t.Fatalf("expected one grouped graph context candidate: %#v", out.GraphContext)
+	}
+	item := out.GraphContext.Groups[0].Items[0]
+	if item.AdmissionEdgeType != "tests_source" || item.SourcePath != "src/session.test.ts" {
+		t.Fatalf("unexpected graph context item: %#v", item)
+	}
+	for _, ranked := range out.RankedResults {
+		if ranked.ID == item.ID {
+			t.Fatalf("graph context item leaked into ranked results: %#v", out)
+		}
+	}
+}
+
 func TestFindGraphDiagnostics_AttachesTypedEdgeAndSuppressesSharedConcept(t *testing.T) {
 	repoDir, _ := setupReadEnv(t)
 	seedGraphDiagnosticArtifacts(t, repoDir)

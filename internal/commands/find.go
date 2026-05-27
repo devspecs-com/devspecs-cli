@@ -121,6 +121,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 			out := findPackOutput(query, retriever.Name(), matches, reasons, rolePack)
 			if graphDiag {
 				out.GraphDiagnostics = &graphDiagnostics
+				out.GraphContext = findGraphPackContext(graphDiagnostics)
 			}
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(out)
 		}
@@ -128,7 +129,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 			return err
 		}
 		if graphDiag {
-			writeFindGraphDiagnosticsText(cmd.OutOrStdout(), graphDiagnostics)
+			writeFindGraphPackText(cmd.OutOrStdout(), findGraphPackContext(graphDiagnostics))
 		}
 		return nil
 	}
