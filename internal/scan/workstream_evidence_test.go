@@ -133,7 +133,7 @@ func TestWorkstreamEvidence_SlugWindowsConnectPlanAndChangedSource(t *testing.T)
 	}
 }
 
-func TestWorkstreamEvidence_SourceTestOnlySlugIsSupportingConfidence(t *testing.T) {
+func TestWorkstreamEvidence_SourceTestOnlySlugIsLocalityOnly(t *testing.T) {
 	artifacts := []evidenceArtifact{
 		{
 			id:      "art_source",
@@ -179,13 +179,8 @@ func TestWorkstreamEvidence_SourceTestOnlySlugIsSupportingConfidence(t *testing.
 	}
 
 	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, facts)
-	if len(built.edges) == 0 {
-		t.Fatalf("expected source/test relation edge")
-	}
-	for _, edge := range built.edges {
-		if edge.SrcArtifactID == "art_source" && edge.DstArtifactID == "art_test" && edge.Confidence > 0.67 {
-			t.Fatalf("expected source/test-only slug to stay supporting confidence, got %.3f", edge.Confidence)
-		}
+	if len(built.edges) != 0 {
+		t.Fatalf("expected source/test-only locality to avoid edge materialization, got %#v", built.edges)
 	}
 	if len(built.diagnostics.TopClusters) == 0 || built.diagnostics.TopClusters[0].PackStrength != workstreamPackStrengthSupportLocal {
 		t.Fatalf("expected locality-support pack cluster, got %#v", built.diagnostics.TopClusters)

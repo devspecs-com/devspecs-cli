@@ -1223,8 +1223,6 @@ func maxWorkstreamEdgesForCluster(packStrength string) int {
 		return maxWorkstreamEdgesPerAnchor
 	case workstreamPackStrengthSupportCross:
 		return maxInt(1, maxWorkstreamEdgesPerAnchor*2/3)
-	case workstreamPackStrengthSupportLocal:
-		return maxInt(1, maxWorkstreamEdgesPerAnchor/4)
 	default:
 		return 0
 	}
