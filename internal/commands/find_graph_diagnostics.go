@@ -262,12 +262,17 @@ func findGraphCandidate(target, seed retrieval.Candidate, edge store.ArtifactEdg
 		AdmissionEdgeType: edge.EdgeType,
 		Confidence:        edge.Confidence,
 		Weight:            edge.Weight,
-		Receipt:           findGraphReceipt(seed, edge),
+		Receipt:           findGraphReceipt(target, seed, edge),
 	}
 }
 
-func findGraphReceipt(seed retrieval.Candidate, edge store.ArtifactEdgeRow) string {
-	seedPath := findGraphDisplayPath(seed)
+func findGraphReceipt(target, seed retrieval.Candidate, edge store.ArtifactEdgeRow) string {
+	srcPath := findGraphDisplayPath(seed)
+	dstPath := findGraphDisplayPath(target)
+	if seed.ID == edge.DstArtifactID {
+		srcPath = findGraphDisplayPath(target)
+		dstPath = findGraphDisplayPath(seed)
+	}
 	explanation := strings.TrimSpace(edge.Explanation)
 	if explanation == "" {
 		explanation = strings.TrimSpace(edge.SourceSignal)
@@ -275,7 +280,7 @@ func findGraphReceipt(seed retrieval.Candidate, edge store.ArtifactEdgeRow) stri
 	if explanation == "" {
 		explanation = "typed graph evidence"
 	}
-	return fmt.Sprintf("%s from %s: %s", edge.EdgeType, seedPath, explanation)
+	return fmt.Sprintf("%s connects %s -> %s: %s", edge.EdgeType, srcPath, dstPath, explanation)
 }
 
 func (diag *FindGraphDiagnostics) addSuppression(target, seed retrieval.Candidate, edge store.ArtifactEdgeRow, reason string) {

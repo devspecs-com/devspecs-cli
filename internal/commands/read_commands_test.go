@@ -532,7 +532,7 @@ func TestFindGraphDiagnostics_AttachesTypedEdgeAndSuppressesSharedConcept(t *tes
 	if got.AdmissionEdgeType != "tests_source" {
 		t.Fatalf("admission edge = %q", got.AdmissionEdgeType)
 	}
-	if !strings.Contains(got.Receipt, "tests_source from src/session.ts") {
+	if !strings.Contains(got.Receipt, "tests_source connects src/session.test.ts#test_case -> src/session.ts") {
 		t.Fatalf("receipt missing seed and edge evidence: %q", got.Receipt)
 	}
 	for _, candidate := range out.GraphDiagnostics.Candidates {
