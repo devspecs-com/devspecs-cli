@@ -52,6 +52,9 @@ type Candidate struct {
 	// candidate discovery admitted this file into the adapter pipeline.
 	DiscoveryScore   float64
 	DiscoveryReasons []string
+	// Metadata carries adapter-specific discovery receipts from scan-time
+	// companion/admission passes into Parse without widening adapter APIs.
+	Metadata map[string]any
 	// Unit fields are optional sub-file extraction hints used by adapters that
 	// emit multiple artifacts from one physical file.
 	UnitName       string

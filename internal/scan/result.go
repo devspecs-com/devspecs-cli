@@ -21,6 +21,36 @@ type ScanHint struct {
 	SuggestCommand string `json:"suggest_command,omitempty"`
 }
 
+// SourceCompanionAdmissionDiagnostics summarizes bounded source files admitted
+// because indexed tests pointed at likely implementation companions.
+type SourceCompanionAdmissionDiagnostics struct {
+	Enabled                  bool                              `json:"enabled"`
+	TestFiles                int                               `json:"test_files,omitempty"`
+	ExistingSourceCandidates int                               `json:"existing_source_candidates,omitempty"`
+	CandidatesConsidered     int                               `json:"candidates_considered,omitempty"`
+	Admitted                 int                               `json:"admitted,omitempty"`
+	AlreadyPresent           int                               `json:"already_present,omitempty"`
+	SkippedByCap             int                               `json:"skipped_by_cap,omitempty"`
+	RejectedByReason         map[string]int                    `json:"rejected_by_reason,omitempty"`
+	TopAdmitted              []SourceCompanionAdmissionExample `json:"top_admitted,omitempty"`
+	TopRejected              []SourceCompanionRejectionExample `json:"top_rejected,omitempty"`
+}
+
+// SourceCompanionAdmissionExample is a compact receipt for one admitted source companion.
+type SourceCompanionAdmissionExample struct {
+	Path       string   `json:"path"`
+	Signals    []string `json:"signals,omitempty"`
+	Confidence string   `json:"confidence,omitempty"`
+	TestPaths  []string `json:"test_paths,omitempty"`
+}
+
+// SourceCompanionRejectionExample is a compact receipt for one rejected source companion.
+type SourceCompanionRejectionExample struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+	Signal string `json:"signal,omitempty"`
+}
+
 // ProgressEvent is a coarse scan heartbeat for long eval/index runs.
 type ProgressEvent struct {
 	Phase                string         `json:"phase"`
@@ -64,16 +94,17 @@ type sourceAgg struct {
 //   - "hints": optional; only when all adapters indexed zero artifacts AND at least one hint
 //     candidate exists. Empty candidate list omits the key (encoding/json omitempty on []ScanHint).
 type Result struct {
-	Found              map[string]int                 `json:"Found"`
-	SourcesBreakdown   []SourceBreakdownRow           `json:"sources_breakdown"`
-	New                int                            `json:"New"`
-	Updated            int                            `json:"Updated"`
-	Unchanged          int                            `json:"Unchanged"`
-	Hints              []ScanHint                     `json:"hints,omitempty"`
-	OpenSpec           *openspecmetrics.Metrics       `json:"openspec,omitempty"`
-	EvidenceGraph      *EvidenceGraphDiagnostics      `json:"evidence_graph,omitempty"`
-	GitEvidence        *GitEvidenceDiagnostics        `json:"git_evidence,omitempty"`
-	WorkstreamEvidence *WorkstreamEvidenceDiagnostics `json:"workstream_evidence,omitempty"`
+	Found              map[string]int                       `json:"Found"`
+	SourcesBreakdown   []SourceBreakdownRow                 `json:"sources_breakdown"`
+	New                int                                  `json:"New"`
+	Updated            int                                  `json:"Updated"`
+	Unchanged          int                                  `json:"Unchanged"`
+	Hints              []ScanHint                           `json:"hints,omitempty"`
+	OpenSpec           *openspecmetrics.Metrics             `json:"openspec,omitempty"`
+	EvidenceGraph      *EvidenceGraphDiagnostics            `json:"evidence_graph,omitempty"`
+	GitEvidence        *GitEvidenceDiagnostics              `json:"git_evidence,omitempty"`
+	WorkstreamEvidence *WorkstreamEvidenceDiagnostics       `json:"workstream_evidence,omitempty"`
+	SourceCompanions   *SourceCompanionAdmissionDiagnostics `json:"source_companion_admission,omitempty"`
 
 	sourcesAgg map[string]*sourceAgg `json:"-"`
 }

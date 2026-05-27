@@ -159,6 +159,14 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 		body = string(data)
 	}
 	title := sourceTitle(c.RelPath)
+	extracted := map[string]any{
+		"language": sourceLanguage(c.RelPath),
+	}
+	for key, value := range c.Metadata {
+		if key != "" && value != nil {
+			extracted[key] = value
+		}
+	}
 	art := adapters.Artifact{
 		SourceIdentity: c.RelPath + "|" + sourceType,
 		Kind:           config.KindSourceContext,
@@ -166,10 +174,8 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 		Status:         "unknown",
 		PrimaryPath:    c.PrimaryPath,
 		Body:           body,
-		Extracted: map[string]any{
-			"language": sourceLanguage(c.RelPath),
-		},
-		FormatProfile: format.ProfileGeneric,
+		Extracted:      extracted,
+		FormatProfile:  format.ProfileGeneric,
 	}
 	src := adapters.Source{
 		SourceType:     sourceType,

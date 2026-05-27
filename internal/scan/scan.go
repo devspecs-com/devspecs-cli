@@ -118,6 +118,13 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 	if err != nil {
 		return nil, fmt.Errorf("shared file discovery: %w", err)
 	}
+	if diagnostics, companions := buildTestSourceCompanionCandidates(ctx, repoRoot, sharedCandidates["test_case"], sharedCandidates["source_context"]); diagnostics != nil {
+		result.SourceCompanions = diagnostics
+		if len(companions) > 0 {
+			sharedCandidates["source_context"] = append(sharedCandidates["source_context"], companions...)
+			sortCandidates(sharedCandidates["source_context"])
+		}
+	}
 	parsedByAdapter := map[string]int{}
 	upsertedByAdapter := map[string]int{}
 	for _, adapter := range s.adapters {
