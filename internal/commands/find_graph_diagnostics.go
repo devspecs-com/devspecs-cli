@@ -5,13 +5,14 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 )
 
 const (
-	findGraphDiagnosticsMode       = "typed_edge_pack_scout_v0"
+	findGraphDiagnosticsMode       = "typed_edge_pack_scout_v1"
 	findGraphMaxSeeds              = 8
 	findGraphMaxCandidates         = 6
 	findGraphMaxOutgoingPerEdge    = 3
@@ -21,18 +22,28 @@ const (
 )
 
 var findGraphAdmittingEdges = map[string]bool{
-	"tests_source":              true,
-	"mentions_symbol":           true,
-	"same_file_or_line_variant": true,
-	"explicit_reference":        true,
-	"openspec_companion":        true,
+	"tests_source":    true,
+	"mentions_symbol": true,
 }
 
 var findGraphSupportOnlyEdges = map[string]bool{
-	"mentions_same_concept":  true,
-	"same_layout_group":      true,
-	"same_workstream_anchor": true,
-	"co_changed_with":        true,
+	"explicit_reference":         true,
+	"same_file_or_line_variant":  true,
+	"openspec_companion":         true,
+	"mentions_same_concept":      true,
+	"same_layout_group":          true,
+	"same_workstream_anchor":     true,
+	"same_workstream_reference":  true,
+	"co_changed_with":            true,
+	"same_pr_reference":          true,
+	"same_ticket_reference":      true,
+	"same_commit_reference":      true,
+	"same_branch_reference":      true,
+	"same_workstream_cluster":    true,
+	"support_cross_role":         true,
+	"strong_workstream_cluster":  true,
+	"workstream_cluster_member":  true,
+	"workstream_cluster_support": true,
 }
 
 type FindGraphOutput struct {
@@ -68,6 +79,8 @@ type FindGraphCandidate struct {
 	AdmissionEdgeType string   `json:"admission_edge_type"`
 	Confidence        float64  `json:"confidence"`
 	Weight            float64  `json:"weight,omitempty"`
+	SourceSignal      string   `json:"source_signal,omitempty"`
+	CompanionDerived  bool     `json:"companion_derived,omitempty"`
 	Receipt           string   `json:"receipt"`
 	SupportReceipts   []string `json:"support_receipts,omitempty"`
 }
@@ -130,8 +143,22 @@ func buildFindGraphDiagnostics(db *store.DB, fp store.FilterParams, query string
 	}
 	diag.SeedCount = len(seeds)
 	seenCandidates := map[string]bool{}
-	for _, seed := range seeds {
+	allowsSourceTestGraph := findGraphQueryAllowsSourceTest(query)
+	for seedIndex, seed := range seeds {
 		if seed.ID == "" {
+			continue
+		}
+		seedRole := retrieval.ClassifyPackRole(seed, query)
+		if seedRole.Role == retrieval.PackRoleExcludedNoise {
+			diag.Counts["suppressed_seed_pack_exclusion"]++
+			continue
+		}
+		if !findGraphSourceTestRole(seedRole.Role) {
+			diag.Counts["suppressed_seed_role"]++
+			continue
+		}
+		if !findGraphSeedHasSpecificQueryAnchor(seed, query, seedIndex) {
+			diag.Counts["suppressed_seed_anchor"]++
 			continue
 		}
 		edges := findGraphSeedEdges(db, seed)
@@ -164,6 +191,11 @@ func buildFindGraphDiagnostics(db *store.DB, fp store.FilterParams, query string
 				diag.addSuppression(target, seed, edge, "edge confidence below graph admission threshold")
 				continue
 			}
+			if !allowsSourceTestGraph {
+				diag.Counts["suppressed_query_intent"]++
+				diag.addSuppression(target, seed, edge, "query does not ask for source/test/debug/implementation context")
+				continue
+			}
 			if perType[edge.EdgeType] >= findGraphMaxOutgoingPerEdge {
 				diag.Counts["suppressed_edge_budget"]++
 				continue
@@ -175,6 +207,11 @@ func buildFindGraphDiagnostics(db *store.DB, fp store.FilterParams, query string
 			if role.Role == retrieval.PackRoleExcludedNoise {
 				diag.Counts["suppressed_pack_exclusion"]++
 				diag.addSuppression(target, seed, edge, role.Reason)
+				continue
+			}
+			if !findGraphEdgeRolesCompatible(edge.EdgeType, seedRole.Role, role.Role) {
+				diag.Counts["suppressed_role_mismatch"]++
+				diag.addSuppression(target, seed, edge, "edge does not connect source and test roles")
 				continue
 			}
 			perType[edge.EdgeType]++
@@ -208,6 +245,90 @@ func buildFindGraphDiagnostics(db *store.DB, fp store.FilterParams, query string
 		diag.Notes = append(diag.Notes, "no typed graph attachments admitted")
 	}
 	return diag
+}
+
+func findGraphQueryAllowsSourceTest(query string) bool {
+	for _, token := range findGraphQueryFields(query) {
+		switch token {
+		case "assert", "assertion", "assertions", "behavior", "behaviour", "bug", "code", "coverage", "debug", "e2e", "fail", "failing", "failure", "fix", "fixture", "fixtures", "implementation", "integration", "regression", "source", "sources", "spec", "specs", "test", "tests", "trace", "unit", "validate", "verify":
+			return true
+		}
+		if strings.HasPrefix(token, "implement") {
+			return true
+		}
+	}
+	return false
+}
+
+func findGraphSeedHasSpecificQueryAnchor(seed retrieval.Candidate, query string, seedIndex int) bool {
+	terms := findGraphSpecificQueryTerms(query)
+	if len(terms) == 0 {
+		return false
+	}
+	strongHaystack := strings.ToLower(strings.Join([]string{seed.Path, seed.Source, seed.Title}, " "))
+	compactStrongHaystack := findGraphCompactAlnum(strongHaystack)
+	bodyHaystack := strings.ToLower(seed.Body)
+	compactBodyHaystack := findGraphCompactAlnum(bodyHaystack)
+	for _, term := range terms {
+		if strings.Contains(strongHaystack, term) || strings.Contains(compactStrongHaystack, term) {
+			return true
+		}
+		if seedIndex < 2 && (strings.Contains(bodyHaystack, term) || strings.Contains(compactBodyHaystack, term)) {
+			return true
+		}
+	}
+	return false
+}
+
+func findGraphSpecificQueryTerms(query string) []string {
+	seen := map[string]bool{}
+	var terms []string
+	for _, field := range findGraphQueryFields(query) {
+		field = strings.TrimSpace(field)
+		if len(field) < 4 || findGraphGenericQueryTerm(field) || seen[field] {
+			continue
+		}
+		seen[field] = true
+		terms = append(terms, field)
+	}
+	return terms
+}
+
+func findGraphQueryFields(query string) []string {
+	return strings.FieldsFunc(strings.ToLower(query), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+func findGraphGenericQueryTerm(term string) bool {
+	switch term {
+	case "adapter", "adapters", "assert", "behavior", "behaviour", "code", "coverage", "debug", "failure", "failing", "fixture", "fixtures", "implementation", "implement", "integration", "source", "spec", "test", "tests", "unit", "validate", "verify":
+		return true
+	default:
+		return false
+	}
+}
+
+func findGraphCompactAlnum(value string) string {
+	var b strings.Builder
+	for _, r := range value {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(unicode.ToLower(r))
+		}
+	}
+	return b.String()
+}
+
+func findGraphSourceTestRole(role string) bool {
+	return role == retrieval.PackRoleImplementation || role == retrieval.PackRoleBehaviorTests
+}
+
+func findGraphEdgeRolesCompatible(edgeType, seedRole, targetRole string) bool {
+	if edgeType != "tests_source" && edgeType != "mentions_symbol" {
+		return true
+	}
+	return (seedRole == retrieval.PackRoleImplementation && targetRole == retrieval.PackRoleBehaviorTests) ||
+		(seedRole == retrieval.PackRoleBehaviorTests && targetRole == retrieval.PackRoleImplementation)
 }
 
 func findGraphSeedEdges(db *store.DB, seed retrieval.Candidate) []store.ArtifactEdgeRow {
@@ -262,6 +383,8 @@ func findGraphCandidate(target, seed retrieval.Candidate, edge store.ArtifactEdg
 		AdmissionEdgeType: edge.EdgeType,
 		Confidence:        edge.Confidence,
 		Weight:            edge.Weight,
+		SourceSignal:      edge.SourceSignal,
+		CompanionDerived:  findGraphCompanionDerived(target) || findGraphCompanionDerived(seed),
 		Receipt:           findGraphReceipt(target, seed, edge),
 	}
 }
@@ -283,6 +406,11 @@ func findGraphReceipt(target, seed retrieval.Candidate, edge store.ArtifactEdgeR
 	return fmt.Sprintf("%s connects %s -> %s: %s", edge.EdgeType, srcPath, dstPath, explanation)
 }
 
+func findGraphCompanionDerived(c retrieval.Candidate) bool {
+	reason := strings.ToLower(strings.TrimSpace(metadataValue(c, "admission_reason")))
+	return reason == "test_source_companion"
+}
+
 func (diag *FindGraphDiagnostics) addSuppression(target, seed retrieval.Candidate, edge store.ArtifactEdgeRow, reason string) {
 	if len(diag.Suppressed) >= findGraphMaxSuppressed {
 		diag.Counts["suppressed_budget_reached"]++
@@ -302,6 +430,9 @@ func writeFindGraphDiagnosticsText(out io.Writer, diag FindGraphDiagnostics) {
 	fmt.Fprintf(out, "  Mode: %s\n", diag.Mode)
 	if len(diag.Candidates) == 0 {
 		fmt.Fprintln(out, "  No typed graph attachments admitted.")
+		if diag.SuppressedCount > 0 {
+			fmt.Fprintf(out, "  Suppressed: %d support/noise candidate(s)\n", diag.SuppressedCount)
+		}
 		return
 	}
 	for i, c := range diag.Candidates {

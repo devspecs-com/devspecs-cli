@@ -543,6 +543,36 @@ func TestFindGraphDiagnostics_AttachesTypedEdgeAndSuppressesSharedConcept(t *tes
 	if out.GraphDiagnostics.Counts["suppressed_support_only"] == 0 {
 		t.Fatalf("expected shared concept suppression count: %#v", out.GraphDiagnostics)
 	}
+	if out.GraphDiagnostics.Counts["admitted_explicit_reference"] != 0 {
+		t.Fatalf("explicit references must stay support-only in graph diagnostics: %#v", out.GraphDiagnostics)
+	}
+}
+
+func TestFindGraphDiagnostics_RequiresSourceTestQueryIntent(t *testing.T) {
+	repoDir, _ := setupReadEnv(t)
+	seedGraphDiagnosticArtifacts(t, repoDir)
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"--json", "--graph-diagnostics", "--no-refresh", "rotatetoken"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out FindGraphOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("find --json --graph-diagnostics invalid: %v\n%s", err, buf.String())
+	}
+	if len(out.RankedResults) == 0 {
+		t.Fatalf("expected unchanged ranked results: %#v", out)
+	}
+	if out.GraphDiagnostics.CandidateCount != 0 {
+		t.Fatalf("expected query-intent gate to suppress graph candidates: %#v", out.GraphDiagnostics)
+	}
+	if out.GraphDiagnostics.Counts["suppressed_query_intent"] == 0 {
+		t.Fatalf("expected query-intent suppression count: %#v", out.GraphDiagnostics)
+	}
 }
 
 func TestFind_JSONOutputIncludesLineScopedPath(t *testing.T) {
@@ -639,6 +669,7 @@ func seedGraphDiagnosticArtifacts(t *testing.T, repoDir string) {
 	insertGraphArtifact(t, db, repoID, "ds_graph_source", "rev_graph_source", "src_graph_source", "source_context", "", "src/session.ts", "Session implementation", "export function RotateToken() { return 'rotatetoken implementation'; }\n", `{"language":"typescript"}`, now)
 	insertGraphArtifact(t, db, repoID, "ds_graph_test", "rev_graph_test", "src_graph_test", "source_context", "test_case", "src/session.test.ts", "Session behavior test", "describe('session behavior', () => { it('covers rotation', () => {}); });\n", `{"mode":"intent","subtype":"test_case","source_type":"test_case","test_name":"session behavior"}`, now)
 	insertGraphArtifact(t, db, repoID, "ds_graph_noise", "rev_graph_noise", "src_graph_noise", "plan", "", "docs/noisy.md", "Noisy related doc", "This document shares a generic session concept but is not implementation context.\n", `{}`, now)
+	insertGraphArtifact(t, db, repoID, "ds_graph_reference", "rev_graph_reference", "src_graph_reference", "plan", "", "docs/session-reference.md", "Session reference", "This document explicitly references src/session.ts but should not be graph-admitted.\n", `{}`, now)
 	if err := db.UpsertArtifactEdge(store.ArtifactEdgeInput{
 		ID:            "edge_graph_test_source",
 		RepoID:        repoID,
@@ -664,6 +695,20 @@ func seedGraphDiagnosticArtifacts(t *testing.T, repoDir string) {
 		EvidenceCount: 1,
 		SourceSignal:  "shared_rare_concept",
 		Explanation:   "shares rare concept session",
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertArtifactEdge(store.ArtifactEdgeInput{
+		ID:            "edge_graph_explicit_reference",
+		RepoID:        repoID,
+		SrcArtifactID: "ds_graph_reference",
+		DstArtifactID: "ds_graph_source",
+		EdgeType:      "explicit_reference",
+		Weight:        0.9,
+		Confidence:    0.9,
+		EvidenceCount: 1,
+		SourceSignal:  "path_reference",
+		Explanation:   "explicit path reference",
 	}, now); err != nil {
 		t.Fatal(err)
 	}
