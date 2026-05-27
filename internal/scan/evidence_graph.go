@@ -30,6 +30,8 @@ const (
 	edgeTypeSameFileOrLineVariant = "same_file_or_line_variant"
 	edgeTypeSameLayoutGroup       = "same_layout_group"
 	edgeTypeOpenSpecCompanion     = "openspec_companion"
+	edgeTypeTestsSource           = "tests_source"
+	edgeTypeMentionsSymbol        = "mentions_symbol"
 
 	maxConceptForms                  = 6
 	maxMentionEvidenceFormLength     = 120
@@ -46,6 +48,10 @@ const (
 	maxPathReferenceEdgesPerSource   = 4
 	maxSameSourcePathEdgesPerPath    = 24
 	maxLayoutGroupEdgesPerGroup      = 24
+	maxTestSourceEdges               = 3000
+	maxTestSourceEdgesPerTest        = 5
+	maxTestSourceCandidatesPerKey    = 16
+	maxTriangulationSymbolsPerSource = 40
 )
 
 // EvidenceGraphDiagnostics is a scan-time summary of persisted graph evidence.
@@ -144,6 +150,20 @@ type pathReferenceEdge struct {
 }
 
 var pathReferencePattern = regexp.MustCompile(`(?i)([A-Za-z0-9_.@+-]+(?:/[A-Za-z0-9_.@+-]+)+\.(?:md|markdown|txt|adoc|rst|go|py|rs|java|kt|ts|tsx|js|jsx|vue|sql|toml|yaml|yml|json|dockerfile))`)
+var testImportPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?m)\bfrom\s+([A-Za-z0-9_./:-]+)\s+import\b`),
+	regexp.MustCompile(`(?m)\bimport\s+([A-Za-z0-9_./:-]+)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?$`),
+	regexp.MustCompile(`(?m)\bimport(?:\s+type)?(?:[^'"` + "`" + `\n]+?\s+from\s*)?['"]([^'"` + "`" + `]+)['"]`),
+	regexp.MustCompile(`(?m)\brequire\(\s*['"]([^'"]+)['"]\s*\)`),
+	regexp.MustCompile(`(?m)\buse\s+([A-Za-z0-9_:]+)`),
+}
+var sourceSymbolPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?m)\bfunc\s+(?:\([^)]+\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(`),
+	regexp.MustCompile(`(?m)\btype\s+([A-Za-z_][A-Za-z0-9_]*)\b`),
+	regexp.MustCompile(`(?m)\b(?:def|class|fn|struct|enum|trait|interface)\s+([A-Za-z_][A-Za-z0-9_]*)\b`),
+	regexp.MustCompile(`(?m)\b(?:function|class|interface|type)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b`),
+	regexp.MustCompile(`(?m)\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b`),
+}
 
 func (s *Scanner) rebuildEvidenceGraph(repoID, now string) (*EvidenceGraphDiagnostics, error) {
 	artifacts, err := s.loadEvidenceArtifacts(repoID)
@@ -300,6 +320,7 @@ func buildEvidenceGraph(repoID string, artifacts []evidenceArtifact) evidenceBui
 	noisy := materializeSharedConceptEdges(artifacts, conceptsByKey, rawMentions, edgeBuilder)
 	materializeLayoutGroupEdges(artifacts, edgeBuilder)
 	materializeSameSourcePathEdges(artifacts, edgeBuilder)
+	materializeTestSourceTriangulationEdges(artifacts, edgeBuilder)
 	materializeLinkEdges(artifacts, edgeBuilder)
 	materializePathReferenceEdges(artifacts, edgeBuilder)
 	edges := edgeBuilder.edges()
@@ -839,6 +860,564 @@ func materializeSameSourcePathEdges(artifacts []evidenceArtifact, builder *evide
 			}
 		}
 	}
+}
+
+type testTriangulationInfo struct {
+	artifact    evidenceArtifact
+	path        string
+	dir         string
+	stem        string
+	symbols     map[string]string
+	importKeys  map[string]bool
+	importForms map[string]bool
+}
+
+type sourceTriangulationInfo struct {
+	artifact   evidenceArtifact
+	path       string
+	dir        string
+	stem       string
+	moduleKeys map[string]bool
+	symbols    map[string]string
+}
+
+type testSourceCandidate struct {
+	test        *testTriangulationInfo
+	source      *sourceTriangulationInfo
+	signals     map[string]bool
+	symbols     map[string]string
+	importForms map[string]bool
+	weight      float64
+	confidence  float64
+}
+
+func materializeTestSourceTriangulationEdges(artifacts []evidenceArtifact, builder *evidenceEdgeBuilder) {
+	tests, sources := collectTriangulationArtifacts(artifacts)
+	if len(tests) == 0 || len(sources) == 0 {
+		return
+	}
+	sourcesByStem := map[string][]*sourceTriangulationInfo{}
+	sourcesByModuleKey := map[string][]*sourceTriangulationInfo{}
+	sourcesBySymbol := map[string][]*sourceTriangulationInfo{}
+	sourceStemCount := map[string]int{}
+	for i := range sources {
+		source := &sources[i]
+		if source.stem != "" {
+			sourcesByStem[source.stem] = append(sourcesByStem[source.stem], source)
+			sourceStemCount[source.stem]++
+		}
+		for key := range source.moduleKeys {
+			sourcesByModuleKey[key] = append(sourcesByModuleKey[key], source)
+		}
+		for symbol := range source.symbols {
+			sourcesBySymbol[symbol] = append(sourcesBySymbol[symbol], source)
+		}
+	}
+
+	var selected []*testSourceCandidate
+	for i := range tests {
+		test := &tests[i]
+		bySource := map[string]*testSourceCandidate{}
+		addCandidate := func(source *sourceTriangulationInfo, signal string, weight, confidence float64) *testSourceCandidate {
+			if source == nil || signal == "" || test.artifact.id == source.artifact.id {
+				return nil
+			}
+			candidate := bySource[source.artifact.id]
+			if candidate == nil {
+				candidate = &testSourceCandidate{
+					test:        test,
+					source:      source,
+					signals:     map[string]bool{},
+					symbols:     map[string]string{},
+					importForms: map[string]bool{},
+				}
+				bySource[source.artifact.id] = candidate
+			}
+			candidate.signals[signal] = true
+			if weight > candidate.weight {
+				candidate.weight = weight
+			}
+			if confidence > candidate.confidence {
+				candidate.confidence = confidence
+			}
+			return candidate
+		}
+
+		if test.stem != "" {
+			for _, source := range cappedTriangulationSources(sourcesByStem[test.stem]) {
+				if !allowTestSourceStemMatch(test, source, sourceStemCount[test.stem]) {
+					continue
+				}
+				confidence := 0.86
+				weight := 0.84
+				if triangulationPathsAreNear(test.path, source.path) {
+					confidence = 0.91
+					weight = 0.9
+				}
+				addCandidate(source, "test_source_stem", weight, confidence)
+			}
+		}
+
+		for _, key := range sortedMapKeys(test.importKeys) {
+			for _, source := range cappedTriangulationSources(sourcesByModuleKey[key]) {
+				candidate := addCandidate(source, "direct_import", 0.92, 0.92)
+				if candidate != nil {
+					for form := range test.importForms {
+						if importKeysForModule(form)[key] {
+							candidate.importForms[form] = true
+						}
+					}
+				}
+			}
+		}
+
+		for _, symbol := range sortedStringValueMapKeys(test.symbols) {
+			for _, source := range cappedTriangulationSymbolSources(sourcesBySymbol[symbol]) {
+				weight := 0.74
+				confidence := 0.72
+				if triangulationPathsAreNear(test.path, source.path) {
+					weight = 0.8
+					confidence = 0.8
+				}
+				candidate := addCandidate(source, "source_symbol_match", weight, confidence)
+				if candidate != nil {
+					candidate.symbols[symbol] = firstNonEmpty(test.symbols[symbol], source.symbols[symbol], symbol)
+				}
+			}
+		}
+
+		candidates := make([]*testSourceCandidate, 0, len(bySource))
+		for _, candidate := range bySource {
+			finalizeTestSourceCandidate(candidate)
+			if candidate.confidence >= 0.75 {
+				candidates = append(candidates, candidate)
+			}
+		}
+		sort.Slice(candidates, func(i, j int) bool {
+			if candidates[i].confidence == candidates[j].confidence {
+				if len(candidates[i].signals) == len(candidates[j].signals) {
+					return candidates[i].source.path < candidates[j].source.path
+				}
+				return len(candidates[i].signals) > len(candidates[j].signals)
+			}
+			return candidates[i].confidence > candidates[j].confidence
+		})
+		if len(candidates) > maxTestSourceEdgesPerTest {
+			candidates = candidates[:maxTestSourceEdgesPerTest]
+		}
+		selected = append(selected, candidates...)
+	}
+
+	sort.Slice(selected, func(i, j int) bool {
+		if selected[i].confidence == selected[j].confidence {
+			if selected[i].test.path == selected[j].test.path {
+				return selected[i].source.path < selected[j].source.path
+			}
+			return selected[i].test.path < selected[j].test.path
+		}
+		return selected[i].confidence > selected[j].confidence
+	})
+	if len(selected) > maxTestSourceEdges {
+		selected = selected[:maxTestSourceEdges]
+	}
+	for _, candidate := range selected {
+		signals := sortedMapKeys(candidate.signals)
+		signal := strongestTestSourceSignal(candidate.signals)
+		symbols := limitedSortedStringMapValues(candidate.symbols, 6)
+		imports := limitedSortedMapKeys(candidate.importForms, 6)
+		explanation := testSourceExplanation(signal, candidate.test.path, candidate.source.path, symbols)
+		metadata := map[string]any{
+			"test_path":   candidate.test.path,
+			"source_path": candidate.source.path,
+			"signals":     signals,
+		}
+		if len(symbols) > 0 {
+			metadata["symbols"] = symbols
+		}
+		if len(imports) > 0 {
+			metadata["imports"] = imports
+		}
+		builder.add(candidate.test.artifact.id, candidate.source.artifact.id, edgeTypeTestsSource, signal, candidate.weight, candidate.confidence, len(signals)+len(symbols)+len(imports), explanation, metadata)
+		if len(symbols) > 0 {
+			builder.add(candidate.test.artifact.id, candidate.source.artifact.id, edgeTypeMentionsSymbol, "test_symbol_match", minFloat(candidate.weight, 0.78), minFloat(candidate.confidence, 0.82), len(symbols), "test mentions source symbol "+symbols[0], metadata)
+		}
+	}
+}
+
+func collectTriangulationArtifacts(artifacts []evidenceArtifact) ([]testTriangulationInfo, []sourceTriangulationInfo) {
+	var tests []testTriangulationInfo
+	var sources []sourceTriangulationInfo
+	for _, artifact := range artifacts {
+		path := primaryEvidencePath(artifact)
+		if path == "" {
+			continue
+		}
+		if isEvidenceTestArtifact(artifact) {
+			info := testTriangulationInfo{
+				artifact:    artifact,
+				path:        path,
+				dir:         filepath.ToSlash(filepath.Dir(path)),
+				stem:        normalizedTestSourceStem(path),
+				symbols:     triangulationTestSymbols(artifact),
+				importKeys:  map[string]bool{},
+				importForms: map[string]bool{},
+			}
+			for _, imp := range extractTriangulationImports(artifact.body) {
+				info.importForms[imp] = true
+				for key := range importKeysForModule(imp) {
+					info.importKeys[key] = true
+				}
+			}
+			tests = append(tests, info)
+			continue
+		}
+		if isEvidenceSourceArtifact(artifact) {
+			if sourcePathLooksLikeTest(path) {
+				continue
+			}
+			sourceSymbols := extractSourceTriangulationSymbols(artifact)
+			info := sourceTriangulationInfo{
+				artifact:   artifact,
+				path:       path,
+				dir:        filepath.ToSlash(filepath.Dir(path)),
+				stem:       normalizedSourceStem(path),
+				moduleKeys: sourceModuleKeys(path),
+				symbols:    sourceSymbols,
+			}
+			sources = append(sources, info)
+		}
+	}
+	return tests, sources
+}
+
+func isEvidenceTestArtifact(artifact evidenceArtifact) bool {
+	if normalizeRoleValue(artifact.subtype) == "test_case" || normalizeRoleValue(evidenceString(artifact.extracted["subtype"])) == "test_case" {
+		return true
+	}
+	for _, src := range artifact.sources {
+		if normalizeRoleValue(src.SourceType) == "test_case" {
+			return true
+		}
+	}
+	return false
+}
+
+func isEvidenceSourceArtifact(artifact evidenceArtifact) bool {
+	if normalizeRoleValue(artifact.kind) != "source_context" {
+		return false
+	}
+	subtype := normalizeRoleValue(artifact.subtype)
+	if subtype == "test_case" || subtype == "code_comment" {
+		return false
+	}
+	for _, src := range artifact.sources {
+		if normalizeRoleValue(src.SourceType) == "source_context" {
+			return true
+		}
+	}
+	return false
+}
+
+func primaryEvidencePath(artifact evidenceArtifact) string {
+	if path := evidenceString(artifact.extracted["source_path"]); path != "" {
+		return normalizeEvidencePath(path)
+	}
+	for _, src := range artifact.sources {
+		if strings.TrimSpace(src.Path) != "" {
+			return normalizeEvidencePath(src.Path)
+		}
+	}
+	return ""
+}
+
+func normalizeEvidencePath(path string) string {
+	path = filepath.ToSlash(strings.TrimSpace(path))
+	path = strings.TrimPrefix(path, "./")
+	return strings.Trim(path, "/")
+}
+
+func normalizedSourceStem(path string) string {
+	base := filepath.Base(filepath.ToSlash(path))
+	stem := strings.TrimSuffix(base, filepath.Ext(base))
+	stem = strings.TrimSuffix(stem, ".d")
+	return compactIdentifier(stem)
+}
+
+func normalizedTestSourceStem(path string) string {
+	base := filepath.Base(filepath.ToSlash(path))
+	stem := strings.TrimSuffix(base, filepath.Ext(base))
+	for _, suffix := range []string{"_test", "-test", ".test", "_spec", "-spec", ".spec", "_tests", "-tests", ".tests"} {
+		stem = strings.TrimSuffix(stem, suffix)
+	}
+	for _, prefix := range []string{"test_", "test-", "spec_", "spec-"} {
+		stem = strings.TrimPrefix(stem, prefix)
+	}
+	return compactIdentifier(stem)
+}
+
+func sourceModuleKeys(path string) map[string]bool {
+	path = strings.TrimSuffix(normalizeEvidencePath(path), filepath.Ext(path))
+	keys := map[string]bool{}
+	addModuleKeys(keys, path)
+	if base := filepath.Base(path); base != "." && base != "" {
+		addModuleKeys(keys, base)
+	}
+	return keys
+}
+
+func importKeysForModule(value string) map[string]bool {
+	keys := map[string]bool{}
+	addModuleKeys(keys, value)
+	if idx := strings.LastIndexAny(value, "/.:"); idx >= 0 && idx+1 < len(value) {
+		addModuleKeys(keys, value[idx+1:])
+	}
+	return keys
+}
+
+func addModuleKeys(keys map[string]bool, value string) {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, `"'`)
+	value = strings.TrimPrefix(value, "./")
+	value = trimKnownTriangulationExtension(value)
+	value = strings.NewReplacer("/", " ", "\\", " ", ".", " ", "::", " ", "-", " ", "_", " ").Replace(value)
+	for _, compact := range compactConcepts(value) {
+		if usefulTriangulationKey(compact) {
+			keys[compact] = true
+		}
+	}
+}
+
+func trimKnownTriangulationExtension(value string) string {
+	ext := strings.ToLower(filepath.Ext(value))
+	switch ext {
+	case ".go", ".py", ".rs", ".java", ".kt", ".ts", ".tsx", ".js", ".jsx", ".vue", ".sql", ".toml", ".yaml", ".yml", ".json":
+		return strings.TrimSuffix(value, filepath.Ext(value))
+	default:
+		return value
+	}
+}
+
+func extractTriangulationImports(body string) []string {
+	if len(body) > 128*1024 {
+		body = body[:128*1024]
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, pattern := range testImportPatterns {
+		for _, match := range pattern.FindAllStringSubmatch(body, 80) {
+			if len(match) < 2 {
+				continue
+			}
+			value := strings.TrimSpace(match[1])
+			value = strings.Trim(value, `"'`)
+			if !usefulTriangulationImport(value) || seen[value] {
+				continue
+			}
+			seen[value] = true
+			out = append(out, value)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func triangulationTestSymbols(artifact evidenceArtifact) map[string]string {
+	symbols := map[string]string{}
+	add := func(value string) {
+		if compact := compactIdentifier(value); usefulTriangulationSymbol(compact) {
+			symbols[compact] = value
+		}
+	}
+	for _, symbol := range evidenceStringSlice(artifact.extracted["symbols"]) {
+		add(symbol)
+	}
+	add(evidenceString(artifact.extracted["test_name"]))
+	return symbols
+}
+
+func extractSourceTriangulationSymbols(artifact evidenceArtifact) map[string]string {
+	symbols := map[string]string{}
+	for _, symbol := range evidenceStringSlice(artifact.extracted["symbols"]) {
+		if compact := compactIdentifier(symbol); usefulTriangulationSymbol(compact) {
+			symbols[compact] = symbol
+		}
+		if len(symbols) >= maxTriangulationSymbolsPerSource {
+			return symbols
+		}
+	}
+	body := artifact.body
+	if len(body) > 128*1024 {
+		body = body[:128*1024]
+	}
+	for _, pattern := range sourceSymbolPatterns {
+		for _, match := range pattern.FindAllStringSubmatch(body, 80) {
+			if len(match) < 2 {
+				continue
+			}
+			symbol := strings.TrimSpace(match[1])
+			if compact := compactIdentifier(symbol); usefulTriangulationSymbol(compact) {
+				symbols[compact] = symbol
+			}
+			if len(symbols) >= maxTriangulationSymbolsPerSource {
+				return symbols
+			}
+		}
+	}
+	return symbols
+}
+
+func cappedTriangulationSources(sources []*sourceTriangulationInfo) []*sourceTriangulationInfo {
+	if len(sources) > maxTestSourceCandidatesPerKey {
+		return nil
+	}
+	return sources
+}
+
+func cappedTriangulationSymbolSources(sources []*sourceTriangulationInfo) []*sourceTriangulationInfo {
+	if len(sources) > 4 {
+		return nil
+	}
+	return sources
+}
+
+func allowTestSourceStemMatch(test *testTriangulationInfo, source *sourceTriangulationInfo, sourceStemCount int) bool {
+	if test.stem == "" || test.stem != source.stem || triangulationGenericStem(test.stem) {
+		return false
+	}
+	if sourceStemCount <= 3 {
+		return true
+	}
+	return triangulationPathsAreNear(test.path, source.path)
+}
+
+func triangulationPathsAreNear(testPath, sourcePath string) bool {
+	testDir := filepath.ToSlash(filepath.Dir(testPath))
+	sourceDir := filepath.ToSlash(filepath.Dir(sourcePath))
+	if testDir == sourceDir {
+		return true
+	}
+	testDir = strings.Trim(testDir, "/")
+	sourceDir = strings.Trim(sourceDir, "/")
+	if strings.HasPrefix(testDir, sourceDir+"/") || strings.HasPrefix(sourceDir, testDir+"/") {
+		return true
+	}
+	testTrimmed := strings.TrimPrefix(testDir, "tests/")
+	testTrimmed = strings.TrimPrefix(testTrimmed, "test/")
+	return testTrimmed != testDir && (testTrimmed == sourceDir || strings.HasSuffix(sourceDir, "/"+testTrimmed))
+}
+
+func finalizeTestSourceCandidate(candidate *testSourceCandidate) {
+	if candidate == nil {
+		return
+	}
+	if candidate.signals["direct_import"] && candidate.signals["test_source_stem"] {
+		candidate.weight = maxFloat(candidate.weight, 0.95)
+		candidate.confidence = maxFloat(candidate.confidence, 0.95)
+		return
+	}
+	if candidate.signals["test_source_stem"] && candidate.signals["source_symbol_match"] {
+		candidate.weight = maxFloat(candidate.weight, 0.9)
+		candidate.confidence = maxFloat(candidate.confidence, 0.9)
+		return
+	}
+	if candidate.signals["direct_import"] && candidate.signals["source_symbol_match"] {
+		candidate.weight = maxFloat(candidate.weight, 0.93)
+		candidate.confidence = maxFloat(candidate.confidence, 0.93)
+	}
+}
+
+func strongestTestSourceSignal(signals map[string]bool) string {
+	for _, signal := range []string{"direct_import", "test_source_stem", "source_symbol_match"} {
+		if signals[signal] {
+			return signal
+		}
+	}
+	return "test_source"
+}
+
+func testSourceExplanation(signal, testPath, sourcePath string, symbols []string) string {
+	switch signal {
+	case "direct_import":
+		return "test imports likely source " + sourcePath
+	case "test_source_stem":
+		return "test/source stem match for " + sourcePath
+	case "source_symbol_match":
+		if len(symbols) > 0 {
+			return "test mentions source symbol " + symbols[0]
+		}
+	}
+	return "test likely relates to source " + sourcePath + " from " + testPath
+}
+
+func usefulTriangulationImport(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 160 {
+		return false
+	}
+	if strings.ContainsAny(value, " \t\n\r") {
+		return false
+	}
+	return len(importKeysForModule(value)) > 0
+}
+
+func usefulTriangulationKey(value string) bool {
+	value = strings.TrimSpace(strings.ToLower(value))
+	return len(value) >= 4 && !evidenceStopWords[value] && !triangulationGenericStem(value)
+}
+
+func usefulTriangulationSymbol(value string) bool {
+	value = strings.TrimSpace(strings.ToLower(value))
+	return len(value) >= 4 && !evidenceStopWords[value] && !genericEdgeTerms[value] && !triangulationGenericStem(value)
+}
+
+func triangulationGenericStem(value string) bool {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "body", "common", "config", "error", "errors", "file", "files", "fixture", "fixtures", "helper", "helpers", "index", "main", "name", "parse", "path", "result", "setup", "shared", "source", "spec", "status", "target", "test", "tests", "title", "types", "util", "utils", "value", "values":
+		return true
+	default:
+		return false
+	}
+}
+
+func sourcePathLooksLikeTest(path string) bool {
+	base := strings.ToLower(strings.TrimSuffix(filepath.Base(filepath.ToSlash(path)), filepath.Ext(path)))
+	if base == "" {
+		return false
+	}
+	for _, suffix := range []string{"_test", "-test", ".test", "_spec", "-spec", ".spec", "_tests", "-tests", ".tests"} {
+		if strings.HasSuffix(base, suffix) {
+			return true
+		}
+	}
+	for _, prefix := range []string{"test_", "test-", "spec_", "spec-"} {
+		if strings.HasPrefix(base, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func limitedSortedStringMapValues(values map[string]string, limit int) []string {
+	seen := map[string]bool{}
+	for key, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			value = key
+		}
+		if value != "" {
+			seen[value] = true
+		}
+	}
+	return limitedSortedMapKeys(seen, limit)
+}
+
+func sortedStringValueMapKeys(values map[string]string) []string {
+	out := make([]string, 0, len(values))
+	for key := range values {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func materializeLinkEdges(artifacts []evidenceArtifact, builder *evidenceEdgeBuilder) {
@@ -1439,6 +2018,13 @@ func minInt(a, b int) int {
 
 func minFloat(a, b float64) float64 {
 	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxFloat(a, b float64) float64 {
+	if a > b {
 		return a
 	}
 	return b

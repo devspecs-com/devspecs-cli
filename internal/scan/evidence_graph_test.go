@@ -173,6 +173,65 @@ func TestEvidenceMentionBudgetCapsDenseRepos(t *testing.T) {
 	}
 }
 
+func TestTestSourceTriangulationExactStem(t *testing.T) {
+	result := buildEvidenceGraph("repo", []evidenceArtifact{
+		evidenceSourceArtifact("src_webhooks", "src/billing/webhooks.ts", "export function handleWebhook() { return true }\n"),
+		evidenceTestCaseArtifact("test_webhooks", "src/billing/webhooks.test.ts", "handles webhook retries", "", nil),
+	})
+
+	edge := singleEdgeByType(t, result.edges, edgeTypeTestsSource)
+	if edge.SrcArtifactID != "test_webhooks" || edge.DstArtifactID != "src_webhooks" {
+		t.Fatalf("tests_source should point test to source, got %#v", edge)
+	}
+	if edge.SourceSignal != "test_source_stem" {
+		t.Fatalf("expected stem signal, got %q", edge.SourceSignal)
+	}
+	if edge.Confidence < 0.9 {
+		t.Fatalf("near test/source stem should be high confidence, got %.3f", edge.Confidence)
+	}
+}
+
+func TestTestSourceTriangulationDirectImport(t *testing.T) {
+	result := buildEvidenceGraph("repo", []evidenceArtifact{
+		evidenceSourceArtifact("src_publish", "scripts/publish_keys.py", "def publish_keys():\n    return True\n"),
+		evidenceTestCaseArtifact("test_publish", "tests/test_publish_keys.py", "test publish keys", "from scripts.publish_keys import publish_keys\n", nil),
+	})
+
+	edge := singleEdgeByType(t, result.edges, edgeTypeTestsSource)
+	if edge.SourceSignal != "direct_import" {
+		t.Fatalf("expected direct import signal, got %q: %#v", edge.SourceSignal, edge)
+	}
+	if edge.Confidence < 0.9 {
+		t.Fatalf("direct import should be high confidence, got %.3f", edge.Confidence)
+	}
+}
+
+func TestTestSourceTriangulationAvoidsSiblingOnly(t *testing.T) {
+	result := buildEvidenceGraph("repo", []evidenceArtifact{
+		evidenceSourceArtifact("src_tokens", "src/auth/tokens.ts", "export function rotateToken() { return true }\n"),
+		evidenceTestCaseArtifact("test_session", "src/auth/session.test.ts", "handles session expiry", "", nil),
+	})
+
+	if got := countEdgesByType(result.edges, edgeTypeTestsSource); got != 0 {
+		t.Fatalf("same-directory sibling-only tests should not create tests_source edges, got %d: %#v", got, result.edges)
+	}
+}
+
+func TestTestSourceTriangulationSymbolMatch(t *testing.T) {
+	result := buildEvidenceGraph("repo", []evidenceArtifact{
+		evidenceSourceArtifact("src_refresh", "src/auth/token_service.ts", "export class RefreshTokenService {}\n"),
+		evidenceTestCaseArtifact("test_refresh", "src/auth/session_behavior.test.ts", "refresh token behavior", "", []string{"RefreshTokenService"}),
+	})
+
+	edge := singleEdgeByType(t, result.edges, edgeTypeTestsSource)
+	if edge.SourceSignal != "source_symbol_match" {
+		t.Fatalf("expected symbol-match signal, got %q: %#v", edge.SourceSignal, edge)
+	}
+	if got := countEdgesByType(result.edges, edgeTypeMentionsSymbol); got != 1 {
+		t.Fatalf("symbol match should emit one mentions_symbol edge, got %d: %#v", got, result.edges)
+	}
+}
+
 func evidenceTestArtifact(id, title, path string) evidenceArtifact {
 	return evidenceArtifact{
 		id:        id,
@@ -185,6 +244,50 @@ func evidenceTestArtifact(id, title, path string) evidenceArtifact {
 			SourceType:    "markdown",
 			Path:          path,
 			FormatProfile: "generic",
+		}},
+	}
+}
+
+func evidenceSourceArtifact(id, path, body string) evidenceArtifact {
+	return evidenceArtifact{
+		id:        id,
+		repoID:    "repo",
+		kind:      "source_context",
+		title:     path,
+		status:    "unknown",
+		body:      body,
+		extracted: map[string]any{"language": "typescript"},
+		sources: []store.SourceRow{{
+			SourceType:     "source_context",
+			Path:           path,
+			SourceIdentity: path + "|source_context",
+			FormatProfile:  "generic",
+		}},
+	}
+}
+
+func evidenceTestCaseArtifact(id, path, name, body string, symbols []string) evidenceArtifact {
+	return evidenceArtifact{
+		id:      id,
+		repoID:  "repo",
+		kind:    "source_context",
+		subtype: "test_case",
+		title:   name,
+		status:  "unknown",
+		body:    body,
+		extracted: map[string]any{
+			"subtype":     "test_case",
+			"language":    "typescript",
+			"source_path": path,
+			"test_name":   name,
+			"symbols":     symbols,
+		},
+		sources: []store.SourceRow{{
+			SourceType:     "test_case",
+			Path:           path,
+			SourceIdentity: path + "|test_case|1|" + name,
+			FormatProfile:  "generic",
+			LayoutGroup:    path,
 		}},
 	}
 }
