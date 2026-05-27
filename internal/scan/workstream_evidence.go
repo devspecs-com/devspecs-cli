@@ -34,9 +34,10 @@ const (
 	maxWorkstreamBodyBytes           = 128 * 1024
 	workstreamHighDFRatio            = 0.35
 
-	workstreamPackStrengthStrong  = "strong"
-	workstreamPackStrengthSupport = "support"
-	workstreamPackStrengthWeak    = "weak"
+	workstreamPackStrengthStrong       = "strong"
+	workstreamPackStrengthSupportCross = "support_cross_role"
+	workstreamPackStrengthSupportLocal = "support_locality"
+	workstreamPackStrengthWeak         = "weak"
 )
 
 var (
@@ -53,10 +54,14 @@ type WorkstreamEvidenceDiagnostics struct {
 	EdgesIndexed         int                               `json:"edges_indexed,omitempty"`
 	EdgesByType          map[string]int                    `json:"edges_by_type,omitempty"`
 	ClustersCapped       int                               `json:"clusters_capped,omitempty"`
+	PackStrengthCounts   map[string]int                    `json:"pack_strength_counts,omitempty"`
+	CappedPackStrengths  map[string]int                    `json:"capped_pack_strength_counts,omitempty"`
+	CappedRoleFamilies   map[string]int                    `json:"capped_role_family_counts,omitempty"`
 	NoisyAnchorsRejected int                               `json:"noisy_anchors_rejected,omitempty"`
 	RejectedByReason     map[string]int                    `json:"rejected_by_reason,omitempty"`
 	TopRejectedAnchors   []WorkstreamRejectedAnchorExample `json:"top_rejected_anchors,omitempty"`
 	TopClusters          []WorkstreamClusterExample        `json:"top_clusters,omitempty"`
+	TopCappedClusters    []WorkstreamClusterExample        `json:"top_capped_clusters,omitempty"`
 }
 
 // WorkstreamClusterExample gives a compact receipt for a materialized anchor cluster.
@@ -496,8 +501,8 @@ func acceptedWorkstreamClusters(accs map[string]*workstreamAnchorAccumulator, ar
 		}
 		if packStrength == workstreamPackStrengthWeak {
 			cluster.caveats = append(cluster.caveats, "weak pack candidate; evidence is mostly single-family code/test locality")
-		} else if packStrength == workstreamPackStrengthSupport && !workstreamHasDocBackedFamilyMix(workstreamRoleFamilyMix(acc, artifactIDs)) {
-			cluster.caveats = append(cluster.caveats, "supporting relation; no doc/model artifact in cluster")
+		} else if packStrength == workstreamPackStrengthSupportLocal {
+			cluster.caveats = append(cluster.caveats, "locality support only; no doc/model-to-implementation bridge")
 		}
 		accepted = append(accepted, cluster)
 	}
@@ -514,8 +519,22 @@ func acceptedWorkstreamClusters(accs map[string]*workstreamAnchorAccumulator, ar
 		return accepted[i].confidence > accepted[j].confidence
 	})
 	if len(accepted) > maxWorkstreamAnchorsMaterialized {
-		diag.ClustersCapped += len(accepted) - maxWorkstreamAnchorsMaterialized
+		capped := append([]workstreamAcceptedCluster(nil), accepted[maxWorkstreamAnchorsMaterialized:]...)
+		diag.ClustersCapped += len(capped)
+		diag.CappedPackStrengths = map[string]int{}
+		diag.CappedRoleFamilies = map[string]int{}
+		for _, cluster := range capped {
+			diag.CappedPackStrengths[cluster.packStrength]++
+			for family, count := range workstreamRoleFamilyMix(cluster.acc, cluster.artifactIDs) {
+				diag.CappedRoleFamilies[family] += count
+			}
+		}
+		diag.TopCappedClusters = workstreamClusterExamples(capped, maxWorkstreamTopClusters)
 		accepted = accepted[:maxWorkstreamAnchorsMaterialized]
+	}
+	diag.PackStrengthCounts = map[string]int{}
+	for _, cluster := range accepted {
+		diag.PackStrengthCounts[cluster.packStrength]++
 	}
 	return accepted
 }
@@ -545,15 +564,17 @@ func workstreamConceptsAndMentions(repoID string, clusters []workstreamAcceptedC
 				Field:      "workstream_anchor",
 				Weight:     art.weight,
 				EvidenceJSON: evidenceJSON(map[string]any{
-					"anchor":        acc.display,
-					"anchor_type":   acc.primaryType(),
-					"pack_strength": cluster.packStrength,
-					"role_family":   workstreamRoleFamily(art.ref),
-					"forms":         limitedSortedMapKeys(art.forms, maxWorkstreamFormsPerAnchor),
-					"sources":       sortedMapKeys(art.sources),
-					"fields":        sortedMapKeys(art.fields),
-					"commits":       art.commits,
-					"evidence":      art.evidence,
+					"anchor":          acc.display,
+					"anchor_type":     acc.primaryType(),
+					"confidence":      cluster.confidence,
+					"confidence_rule": cluster.confidenceRule,
+					"pack_strength":   cluster.packStrength,
+					"role_family":     workstreamRoleFamily(art.ref),
+					"forms":           limitedSortedMapKeys(art.forms, maxWorkstreamFormsPerAnchor),
+					"sources":         sortedMapKeys(art.sources),
+					"fields":          sortedMapKeys(art.fields),
+					"commits":         art.commits,
+					"evidence":        art.evidence,
 				}),
 			})
 		}
@@ -574,10 +595,14 @@ func workstreamEdges(repoID string, clusters []workstreamAcceptedCluster, refsBy
 		if len(cluster.artifactIDs) < 2 {
 			continue
 		}
+		edgeLimit := maxWorkstreamEdgesForCluster(cluster.packStrength)
+		if edgeLimit <= 0 {
+			continue
+		}
 		emittedForAnchor := 0
 		for i := 0; i < len(cluster.artifactIDs); i++ {
 			for j := i + 1; j < len(cluster.artifactIDs); j++ {
-				if emittedForAnchor >= maxWorkstreamEdgesPerAnchor {
+				if emittedForAnchor >= edgeLimit {
 					diag.ClustersCapped++
 					break
 				}
@@ -592,6 +617,8 @@ func workstreamEdges(repoID string, clusters []workstreamAcceptedCluster, refsBy
 					"anchor":          cluster.acc.display,
 					"canonical":       cluster.acc.canonical,
 					"anchor_type":     cluster.acc.primaryType(),
+					"confidence":      cluster.confidence,
+					"weight":          cluster.weight,
 					"pack_strength":   cluster.packStrength,
 					"confidence_rule": cluster.confidenceRule,
 					"sources":         sortedMapKeys(cluster.acc.sources),
@@ -674,14 +701,22 @@ func workstreamEdges(repoID string, clusters []workstreamAcceptedCluster, refsBy
 }
 
 func topWorkstreamClusters(clusters []workstreamAcceptedCluster, refsByArtifact map[string]gitArtifactRef) []WorkstreamClusterExample {
-	limit := minInt(maxWorkstreamTopClusters, len(clusters))
+	return workstreamClusterExamples(clusters, maxWorkstreamTopClusters)
+}
+
+func workstreamClusterExamples(clusters []workstreamAcceptedCluster, limit int) []WorkstreamClusterExample {
+	limit = minInt(limit, len(clusters))
 	out := make([]WorkstreamClusterExample, 0, limit)
 	for _, cluster := range clusters[:limit] {
 		roleMix := map[string]int{}
 		roleFamilyMix := map[string]int{}
 		var examples []WorkstreamArtifactExample
 		for _, artifactID := range cluster.artifactIDs {
-			ref := refsByArtifact[artifactID]
+			art := cluster.acc.artifacts[artifactID]
+			if art == nil {
+				continue
+			}
+			ref := art.ref
 			roleMix[workstreamArtifactRole(ref)]++
 			roleFamilyMix[workstreamRoleFamily(ref)]++
 			if len(examples) < maxWorkstreamArtifactExamples {
@@ -1114,8 +1149,11 @@ func workstreamPackStrength(acc *workstreamAnchorAccumulator, roleFamilies map[s
 	if workstreamHasDocBackedFamilyMix(roleFamilies) && len(acc.sources) >= 3 && len(acc.artifacts) >= 2 {
 		return workstreamPackStrengthStrong
 	}
+	if workstreamHasDocBackedFamilyMix(roleFamilies) {
+		return workstreamPackStrengthSupportCross
+	}
 	if acc.formalAnchor() || len(roleFamilies) >= 2 {
-		return workstreamPackStrengthSupport
+		return workstreamPackStrengthSupportLocal
 	}
 	return workstreamPackStrengthWeak
 }
@@ -1167,11 +1205,26 @@ func workstreamRoleFamilyImplementationLike(family string) bool {
 func workstreamPackStrengthRank(value string) int {
 	switch value {
 	case workstreamPackStrengthStrong:
+		return 4
+	case workstreamPackStrengthSupportCross:
 		return 3
-	case workstreamPackStrengthSupport:
+	case workstreamPackStrengthSupportLocal:
 		return 2
 	case workstreamPackStrengthWeak:
 		return 1
+	default:
+		return 0
+	}
+}
+
+func maxWorkstreamEdgesForCluster(packStrength string) int {
+	switch packStrength {
+	case workstreamPackStrengthStrong:
+		return maxWorkstreamEdgesPerAnchor
+	case workstreamPackStrengthSupportCross:
+		return maxInt(1, maxWorkstreamEdgesPerAnchor*2/3)
+	case workstreamPackStrengthSupportLocal:
+		return maxInt(1, maxWorkstreamEdgesPerAnchor/4)
 	default:
 		return 0
 	}

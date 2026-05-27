@@ -187,8 +187,48 @@ func TestWorkstreamEvidence_SourceTestOnlySlugIsSupportingConfidence(t *testing.
 			t.Fatalf("expected source/test-only slug to stay supporting confidence, got %.3f", edge.Confidence)
 		}
 	}
-	if len(built.diagnostics.TopClusters) == 0 || built.diagnostics.TopClusters[0].PackStrength != workstreamPackStrengthSupport {
-		t.Fatalf("expected supporting pack cluster, got %#v", built.diagnostics.TopClusters)
+	if len(built.diagnostics.TopClusters) == 0 || built.diagnostics.TopClusters[0].PackStrength != workstreamPackStrengthSupportLocal {
+		t.Fatalf("expected locality-support pack cluster, got %#v", built.diagnostics.TopClusters)
+	}
+}
+
+func TestWorkstreamEvidence_PlanSourceSlugIsCrossRoleSupport(t *testing.T) {
+	artifacts := []evidenceArtifact{
+		{
+			id:      "art_plan",
+			repoID:  "repo",
+			kind:    "plan",
+			title:   "Billing Entitlements",
+			sources: []store.SourceRow{{ArtifactID: "art_plan", SourceType: "markdown", Path: "docs/billing-entitlements.md", SourceIdentity: "docs/billing-entitlements.md"}},
+		},
+		{
+			id:      "art_source",
+			repoID:  "repo",
+			kind:    "source_context",
+			subtype: "code_comment",
+			title:   "Billing Entitlements",
+			sources: []store.SourceRow{{ArtifactID: "art_source", SourceType: "source_context", Path: "internal/billing/entitlements.go", SourceIdentity: "internal/billing/entitlements.go"}},
+		},
+	}
+	byPath := map[string][]gitArtifactRef{
+		"docs/billing-entitlements.md": {
+			{id: "art_plan", kind: "plan", title: "Billing Entitlements", path: "docs/billing-entitlements.md"},
+		},
+		"internal/billing/entitlements.go": {
+			{id: "art_source", kind: "source_context", subtype: "code_comment", title: "Billing Entitlements", path: "internal/billing/entitlements.go"},
+		},
+	}
+	byID := map[string]gitArtifactRef{
+		"art_plan":   byPath["docs/billing-entitlements.md"][0],
+		"art_source": byPath["internal/billing/entitlements.go"][0],
+	}
+
+	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, gitfacts.Facts{})
+	if len(built.diagnostics.TopClusters) == 0 || built.diagnostics.TopClusters[0].PackStrength != workstreamPackStrengthSupportCross {
+		t.Fatalf("expected cross-role support pack cluster, got %#v", built.diagnostics.TopClusters)
+	}
+	if len(built.edges) == 0 {
+		t.Fatalf("expected cross-role support edge")
 	}
 }
 
