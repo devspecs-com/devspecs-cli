@@ -1484,7 +1484,7 @@ func workstreamPackStrength(acc *workstreamAnchorAccumulator, roleFamilies map[s
 		if docBacked && len(acc.sources) >= 3 && (acc.sources["artifact_path"] || acc.sources["metadata"] || acc.hasGitSource()) && len(acc.artifacts) >= 2 {
 			return workstreamPackStrengthStrong
 		}
-		if docBacked {
+		if docBacked && roleFamilies["source"] > 0 && (len(acc.sources) >= 2 || acc.sources["heading"] || acc.sources["body"] || acc.sources["artifact_path"] || acc.hasGitSource()) {
 			return workstreamPackStrengthSupportCross
 		}
 		if len(roleFamilies) >= 2 {

@@ -486,6 +486,52 @@ func TestWorkstreamEvidence_BranchSlugDemotedBelowStrong(t *testing.T) {
 	}
 }
 
+func TestWorkstreamEvidence_TitleOnlyCrossRoleSlugIsLocality(t *testing.T) {
+	artifacts := []evidenceArtifact{
+		{
+			id:      "art_design",
+			repoID:  "repo",
+			kind:    "markdown_artifact",
+			subtype: "design",
+			title:   "Jupyter Lab",
+			sections: []store.SectionRow{{
+				ID:    "section_design",
+				Title: "The default JupyterLab connection lost provider",
+			}},
+			sources: []store.SourceRow{{ArtifactID: "art_design", SourceType: "markdown", Path: "design/about.md", SourceIdentity: "design/about.md"}},
+		},
+		{
+			id:      "art_test",
+			repoID:  "repo",
+			kind:    "source_context",
+			subtype: "test_case",
+			title:   "Jupyter Lab",
+			sources: []store.SourceRow{{ArtifactID: "art_test", SourceType: "source_context", Path: "galata/test/fixture.spec.ts", SourceIdentity: "galata/test/fixture.spec.ts"}},
+		},
+	}
+	byPath := map[string][]gitArtifactRef{
+		"design/about.md": {
+			{id: "art_design", kind: "markdown_artifact", subtype: "design", title: "Jupyter Lab", path: "design/about.md"},
+		},
+		"galata/test/fixture.spec.ts": {
+			{id: "art_test", kind: "source_context", subtype: "test_case", title: "Jupyter Lab", path: "galata/test/fixture.spec.ts"},
+		},
+	}
+	byID := map[string]gitArtifactRef{
+		"art_design": byPath["design/about.md"][0],
+		"art_test":   byPath["galata/test/fixture.spec.ts"][0],
+	}
+
+	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, gitfacts.Facts{})
+	cluster := findWorkstreamTestCluster(t, built.diagnostics.TopClusters, "jupyter-lab")
+	if cluster.Dialect != workstreamDialectTitleHeadingSlug {
+		t.Fatalf("expected title/heading dialect, got %#v", cluster)
+	}
+	if cluster.PackStrength != workstreamPackStrengthSupportLocal {
+		t.Fatalf("expected title-only cross-role slug to stay local support, got %#v", cluster)
+	}
+}
+
 func TestWorkstreamEvidence_GenericTechnicalTermNeverStrong(t *testing.T) {
 	acc := &workstreamAnchorAccumulator{
 		canonical: "sha-256",
