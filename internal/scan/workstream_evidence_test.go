@@ -486,6 +486,148 @@ func TestWorkstreamEvidence_BranchSlugDemotedBelowStrong(t *testing.T) {
 	}
 }
 
+func TestWorkstreamEvidence_ExtractsPRFossilsFromMergeAndSquash(t *testing.T) {
+	merge := extractWorkstreamAnchorsFromCommit(gitfacts.Commit{
+		Message:     "Merge pull request #123 from owner/fix-parser-regression",
+		BodyPreview: "Fix parser regression for optional chaining",
+		IsMerge:     true,
+	})
+	gotMerge := map[string]string{}
+	for _, anchor := range merge.anchors {
+		gotMerge[anchor.canonical] = anchor.dialect
+	}
+	if gotMerge["pr-123"] != workstreamDialectGitHubMergePRRef {
+		t.Fatalf("expected merge PR fossil, got %#v", merge.anchors)
+	}
+	if gotMerge["parser-regression"] != workstreamDialectPRTitleSlug {
+		t.Fatalf("expected PR title fossil, got %#v", merge.anchors)
+	}
+	mergeBranchOnly := extractWorkstreamAnchorsFromCommit(gitfacts.Commit{
+		Message: "Merge pull request #124 from owner/fix-parser-regression",
+		IsMerge: true,
+	})
+	gotBranchOnly := map[string]string{}
+	for _, anchor := range mergeBranchOnly.anchors {
+		gotBranchOnly[anchor.canonical] = anchor.dialect
+	}
+	if gotBranchOnly["parser-regression"] != workstreamDialectMergeSourceBranch {
+		t.Fatalf("expected merge source branch fossil when title is absent, got %#v", mergeBranchOnly.anchors)
+	}
+
+	squash := extractWorkstreamAnchorsFromCommit(gitfacts.Commit{
+		Message: "Fix parser regression (#456)",
+	})
+	gotSquash := map[string]string{}
+	for _, anchor := range squash.anchors {
+		gotSquash[anchor.canonical] = anchor.dialect
+	}
+	if gotSquash["pr-456"] != workstreamDialectSquashPRRef {
+		t.Fatalf("expected squash PR fossil, got %#v", squash.anchors)
+	}
+	if gotSquash["parser-regression"] != workstreamDialectPRTitleSlug {
+		t.Fatalf("expected squash title fossil, got %#v", squash.anchors)
+	}
+	if gotSquash["gh-456"] != "" {
+		t.Fatalf("expected squash PR number not to materialize as bare hash, got %#v", squash.anchors)
+	}
+
+	closing := extractWorkstreamAnchorsFromCommit(gitfacts.Commit{
+		Message:     "release parser fix",
+		BodyPreview: "Fixes: #789",
+	})
+	gotClosing := map[string]string{}
+	for _, anchor := range closing.anchors {
+		gotClosing[anchor.canonical] = anchor.dialect
+	}
+	if gotClosing["issue-789"] != workstreamDialectIssueClosingRef {
+		t.Fatalf("expected issue closing fossil, got %#v", closing.anchors)
+	}
+}
+
+func TestWorkstreamEvidence_PRRefFossilNeverStrong(t *testing.T) {
+	acc := &workstreamAnchorAccumulator{
+		canonical: "pr-123",
+		display:   "pr-123",
+		types:     map[string]bool{"github_ref": true},
+		dialects:  map[string]bool{workstreamDialectGitHubMergePRRef: true},
+		sources:   map[string]bool{"merge_header": true, "merge_header_changed_file": true, "body": true},
+		contexts:  map[string]bool{"github_merge_pr": true},
+		artifacts: map[string]*workstreamArtifactAccumulator{
+			"art_doc": {
+				ref:     gitArtifactRef{id: "art_doc", kind: "markdown_artifact", subtype: "plan", title: "PR 123", path: "docs/pr-123.md"},
+				sources: map[string]bool{"body": true},
+			},
+			"art_source": {
+				ref:     gitArtifactRef{id: "art_source", kind: "source_context", subtype: "code_comment", title: "PR 123", path: "internal/parser/regression.go"},
+				sources: map[string]bool{"merge_header_changed_file": true},
+			},
+		},
+	}
+	profile := buildWorkstreamDialectProfile(map[string]*workstreamAnchorAccumulator{"pr-123": acc})
+	_, _, _, packStrength := workstreamScore(acc, []string{"art_doc", "art_source"}, profile)
+	if packStrength == workstreamPackStrengthStrong {
+		t.Fatalf("expected PR ref fossil below strong")
+	}
+}
+
+func TestWorkstreamEvidence_PRTitleFossilCanBecomeStrongWhenDocBacked(t *testing.T) {
+	artifacts := []evidenceArtifact{
+		{
+			id:      "art_plan",
+			repoID:  "repo",
+			kind:    "markdown_artifact",
+			subtype: "plan",
+			title:   "Parser Regression Plan",
+			body:    "Fix parser regression before releasing optional chaining.",
+			sources: []store.SourceRow{{ArtifactID: "art_plan", SourceType: "markdown", Path: "docs/parser-regression.md", SourceIdentity: "docs/parser-regression.md"}},
+		},
+		{
+			id:      "art_source",
+			repoID:  "repo",
+			kind:    "source_context",
+			subtype: "code_comment",
+			title:   "Parser Regression",
+			sources: []store.SourceRow{{ArtifactID: "art_source", SourceType: "source_context", Path: "internal/parser/regression.go", SourceIdentity: "internal/parser/regression.go"}},
+		},
+	}
+	byPath := map[string][]gitArtifactRef{
+		"docs/parser-regression.md": {
+			{id: "art_plan", kind: "markdown_artifact", subtype: "plan", title: "Parser Regression Plan", path: "docs/parser-regression.md"},
+		},
+		"internal/parser/regression.go": {
+			{id: "art_source", kind: "source_context", subtype: "code_comment", title: "Parser Regression", path: "internal/parser/regression.go"},
+		},
+	}
+	byID := map[string]gitArtifactRef{
+		"art_plan":   byPath["docs/parser-regression.md"][0],
+		"art_source": byPath["internal/parser/regression.go"][0],
+	}
+	facts := gitfacts.Facts{
+		Commits: []gitfacts.Commit{{
+			SHA:          "abcdef1234567890",
+			Message:      "Merge pull request #123 from owner/fix-parser-regression",
+			BodyPreview:  "Fix parser regression for optional chaining",
+			CommittedAt:  "2026-05-26T10:00:00Z",
+			IsMerge:      true,
+			HistoryShape: gitfacts.ShapeFull,
+		}},
+		Files:       []gitfacts.FileChange{{CommitSHA: "abcdef1234567890", FilePath: "internal/parser/regression.go"}},
+		Diagnostics: gitfacts.Diagnostics{Enabled: true, HistoryShape: gitfacts.ShapeFull},
+	}
+
+	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, facts)
+	cluster := findWorkstreamTestCluster(t, built.diagnostics.TopClusters, "parser-regression")
+	if cluster.Dialect != workstreamDialectPRTitleSlug {
+		t.Fatalf("expected PR title dialect, got %#v", cluster)
+	}
+	if cluster.PackStrength != workstreamPackStrengthStrong {
+		t.Fatalf("expected PR title fossil to become strong with doc/source backing, got %#v", cluster)
+	}
+	if built.diagnostics.PRFossilsSeen == 0 || built.diagnostics.PRFossilsMaterialized == 0 {
+		t.Fatalf("expected PR fossil diagnostics, got %#v", built.diagnostics)
+	}
+}
+
 func TestWorkstreamEvidence_TitleOnlyCrossRoleSlugIsLocality(t *testing.T) {
 	artifacts := []evidenceArtifact{
 		{

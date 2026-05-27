@@ -47,6 +47,7 @@ type GitEvidenceDiagnostics struct {
 	CommitsRead                int                      `json:"commits_read,omitempty"`
 	CommitsStored              int                      `json:"commits_stored,omitempty"`
 	FilesStored                int                      `json:"files_stored,omitempty"`
+	BodiesTruncated            int                      `json:"commit_bodies_truncated,omitempty"`
 	EdgesIndexed               int                      `json:"edges_indexed,omitempty"`
 	EdgesByType                map[string]int           `json:"edges_by_type,omitempty"`
 	SkippedLargeCommits        int                      `json:"skipped_large_commits,omitempty"`
@@ -150,6 +151,7 @@ func (s *Scanner) rebuildGitEvidence(ctx context.Context, repoRoot, repoID, now 
 			AuthorName:   c.AuthorName,
 			AuthorEmail:  c.AuthorEmail,
 			Message:      c.Message,
+			BodyPreview:  c.BodyPreview,
 			CommittedAt:  c.CommittedAt,
 			FilesChanged: c.FilesChanged,
 			IsMerge:      c.IsMerge,
@@ -214,6 +216,7 @@ func gitEvidenceDiagnosticsFromFacts(d gitfacts.Diagnostics) *GitEvidenceDiagnos
 		CommitsRead:         d.CommitsRead,
 		CommitsStored:       d.CommitsStored,
 		FilesStored:         d.FilesStored,
+		BodiesTruncated:     d.BodiesTruncated,
 		SkippedLargeCommits: d.SkippedLargeCommits,
 		GitError:            d.GitError,
 		EdgesByType:         map[string]int{},

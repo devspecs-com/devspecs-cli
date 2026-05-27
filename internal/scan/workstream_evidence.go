@@ -45,6 +45,11 @@ const (
 	workstreamDialectExplicitIssueRef   = "explicit_issue_ref"
 	workstreamDialectExplicitGHRef      = "explicit_gh_ref"
 	workstreamDialectBareHashRef        = "bare_hash_ref"
+	workstreamDialectGitHubMergePRRef   = "github_merge_pr_ref"
+	workstreamDialectSquashPRRef        = "squash_pr_ref"
+	workstreamDialectIssueClosingRef    = "issue_closing_ref"
+	workstreamDialectMergeSourceBranch  = "merge_source_branch_slug"
+	workstreamDialectPRTitleSlug        = "pr_title_slug"
 	workstreamDialectOpenSpecChangeSlug = "openspec_change_slug"
 	workstreamDialectBranchSlug         = "branch_slug"
 	workstreamDialectCommitSlug         = "commit_slug"
@@ -59,8 +64,11 @@ const (
 )
 
 var (
-	workstreamTaskIDPattern = regexp.MustCompile(`\b[A-Z][A-Z0-9]{1,9}-[0-9]{1,6}\b`)
-	workstreamRefPattern    = regexp.MustCompile(`(?i)(?:\b(GH|PR|ISSUE)-|(?:\b(issues|pull)/)|#)([0-9]{1,6})\b`)
+	workstreamTaskIDPattern     = regexp.MustCompile(`\b[A-Z][A-Z0-9]{1,9}-[0-9]{1,6}\b`)
+	workstreamRefPattern        = regexp.MustCompile(`(?i)(?:\b(GH|PR|ISSUE)-|(?:\b(issues|pull)/)|#)([0-9]{1,6})\b`)
+	workstreamMergePRPattern    = regexp.MustCompile(`(?i)^Merge pull request #([0-9]{1,6}) from ([^\s]+)`)
+	workstreamSquashPRPattern   = regexp.MustCompile(`(?i)^(.+?)\s+\(#([0-9]{1,6})\)\s*$`)
+	workstreamClosingRefPattern = regexp.MustCompile(`(?i)\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s*:?\s*#([0-9]{1,6})\b`)
 )
 
 // WorkstreamEvidenceDiagnostics is emitted by ds scan --json when workstream evidence is enabled.
@@ -80,6 +88,9 @@ type WorkstreamEvidenceDiagnostics struct {
 	CappedRoleFamilies    map[string]int                       `json:"capped_role_family_counts,omitempty"`
 	StrongOrCrossClusters int                                  `json:"strong_or_cross_clusters,omitempty"`
 	StrongOrCrossEdges    int                                  `json:"strong_or_cross_edges,omitempty"`
+	PRFossilsSeen         int                                  `json:"pr_fossils_seen,omitempty"`
+	PRFossilsMaterialized int                                  `json:"pr_fossils_materialized,omitempty"`
+	PRFossilsByDialect    map[string]int                       `json:"pr_fossils_by_dialect,omitempty"`
 	DialectProfile        *WorkstreamDialectProfileDiagnostics `json:"dialect_profile,omitempty"`
 	NoisyAnchorsRejected  int                                  `json:"noisy_anchors_rejected,omitempty"`
 	RejectedByReason      map[string]int                       `json:"rejected_by_reason,omitempty"`
@@ -251,6 +262,7 @@ func buildWorkstreamEvidence(repoID string, artifacts []evidenceArtifact, artifa
 		EdgesByType:         map[string]int{},
 		EdgesByPackStrength: map[string]int{},
 		RejectedByReason:    map[string]int{},
+		PRFossilsByDialect:  map[string]int{},
 	}
 	accs := map[string]*workstreamAnchorAccumulator{}
 	addRejected := func(rej workstreamRejectedAnchor) {
@@ -459,20 +471,25 @@ func buildWorkstreamEvidence(repoID string, artifacts []evidenceArtifact, artifa
 		filesByCommit[file.CommitSHA] = append(filesByCommit[file.CommitSHA], file)
 	}
 	for _, commit := range facts.Commits {
-		if commit.IsMerge {
-			continue
-		}
 		files := filesByCommit[commit.SHA]
 		mappedRefs := refsForGitFiles(files, artifactsByPath)
-		messageExtracted := extractWorkstreamAnchorsFromCommitMessage(commit.Message)
+		messageExtracted := extractWorkstreamAnchorsFromCommit(commit)
 		for _, rej := range messageExtracted.rejected {
 			addRejected(rej)
 		}
 		for _, anchor := range messageExtracted.anchors {
-			addGit(anchor, "commit_message", commit.SHA, "", commit.CommittedAt)
-			for _, ref := range mappedRefs {
-				addArtifact(anchor, ref, "commit_message", "commit_message_changed_file", commit.SHA, 0.74)
+			if workstreamPRFossilDialect(anchor.dialect) {
+				diag.PRFossilsSeen++
+				diag.PRFossilsByDialect[anchor.dialect]++
 			}
+			source := firstNonEmpty(anchor.source, "commit_message")
+			addGit(anchor, source, commit.SHA, "", commit.CommittedAt)
+			for _, ref := range mappedRefs {
+				addArtifact(anchor, ref, "commit_message", source+"_changed_file", commit.SHA, 0.74)
+			}
+		}
+		if commit.IsMerge {
+			continue
 		}
 		for _, file := range files {
 			path := normalizeGitEvidencePath(file.FilePath)
@@ -603,6 +620,10 @@ func workstreamDialectTrust(dialect string, stat *workstreamDialectProfileStat) 
 		if stat.crossRole >= 1 {
 			return workstreamTrustModerate
 		}
+	case workstreamDialectGitHubMergePRRef, workstreamDialectSquashPRRef, workstreamDialectIssueClosingRef:
+		if stat.crossRole >= 1 {
+			return workstreamTrustModerate
+		}
 	case workstreamDialectPathComponentSlug, workstreamDialectTitleHeadingSlug:
 		if stat.crossRole >= 10 {
 			return workstreamTrustStrong
@@ -610,7 +631,14 @@ func workstreamDialectTrust(dialect string, stat *workstreamDialectProfileStat) 
 		if stat.crossRole >= 2 {
 			return workstreamTrustModerate
 		}
-	case workstreamDialectBareHashRef, workstreamDialectBranchSlug, workstreamDialectCommitSlug, workstreamDialectGenericTechnical:
+	case workstreamDialectPRTitleSlug:
+		if stat.crossRole >= 4 {
+			return workstreamTrustStrong
+		}
+		if stat.crossRole >= 1 {
+			return workstreamTrustModerate
+		}
+	case workstreamDialectBareHashRef, workstreamDialectBranchSlug, workstreamDialectMergeSourceBranch, workstreamDialectCommitSlug, workstreamDialectGenericTechnical:
 		return workstreamTrustWeak
 	}
 	return workstreamTrustWeak
@@ -722,6 +750,12 @@ func acceptedWorkstreamClusters(accs map[string]*workstreamAnchorAccumulator, ar
 		if acc.primaryDialect() == workstreamDialectDocumentNumberRef {
 			cluster.caveats = append(cluster.caveats, "document number reference; not eligible for strong evidence without a more specific work anchor")
 		}
+		if workstreamPRRefFossilDialect(acc.primaryDialect()) {
+			cluster.caveats = append(cluster.caveats, "PR/issue fossil from local git metadata; support evidence only")
+		}
+		if acc.primaryDialect() == workstreamDialectMergeSourceBranch {
+			cluster.caveats = append(cluster.caveats, "merge source branch fossil; support evidence only")
+		}
 		accepted = append(accepted, cluster)
 	}
 	sort.Slice(accepted, func(i, j int) bool {
@@ -757,9 +791,15 @@ func acceptedWorkstreamClusters(accs map[string]*workstreamAnchorAccumulator, ar
 	for _, cluster := range accepted {
 		diag.PackStrengthCounts[cluster.packStrength]++
 		diag.DialectCounts[cluster.dialect]++
+		if workstreamPRFossilDialect(cluster.dialect) {
+			diag.PRFossilsMaterialized++
+		}
 		if cluster.packStrength == workstreamPackStrengthStrong || cluster.packStrength == workstreamPackStrengthSupportCross {
 			diag.StrongOrCrossClusters++
 		}
+	}
+	if len(diag.PRFossilsByDialect) == 0 {
+		diag.PRFossilsByDialect = nil
 	}
 	return accepted
 }
@@ -1094,6 +1134,126 @@ func extractWorkstreamAnchorsFromCommitMessage(message string) workstreamExtract
 	return out
 }
 
+func extractWorkstreamAnchorsFromCommit(commit gitfacts.Commit) workstreamExtractResult {
+	subject := strings.Split(strings.TrimSpace(commit.Message), "\n")[0]
+	var out workstreamExtractResult
+	if match := workstreamMergePRPattern.FindStringSubmatch(subject); len(match) == 3 {
+		pr := strings.TrimSpace(match[1])
+		branch := strings.TrimSpace(match[2])
+		out.anchors = append(out.anchors, workstreamAnchor{
+			canonical:  "pr-" + pr,
+			display:    "pr-" + pr,
+			anchorType: "github_ref",
+			dialect:    workstreamDialectGitHubMergePRRef,
+			raw:        "#" + pr,
+			source:     "merge_header",
+			context:    "github_merge_pr",
+			weight:     0.82,
+		})
+		if title := firstCommitBodyLine(commit.BodyPreview); title != "" {
+			out = appendWorkstreamPRTitleFossils(out, title, "merge_body_title", "github_merge_pr")
+		}
+		out = appendWorkstreamBranchFossils(out, branch, "merge_source_branch")
+	} else if match := workstreamSquashPRPattern.FindStringSubmatch(subject); len(match) == 3 {
+		title := strings.TrimSpace(match[1])
+		pr := strings.TrimSpace(match[2])
+		out.anchors = append(out.anchors, workstreamAnchor{
+			canonical:  "pr-" + pr,
+			display:    "pr-" + pr,
+			anchorType: "github_ref",
+			dialect:    workstreamDialectSquashPRRef,
+			raw:        "#" + pr,
+			source:     "squash_pr_ref",
+			context:    "squash_pr",
+			weight:     0.82,
+		})
+		out = appendWorkstreamPRTitleFossils(out, title, "squash_pr_title", "squash_pr")
+	} else {
+		out = extractWorkstreamAnchorsFromCommitMessage(subject)
+	}
+	closingText := strings.TrimSpace(subject + "\n" + commit.BodyPreview)
+	for _, match := range workstreamClosingRefPattern.FindAllStringSubmatch(closingText, 20) {
+		if len(match) < 2 {
+			continue
+		}
+		pr := strings.TrimSpace(match[1])
+		out.anchors = append(out.anchors, workstreamAnchor{
+			canonical:  "issue-" + pr,
+			display:    "issue-" + pr,
+			anchorType: "github_ref",
+			dialect:    workstreamDialectIssueClosingRef,
+			raw:        "#" + pr,
+			source:     "commit_body",
+			context:    "issue_closing",
+			weight:     0.78,
+		})
+	}
+	out.anchors = uniqueWorkstreamAnchors(out.anchors)
+	return out
+}
+
+func appendWorkstreamBranchFossils(out workstreamExtractResult, branch, source string) workstreamExtractResult {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return out
+	}
+	parts := strings.Split(branch, "/")
+	if len(parts) > 1 {
+		branch = strings.Join(parts[1:], " ")
+	}
+	extracted := extractWorkstreamAnchorsFromSlugText(branch, source)
+	out.rejected = append(out.rejected, extracted.rejected...)
+	for _, anchor := range extracted.anchors {
+		if anchor.anchorType == "title_slug" || anchor.anchorType == "path_slug" || anchor.anchorType == "branch_slug" {
+			anchor.anchorType = "branch_slug"
+			if anchor.dialect != workstreamDialectGenericTechnical {
+				anchor.dialect = workstreamDialectMergeSourceBranch
+			}
+		}
+		anchor.source = source
+		anchor.context = "github_merge_pr"
+		if anchor.weight < 0.7 {
+			anchor.weight = 0.7
+		}
+		out.anchors = append(out.anchors, anchor)
+	}
+	return out
+}
+
+func appendWorkstreamPRTitleFossils(out workstreamExtractResult, title, source, context string) workstreamExtractResult {
+	title = strings.TrimSpace(stripConventionalCommitPrefix(title))
+	if title == "" {
+		return out
+	}
+	extracted := extractWorkstreamAnchorsFromSlugText(title, source)
+	out.rejected = append(out.rejected, extracted.rejected...)
+	for _, anchor := range extracted.anchors {
+		if anchor.anchorType == "title_slug" || anchor.anchorType == "commit_slug" || anchor.anchorType == "path_slug" {
+			anchor.anchorType = "pr_title_slug"
+			if anchor.dialect != workstreamDialectGenericTechnical {
+				anchor.dialect = workstreamDialectPRTitleSlug
+			}
+		}
+		anchor.source = source
+		anchor.context = context
+		if anchor.weight < 0.76 {
+			anchor.weight = 0.76
+		}
+		out.anchors = append(out.anchors, anchor)
+	}
+	return out
+}
+
+func firstCommitBodyLine(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
 func extractWorkstreamAnchorsFromBranch(branch string) workstreamExtractResult {
 	branch = strings.TrimSpace(branch)
 	if branch == "" || workstreamGenericBranch(branch) {
@@ -1388,6 +1548,10 @@ func workstreamScore(acc *workstreamAnchorAccumulator, artifactIDs []string, pro
 		return 0.58, 0.66, "support_document_number_ref", packStrength
 	case dialect == workstreamDialectDocumentNumberRef:
 		return 0.42, 0.54, "low_document_number_ref", packStrength
+	case workstreamPRRefFossilDialect(dialect) && docBacked && hasGit && artifactCount >= 2:
+		return 0.58, 0.68, "support_pr_fossil_ref_cross_role", packStrength
+	case workstreamPRRefFossilDialect(dialect):
+		return 0.42, 0.54, "low_pr_fossil_ref", packStrength
 	case dialect == workstreamDialectTicketLikeUpper && hasGit && artifactCount >= 2 && roleDiverse:
 		return 0.88, 0.93, "high_task_id_role_diverse_git", packStrength
 	case dialect == workstreamDialectTicketLikeUpper && hasGit && artifactCount >= 2:
@@ -1400,6 +1564,8 @@ func workstreamScore(acc *workstreamAnchorAccumulator, artifactIDs []string, pro
 		return 0.66, 0.76, "medium_explicit_work_ref_with_git", packStrength
 	case dialect == workstreamDialectOpenSpecChangeSlug && docBacked && artifactCount >= 2:
 		return 0.82, 0.9, "high_openspec_change_cross_role", packStrength
+	case dialect == workstreamDialectPRTitleSlug && docBacked && hasGit && sourceCount >= 3 && artifactCount >= 2:
+		return 0.78, 0.86, "high_pr_title_slug_docbacked_git", packStrength
 	case docBacked && hasGit && sourceCount >= 3 && artifactCount >= 2:
 		return 0.72, 0.8, "medium_slug_docbacked_git", packStrength
 	case docBacked && sourceCount >= 3 && artifactCount >= 2:
@@ -1445,8 +1611,24 @@ func workstreamPackStrength(acc *workstreamAnchorAccumulator, roleFamilies map[s
 			return workstreamPackStrengthSupportLocal
 		}
 		return workstreamPackStrengthWeak
+	case workstreamDialectGitHubMergePRRef, workstreamDialectSquashPRRef, workstreamDialectIssueClosingRef:
+		if docBacked {
+			return workstreamPackStrengthSupportCross
+		}
+		if acc.formalAnchor() || len(roleFamilies) >= 2 {
+			return workstreamPackStrengthSupportLocal
+		}
+		return workstreamPackStrengthWeak
 	case workstreamDialectBranchSlug:
 		if docBacked && acc.nativeArtifactSourceCount() > 0 && (acc.sources["commit_message"] || acc.sources["artifact_title"] || acc.sources["artifact_path"] || acc.sources["metadata"]) {
+			return workstreamPackStrengthSupportCross
+		}
+		if len(roleFamilies) >= 2 {
+			return workstreamPackStrengthSupportLocal
+		}
+		return workstreamPackStrengthWeak
+	case workstreamDialectMergeSourceBranch:
+		if docBacked && acc.nativeArtifactSourceCount() > 0 {
 			return workstreamPackStrengthSupportCross
 		}
 		if len(roleFamilies) >= 2 {
@@ -1485,6 +1667,17 @@ func workstreamPackStrength(acc *workstreamAnchorAccumulator, roleFamilies map[s
 			return workstreamPackStrengthStrong
 		}
 		if docBacked && roleFamilies["source"] > 0 && (len(acc.sources) >= 2 || acc.sources["heading"] || acc.sources["body"] || acc.sources["artifact_path"] || acc.hasGitSource()) {
+			return workstreamPackStrengthSupportCross
+		}
+		if len(roleFamilies) >= 2 {
+			return workstreamPackStrengthSupportLocal
+		}
+		return workstreamPackStrengthWeak
+	case workstreamDialectPRTitleSlug:
+		if docBacked && roleFamilies["source"] > 0 && len(acc.sources) >= 3 && acc.hasGitSource() && len(acc.artifacts) >= 2 {
+			return workstreamPackStrengthStrong
+		}
+		if docBacked {
 			return workstreamPackStrengthSupportCross
 		}
 		if len(roleFamilies) >= 2 {
@@ -1602,7 +1795,7 @@ func (acc *workstreamAnchorAccumulator) gitOnlySupport() bool {
 
 func (acc *workstreamAnchorAccumulator) formalAnchor() bool {
 	switch acc.primaryDialect() {
-	case workstreamDialectTicketLikeUpper, workstreamDialectDocumentNumberRef, workstreamDialectExplicitPRRef, workstreamDialectExplicitIssueRef, workstreamDialectExplicitGHRef, workstreamDialectBareHashRef:
+	case workstreamDialectTicketLikeUpper, workstreamDialectDocumentNumberRef, workstreamDialectExplicitPRRef, workstreamDialectExplicitIssueRef, workstreamDialectExplicitGHRef, workstreamDialectBareHashRef, workstreamDialectGitHubMergePRRef, workstreamDialectSquashPRRef, workstreamDialectIssueClosingRef:
 		return true
 	default:
 		return false
@@ -1635,7 +1828,7 @@ func workstreamNativeArtifactSource(source string) bool {
 }
 
 func (acc *workstreamAnchorAccumulator) primaryType() string {
-	priority := []string{"task_id", "github_ref", "change_slug", "branch_slug", "path_slug", "commit_slug", "title_slug"}
+	priority := []string{"task_id", "github_ref", "change_slug", "pr_title_slug", "branch_slug", "path_slug", "commit_slug", "title_slug"}
 	for _, value := range priority {
 		if acc.types[value] {
 			return value
@@ -1654,8 +1847,13 @@ func (acc *workstreamAnchorAccumulator) primaryDialect() string {
 		workstreamDialectExplicitPRRef,
 		workstreamDialectExplicitIssueRef,
 		workstreamDialectExplicitGHRef,
+		workstreamDialectGitHubMergePRRef,
+		workstreamDialectSquashPRRef,
+		workstreamDialectIssueClosingRef,
 		workstreamDialectBareHashRef,
 		workstreamDialectOpenSpecChangeSlug,
+		workstreamDialectPRTitleSlug,
+		workstreamDialectMergeSourceBranch,
 		workstreamDialectBranchSlug,
 		workstreamDialectPathComponentSlug,
 		workstreamDialectCommitSlug,
@@ -1683,6 +1881,8 @@ func workstreamDialectForAnchorType(anchorType string) string {
 		return workstreamDialectOpenSpecChangeSlug
 	case "branch_slug":
 		return workstreamDialectBranchSlug
+	case "pr_title_slug":
+		return workstreamDialectPRTitleSlug
 	case "commit_slug":
 		return workstreamDialectCommitSlug
 	case "path_slug":
@@ -1703,6 +1903,19 @@ func workstreamExplicitWorkRefDialect(dialect string) bool {
 	}
 }
 
+func workstreamPRRefFossilDialect(dialect string) bool {
+	switch dialect {
+	case workstreamDialectGitHubMergePRRef, workstreamDialectSquashPRRef, workstreamDialectIssueClosingRef:
+		return true
+	default:
+		return false
+	}
+}
+
+func workstreamPRFossilDialect(dialect string) bool {
+	return workstreamPRRefFossilDialect(dialect) || dialect == workstreamDialectPRTitleSlug || dialect == workstreamDialectMergeSourceBranch
+}
+
 func workstreamTicketLikeDialect(canonical string) string {
 	prefix, _, ok := strings.Cut(strings.ToUpper(canonical), "-")
 	if !ok || prefix == "" {
@@ -1719,8 +1932,12 @@ func workstreamTicketLikeDialect(canonical string) string {
 }
 
 func (acc *workstreamAnchorAccumulator) hasGitSource() bool {
-	for _, source := range []string{"commit_message", "commit_message_changed_file", "git_changed_file", "branch"} {
-		if acc.sources[source] {
+	for source := range acc.sources {
+		if source == "commit_message" || source == "git_changed_file" || source == "branch" ||
+			strings.HasSuffix(source, "_changed_file") ||
+			strings.HasPrefix(source, "merge_") ||
+			strings.HasPrefix(source, "squash_") ||
+			source == "commit_body" {
 			return true
 		}
 	}

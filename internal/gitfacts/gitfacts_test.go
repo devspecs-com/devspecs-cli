@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -42,7 +43,7 @@ func TestCollect_LocalGitRepo(t *testing.T) {
 	mustWriteFile(t, filepath.Join(root, "docs", "auth.md"), "# Auth\n")
 	mustWriteFile(t, filepath.Join(root, "docs", "auth-tests.md"), "# Auth Tests\n")
 	runGit(t, root, "add", ".")
-	runGit(t, root, "commit", "-m", "add auth docs")
+	runGit(t, root, "commit", "-m", "add auth docs", "-m", "Fixes #42\n\nAuth docs PR title.")
 
 	facts, err := Collect(context.Background(), root, Options{MaxCommits: 10, MaxFilesPerCommit: 8})
 	if err != nil {
@@ -53,6 +54,9 @@ func TestCollect_LocalGitRepo(t *testing.T) {
 	}
 	if len(facts.Commits) != 1 {
 		t.Fatalf("expected 1 commit, got %d", len(facts.Commits))
+	}
+	if facts.Commits[0].BodyPreview == "" || !strings.Contains(facts.Commits[0].BodyPreview, "Fixes #42") {
+		t.Fatalf("expected commit body preview, got %#v", facts.Commits[0])
 	}
 	if len(facts.Files) != 2 {
 		t.Fatalf("expected 2 files, got %d", len(facts.Files))

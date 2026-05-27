@@ -1,4 +1,4 @@
--- DevSpecs v0.1 schema (version 10)
+-- DevSpecs v0.1 schema (version 11)
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version    INTEGER PRIMARY KEY,
@@ -176,6 +176,7 @@ CREATE TABLE IF NOT EXISTS git_commits (
   author_name   TEXT NOT NULL DEFAULT '',
   author_email  TEXT NOT NULL DEFAULT '',
   message       TEXT NOT NULL,
+  body_preview  TEXT NOT NULL DEFAULT '',
   committed_at  TEXT NOT NULL,
   files_changed INTEGER NOT NULL DEFAULT 0,
   is_merge      INTEGER NOT NULL DEFAULT 0,

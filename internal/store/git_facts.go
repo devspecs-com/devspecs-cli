@@ -10,6 +10,7 @@ type GitCommitInput struct {
 	AuthorName   string
 	AuthorEmail  string
 	Message      string
+	BodyPreview  string
 	CommittedAt  string
 	FilesChanged int
 	IsMerge      bool
@@ -60,8 +61,8 @@ func (db *DB) ReplaceRepoGitFacts(repoID string, commits []GitCommitInput, files
 	}
 	commitStmt, err := db.Prepare(
 		`INSERT INTO git_commits
-			(repo_id, sha, branch, author_name, author_email, message, committed_at, files_changed, is_merge, history_shape, indexed_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			(repo_id, sha, branch, author_name, author_email, message, body_preview, committed_at, files_changed, is_merge, history_shape, indexed_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	)
 	if err != nil {
 		return rollback(err)
@@ -72,7 +73,7 @@ func (db *DB) ReplaceRepoGitFacts(repoID string, commits []GitCommitInput, files
 		if c.IsMerge {
 			isMerge = 1
 		}
-		if _, err := commitStmt.Exec(c.RepoID, c.SHA, c.Branch, c.AuthorName, c.AuthorEmail, c.Message, c.CommittedAt, c.FilesChanged, isMerge, c.HistoryShape, now); err != nil {
+		if _, err := commitStmt.Exec(c.RepoID, c.SHA, c.Branch, c.AuthorName, c.AuthorEmail, c.Message, c.BodyPreview, c.CommittedAt, c.FilesChanged, isMerge, c.HistoryShape, now); err != nil {
 			return rollback(err)
 		}
 	}

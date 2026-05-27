@@ -20,6 +20,7 @@ func TestGitFacts_ReplaceRepoGitFactsIsIdempotent(t *testing.T) {
 		AuthorName:   "Test User",
 		AuthorEmail:  "test@example.com",
 		Message:      "touch auth docs",
+		BodyPreview:  "Fixes #42",
 		CommittedAt:  now,
 		FilesChanged: 2,
 		HistoryShape: "single_commit",
@@ -39,6 +40,13 @@ func TestGitFacts_ReplaceRepoGitFactsIsIdempotent(t *testing.T) {
 	}
 	if counts.Commits != 1 || counts.Files != 2 {
 		t.Fatalf("unexpected git fact counts: %#v", counts)
+	}
+	var bodyPreview string
+	if err := db.QueryRow("SELECT body_preview FROM git_commits WHERE repo_id = ? AND sha = ?", "repo_git", "abc123").Scan(&bodyPreview); err != nil {
+		t.Fatal(err)
+	}
+	if bodyPreview != "Fixes #42" {
+		t.Fatalf("expected body preview stored, got %q", bodyPreview)
 	}
 }
 

@@ -21,6 +21,8 @@ const (
 
 	DefaultMaxCommits        = 200
 	DefaultMaxFilesPerCommit = 32
+	DefaultMaxBodyBytes      = 4096
+	DefaultMaxBodyLines      = 40
 )
 
 // Options controls bounded git history collection.
@@ -40,9 +42,11 @@ type Facts struct {
 type Commit struct {
 	SHA          string
 	Branch       string
+	Parents      []string
 	AuthorName   string
 	AuthorEmail  string
 	Message      string
+	BodyPreview  string
 	CommittedAt  string
 	FilesChanged int
 	IsMerge      bool
@@ -70,6 +74,7 @@ type Diagnostics struct {
 	CommitsStored       int    `json:"commits_stored,omitempty"`
 	FilesStored         int    `json:"files_stored,omitempty"`
 	SkippedLargeCommits int    `json:"skipped_large_commits,omitempty"`
+	BodiesTruncated     int    `json:"commit_bodies_truncated,omitempty"`
 	GitError            string `json:"git_error,omitempty"`
 }
 
@@ -125,7 +130,7 @@ func Collect(ctx context.Context, repoRoot string, opts Options) (Facts, error) 
 	logRaw, err := gitOutput(ctx, repoRoot,
 		"log",
 		"--date=iso-strict",
-		"--pretty=format:__DEV_SPECS_COMMIT__%x1f%H%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%s",
+		"--pretty=format:__DEV_SPECS_COMMIT__%x1f%H%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%s%n__DEV_SPECS_BODY__%n%b%n__DEV_SPECS_FILES__",
 		"--name-status",
 		"-n", strconv.Itoa(opts.MaxCommits),
 	)
@@ -133,7 +138,7 @@ func Collect(ctx context.Context, repoRoot string, opts Options) (Facts, error) 
 		out.Diagnostics.GitError = shortGitError(err)
 		return out, nil
 	}
-	out.Commits, out.Files, out.Diagnostics.SkippedLargeCommits = parseLog(logRaw, out.Diagnostics.Branch, out.Diagnostics.HistoryShape, opts.MaxFilesPerCommit)
+	out.Commits, out.Files, out.Diagnostics.SkippedLargeCommits, out.Diagnostics.BodiesTruncated = parseLog(logRaw, out.Diagnostics.Branch, out.Diagnostics.HistoryShape, opts.MaxFilesPerCommit)
 	out.Diagnostics.CommitsRead = len(out.Commits)
 	out.Diagnostics.CommitsStored = len(out.Commits)
 	out.Diagnostics.FilesStored = len(out.Files)
@@ -183,15 +188,25 @@ func gitErrorMeansNonGit(err error) bool {
 		strings.Contains(msg, "not inside a git")
 }
 
-func parseLog(raw, branch, shape string, maxFilesPerCommit int) ([]Commit, []FileChange, int) {
+func parseLog(raw, branch, shape string, maxFilesPerCommit int) ([]Commit, []FileChange, int, int) {
 	var commits []Commit
 	var files []FileChange
 	var current *Commit
 	var currentFiles []FileChange
+	var bodyLines []string
 	skippedLarge := 0
+	bodiesTruncated := 0
+	state := ""
 	flush := func() {
 		if current == nil {
 			return
+		}
+		if len(bodyLines) > 0 {
+			body, truncated := boundedCommitBody(bodyLines)
+			current.BodyPreview = body
+			if truncated {
+				bodiesTruncated++
+			}
 		}
 		current.FilesChanged = len(currentFiles)
 		commits = append(commits, *current)
@@ -202,6 +217,8 @@ func parseLog(raw, branch, shape string, maxFilesPerCommit int) ([]Commit, []Fil
 		}
 		current = nil
 		currentFiles = nil
+		bodyLines = nil
+		state = ""
 	}
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimRight(line, "\r")
@@ -215,6 +232,7 @@ func parseLog(raw, branch, shape string, maxFilesPerCommit int) ([]Commit, []Fil
 			current = &Commit{
 				SHA:          fields[1],
 				Branch:       branch,
+				Parents:      parents,
 				AuthorName:   fields[3],
 				AuthorEmail:  fields[4],
 				CommittedAt:  fields[5],
@@ -222,9 +240,25 @@ func parseLog(raw, branch, shape string, maxFilesPerCommit int) ([]Commit, []Fil
 				IsMerge:      len(parents) > 1,
 				HistoryShape: shape,
 			}
+			state = "commit"
 			continue
 		}
-		if current == nil || strings.TrimSpace(line) == "" {
+		if current == nil {
+			continue
+		}
+		switch line {
+		case "__DEV_SPECS_BODY__":
+			state = "body"
+			continue
+		case "__DEV_SPECS_FILES__":
+			state = "files"
+			continue
+		}
+		if state == "body" {
+			bodyLines = append(bodyLines, line)
+			continue
+		}
+		if state != "files" || strings.TrimSpace(line) == "" {
 			continue
 		}
 		if change, ok := parseNameStatus(current.SHA, line); ok {
@@ -232,7 +266,21 @@ func parseLog(raw, branch, shape string, maxFilesPerCommit int) ([]Commit, []Fil
 		}
 	}
 	flush()
-	return commits, files, skippedLarge
+	return commits, files, skippedLarge, bodiesTruncated
+}
+
+func boundedCommitBody(lines []string) (string, bool) {
+	truncated := false
+	if len(lines) > DefaultMaxBodyLines {
+		lines = lines[:DefaultMaxBodyLines]
+		truncated = true
+	}
+	body := strings.TrimSpace(strings.Join(lines, "\n"))
+	if len(body) > DefaultMaxBodyBytes {
+		body = body[:DefaultMaxBodyBytes]
+		truncated = true
+	}
+	return body, truncated
 }
 
 func parseNameStatus(commitSHA, line string) (FileChange, bool) {
