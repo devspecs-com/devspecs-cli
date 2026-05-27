@@ -500,6 +500,51 @@ func TestFindPack_HumanOutputShowsReceipt(t *testing.T) {
 	}
 }
 
+func TestFindGraphDiagnostics_AttachesTypedEdgeAndSuppressesSharedConcept(t *testing.T) {
+	repoDir, _ := setupReadEnv(t)
+	seedGraphDiagnosticArtifacts(t, repoDir)
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"--json", "--graph-diagnostics", "--no-refresh", "rotatetoken implementation"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out FindGraphOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("find --json --graph-diagnostics invalid: %v\n%s", err, buf.String())
+	}
+	if out.Mode != findGraphDiagnosticsMode {
+		t.Fatalf("graph mode = %q", out.Mode)
+	}
+	if len(out.RankedResults) == 0 {
+		t.Fatalf("expected unchanged ranked results: %#v", out)
+	}
+	if out.GraphDiagnostics.CandidateCount != 1 {
+		t.Fatalf("expected one graph candidate, got %#v", out.GraphDiagnostics)
+	}
+	got := out.GraphDiagnostics.Candidates[0]
+	if got.SourcePath != "src/session.test.ts" {
+		t.Fatalf("graph candidate source path = %q, want test attachment; diagnostics=%#v", got.SourcePath, out.GraphDiagnostics)
+	}
+	if got.AdmissionEdgeType != "tests_source" {
+		t.Fatalf("admission edge = %q", got.AdmissionEdgeType)
+	}
+	if !strings.Contains(got.Receipt, "tests_source from src/session.ts") {
+		t.Fatalf("receipt missing seed and edge evidence: %q", got.Receipt)
+	}
+	for _, candidate := range out.GraphDiagnostics.Candidates {
+		if candidate.Path == "docs/noisy.md" {
+			t.Fatalf("support-only shared concept admitted graph candidate: %#v", out.GraphDiagnostics)
+		}
+	}
+	if out.GraphDiagnostics.Counts["suppressed_support_only"] == 0 {
+		t.Fatalf("expected shared concept suppression count: %#v", out.GraphDiagnostics)
+	}
+}
+
 func TestFind_JSONOutputIncludesLineScopedPath(t *testing.T) {
 	repoDir, _ := setupReadEnv(t)
 	relPath := seedLineScopedTestArtifacts(t, repoDir)
@@ -576,6 +621,73 @@ func seedLineScopedTestArtifacts(t *testing.T, repoDir string) string {
 	insertTestArtifact(t, db, repoID, "ds_exact_test", "rev_exact_test", "src_exact_test", relPath, 53, 67, "testPutAndGetExposedTool", "Test: testPutAndGetExposedTool\nSource: "+relPath+"\nLines: 53-67\n\ncache.put(\"users\", camelSpec);\ncache.getTools().get(\"users\");", now)
 	insertTestArtifact(t, db, repoID, "ds_other_test", "rev_other_test", "src_other_test", relPath, 151, 159, "testHasSearchableTools", "Test: testHasSearchableTools\nSource: "+relPath+"\nLines: 151-159\n\ncache.putSearchable(\"users\", camelSpec);\ncache.hasSearchableTools();", now)
 	return relPath
+}
+
+func seedGraphDiagnosticArtifacts(t *testing.T, repoDir string) {
+	t.Helper()
+	db, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	var repoID string
+	if err := db.QueryRow("SELECT id FROM repos LIMIT 1").Scan(&repoID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	insertGraphArtifact(t, db, repoID, "ds_graph_source", "rev_graph_source", "src_graph_source", "source_context", "", "src/session.ts", "Session implementation", "export function RotateToken() { return 'rotatetoken implementation'; }\n", `{"language":"typescript"}`, now)
+	insertGraphArtifact(t, db, repoID, "ds_graph_test", "rev_graph_test", "src_graph_test", "source_context", "test_case", "src/session.test.ts", "Session behavior test", "describe('session behavior', () => { it('covers rotation', () => {}); });\n", `{"mode":"intent","subtype":"test_case","source_type":"test_case","test_name":"session behavior"}`, now)
+	insertGraphArtifact(t, db, repoID, "ds_graph_noise", "rev_graph_noise", "src_graph_noise", "plan", "", "docs/noisy.md", "Noisy related doc", "This document shares a generic session concept but is not implementation context.\n", `{}`, now)
+	if err := db.UpsertArtifactEdge(store.ArtifactEdgeInput{
+		ID:            "edge_graph_test_source",
+		RepoID:        repoID,
+		SrcArtifactID: "ds_graph_test",
+		DstArtifactID: "ds_graph_source",
+		EdgeType:      "tests_source",
+		Weight:        0.8,
+		Confidence:    0.82,
+		EvidenceCount: 1,
+		SourceSignal:  "source_symbol_match",
+		Explanation:   "test mentions source symbol RotateToken",
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertArtifactEdge(store.ArtifactEdgeInput{
+		ID:            "edge_graph_shared_concept",
+		RepoID:        repoID,
+		SrcArtifactID: "ds_graph_source",
+		DstArtifactID: "ds_graph_noise",
+		EdgeType:      "mentions_same_concept",
+		Weight:        0.7,
+		Confidence:    0.9,
+		EvidenceCount: 1,
+		SourceSignal:  "shared_rare_concept",
+		Explanation:   "shares rare concept session",
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertGraphArtifact(t *testing.T, db *store.DB, repoID, artifactID, revID, sourceID, kind, subtype, relPath, title, body, extracted, now string) {
+	t.Helper()
+	relPath = filepath.ToSlash(relPath)
+	if err := db.InsertArtifactDirect(artifactID, repoID, kind, subtype, title, "unknown", revID, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertRevisionDirect(revID, artifactID, "sha256:"+artifactID, body, extracted, now); err != nil {
+		t.Fatal(err)
+	}
+	sourceType := kind
+	if subtype == "test_case" {
+		sourceType = "test_case"
+	}
+	if err := db.InsertSourceDirect(sourceID, artifactID, repoID, sourceType, relPath, relPath+"|"+sourceType, "", "", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.IndexArtifactFTS(artifactID, title, body, relPath); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func insertTestArtifact(t *testing.T, db *store.DB, repoID, artifactID, revID, sourceID, relPath string, startLine, endLine int, testName, body, now string) {

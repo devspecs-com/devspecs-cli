@@ -9,13 +9,14 @@ import (
 )
 
 type FindPackOutput struct {
-	Query         string                `json:"query"`
-	Retriever     string                `json:"retriever"`
-	Mode          string                `json:"mode"`
-	Groups        []retrieval.PackGroup `json:"groups"`
-	ExcludedNoise []retrieval.PackItem  `json:"excluded_noise,omitempty"`
-	Counts        map[string]int        `json:"counts,omitempty"`
-	RankedResults []FindResult          `json:"ranked_results"`
+	Query            string                `json:"query"`
+	Retriever        string                `json:"retriever"`
+	Mode             string                `json:"mode"`
+	Groups           []retrieval.PackGroup `json:"groups"`
+	ExcludedNoise    []retrieval.PackItem  `json:"excluded_noise,omitempty"`
+	Counts           map[string]int        `json:"counts,omitempty"`
+	RankedResults    []FindResult          `json:"ranked_results"`
+	GraphDiagnostics *FindGraphDiagnostics `json:"graph_diagnostics,omitempty"`
 }
 
 func findPackOutput(query, retrieverName string, candidates []retrieval.Candidate, reasons map[string][]string, rolePack retrieval.RoleGroupedPack) FindPackOutput {
