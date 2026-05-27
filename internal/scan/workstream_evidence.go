@@ -40,6 +40,7 @@ const (
 	workstreamPackStrengthWeak         = "weak"
 
 	workstreamDialectTicketLikeUpper    = "ticket_like_upper"
+	workstreamDialectDocumentNumberRef  = "document_number_ref"
 	workstreamDialectExplicitPRRef      = "explicit_pr_ref"
 	workstreamDialectExplicitIssueRef   = "explicit_issue_ref"
 	workstreamDialectExplicitGHRef      = "explicit_gh_ref"
@@ -584,6 +585,10 @@ func workstreamDialectTrust(dialect string, stat *workstreamDialectProfileStat) 
 		if stat.crossRole >= 1 || stat.anchors >= 3 {
 			return workstreamTrustModerate
 		}
+	case workstreamDialectDocumentNumberRef:
+		if stat.crossRole >= 2 {
+			return workstreamTrustModerate
+		}
 	case workstreamDialectOpenSpecChangeSlug:
 		if stat.crossRole >= 1 {
 			return workstreamTrustStrong
@@ -713,6 +718,9 @@ func acceptedWorkstreamClusters(accs map[string]*workstreamAnchorAccumulator, ar
 		}
 		if acc.primaryDialect() == workstreamDialectGenericTechnical {
 			cluster.caveats = append(cluster.caveats, "generic technical term; requires a specific work anchor for strong evidence")
+		}
+		if acc.primaryDialect() == workstreamDialectDocumentNumberRef {
+			cluster.caveats = append(cluster.caveats, "document number reference; not eligible for strong evidence without a more specific work anchor")
 		}
 		accepted = append(accepted, cluster)
 	}
@@ -978,11 +986,12 @@ func extractFormalWorkstreamAnchors(text, source string) workstreamExtractResult
 	}
 	for _, raw := range workstreamTaskIDPattern.FindAllString(text, 40) {
 		canonical := strings.ToUpper(raw)
+		dialect := workstreamTicketLikeDialect(canonical)
 		out.anchors = append(out.anchors, workstreamAnchor{
 			canonical:  canonical,
 			display:    canonical,
 			anchorType: "task_id",
-			dialect:    workstreamDialectTicketLikeUpper,
+			dialect:    dialect,
 			raw:        raw,
 			source:     source,
 			weight:     0.96,
@@ -1375,6 +1384,10 @@ func workstreamScore(acc *workstreamAnchorAccumulator, artifactIDs []string, pro
 		return 0.52, 0.64, "support_bare_hash_with_issue_context", packStrength
 	case dialect == workstreamDialectBareHashRef:
 		return 0.36, 0.5, "low_bare_hash_ref", packStrength
+	case dialect == workstreamDialectDocumentNumberRef && docBacked:
+		return 0.58, 0.66, "support_document_number_ref", packStrength
+	case dialect == workstreamDialectDocumentNumberRef:
+		return 0.42, 0.54, "low_document_number_ref", packStrength
 	case dialect == workstreamDialectTicketLikeUpper && hasGit && artifactCount >= 2 && roleDiverse:
 		return 0.88, 0.93, "high_task_id_role_diverse_git", packStrength
 	case dialect == workstreamDialectTicketLikeUpper && hasGit && artifactCount >= 2:
@@ -1424,6 +1437,14 @@ func workstreamPackStrength(acc *workstreamAnchorAccumulator, roleFamilies map[s
 			return workstreamPackStrengthSupportLocal
 		}
 		return workstreamPackStrengthWeak
+	case workstreamDialectDocumentNumberRef:
+		if docBacked {
+			return workstreamPackStrengthSupportCross
+		}
+		if acc.formalAnchor() || len(roleFamilies) >= 2 {
+			return workstreamPackStrengthSupportLocal
+		}
+		return workstreamPackStrengthWeak
 	case workstreamDialectBranchSlug:
 		if docBacked && acc.nativeArtifactSourceCount() > 0 && (acc.sources["commit_message"] || acc.sources["artifact_title"] || acc.sources["artifact_path"] || acc.sources["metadata"]) {
 			return workstreamPackStrengthSupportCross
@@ -1461,6 +1482,17 @@ func workstreamPackStrength(acc *workstreamAnchorAccumulator, roleFamilies map[s
 		return workstreamPackStrengthWeak
 	case workstreamDialectTitleHeadingSlug:
 		if docBacked && len(acc.sources) >= 3 && (acc.sources["artifact_path"] || acc.sources["metadata"] || acc.hasGitSource()) && len(acc.artifacts) >= 2 {
+			return workstreamPackStrengthStrong
+		}
+		if docBacked {
+			return workstreamPackStrengthSupportCross
+		}
+		if len(roleFamilies) >= 2 {
+			return workstreamPackStrengthSupportLocal
+		}
+		return workstreamPackStrengthWeak
+	case workstreamDialectPathComponentSlug:
+		if docBacked && roleFamilies["source"] > 0 && len(acc.sources) >= 3 && (acc.sources["artifact_path"] || acc.sources["metadata"] || acc.hasGitSource()) && len(acc.artifacts) >= 2 && (trust == workstreamTrustStrong || acc.evidenceCount() >= 8 || len(acc.artifacts) >= 4) {
 			return workstreamPackStrengthStrong
 		}
 		if docBacked {
@@ -1570,7 +1602,7 @@ func (acc *workstreamAnchorAccumulator) gitOnlySupport() bool {
 
 func (acc *workstreamAnchorAccumulator) formalAnchor() bool {
 	switch acc.primaryDialect() {
-	case workstreamDialectTicketLikeUpper, workstreamDialectExplicitPRRef, workstreamDialectExplicitIssueRef, workstreamDialectExplicitGHRef, workstreamDialectBareHashRef:
+	case workstreamDialectTicketLikeUpper, workstreamDialectDocumentNumberRef, workstreamDialectExplicitPRRef, workstreamDialectExplicitIssueRef, workstreamDialectExplicitGHRef, workstreamDialectBareHashRef:
 		return true
 	default:
 		return false
@@ -1617,6 +1649,7 @@ func (acc *workstreamAnchorAccumulator) primaryType() string {
 
 func (acc *workstreamAnchorAccumulator) primaryDialect() string {
 	priority := []string{
+		workstreamDialectDocumentNumberRef,
 		workstreamDialectTicketLikeUpper,
 		workstreamDialectExplicitPRRef,
 		workstreamDialectExplicitIssueRef,
@@ -1667,6 +1700,21 @@ func workstreamExplicitWorkRefDialect(dialect string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func workstreamTicketLikeDialect(canonical string) string {
+	prefix, _, ok := strings.Cut(strings.ToUpper(canonical), "-")
+	if !ok || prefix == "" {
+		return workstreamDialectTicketLikeUpper
+	}
+	switch prefix {
+	case "ADR", "RFC", "PEP":
+		return workstreamDialectDocumentNumberRef
+	case "GPT", "IGRF", "HTTP", "TLS", "SHA", "MD", "CRC", "UTF":
+		return workstreamDialectGenericTechnical
+	default:
+		return workstreamDialectTicketLikeUpper
 	}
 }
 

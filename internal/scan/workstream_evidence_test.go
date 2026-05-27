@@ -312,7 +312,7 @@ func TestWorkstreamEvidence_RejectsDateLikeBareGithubRef(t *testing.T) {
 }
 
 func TestWorkstreamEvidence_ExplicitWorkRefDialects(t *testing.T) {
-	extracted := extractFormalWorkstreamAnchors("See PR-42, pull/43, ISSUE-44, issues/45, GH-46, and #47.", "body")
+	extracted := extractFormalWorkstreamAnchors("See PR-42, pull/43, ISSUE-44, issues/45, GH-46, #47, ADR-001, GPT-2, and LM-19.", "body")
 	got := map[string]string{}
 	for _, anchor := range extracted.anchors {
 		got[anchor.canonical] = anchor.dialect
@@ -324,6 +324,9 @@ func TestWorkstreamEvidence_ExplicitWorkRefDialects(t *testing.T) {
 		"issue-45": workstreamDialectExplicitIssueRef,
 		"gh-46":    workstreamDialectExplicitGHRef,
 		"gh-47":    workstreamDialectBareHashRef,
+		"ADR-001":  workstreamDialectDocumentNumberRef,
+		"GPT-2":    workstreamDialectGenericTechnical,
+		"LM-19":    workstreamDialectTicketLikeUpper,
 	}
 	for canonical, dialect := range want {
 		if got[canonical] != dialect {
