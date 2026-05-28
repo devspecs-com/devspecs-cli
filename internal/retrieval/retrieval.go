@@ -89,9 +89,8 @@ func (r WeightedFilesRetrieverV0) Name() string {
 		suffix += "_tiered"
 	}
 	if r.AnchorFirstRanking {
-		suffix += "_anchor_first"
-		if mode := NormalizeAnchorFirstMode(r.AnchorFirstMode); mode != "" && mode != AnchorFirstModeV1 {
-			suffix += "_" + mode
+		if mode := NormalizeAnchorFirstMode(r.AnchorFirstMode); mode != "" && mode != DefaultAnchorFirstMode {
+			suffix += "_anchor_first_" + mode
 		}
 	}
 	if strings.EqualFold(r.EvidenceMode, EvidenceModeBalanced) {
@@ -182,6 +181,8 @@ func IsSourceContextCandidate(c Candidate) bool {
 func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode string, conceptBackfill, glossaryConcepts, tieredConceptOutput, anchorFirstRanking bool, anchorFirstMode string) []Candidate {
 	terms := expandedTerms(query)
 	queryLower := strings.ToLower(query)
+	normalizedAnchorFirstMode := NormalizeAnchorFirstMode(anchorFirstMode)
+	selectedOnlyAnchorFirst := anchorFirstRanking && normalizedAnchorFirstMode == AnchorFirstModeSelectedOnly
 	var scoredCandidates []scoredCandidate
 	for _, c := range candidates {
 		baseScore := scoreCandidate(c, terms, queryLower)
@@ -209,8 +210,8 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode 
 	limit := retrievalLimit(queryLower, terms)
 	scoredCandidates = collapseVariantCandidates(scoredCandidates, queryLower)
 	scoredCandidates = suppressRawTestSourceCandidates(scoredCandidates, queryLower)
-	if anchorFirstRanking {
-		scoredCandidates = applyAnchorFirstRanking(scoredCandidates, candidates, query, anchorFirstMode)
+	if anchorFirstRanking && !selectedOnlyAnchorFirst {
+		scoredCandidates = applyAnchorFirstRanking(scoredCandidates, candidates, query, normalizedAnchorFirstMode)
 	}
 	scoredCandidates = selectScoredCandidates(scoredCandidates, queryLower, limit)
 	scoredCandidates = enforceSupportingArtifactBudgets(scoredCandidates, queryLower, terms)
@@ -222,6 +223,9 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode 
 			}
 			return scoredCandidates[i].score > scoredCandidates[j].score
 		})
+	}
+	if selectedOnlyAnchorFirst {
+		scoredCandidates = applyAnchorFirstRanking(scoredCandidates, candidates, query, normalizedAnchorFirstMode)
 	}
 	out := make([]Candidate, 0, len(scoredCandidates))
 	for _, sf := range scoredCandidates {

@@ -50,7 +50,7 @@ func NewEvalCmd() *cobra.Command {
 		experimentalConceptBackfill     bool
 		experimentalGlossaryConcepts    bool
 		experimentalTieredConceptOutput bool
-		experimentalAnchorFirstRanking  bool
+		experimentalAnchorFirstRanking  = true
 		experimentalAnchorFirstMode     string
 		packDiagnostics                 bool
 		graphDiagnostics                bool
@@ -108,7 +108,7 @@ func NewEvalCmd() *cobra.Command {
 				return nil
 			}
 
-			if cmd.Flags().Changed("experimental-anchor-first-mode") {
+			if cmd.Flags().Changed("experimental-anchor-first-mode") && !cmd.Flags().Changed("experimental-anchor-first-ranking") {
 				experimentalAnchorFirstRanking = true
 			}
 			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, findRuntime, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput, experimentalAnchorFirstRanking, experimentalAnchorFirstMode, packDiagnostics, graphDiagnostics, evalIndexCacheDir, refreshIndexCache, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
@@ -212,8 +212,8 @@ func NewEvalCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&experimentalConceptBackfill, "experimental-concept-backfill", false, "Use the opt-in deterministic concept backfill lane during retrieval evals")
 	cmd.Flags().BoolVar(&experimentalGlossaryConcepts, "experimental-glossary-concepts", false, "Gate experimental concept backfill through repo-local glossary evidence during retrieval evals")
 	cmd.Flags().BoolVar(&experimentalTieredConceptOutput, "experimental-tiered-concept-output", false, "Demote lower-confidence concept backfill artifacts to a separate related tier during retrieval evals")
-	cmd.Flags().BoolVar(&experimentalAnchorFirstRanking, "experimental-anchor-first-ranking", false, "Use opt-in repo-local TF-IDF anchor-first ranking during retrieval evals")
-	cmd.Flags().StringVar(&experimentalAnchorFirstMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, strong_field, or strict")
+	cmd.Flags().BoolVar(&experimentalAnchorFirstRanking, "experimental-anchor-first-ranking", true, "Use repo-local TF-IDF anchor-first ordering during retrieval evals; pass false to disable")
+	cmd.Flags().StringVar(&experimentalAnchorFirstMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, selected_only, strong_field, or strict")
 	cmd.Flags().BoolVar(&packDiagnostics, "pack-diagnostics", false, "Record role-grouped pack diagnostics in per-case eval JSON without changing scoring")
 	cmd.Flags().BoolVar(&graphDiagnostics, "graph-diagnostics", false, "Record opt-in find graph context diagnostics in live command eval JSON without changing scoring")
 	cmd.Flags().StringVar(&evalIndexCacheDir, "eval-index-cache-dir", "", "Directory for strict indexed eval corpus cache; disabled when empty")

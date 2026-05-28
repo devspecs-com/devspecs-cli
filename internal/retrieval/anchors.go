@@ -32,11 +32,12 @@ type AnchorProfile struct {
 }
 
 const (
-	AnchorFirstModeV1          = "v1"
-	AnchorFirstModeRerankOnly  = "rerank_only"
-	AnchorFirstModeStrongField = "strong_field"
-	AnchorFirstModeStrict      = "strict"
-	DefaultAnchorFirstMode     = AnchorFirstModeV1
+	AnchorFirstModeV1           = "v1"
+	AnchorFirstModeRerankOnly   = "rerank_only"
+	AnchorFirstModeSelectedOnly = "selected_only"
+	AnchorFirstModeStrongField  = "strong_field"
+	AnchorFirstModeStrict       = "strict"
+	DefaultAnchorFirstMode      = AnchorFirstModeSelectedOnly
 )
 
 func NormalizeAnchorFirstMode(mode string) string {
@@ -47,6 +48,8 @@ func NormalizeAnchorFirstMode(mode string) string {
 		return AnchorFirstModeV1
 	case "rerank-only", AnchorFirstModeRerankOnly:
 		return AnchorFirstModeRerankOnly
+	case "selected-only", AnchorFirstModeSelectedOnly:
+		return AnchorFirstModeSelectedOnly
 	case "strong-field", AnchorFirstModeStrongField:
 		return AnchorFirstModeStrongField
 	case AnchorFirstModeStrict:
@@ -57,7 +60,7 @@ func NormalizeAnchorFirstMode(mode string) string {
 }
 
 func ValidAnchorFirstModes() []string {
-	return []string{AnchorFirstModeV1, AnchorFirstModeRerankOnly, AnchorFirstModeStrongField, AnchorFirstModeStrict}
+	return []string{AnchorFirstModeV1, AnchorFirstModeRerankOnly, AnchorFirstModeSelectedOnly, AnchorFirstModeStrongField, AnchorFirstModeStrict}
 }
 
 type RepoVocabulary struct {
@@ -216,7 +219,7 @@ func applyAnchorFirstRanking(candidates []scoredCandidate, universe []Candidate,
 		candidates[i].candidate = withAnchorFirstMetadata(candidates[i].candidate, delta, result, mode)
 		changed = true
 	}
-	if mode == AnchorFirstModeRerankOnly {
+	if mode == AnchorFirstModeRerankOnly || mode == AnchorFirstModeSelectedOnly {
 		if changed {
 			sort.Slice(candidates, func(i, j int) bool {
 				if candidates[i].score == candidates[j].score {
@@ -455,7 +458,7 @@ func phraseFieldWeightedTF(phrase string, fields anchorFieldTerms, mode string) 
 	add("title", fields.title, 4.0)
 	add("test_name", fields.testName, 5.0)
 	add("heading", fields.heading, 3.0)
-	if mode == AnchorFirstModeV1 || mode == AnchorFirstModeRerankOnly {
+	if mode == AnchorFirstModeV1 || mode == AnchorFirstModeRerankOnly || mode == AnchorFirstModeSelectedOnly {
 		add("body", fields.body, 0.45)
 	}
 	return score, matched

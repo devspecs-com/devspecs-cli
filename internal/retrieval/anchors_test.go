@@ -1,6 +1,9 @@
 package retrieval
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestBuildAnchorProfileClassifiesQueryTerms(t *testing.T) {
 	profile := BuildAnchorProfile("fix Langfuse trace association for REQ_fluxnova_aigf_integration and testPutAndGetExposedTool behavior")
@@ -70,6 +73,41 @@ func TestAnchorFirstRankingPromotesRareNamedRequirement(t *testing.T) {
 	if got[0].Metadata["anchor_first_score"] == "" {
 		t.Fatalf("missing anchor metadata: %#v", got[0].Metadata)
 	}
+}
+
+func TestAnchorFirstSelectedOnlyPreservesDefaultSelectedSet(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:    "calm-suite/calm-studio/docs/REQ_fluxnova_aigf_integration.md",
+			Title:   "Requirements Spec: FluxNova Templates + AI Governance Framework Integration",
+			Kind:    "requirements",
+			Subtype: "prd",
+			Body:    "FluxNova AIGF integration requirements for CALM Studio.",
+		},
+	}
+	for i := 0; i < 10; i++ {
+		candidates = append(candidates, Candidate{
+			Path:  fmt.Sprintf("docs/reference/filler-%02d.md", i),
+			Title: "Reference Notes",
+			Body:  "FluxNova AIGF integration requirements for CALM Studio. " + repeatForTest("integration requirements ", 4),
+		})
+	}
+
+	query := "FluxNova AIGF integration requirements for CALM Studio"
+	base := (WeightedFilesRetrieverV0{}).Retrieve(candidates, query)
+	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true, AnchorFirstMode: AnchorFirstModeSelectedOnly}).Retrieve(candidates, query)
+	if !sameCandidatePathSetForTest(base, got) {
+		t.Fatalf("selected_only changed selected set: base %#v got %#v", CandidatePaths(base), CandidatePaths(got))
+	}
+	for _, candidate := range got {
+		if candidate.Path == "calm-suite/calm-studio/docs/REQ_fluxnova_aigf_integration.md" {
+			if candidate.Metadata["anchor_first_mode"] != AnchorFirstModeSelectedOnly {
+				t.Fatalf("missing selected_only metadata: %#v", candidate.Metadata)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing target candidate: %#v", CandidatePaths(got))
 }
 
 func TestAnchorFirstRankingPromotesNamedTemplateWithoutRoleOnlyPromotion(t *testing.T) {
@@ -299,6 +337,25 @@ func CandidatePathsFromScoredForTest(candidates []scoredCandidate) []string {
 		out = append(out, c.candidate.Path)
 	}
 	return out
+}
+
+func sameCandidatePathSetForTest(a, b []Candidate) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := map[string]int{}
+	for _, candidate := range a {
+		seen[candidate.Path]++
+	}
+	for _, candidate := range b {
+		seen[candidate.Path]--
+	}
+	for _, count := range seen {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func anchorFillerCandidatesForTest() []Candidate {

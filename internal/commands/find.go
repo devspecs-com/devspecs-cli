@@ -30,7 +30,7 @@ func NewFindCmd() *cobra.Command {
 		noRefresh   bool
 		pack        bool
 		graphDiag   bool
-		anchorFirst bool
+		anchorFirst = true
 		anchorMode  string
 	)
 
@@ -40,7 +40,7 @@ func NewFindCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fp := store.FilterParams{Kind: kind, Subtype: subtype, Tag: tag, Branch: branch, User: user}
-			if cmd.Flags().Changed("experimental-anchor-first-mode") {
+			if cmd.Flags().Changed("experimental-anchor-first-mode") && !cmd.Flags().Changed("experimental-anchor-first-ranking") {
 				anchorFirst = true
 			}
 			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, pack, graphDiag, anchorFirst, anchorMode)
@@ -58,8 +58,8 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	cmd.Flags().BoolVar(&pack, "pack", false, "Group results into a role-based context pack with inclusion and exclusion receipts")
 	cmd.Flags().BoolVar(&graphDiag, "graph-diagnostics", false, "Attach opt-in typed-edge graph diagnostics without changing ranked results")
-	cmd.Flags().BoolVar(&anchorFirst, "experimental-anchor-first-ranking", false, "Use opt-in repo-local TF-IDF anchor-first ranking")
-	cmd.Flags().StringVar(&anchorMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, strong_field, or strict")
+	cmd.Flags().BoolVar(&anchorFirst, "experimental-anchor-first-ranking", true, "Use repo-local TF-IDF anchor-first ordering; pass false to disable")
+	cmd.Flags().StringVar(&anchorMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, selected_only, strong_field, or strict")
 	return cmd
 }
 
