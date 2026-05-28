@@ -27,6 +27,8 @@ const (
 	intentCandidateMinScore    = 4.0
 	intentCandidateHeaderBytes = 32768
 	intentCandidateMaxFiles    = 2000
+	supportDocMinScore         = 4.0
+	supportDocMaxFiles         = 200
 )
 
 type discoveryEvidence struct {
@@ -123,6 +125,15 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 		entries, err := walkIntentMarkdownCandidates(ctx, repoRoot)
 		if err == nil {
 			for _, entry := range entries {
+				addCandidate(entry.absPath, discoveryEvidence{
+					score:   entry.score,
+					reasons: entry.reasons,
+				})
+			}
+		}
+		supportEntries, err := walkSupportMarkdownCandidates(ctx, repoRoot)
+		if err == nil {
+			for _, entry := range supportEntries {
 				addCandidate(entry.absPath, discoveryEvidence{
 					score:   entry.score,
 					reasons: entry.reasons,
@@ -463,6 +474,69 @@ func walkIntentMarkdownCandidates(ctx context.Context, repoRoot string) ([]inten
 	return candidates, err
 }
 
+func walkSupportMarkdownCandidates(ctx context.Context, repoRoot string) ([]intentMarkdownCandidate, error) {
+	m := ignore.FromContext(ctx)
+	var candidates []intentMarkdownCandidate
+	err := filepath.Walk(repoRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		rel, rerr := filepath.Rel(repoRoot, path)
+		if rerr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+		if isOpenSpecOwnedPath(rel) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if m != nil && m.ShouldSkip(rel, info.IsDir()) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir() {
+			if isBuiltinIgnoredDir(info.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !isMarkdownLikeFilename(info.Name()) {
+			return nil
+		}
+		score, reasons := scoreSupportMarkdownCandidate(path, rel)
+		if score < supportDocMinScore {
+			return nil
+		}
+		candidates = append(candidates, intentMarkdownCandidate{
+			absPath: path,
+			relPath: rel,
+			score:   score,
+			reasons: reasons,
+		})
+		return nil
+	})
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].score != candidates[j].score {
+			return candidates[i].score > candidates[j].score
+		}
+		return candidates[i].relPath < candidates[j].relPath
+	})
+	if len(candidates) > supportDocMaxFiles {
+		candidates = candidates[:supportDocMaxFiles]
+	}
+	return candidates, err
+}
+
 func isMarkdownLikeFilename(name string) bool {
 	switch strings.ToLower(filepath.Ext(name)) {
 	case ".md", ".mdx":
@@ -481,6 +555,146 @@ func scoreIntentMarkdownCandidate(absPath, relPath string) (float64, []string) {
 		reasons = append(reasons, contentReasons...)
 	}
 	reasons = append(reasons, fmt.Sprintf("intent_candidate_score:%.2f", score))
+	return score, reasons
+}
+
+func scoreSupportMarkdownCandidate(absPath, relPath string) (float64, []string) {
+	score, reasons := scoreSupportPath(relPath)
+	header := readIntentHeader(absPath)
+	if header != "" {
+		contentScore, contentReasons := scoreSupportContent(header)
+		score += contentScore
+		reasons = append(reasons, contentReasons...)
+	}
+	reasons = append(reasons, fmt.Sprintf("support_doc_score:%.2f", score))
+	return score, reasons
+}
+
+func scoreSupportPath(relPath string) (float64, []string) {
+	relPath = filepath.ToSlash(relPath)
+	segments := strings.Split(relPath, "/")
+	base := strings.TrimSuffix(filepath.Base(relPath), filepath.Ext(relPath))
+	lowerBase := strings.ToLower(base)
+	var tokens []string
+	for _, segment := range segments {
+		tokens = append(tokens, supportTokens(segment)...)
+	}
+	tokenSet := stringSet(tokens)
+	var score float64
+	var reasons []string
+	pathWeights := map[string]float64{
+		"access":         1.1,
+		"ansible":        4.0,
+		"authentication": 3.2,
+		"authorization":  2.6,
+		"automation":     1.6,
+		"awx":            3.4,
+		"control":        1.0,
+		"deployment":     1.5,
+		"failover":       2.5,
+		"integration":    1.8,
+		"logging":        2.0,
+		"manager":        1.8,
+		"metric":         3.5,
+		"observability":  2.8,
+		"operator":       2.2,
+		"playbook":       3.0,
+		"rbac":           3.0,
+		"runtime":        1.6,
+		"security":       1.8,
+		"service":        0.8,
+		"statefulset":    2.0,
+		"telemetry":      2.8,
+		"tracing":        2.0,
+		"instance":       1.8,
+	}
+	for token, weight := range pathWeights {
+		if !tokenSet[token] {
+			continue
+		}
+		score += weight
+		reasons = append(reasons, "support_path_token:"+token)
+	}
+	if tokenSet["access"] && tokenSet["control"] {
+		score += 2.4
+		reasons = append(reasons, "support_path_phrase:access_control")
+	}
+	if tokenSet["core"] && tokenSet["service"] {
+		score += 1.2
+		reasons = append(reasons, "support_path_phrase:core_service")
+	}
+	if tokenSet["instance"] && tokenSet["manager"] {
+		score += 2.2
+		reasons = append(reasons, "support_path_phrase:instance_manager")
+	}
+	if strings.Contains(strings.ToLower(relPath), "docs/src/") {
+		score += 0.8
+		reasons = append(reasons, "support_path_convention:docs_src")
+	}
+	switch {
+	case len(segments) == 1 && lowerBase == "readme":
+		score -= 4.0
+		reasons = append(reasons, "support_negative:root_readme")
+	case lowerBase == "readme":
+		score -= 1.5
+		reasons = append(reasons, "support_negative:readme")
+	}
+	for _, token := range []string{"changelog", "license", "news", "release", "template", "prompt", "skill", "fixture", "sample", "example", "tutorial"} {
+		if tokenSet[token] {
+			score -= 2.0
+			reasons = append(reasons, "support_negative:"+token)
+		}
+	}
+	return score, reasons
+}
+
+func scoreSupportContent(content string) (float64, []string) {
+	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	headingWeights := map[string]float64{
+		"access control":   2.6,
+		"authentication":   2.6,
+		"authorization":    2.2,
+		"configuration":    1.1,
+		"deployment":       1.4,
+		"failover":         2.0,
+		"instance manager": 2.4,
+		"integration":      1.4,
+		"logging":          1.6,
+		"metric":           2.4,
+		"observability":    2.2,
+		"operator":         1.8,
+		"playbook":         2.4,
+		"rbac":             2.3,
+		"security":         1.3,
+		"statefulset":      1.8,
+		"telemetry":        2.0,
+		"tracing":          1.6,
+	}
+	var score float64
+	var reasons []string
+	seen := map[string]bool{}
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if strings.HasPrefix(lower, "do not edit") ||
+			strings.Contains(lower, "generated file") {
+			score -= 2.0
+			reasons = append(reasons, "support_negative:generated_marker")
+			continue
+		}
+		if !strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		heading := normalizeSupportPhrase(strings.TrimLeft(trimmed, "# "))
+		for phrase, weight := range headingWeights {
+			if seen[phrase] || !strings.Contains(heading, phrase) {
+				continue
+			}
+			seen[phrase] = true
+			score += weight
+			reasons = append(reasons, "support_heading:"+strings.ReplaceAll(phrase, " ", "_"))
+		}
+	}
 	return score, reasons
 }
 
@@ -702,6 +916,17 @@ func intentTokens(value string) []string {
 	return uniqueStrings(raw)
 }
 
+func supportTokens(value string) []string {
+	var raw []string
+	for _, part := range splitIntentTokenParts(value) {
+		token := normalizeSupportToken(part)
+		if token != "" {
+			raw = append(raw, token)
+		}
+	}
+	return uniqueStrings(raw)
+}
+
 func splitIntentTokenParts(value string) []string {
 	var parts []string
 	var b strings.Builder
@@ -820,8 +1045,61 @@ func normalizeIntentToken(value string) string {
 	return token
 }
 
+func normalizeSupportToken(value string) string {
+	token := normalizeIntentToken(value)
+	switch token {
+	case "auth", "authenticate", "authenticated", "authenticating", "authentication", "login", "signin", "signon":
+		return "authentication"
+	case "authorize", "authorized", "authorizing", "authorization", "permission", "permissions":
+		return "authorization"
+	case "metrics":
+		return "metric"
+	case "observable", "observability":
+		return "observability"
+	case "telemetry":
+		return "telemetry"
+	case "trace", "traces", "tracing":
+		return "tracing"
+	case "log", "logs", "logging":
+		return "logging"
+	case "operators":
+		return "operator"
+	case "instances":
+		return "instance"
+	case "managers", "management":
+		return "manager"
+	case "statefulsets", "stateful-set", "stateful-sets":
+		return "statefulset"
+	case "deploy", "deployment", "deployments":
+		return "deployment"
+	case "integrate", "integrated", "integration", "integrations":
+		return "integration"
+	case "playbooks":
+		return "playbook"
+	case "services":
+		return "service"
+	case "controls":
+		return "control"
+	case "examples":
+		return "example"
+	case "samples":
+		return "sample"
+	case "fixtures":
+		return "fixture"
+	case "tutorials":
+		return "tutorial"
+	default:
+		return token
+	}
+}
+
 func normalizeIntentPhrase(value string) string {
 	tokens := intentTokens(value)
+	return strings.Join(tokens, " ")
+}
+
+func normalizeSupportPhrase(value string) string {
+	tokens := supportTokens(value)
 	return strings.Join(tokens, " ")
 }
 

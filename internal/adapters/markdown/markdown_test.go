@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -293,6 +294,107 @@ func TestDiscover_ProposalFamilyDirectoryIndexes(t *testing.T) {
 	}
 	if !hasReasonPrefix(reasons, "intent_heading:proposal") {
 		t.Fatalf("expected proposal heading reason, got %#v", reasons)
+	}
+}
+
+func TestDiscover_SupportDocDiscoveryFindsBoundedDocs(t *testing.T) {
+	tmp := t.TempDir()
+	for rel, body := range map[string]string{
+		"docs/security/how-to-authenticate.md":            "# How to Authenticate\n\n## Authentication\n\nUse local auth for offline deployments.\n",
+		"docs/security/access-control.md":                 "# Access Control\n\n## RBAC\n\nRole permissions and authorization.\n",
+		"docs/backend-system/core-services/metrics.md":    "# Metrics Service\n\n## Metrics\n\nOpenTelemetry naming conventions.\n",
+		"docs/docs/ansible.md":                            "# Ansible\n\n## Playbooks\n\nAWX backed playbook execution.\n",
+		"docs/src/instance_manager.md":                    "# Instance Manager\n\n## Failover\n\nOperator pod management internals.\n",
+		"docs/tutorials/getting-started.md":               "# Getting Started\n\n## Tutorial\n\nA generic tutorial.\n",
+		"docs/examples/sample-template.md":                "# Sample Template\n\n## Example\n\nA generated-looking sample.\n",
+		"CHANGELOG.md":                                    "# Changelog\n",
+		"README.md":                                       "# Project\n\n## Architecture\n",
+		"examples/agent/browser_agent/prompt/README.md":   "# Browser Agent Prompt\n",
+		"library/methodologies/skills/security/SKILL.md":  "# Security Skill\n",
+		"docs/release-notes/security-release-notes.md":    "# Security Release Notes\n",
+		"docs/generated/observability-fixture-example.md": "# Observability Fixture Example\n",
+		"docs/reference/generated-metrics-template.md":    "# Metrics Template\n",
+		"docs/reference/security-news.md":                 "# Security News\n",
+		"docs/reference/authorization-sample.md":          "# Authorization Sample\n",
+		"docs/reference/authentication-fixture.md":        "# Authentication Fixture\n",
+		"docs/reference/operator-tutorial.md":             "# Operator Tutorial\n",
+		"docs/reference/telemetry-example.md":             "# Telemetry Example\n",
+		"docs/reference/access-control-template.md":       "# Access Control Template\n",
+		"docs/reference/observability-prompt.md":          "# Observability Prompt\n",
+		"docs/reference/security-changelog.md":            "# Security Changelog\n",
+		"docs/reference/metrics-release.md":               "# Metrics Release\n",
+		"docs/reference/auth-license.md":                  "# Auth License\n",
+		"docs/reference/playbook-sample.md":               "# Playbook Sample\n",
+		"docs/reference/ansible-example.md":               "# Ansible Example\n",
+		"docs/reference/statefulset-tutorial.md":          "# StatefulSet Tutorial\n",
+		"docs/reference/failover-template.md":             "# Failover Template\n",
+		"docs/reference/logging-fixture.md":               "# Logging Fixture\n",
+		"docs/reference/rbac-prompt.md":                   "# RBAC Prompt\n",
+	} {
+		writeMarkdown(t, tmp, rel, body)
+	}
+
+	a := &Adapter{}
+	candidates, err := a.Discover(context.Background(), tmp, config.WithIntentCandidateDiscovery(nil, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := candidateRelPaths(candidates)
+	for _, want := range []string{
+		"docs/security/how-to-authenticate.md",
+		"docs/security/access-control.md",
+		"docs/backend-system/core-services/metrics.md",
+		"docs/docs/ansible.md",
+		"docs/src/instance_manager.md",
+	} {
+		if !stringSliceContains(got, want) {
+			t.Fatalf("missing support doc %q in %v", want, got)
+		}
+		candidate := findCandidate(candidates, want)
+		if !hasReasonPrefix(candidate.DiscoveryReasons, "support_") {
+			t.Fatalf("%s missing support discovery reason: %#v", want, candidate.DiscoveryReasons)
+		}
+	}
+	for _, noisy := range []string{
+		"docs/tutorials/getting-started.md",
+		"docs/examples/sample-template.md",
+		"CHANGELOG.md",
+		"README.md",
+		"examples/agent/browser_agent/prompt/README.md",
+		"library/methodologies/skills/security/SKILL.md",
+		"docs/release-notes/security-release-notes.md",
+	} {
+		if stringSliceContains(got, noisy) {
+			t.Fatalf("support-doc discovery admitted noisy doc %q in %v", noisy, got)
+		}
+	}
+}
+
+func TestDiscover_SupportDocDiscoveryIsCapped(t *testing.T) {
+	tmp := t.TempDir()
+	for i := 0; i < supportDocMaxFiles+15; i++ {
+		writeMarkdown(t, tmp, fmt.Sprintf("docs/security/auth-%03d.md", i), "# Authentication\n\n## Access Control\n")
+	}
+
+	a := &Adapter{}
+	candidates, err := a.Discover(context.Background(), tmp, config.WithIntentCandidateDiscovery(nil, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var supportCount int
+	for _, candidate := range candidates {
+		if strings.HasPrefix(filepath.ToSlash(candidate.RelPath), "docs/security/auth-") {
+			supportCount++
+		}
+	}
+	if supportCount != supportDocMaxFiles {
+		t.Fatalf("support candidates = %d, want cap %d", supportCount, supportDocMaxFiles)
+	}
+	if findCandidate(candidates, "docs/security/auth-000.md").RelPath == "" {
+		t.Fatal("expected deterministic low path to survive support-doc cap")
+	}
+	if findCandidate(candidates, fmt.Sprintf("docs/security/auth-%03d.md", supportDocMaxFiles+14)).RelPath != "" {
+		t.Fatal("expected path beyond support-doc cap to be excluded")
 	}
 }
 
