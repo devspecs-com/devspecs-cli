@@ -496,9 +496,32 @@ func TestFindPack_HumanOutputShowsReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := buf.String()
-	for _, want := range []string{"Working set: Plan", "Mode: role_grouped_pack_v0", "Summary:", "Coverage:", "Why:"} {
+	for _, want := range []string{"Working set: Plan", "Summary:", "Coverage:", "Evidence:"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("find --pack missing %q:\n%s", want, output)
+		}
+	}
+	for _, notWant := range []string{"Retriever:", "Mode:", "Type:", "Why:", "Signals:"} {
+		if strings.Contains(output, notWant) {
+			t.Fatalf("find --pack should be concise and omit %q:\n%s", notWant, output)
+		}
+	}
+}
+
+func TestFindPack_VerboseHumanOutputShowsDiagnostics(t *testing.T) {
+	setupReadEnv(t)
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"Plan", "--pack", "--verbose"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	output := buf.String()
+	for _, want := range []string{"Working set: Plan", "Retriever:", "Mode: role_grouped_pack_v0", "Source:", "Type:", "Why:"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("find --pack --verbose missing %q:\n%s", want, output)
 		}
 	}
 }

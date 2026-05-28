@@ -34,10 +34,12 @@ func findPackOutput(query, retrieverName string, candidates []retrieval.Candidat
 	}
 }
 
-func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retrieval.RoleGroupedPack) error {
+func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retrieval.RoleGroupedPack, verbose bool) error {
 	fmt.Fprintf(out, "Working set: %s\n", query)
-	fmt.Fprintf(out, "Retriever: %s\n", retrieverName)
-	fmt.Fprintf(out, "Mode: %s\n", rolePack.Mode)
+	if verbose {
+		fmt.Fprintf(out, "Retriever: %s\n", retrieverName)
+		fmt.Fprintf(out, "Mode: %s\n", rolePack.Mode)
+	}
 	writePackSummary(out, rolePack.Summary)
 
 	if len(rolePack.Groups) == 0 && len(rolePack.ExcludedNoise) == 0 {
@@ -59,14 +61,18 @@ func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retr
 			fmt.Fprintf(out, "  Note: %d item(s) over the recommended budget of %d.\n", group.OverflowCount, group.Budget)
 		}
 		for _, item := range group.Items {
-			writePackItem(out, item, false)
+			writePackItem(out, item, false, verbose)
 		}
 	}
 
 	if len(rolePack.ExcludedNoise) > 0 {
-		fmt.Fprintf(out, "\n%s (%d)\n", retrieval.PackRoleTitle(retrieval.PackRoleExcludedNoise), len(rolePack.ExcludedNoise))
+		title := retrieval.PackRoleTitle(retrieval.PackRoleExcludedNoise)
+		if !verbose {
+			title = "Downgraded as likely noise"
+		}
+		fmt.Fprintf(out, "\n%s (%d)\n", title, len(rolePack.ExcludedNoise))
 		for _, item := range rolePack.ExcludedNoise {
-			writePackItem(out, item, true)
+			writePackItem(out, item, true, verbose)
 		}
 	}
 	return nil
@@ -87,7 +93,7 @@ func writePackSummary(out io.Writer, summary retrieval.PackSummary) {
 	}
 }
 
-func writePackItem(out io.Writer, item retrieval.PackItem, excluded bool) {
+func writePackItem(out io.Writer, item retrieval.PackItem, excluded, verbose bool) {
 	label := item.ShortID
 	if label == "" {
 		label = item.ID
@@ -104,23 +110,23 @@ func writePackItem(out io.Writer, item retrieval.PackItem, excluded bool) {
 	} else {
 		fmt.Fprintf(out, "  %2d. %s  %s\n", item.OriginalRank, label, title)
 	}
-	if item.Path != "" {
+	if item.Path != "" && shouldShowPackSource(item, verbose) {
 		fmt.Fprintf(out, "      Source: %s\n", item.Path)
 	}
-	if item.SourcePath != "" && item.SourcePath != item.Path {
+	if verbose && item.SourcePath != "" && item.SourcePath != item.Path {
 		fmt.Fprintf(out, "      From: %s\n", item.SourcePath)
 	}
-	if item.Kind != "" || item.Subtype != "" {
+	if verbose && (item.Kind != "" || item.Subtype != "") {
 		fmt.Fprintf(out, "      Type: %s\n", compactKindSubtype(item.Kind, item.Subtype))
 	}
-	if item.RoleReason != "" {
+	if verbose && item.RoleReason != "" {
 		prefix := "Why"
 		if excluded {
 			prefix = "Because"
 		}
 		fmt.Fprintf(out, "      %s: %s\n", prefix, displayPackRoleReason(item.RoleReason))
 	}
-	if len(item.AuthorityCues) > 0 {
+	if verbose && len(item.AuthorityCues) > 0 {
 		signals, cautions := splitPackCues(item.AuthorityCues)
 		if len(signals) > 0 {
 			fmt.Fprintf(out, "      Signals: %s\n", strings.Join(limitStrings(signals, 3), "; "))
@@ -129,13 +135,224 @@ func writePackItem(out io.Writer, item retrieval.PackItem, excluded bool) {
 			fmt.Fprintf(out, "      Caution: %s\n", strings.Join(limitStrings(cautions, 3), "; "))
 		}
 	}
-	if evidence := displayPackReasons(item.Reasons, excluded); len(evidence) > 0 {
+	if !verbose && excluded && item.RoleReason != "" {
+		fmt.Fprintf(out, "      Because: %s\n", displayPackRoleReason(item.RoleReason))
+	}
+	if !verbose && excluded {
+		_, cautions := splitPackCues(item.AuthorityCues)
+		if len(cautions) > 0 {
+			fmt.Fprintf(out, "      Caution: %s\n", strings.Join(firstStrings(cautions, 2), "; "))
+		}
+	}
+	if evidence := packItemEvidence(item.Reasons, excluded, verbose); len(evidence) > 0 {
 		reasonLabel := "Evidence"
 		if excluded {
 			reasonLabel = "Weak evidence"
 		}
-		fmt.Fprintf(out, "      %s: %s\n", reasonLabel, strings.Join(limitStrings(evidence, 4), "; "))
+		if !verbose && excluded {
+			return
+		}
+		fmt.Fprintf(out, "      %s: %s\n", reasonLabel, strings.Join(evidence, "; "))
 	}
+}
+
+func shouldShowPackSource(item retrieval.PackItem, verbose bool) bool {
+	if verbose || item.Path == "" {
+		return verbose && item.Path != ""
+	}
+	title := strings.ToLower(strings.TrimSpace(item.Title))
+	path := strings.ToLower(strings.TrimSpace(item.Path))
+	if path == "" {
+		return false
+	}
+	return title == "" || (title != path && !strings.Contains(title, path))
+}
+
+func packItemEvidence(reasons []string, excluded, verbose bool) []string {
+	if verbose {
+		return limitStrings(displayPackReasons(reasons, excluded), 4)
+	}
+	return concisePackReasons(reasons)
+}
+
+func concisePackReasons(reasons []string) []string {
+	evidence := concisePackEvidence{}
+	for _, reason := range reasons {
+		evidence.addReason(reason)
+	}
+	return evidence.render()
+}
+
+type concisePackEvidence struct {
+	anchors    []string
+	sections   []string
+	pathTerms  []string
+	titleTerms []string
+	bodyTerms  []string
+}
+
+func (e *concisePackEvidence) addReason(reason string) {
+	reason = strings.TrimSpace(reason)
+	lower := strings.ToLower(reason)
+	switch {
+	case strings.HasPrefix(lower, "anchor-first ranking:"):
+		for _, term := range anchorTermsFromReason(reason) {
+			e.anchors = appendUniqueString(e.anchors, term)
+		}
+	case strings.HasPrefix(lower, "query term match in "):
+		field, term, ok := queryTermFromReason(reason)
+		if !ok {
+			return
+		}
+		switch field {
+		case "path":
+			e.pathTerms = appendUniqueString(e.pathTerms, term)
+		case "title":
+			e.titleTerms = appendUniqueString(e.titleTerms, term)
+		case "body":
+			e.bodyTerms = appendUniqueString(e.bodyTerms, term)
+		default:
+			e.bodyTerms = appendUniqueString(e.bodyTerms, term)
+		}
+	case strings.HasPrefix(lower, "section-packed context:"):
+		e.addSections(strings.TrimSpace(strings.TrimPrefix(reason, "section-packed context:")))
+	case strings.HasPrefix(lower, "indexed section match:"):
+		e.addSections(strings.TrimSpace(strings.TrimPrefix(reason, "indexed section match:")))
+	case lower == "test-case behavior signal":
+		e.anchors = appendUniqueString(e.anchors, "test behavior")
+	case strings.HasPrefix(lower, "matched test behavior:"):
+		body := strings.TrimSpace(strings.TrimPrefix(reason, "matched test behavior:"))
+		if body != "" {
+			e.anchors = appendUniqueString(e.anchors, body)
+		}
+	}
+}
+
+func (e *concisePackEvidence) addSections(body string) {
+	for _, part := range strings.Split(body, ";") {
+		section := conciseSectionName(part)
+		if section == "" || isLowValuePackSection(section) {
+			continue
+		}
+		e.sections = appendUniqueString(e.sections, section)
+	}
+}
+
+func (e concisePackEvidence) render() []string {
+	var out []string
+	if len(e.anchors) > 0 {
+		out = append(out, "matched: "+strings.Join(firstStrings(e.anchors, 5), ", "))
+	}
+	if len(e.sections) > 0 {
+		out = append(out, "sections: "+strings.Join(firstStrings(e.sections, 2), "; "))
+	}
+	if len(out) >= 2 {
+		return out
+	}
+	if field := conciseFieldEvidence("path", e.pathTerms); field != "" {
+		out = append(out, field)
+	}
+	if len(out) >= 2 {
+		return out
+	}
+	if field := conciseFieldEvidence("title", e.titleTerms); field != "" {
+		out = append(out, field)
+	}
+	if len(out) >= 2 {
+		return out
+	}
+	if field := conciseFieldEvidence("body", e.bodyTerms); field != "" {
+		out = append(out, field)
+	}
+	return out
+}
+
+func anchorTermsFromReason(reason string) []string {
+	parts := strings.Split(strings.TrimSpace(strings.TrimPrefix(reason, "anchor-first ranking:")), ";")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		lower := strings.ToLower(part)
+		if !strings.HasPrefix(lower, "matches ") {
+			continue
+		}
+		var terms []string
+		for _, term := range strings.Split(strings.TrimSpace(part[len("matches "):]), ",") {
+			term = strings.TrimSpace(term)
+			if term != "" && !isGenericPackReceiptTerm(term) {
+				terms = append(terms, term)
+			}
+		}
+		return terms
+	}
+	return nil
+}
+
+func queryTermFromReason(reason string) (string, string, bool) {
+	trimmed := strings.TrimSpace(strings.TrimPrefix(reason, "query term match in "))
+	field, term, ok := strings.Cut(trimmed, ":")
+	if !ok {
+		return "", "", false
+	}
+	field = strings.ToLower(strings.TrimSpace(field))
+	term = strings.TrimSpace(term)
+	if term == "" || isGenericPackReceiptTerm(term) {
+		return "", "", false
+	}
+	return field, term, true
+}
+
+func conciseSectionName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	parts := strings.Split(value, ">")
+	leaf := strings.TrimSpace(parts[len(parts)-1])
+	if idx := strings.Index(strings.ToLower(leaf), " lines "); idx >= 0 {
+		leaf = strings.TrimSpace(leaf[:idx])
+	}
+	leaf = strings.Trim(leaf, "` ")
+	return limitRunes(leaf, 96)
+}
+
+func isLowValuePackSection(section string) bool {
+	lower := strings.ToLower(strings.TrimSpace(section))
+	switch lower {
+	case "", "table of contents", "overview", "summary", "quick start":
+		return true
+	default:
+		return false
+	}
+}
+
+func conciseFieldEvidence(field string, terms []string) string {
+	terms = firstStrings(terms, 3)
+	if len(terms) == 0 {
+		return ""
+	}
+	return field + ": " + strings.Join(terms, ", ")
+}
+
+func appendUniqueString(values []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return values
+	}
+	for _, existing := range values {
+		if strings.EqualFold(existing, value) {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func firstStrings(values []string, limit int) []string {
+	if limit <= 0 || len(values) <= limit {
+		return values
+	}
+	out := make([]string, limit)
+	copy(out, values[:limit])
+	return out
 }
 
 func packCoverageText(summary retrieval.PackSummary) string {

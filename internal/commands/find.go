@@ -29,6 +29,7 @@ func NewFindCmd() *cobra.Command {
 		asJSON      bool
 		noRefresh   bool
 		pack        bool
+		verbose     bool
 		graphDiag   bool
 		anchorFirst = true
 		anchorMode  string
@@ -43,7 +44,7 @@ func NewFindCmd() *cobra.Command {
 			if cmd.Flags().Changed("experimental-anchor-first-mode") && !cmd.Flags().Changed("experimental-anchor-first-ranking") {
 				anchorFirst = true
 			}
-			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, pack, graphDiag, anchorFirst, anchorMode)
+			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, anchorFirst, anchorMode)
 		},
 	}
 
@@ -57,13 +58,14 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	cmd.Flags().BoolVar(&pack, "pack", false, "Group results into a role-based context pack with inclusion and exclusion receipts")
+	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show detailed human output for pack receipts and diagnostics")
 	cmd.Flags().BoolVar(&graphDiag, "graph-diagnostics", false, "Attach opt-in typed-edge graph diagnostics without changing ranked results")
 	cmd.Flags().BoolVar(&anchorFirst, "experimental-anchor-first-ranking", true, "Use repo-local TF-IDF anchor-first ordering; pass false to disable")
 	cmd.Flags().StringVar(&anchorMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, selected_only, strong_field, or strict")
 	return cmd
 }
 
-func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, pack, graphDiag, anchorFirst bool, anchorMode string) error {
+func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, anchorFirst bool, anchorMode string) error {
 	start := time.Now()
 	success := false
 	anchorMode = retrieval.NormalizeAnchorFirstMode(anchorMode)
@@ -74,6 +76,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 		"query_length_bucket": telemetry.QueryLengthBucket(query),
 		"json":                asJSON,
 		"pack":                pack,
+		"verbose":             verbose,
 		"graph_diagnostics":   graphDiag,
 		"anchor_first":        anchorFirst,
 		"anchor_first_mode":   anchorMode,
@@ -125,7 +128,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 			}
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(out)
 		}
-		if err := writeFindPackText(cmd.OutOrStdout(), query, retriever.Name(), rolePack); err != nil {
+		if err := writeFindPackText(cmd.OutOrStdout(), query, retriever.Name(), rolePack, verbose); err != nil {
 			return err
 		}
 		if graphDiag {

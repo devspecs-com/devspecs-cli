@@ -43,6 +43,25 @@ func TestDisplayPackReasons_CompactsSectionReceipts(t *testing.T) {
 	}
 }
 
+func TestConcisePackReasons_AvoidsCollapsedMoreMarkers(t *testing.T) {
+	got := concisePackReasons([]string{
+		"section-packed context: MCP Server Design Guidelines > Table of Contents; MCP Server Design Guidelines > Project Structure; MCP Server Design Guidelines > Package Naming and Versioning",
+		"indexed section match: MCP Server Design Guidelines > Table of Contents lines 5-50; MCP Server Design Guidelines > Package Naming and Versioning lines 119-165",
+		"anchor-first ranking: score 24.000; matches server, design, guidelines; fields title, heading, body, path",
+	})
+	joined := strings.Join(got, "; ")
+	for _, notWant := range []string{"+1 more", "section focus", "section evidence", "Table of Contents"} {
+		if strings.Contains(joined, notWant) {
+			t.Fatalf("concise reasons leaked %q: %#v", notWant, got)
+		}
+	}
+	for _, want := range []string{"matched: server, design, guidelines", "sections: Project Structure; Package Naming and Versioning"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("concise reasons missing %q: %#v", want, got)
+		}
+	}
+}
+
 func TestPackCoverageText_UsesRoleNames(t *testing.T) {
 	got := packCoverageText(retrieval.PackSummary{
 		HasBackgroundDecisions: true,
