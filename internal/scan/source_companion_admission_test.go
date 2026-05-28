@@ -95,8 +95,8 @@ func TestSourceCompanionAdmissionDedupesExistingSourceCandidates(t *testing.T) {
 
 func TestScanAdmitsTestSourceCompanionsAndBuildsEdges(t *testing.T) {
 	root := t.TempDir()
-	writeCompanionTestFile(t, root, "internal/auth/session.go", "package auth\nfunc RotateToken() {}\n")
-	writeCompanionTestFile(t, root, "internal/auth/session_test.go", "package auth\nimport \"testing\"\nfunc TestSession(t *testing.T) { RotateToken() }\n")
+	writeCompanionTestFile(t, root, "services/auth/session.go", "package auth\nfunc RotateToken() {}\n")
+	writeCompanionTestFile(t, root, "services/auth/session_test.go", "package auth\nimport \"testing\"\nfunc TestSession(t *testing.T) { RotateToken() }\n")
 
 	db, err := store.Open(filepath.Join(t.TempDir(), "devspecs.db"))
 	if err != nil {

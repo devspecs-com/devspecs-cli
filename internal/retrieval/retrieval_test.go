@@ -485,6 +485,43 @@ func TestWeightedFilesRetrieverV0_UsesTestCasesForBehaviorQueries(t *testing.T) 
 	}
 }
 
+func TestWeightedFilesRetrieverV0_UsesTestsForImplementationTaskQueries(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "internal/costs/parser_minimax.go",
+			Kind:  "source_context",
+			Title: "internal/costs/parser_minimax.go (go)",
+			Body:  "package costs\n\nfunc ParseMiniMaxUsage() {}\n",
+		},
+		{
+			Path:    "internal/costs/parser_minimax_integration_test.go#L12",
+			Kind:    "source_context",
+			Subtype: "test_case",
+			Title:   "TestParseMiniMaxUsagePricing",
+			Body:    "Test: TestParseMiniMaxUsagePricing\nSource: internal/costs/parser_minimax_integration_test.go\nSymbols: minimax, usage, pricing\nAssertion vocabulary: require\n",
+			Metadata: map[string]string{
+				"source_type": "test_case",
+				"test_name":   "TestParseMiniMaxUsagePricing",
+			},
+		},
+		{
+			Path:  "docs/plans/minimax-cost-plan.md",
+			Kind:  "plan",
+			Title: "MiniMax Cost Plan",
+			Body:  strings.Repeat("MiniMax cost collection planning notes. ", 8),
+		},
+	}
+
+	query := "add Agent Deck cost collection support for MiniMax usage strings and MiniMax model pricing"
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, query)
+	if !containsCandidatePath(got, "internal/costs/parser_minimax.go") {
+		t.Fatalf("missing implementation source candidate: %#v", CandidatePaths(got))
+	}
+	if !containsCandidatePath(got, "internal/costs/parser_minimax_integration_test.go#L12") {
+		t.Fatalf("implementation task should admit directly matching behavior test: %#v", CandidatePaths(got))
+	}
+}
+
 func TestWeightedFilesRetrieverV0_AnchorsCamelCaseTestNames(t *testing.T) {
 	candidates := []Candidate{
 		{

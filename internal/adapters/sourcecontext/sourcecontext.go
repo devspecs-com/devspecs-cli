@@ -27,7 +27,10 @@ type Adapter struct{}
 func (a *Adapter) Name() string { return sourceType }
 
 func (a *Adapter) AcceptsFile(rel string, size int64, cfg *config.RepoConfig) bool {
-	if size > maxFileBytes || !isSourceContextFile(rel) {
+	if size > maxFileBytes {
+		return false
+	}
+	if _, ok := sourceContextAdmissionReason(rel); !ok {
 		return false
 	}
 	paths, rootCoverage := sourcePaths(cfg)
@@ -44,11 +47,15 @@ func (a *Adapter) DiscoverFile(ctx context.Context, file adapters.FileCandidate,
 	if !a.AcceptsFile(file.RelPath, file.Size, cfg) {
 		return nil, nil
 	}
+	reason, _ := sourceContextAdmissionReason(file.RelPath)
 	return []adapters.Candidate{{
 		PrimaryPath: file.PrimaryPath,
 		RelPath:     file.RelPath,
 		AdapterName: sourceType,
 		UnitBody:    string(file.Body),
+		Metadata: map[string]any{
+			"admission_reason": reason,
+		},
 	}}, nil
 }
 
@@ -72,7 +79,8 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 		if err != nil || info.IsDir() || info.Size() > maxFileBytes {
 			return
 		}
-		if !isSourceContextFile(rel) {
+		reason, ok := sourceContextAdmissionReason(rel)
+		if !ok {
 			return
 		}
 		seen[rel] = true
@@ -80,6 +88,9 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 			PrimaryPath: absPath,
 			RelPath:     rel,
 			AdapterName: sourceType,
+			Metadata: map[string]any{
+				"admission_reason": reason,
+			},
 		})
 	}
 	if rootCoverage {
@@ -160,7 +171,8 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 	}
 	title := sourceTitle(c.RelPath)
 	extracted := map[string]any{
-		"language": sourceLanguage(c.RelPath),
+		"language":         sourceLanguage(c.RelPath),
+		"admission_reason": "default_source_context",
 	}
 	for key, value := range c.Metadata {
 		if key != "" && value != nil {
@@ -217,15 +229,35 @@ func withinConfiguredSourcePath(rel string, paths []string) bool {
 }
 
 func isSourceContextFile(rel string) bool {
+	_, ok := sourceContextAdmissionReason(rel)
+	return ok
+}
+
+func sourceContextAdmissionReason(rel string) (string, bool) {
 	rel = filepath.ToSlash(strings.TrimSpace(rel))
 	base := strings.ToLower(filepath.Base(rel))
 	if isDefaultSourceContextBase(base) {
-		return true
+		return "default_source_context", true
 	}
 	if !isExpandedSourceContextBase(base) {
-		return false
+		return "", false
 	}
-	return isIntentBearingSourceContextPath(rel)
+	if isIntentBearingSourceContextPath(rel) {
+		return "intent_bearing_source_context", true
+	}
+	if isTestFileLikeExpandedSourcePath(rel) {
+		return "", false
+	}
+	if isImplementationRootSourceContextPath(rel) {
+		return "implementation_root_source_context", true
+	}
+	if isTestSupportSourceContextPath(rel) {
+		return "test_support_source_context", true
+	}
+	if isLikelyPackageSourceContextPath(rel) {
+		return "package_source_context", true
+	}
+	return "", false
 }
 
 func isDefaultSourceContextBase(base string) bool {
@@ -247,7 +279,7 @@ func isExpandedSourceContextBase(base string) bool {
 		return true
 	}
 	switch strings.ToLower(filepath.Ext(base)) {
-	case ".py", ".go", ".rs", ".java", ".toml":
+	case ".py", ".go", ".rs", ".java", ".kt", ".kts", ".rb", ".php", ".toml":
 		return true
 	default:
 		return false
@@ -275,6 +307,99 @@ func sourceContextIntentTokens(text string) []string {
 	return strings.FieldsFunc(text, func(r rune) bool {
 		return r == '/' || r == '\\' || r == '-' || r == '_' || r == '.' || r == ' ' || r == '@'
 	})
+}
+
+func isImplementationRootSourceContextPath(rel string) bool {
+	parts := sourceContextPathParts(rel)
+	if len(parts) == 0 {
+		return false
+	}
+	switch parts[0] {
+	case "cmd", "internal", "pkg", "src", "lib", "app", "apps", "packages":
+		return true
+	case "crates":
+		for _, part := range parts[1:] {
+			if part == "src" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isTestSupportSourceContextPath(rel string) bool {
+	for _, part := range sourceContextPathParts(rel) {
+		switch part {
+		case "test", "tests", "__tests__", "spec", "integration", "e2e", "e2e-tests", "fixtures", "fixture", "valid_configs":
+			return true
+		}
+	}
+	return false
+}
+
+func isLikelyPackageSourceContextPath(rel string) bool {
+	parts := sourceContextPathParts(rel)
+	if len(parts) < 2 {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(filepath.ToSlash(rel)))
+	if filepath.Ext(base) != ".py" {
+		return false
+	}
+	switch parts[0] {
+	case "docs", "doc", "examples", "example", "scripts", "tools", "test", "tests", "e2e", "fixtures", "fixture", "node_modules", "vendor", "dist", "build":
+		return false
+	}
+	return strings.Contains(parts[0], "_") || hasPythonPackageMarker(rel)
+}
+
+func hasPythonPackageMarker(rel string) bool {
+	for _, part := range sourceContextPathParts(rel) {
+		if part == "__init__" {
+			return true
+		}
+	}
+	return false
+}
+
+func isTestFileLikeExpandedSourcePath(rel string) bool {
+	base := strings.ToLower(filepath.Base(filepath.ToSlash(rel)))
+	ext := strings.ToLower(filepath.Ext(base))
+	name := strings.TrimSuffix(base, ext)
+	switch {
+	case strings.HasSuffix(base, "_test.go"):
+		return true
+	case ext == ".py" && (strings.HasPrefix(base, "test_") || strings.HasSuffix(name, "_test")):
+		return true
+	case ext == ".rb" && strings.HasSuffix(base, "_spec.rb"):
+		return true
+	case ext == ".php" && strings.HasSuffix(base, "test.php"):
+		return true
+	case ext == ".java" && (strings.HasSuffix(name, "test") || strings.HasSuffix(name, "tests") || strings.HasSuffix(name, "it")):
+		return true
+	case (ext == ".kt" || ext == ".kts") && (strings.HasSuffix(name, "test") || strings.HasSuffix(name, "spec")):
+		return true
+	case ext == ".rs" && strings.HasSuffix(name, "_test"):
+		return true
+	default:
+		return false
+	}
+}
+
+func sourceContextPathParts(rel string) []string {
+	rel = strings.Trim(strings.ToLower(filepath.ToSlash(rel)), "/")
+	if rel == "" {
+		return nil
+	}
+	raw := strings.Split(rel, "/")
+	parts := make([]string, 0, len(raw))
+	for _, part := range raw {
+		part = strings.TrimSpace(strings.TrimSuffix(part, filepath.Ext(part)))
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return parts
 }
 
 func isBuiltinIgnoredDir(name string) bool {
@@ -314,6 +439,12 @@ func sourceLanguage(rel string) string {
 		return "rust"
 	case ".java":
 		return "java"
+	case ".kt", ".kts":
+		return "kotlin"
+	case ".rb":
+		return "ruby"
+	case ".php":
+		return "php"
 	case ".ts":
 		return "typescript"
 	case ".tsx":

@@ -2428,12 +2428,16 @@ func enforceSupportingArtifactBudgets(candidates []scoredCandidate, queryLower s
 		testBudget = 3
 	case hasExplicitSourceIntent(queryLower) || hasIdentifierTerm(terms):
 		testBudget = 2
+	case hasImplementationTaskIntent(queryLower):
+		testBudget = 2
 	}
 	commentBudget := 0
 	switch {
 	case hasCodeCommentIntent(queryLower):
 		commentBudget = 3
 	case hasExplicitSourceIntent(queryLower) || hasIdentifierTerm(terms):
+		commentBudget = 2
+	case hasImplementationTaskIntent(queryLower):
 		commentBudget = 2
 	}
 	testCount := 0
@@ -2592,6 +2596,7 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 	role := candidateRole(c)
 	profile := candidateMatchProfile(c, queryLower)
 	explicitSourceIntent := hasExplicitSourceIntent(queryLower)
+	implementationTaskIntent := hasImplementationTaskIntent(queryLower)
 	planIntent := hasPlanIntent(queryLower)
 	productBackgroundIntent := hasProductBackgroundIntent(queryLower)
 	lifecycleIntent := hasLifecycleIntent(queryLower)
@@ -2764,8 +2769,13 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 		}
 	case "test_case":
 		testAnchor := testNameAnchorScore(c, queryLower)
-		if hasTestBehaviorIntent(queryLower) || explicitSourceIntent || profile.identifierMatches > 0 || testAnchor.score > 0 {
+		implementationTaskMatch := implementationTaskIntent && (profile.pathTitleCoreMatches > 0 || profile.coreMatches >= 2)
+		if hasTestBehaviorIntent(queryLower) || explicitSourceIntent || profile.identifierMatches > 0 || testAnchor.score > 0 ||
+			implementationTaskMatch {
 			score += 2.5
+			if implementationTaskMatch {
+				score += 4.0
+			}
 			if profile.pathTitleCoreMatches > 0 {
 				score += 2.0
 			}
@@ -2792,7 +2802,8 @@ func scoreCandidate(c Candidate, terms map[string]float64, queryLower string) fl
 		}
 	}
 	if sourceFile {
-		if explicitSourceIntent || containsAny(queryLower, "implement", "implementation", "handler") || hasIdentifierTerm(terms) {
+		if explicitSourceIntent || containsAny(queryLower, "implement", "implementation", "handler") || hasIdentifierTerm(terms) ||
+			(implementationTaskIntent && (profile.pathTitleCoreMatches > 0 || profile.coreMatches >= 2)) {
 			score += 2.0
 		} else if profile.pathTitleCoreMatches > 0 {
 			score += 2.0
@@ -3315,6 +3326,23 @@ func hasExplicitSourceIntent(queryLower string) bool {
 		return true
 	}
 	return hasQueryWord(queryLower, "source") || hasQueryWord(queryLower, "file") || hasQueryWord(queryLower, "handler")
+}
+
+func hasImplementationTaskIntent(queryLower string) bool {
+	if hasExplicitSourceIntent(queryLower) ||
+		containsAny(queryLower, "source code", "implementation", "code path", "source file") ||
+		hasTestBehaviorIntent(queryLower) {
+		return true
+	}
+	for _, word := range []string{
+		"add", "update", "change", "fix", "trace", "debug", "verify", "extend",
+		"cleanup", "refactor", "wire", "implement",
+	} {
+		if hasQueryWord(queryLower, word) {
+			return true
+		}
+	}
+	return containsAny(queryLower, "clean up", "follow the call", "track how", "trace how")
 }
 
 func hasTestBehaviorIntent(queryLower string) bool {
