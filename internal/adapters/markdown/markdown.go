@@ -560,8 +560,8 @@ func scoreIntentMarkdownCandidate(absPath, relPath string) (float64, []string) {
 
 func scoreSupportMarkdownCandidate(absPath, relPath string) (float64, []string) {
 	score, reasons := scoreSupportPath(relPath)
-	header := readIntentHeader(absPath)
-	if header != "" {
+	if score >= supportDocMinScore {
+		header := readIntentHeader(absPath)
 		contentScore, contentReasons := scoreSupportContent(header)
 		score += contentScore
 		reasons = append(reasons, contentReasons...)
