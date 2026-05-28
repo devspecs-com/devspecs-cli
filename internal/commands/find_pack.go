@@ -12,6 +12,7 @@ type FindPackOutput struct {
 	Query            string                `json:"query"`
 	Retriever        string                `json:"retriever"`
 	Mode             string                `json:"mode"`
+	Summary          retrieval.PackSummary `json:"summary,omitempty"`
 	Groups           []retrieval.PackGroup `json:"groups"`
 	ExcludedNoise    []retrieval.PackItem  `json:"excluded_noise,omitempty"`
 	Counts           map[string]int        `json:"counts,omitempty"`
@@ -25,6 +26,7 @@ func findPackOutput(query, retrieverName string, candidates []retrieval.Candidat
 		Query:         query,
 		Retriever:     retrieverName,
 		Mode:          rolePack.Mode,
+		Summary:       rolePack.Summary,
 		Groups:        rolePack.Groups,
 		ExcludedNoise: rolePack.ExcludedNoise,
 		Counts:        rolePack.Counts,
@@ -36,6 +38,7 @@ func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retr
 	fmt.Fprintf(out, "Working set: %s\n", query)
 	fmt.Fprintf(out, "Retriever: %s\n", retrieverName)
 	fmt.Fprintf(out, "Mode: %s\n", rolePack.Mode)
+	writePackSummary(out, rolePack.Summary)
 
 	if len(rolePack.Groups) == 0 && len(rolePack.ExcludedNoise) == 0 {
 		fmt.Fprintln(out)
@@ -67,6 +70,27 @@ func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retr
 		}
 	}
 	return nil
+}
+
+func writePackSummary(out io.Writer, summary retrieval.PackSummary) {
+	if summary.IncludedCount == 0 && summary.ExcludedNoiseCount == 0 && summary.GroupCount == 0 {
+		return
+	}
+	fmt.Fprintf(out, "Summary: %d included across %d role group(s)", summary.IncludedCount, summary.RoleDiversity)
+	if summary.ExcludedNoiseCount > 0 {
+		fmt.Fprintf(out, "; %d excluded as likely noise", summary.ExcludedNoiseCount)
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "Coverage: background=%s implementation=%s tests=%s config=%s open_work=%s\n",
+		yesNo(summary.HasBackgroundDecisions),
+		yesNo(summary.HasImplementation),
+		yesNo(summary.HasBehaviorTests),
+		yesNo(summary.HasConfigSchema),
+		yesNo(summary.HasOpenWork),
+	)
+	if len(summary.Notes) > 0 {
+		fmt.Fprintf(out, "Notes: %s\n", strings.Join(limitStrings(summary.Notes, 2), "; "))
+	}
 }
 
 func writePackItem(out io.Writer, item retrieval.PackItem, excluded bool) {
@@ -112,6 +136,13 @@ func writePackItem(out io.Writer, item retrieval.PackItem, excluded bool) {
 		}
 		fmt.Fprintf(out, "      %s: %s\n", reasonLabel, strings.Join(limitStrings(item.Reasons, 3), "; "))
 	}
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
 }
 
 func compactKindSubtype(kind, subtype string) string {

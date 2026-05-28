@@ -373,6 +373,7 @@ type CaseResult struct {
 	ArtifactsIncluded                []string                   `json:"artifacts_included"`
 	ArtifactReasons                  []ArtifactReason           `json:"artifact_reasons"`
 	PackDiagnostics                  *retrieval.RoleGroupedPack `json:"pack_diagnostics,omitempty"`
+	PackSummary                      *retrieval.PackSummary     `json:"pack_summary,omitempty"`
 	GraphContext                     *GraphContext              `json:"graph_context,omitempty"`
 	GraphDiagnostics                 *GraphDiagnostics          `json:"graph_diagnostics,omitempty"`
 	GraphContextArtifacts            []string                   `json:"graph_context_artifacts,omitempty"`
@@ -460,6 +461,18 @@ type Summary struct {
 	MeanGraphContextArtifactPrecision        float64       `json:"mean_graph_context_artifact_precision,omitempty"`
 	MeanGraphContextGradedPrecision          float64       `json:"mean_graph_context_graded_precision,omitempty"`
 	GraphContextGradeCounts                  GradeCounts   `json:"graph_context_grade_counts,omitempty"`
+	PackDiagnosticCases                      int           `json:"pack_diagnostic_cases,omitempty"`
+	PackIncludedArtifactCount                int           `json:"pack_included_artifact_count,omitempty"`
+	PackExcludedNoiseCount                   int           `json:"pack_excluded_noise_count,omitempty"`
+	MeanPackIncludedArtifacts                float64       `json:"mean_pack_included_artifacts,omitempty"`
+	MeanPackRoleDiversity                    float64       `json:"mean_pack_role_diversity,omitempty"`
+	PackCasesWithBackgroundDecisions         int           `json:"pack_cases_with_background_decisions,omitempty"`
+	PackCasesWithImplementation              int           `json:"pack_cases_with_implementation_surface,omitempty"`
+	PackCasesWithBehaviorTests               int           `json:"pack_cases_with_behavior_tests,omitempty"`
+	PackCasesWithConfigSchema                int           `json:"pack_cases_with_config_schema,omitempty"`
+	PackCasesWithOpenWork                    int           `json:"pack_cases_with_open_work,omitempty"`
+	PackCasesWithSupportingContext           int           `json:"pack_cases_with_supporting_context,omitempty"`
+	PackCasesWithExcludedNoise               int           `json:"pack_cases_with_excluded_noise,omitempty"`
 	CombinedTieredContextSufficiencyCases    int           `json:"combined_tiered_context_sufficiency_cases,omitempty"`
 	CombinedTieredContextSufficiencyPassed   int           `json:"combined_tiered_context_sufficiency_passed,omitempty"`
 	CombinedTieredContextSufficiencyPassRate float64       `json:"combined_tiered_context_sufficiency_pass_rate,omitempty"`
@@ -778,6 +791,8 @@ func Run(fixture string, opts Options) (*Result, error) {
 		if opts.PackDiagnostics {
 			pack := retrieval.BuildRoleGroupedPack(devspecsFiles, artifactReasonMap(artifactReasons), c.Query)
 			cr.PackDiagnostics = &pack
+			summary := pack.Summary
+			cr.PackSummary = &summary
 		}
 		applyPackingMetrics(&cr, devspecsFiles)
 		applyArtifactMetrics(&cr, c)
@@ -2791,6 +2806,7 @@ func summarize(cases []CaseResult) Summary {
 	backgroundCases := 0
 	relatedCases := 0
 	graphContextCases := 0
+	packDiagnosticCases := 0
 	for _, c := range cases {
 		reductionsFull = append(reductionsFull, c.TokenReductionVsFullPlanning)
 		reductionsQueryFile = append(reductionsQueryFile, c.TokenReductionVsQueryFile)
@@ -2830,6 +2846,35 @@ func summarize(cases []CaseResult) Summary {
 			if c.GraphContextAgentMetrics != nil {
 				s.MeanGraphContextGradedPrecision += c.GraphContextAgentMetrics.GradedPrecision
 				addGradeCounts(&s.GraphContextGradeCounts, c.GraphContextAgentMetrics.GradeCounts)
+			}
+		}
+		if c.PackSummary != nil {
+			packDiagnosticCases++
+			packSummary := c.PackSummary
+			s.PackIncludedArtifactCount += packSummary.IncludedCount
+			s.PackExcludedNoiseCount += packSummary.ExcludedNoiseCount
+			s.MeanPackIncludedArtifacts += float64(packSummary.IncludedCount)
+			s.MeanPackRoleDiversity += float64(packSummary.RoleDiversity)
+			if packSummary.HasBackgroundDecisions {
+				s.PackCasesWithBackgroundDecisions++
+			}
+			if packSummary.HasImplementation {
+				s.PackCasesWithImplementation++
+			}
+			if packSummary.HasBehaviorTests {
+				s.PackCasesWithBehaviorTests++
+			}
+			if packSummary.HasConfigSchema {
+				s.PackCasesWithConfigSchema++
+			}
+			if packSummary.HasOpenWork {
+				s.PackCasesWithOpenWork++
+			}
+			if packSummary.HasSupportingContext {
+				s.PackCasesWithSupportingContext++
+			}
+			if packSummary.ExcludedNoiseCount > 0 {
+				s.PackCasesWithExcludedNoise++
 			}
 		}
 		s.FailedThresholdCount += len(c.ThresholdFailures)
@@ -2879,6 +2924,11 @@ func summarize(cases []CaseResult) Summary {
 	if graphContextCases > 0 {
 		s.MeanGraphContextArtifactPrecision /= float64(graphContextCases)
 		s.MeanGraphContextGradedPrecision /= float64(graphContextCases)
+	}
+	s.PackDiagnosticCases = packDiagnosticCases
+	if packDiagnosticCases > 0 {
+		s.MeanPackIncludedArtifacts /= float64(packDiagnosticCases)
+		s.MeanPackRoleDiversity /= float64(packDiagnosticCases)
 	}
 	if s.ContextSufficiencyCases > 0 {
 		s.ContextSufficiencyPassRate = float64(s.ContextSufficiencyPassed) / float64(s.ContextSufficiencyCases)
@@ -3064,6 +3114,13 @@ func FormatText(r *Result) string {
 			r.Summary.GraphAssistedRelevantCount,
 			pct(r.Summary.MeanGraphContextArtifactPrecision),
 			pct(r.Summary.MeanGraphContextGradedPrecision))
+	}
+	if r.Summary.PackDiagnosticCases > 0 {
+		fmt.Fprintf(&b, "- Pack diagnostics: %d cases / mean included %.2f / mean role diversity %.2f / excluded noise %d\n",
+			r.Summary.PackDiagnosticCases,
+			r.Summary.MeanPackIncludedArtifacts,
+			r.Summary.MeanPackRoleDiversity,
+			r.Summary.PackExcludedNoiseCount)
 	}
 	if r.Summary.ContextSufficiencyCases > 0 {
 		fmt.Fprintf(&b, "- Context sufficiency pass rate: %d/%d = %s\n", r.Summary.ContextSufficiencyPassed, r.Summary.ContextSufficiencyCases, pct(r.Summary.ContextSufficiencyPassRate))

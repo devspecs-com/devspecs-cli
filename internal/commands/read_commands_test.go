@@ -477,6 +477,9 @@ func TestFindPack_JSONOutputKeepsRankedResultsAndGroups(t *testing.T) {
 	if len(out.Groups) == 0 {
 		t.Fatalf("find --json --pack returned no groups: %#v", out)
 	}
+	if out.Summary.IncludedCount == 0 || out.Summary.RoleDiversity == 0 {
+		t.Fatalf("find --json --pack missing summary: %#v", out.Summary)
+	}
 	if len(out.RankedResults) == 0 {
 		t.Fatalf("find --json --pack returned no ranked results: %#v", out)
 	}
@@ -493,7 +496,7 @@ func TestFindPack_HumanOutputShowsReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := buf.String()
-	for _, want := range []string{"Working set: Plan", "Mode: role_grouped_pack_v0", "Why:"} {
+	for _, want := range []string{"Working set: Plan", "Mode: role_grouped_pack_v0", "Summary:", "Coverage:", "Why:"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("find --pack missing %q:\n%s", want, output)
 		}

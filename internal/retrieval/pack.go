@@ -46,11 +46,26 @@ var packRoleBudgets = map[string]int{
 
 type RoleGroupedPack struct {
 	Mode          string            `json:"mode"`
+	Summary       PackSummary       `json:"summary,omitempty"`
 	Groups        []PackGroup       `json:"groups"`
 	ExcludedNoise []PackItem        `json:"excluded_noise,omitempty"`
 	Counts        map[string]int    `json:"counts,omitempty"`
 	Notes         []string          `json:"notes,omitempty"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
+}
+
+type PackSummary struct {
+	IncludedCount          int      `json:"included_count"`
+	ExcludedNoiseCount     int      `json:"excluded_noise_count,omitempty"`
+	GroupCount             int      `json:"group_count,omitempty"`
+	RoleDiversity          int      `json:"role_diversity,omitempty"`
+	HasBackgroundDecisions bool     `json:"has_background_decisions,omitempty"`
+	HasImplementation      bool     `json:"has_implementation_surface,omitempty"`
+	HasBehaviorTests       bool     `json:"has_behavior_tests,omitempty"`
+	HasConfigSchema        bool     `json:"has_config_schema,omitempty"`
+	HasOpenWork            bool     `json:"has_open_work,omitempty"`
+	HasSupportingContext   bool     `json:"has_supporting_context,omitempty"`
+	Notes                  []string `json:"notes,omitempty"`
 }
 
 type PackGroup struct {
@@ -150,13 +165,66 @@ func BuildRoleGroupedPack(candidates []Candidate, reasons map[string][]string, q
 	if len(counts) == 0 {
 		counts = nil
 	}
+	summary := BuildPackSummary(groups, excluded)
 
 	return RoleGroupedPack{
 		Mode:          "role_grouped_pack_v0",
+		Summary:       summary,
 		Groups:        groups,
 		ExcludedNoise: excluded,
 		Counts:        counts,
+		Notes:         summary.Notes,
 	}
+}
+
+func BuildPackSummary(groups []PackGroup, excluded []PackItem) PackSummary {
+	summary := PackSummary{
+		ExcludedNoiseCount: len(excluded),
+		GroupCount:         len(groups),
+	}
+	for _, group := range groups {
+		if len(group.Items) == 0 {
+			continue
+		}
+		summary.IncludedCount += len(group.Items)
+		summary.RoleDiversity++
+		switch group.Role {
+		case PackRoleBackgroundDecisions:
+			summary.HasBackgroundDecisions = true
+		case PackRoleImplementation:
+			summary.HasImplementation = true
+		case PackRoleBehaviorTests:
+			summary.HasBehaviorTests = true
+		case PackRoleConfigSchema:
+			summary.HasConfigSchema = true
+		case PackRoleOpenWork:
+			summary.HasOpenWork = true
+		case PackRoleSupportingContext:
+			summary.HasSupportingContext = true
+		}
+	}
+	summary.Notes = packSummaryNotes(summary)
+	return summary
+}
+
+func packSummaryNotes(summary PackSummary) []string {
+	notes := make([]string, 0, 3)
+	switch {
+	case summary.IncludedCount == 0 && summary.ExcludedNoiseCount == 0:
+		notes = append(notes, "No matching artifacts were selected for the pack.")
+	case summary.RoleDiversity == 1:
+		notes = append(notes, "Pack is concentrated in one role; inspect ranked results for missing context types.")
+	}
+	if summary.IncludedCount > 0 && !summary.HasImplementation && !summary.HasBehaviorTests {
+		notes = append(notes, "No implementation or behavior-test artifacts are present in the selected set.")
+	}
+	if summary.HasBackgroundDecisions && summary.HasImplementation && summary.HasBehaviorTests {
+		notes = append(notes, "Pack includes background, implementation, and behavior-test evidence.")
+	}
+	if summary.ExcludedNoiseCount > 0 {
+		notes = append(notes, "Excluded likely-noise artifacts are listed separately and are not part of the working set.")
+	}
+	return notes
 }
 
 func ClassifyPackRole(c Candidate, query string) PackRoleDecision {

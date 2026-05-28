@@ -63,8 +63,20 @@ func TestBuildRoleGroupedPackClassifiesCoreRolesAndNoise(t *testing.T) {
 	assertGroupCount(t, pack, PackRoleImplementation, 1)
 	assertGroupCount(t, pack, PackRoleBehaviorTests, 1)
 	assertGroupCount(t, pack, PackRoleConfigSchema, 1)
+	if pack.Summary.IncludedCount != 4 || pack.Summary.RoleDiversity != 4 {
+		t.Fatalf("unexpected pack summary: %#v", pack.Summary)
+	}
+	if !pack.Summary.HasBackgroundDecisions || !pack.Summary.HasImplementation || !pack.Summary.HasBehaviorTests || !pack.Summary.HasConfigSchema {
+		t.Fatalf("summary missing role coverage: %#v", pack.Summary)
+	}
 	if len(pack.ExcludedNoise) != 1 {
 		t.Fatalf("expected one excluded noise item, got %d", len(pack.ExcludedNoise))
+	}
+	if pack.Summary.ExcludedNoiseCount != 1 {
+		t.Fatalf("summary excluded count = %d", pack.Summary.ExcludedNoiseCount)
+	}
+	if len(pack.Summary.Notes) == 0 {
+		t.Fatalf("expected summary notes: %#v", pack.Summary)
 	}
 	if pack.ExcludedNoise[0].Path != "AGENTS.md" {
 		t.Fatalf("expected AGENTS.md to be excluded, got %q", pack.ExcludedNoise[0].Path)

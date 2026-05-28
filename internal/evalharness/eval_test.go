@@ -191,6 +191,15 @@ func TestRun_PackDiagnostics(t *testing.T) {
 	if len(result.Cases[0].PackDiagnostics.Groups) == 0 {
 		t.Fatalf("expected grouped pack diagnostics: %#v", result.Cases[0].PackDiagnostics)
 	}
+	if result.Cases[0].PackSummary == nil || result.Cases[0].PackSummary.IncludedCount == 0 {
+		t.Fatalf("expected per-case pack summary: %#v", result.Cases[0].PackSummary)
+	}
+	if result.Summary.PackDiagnosticCases != len(result.Cases) {
+		t.Fatalf("pack diagnostic cases = %d, want %d", result.Summary.PackDiagnosticCases, len(result.Cases))
+	}
+	if result.Summary.MeanPackIncludedArtifacts <= 0 || result.Summary.MeanPackRoleDiversity <= 0 {
+		t.Fatalf("expected aggregate pack summary: %#v", result.Summary)
+	}
 }
 
 func TestApplyGraphContextMetricsSeparatesGraphAssistedHits(t *testing.T) {
