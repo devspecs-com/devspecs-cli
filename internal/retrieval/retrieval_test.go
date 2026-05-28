@@ -1082,6 +1082,33 @@ func TestWeightedFilesRetrieverV0_UsesClassifierRoleForDesignDocs(t *testing.T) 
 	}
 }
 
+func TestWeightedFilesRetrieverV0_IncludesProtocolGuidelinesWhenRequested(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:    "DESIGN_GUIDELINES.md",
+			Kind:    "markdown_artifact",
+			Subtype: "standard",
+			Title:   "MCP Server Design Guidelines",
+			Body:    "Design guidelines and best practices for developing MCP servers, including project structure and code organization.",
+			Metadata: map[string]string{
+				"classifier_family": "protocol.standard",
+				"classifier_mode":   "protocol",
+			},
+		},
+		{
+			Path:  "src/example/server.py",
+			Kind:  "source_context",
+			Title: "src/example/server.py (python)",
+			Body:  "Example MCP server implementation.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "add or update an AWS MCP server; follow the MCP server design guidelines first")
+	if !containsCandidatePath(got, "DESIGN_GUIDELINES.md") {
+		t.Fatalf("missing requested protocol guidelines: %#v", CandidatePaths(got))
+	}
+}
+
 func TestWeightedFilesRetrieverV0_PrefersRepositoryWideInstructionsWhenRequested(t *testing.T) {
 	candidates := []Candidate{
 		{

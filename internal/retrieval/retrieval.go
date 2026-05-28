@@ -3556,7 +3556,7 @@ func hasNonIntentModeIntent(queryLower, mode string) bool {
 		return containsAny(queryLower,
 			"instruction", "instructions", "rule", "rules", "policy", "policies",
 			"procedure", "procedures", "runbook", "runbooks", "playbook", "skill",
-			"skills", "standard", "standards", "convention", "conventions",
+			"skills", "standard", "standards", "guideline", "guidelines", "convention", "conventions",
 			"agent", "agents", "claude", "codex", "maintainer", "maintainers", "codeowners",
 			"security policy", "contributing",
 		)
