@@ -33,29 +33,35 @@ const (
 	edgeTypeTestsSource           = "tests_source"
 	edgeTypeMentionsSymbol        = "mentions_symbol"
 
-	maxConceptForms                  = 6
-	maxMentionEvidenceFormLength     = 120
-	maxEvidenceMentionsPerArtifact   = 96
-	minEvidenceMentionsPerArtifact   = 8
-	maxEvidenceMentionsPerRepo       = 60000
-	maxSymbolConceptsPerArtifact     = 12
-	maxSharedConceptArtifacts        = 6
-	maxSharedConceptEdges            = 1500
-	maxSharedConceptEdgesPerArtifact = 48
-	maxSharedConceptsPerPair         = 5
-	maxSharedConceptMetadataPerEdge  = 3
-	maxPathReferenceEdgesPerTarget   = 32
-	maxPathReferenceEdgesPerSource   = 4
-	maxSameSourcePathEdgesPerPath    = 24
-	maxLayoutGroupEdgesPerGroup      = 24
-	maxTestSourceEdges               = 3000
-	maxTestSourceEdgesPerTest        = 5
-	maxTestSourceCandidatesPerKey    = 16
-	maxTriangulationSymbolsPerSource = 40
+	maxConceptForms                    = 6
+	maxMentionEvidenceFormLength       = 120
+	maxEvidenceMentionsPerArtifact     = 96
+	minEvidenceMentionsPerArtifact     = 8
+	maxEvidenceMentionsPerRepo         = 60000
+	maxSymbolConceptsPerArtifact       = 12
+	maxSharedConceptArtifacts          = 6
+	maxSharedConceptEdges              = 1500
+	maxSharedConceptEdgesPerArtifact   = 48
+	maxSharedConceptsPerPair           = 5
+	maxSharedConceptMetadataPerEdge    = 3
+	maxPathReferenceEdgesPerTarget     = 32
+	maxPathReferenceEdgesPerSource     = 4
+	maxSameSourcePathEdgesPerPath      = 24
+	maxLayoutGroupEdgesPerGroup        = 24
+	maxTestSourceEdges                 = 3000
+	maxTestSourceEdgesPerTest          = 5
+	maxTestSourceCandidatesPerKey      = 16
+	maxTriangulationSymbolsPerSource   = 40
+	maxRichSymbolSources               = 4
+	maxRichSymbolReferenceEdges        = 1200
+	maxRichSymbolReferencePerSource    = 24
+	maxRichSymbolReferencePerRef       = 8
+	maxRichSymbolReferencesPerArtifact = 32
 )
 
 // EvidenceGraphDiagnostics is a scan-time summary of persisted graph evidence.
 type EvidenceGraphDiagnostics struct {
+	RichTypedIndex       bool                     `json:"rich_typed_index,omitempty"`
 	ConceptsIndexed      int                      `json:"concepts_indexed"`
 	MentionsIndexed      int                      `json:"mentions_indexed"`
 	EdgesIndexed         int                      `json:"edges_indexed"`
@@ -91,6 +97,10 @@ type evidenceBuildResult struct {
 	mentions    []store.ConceptMentionInput
 	edges       []store.ArtifactEdgeInput
 	diagnostics *EvidenceGraphDiagnostics
+}
+
+type evidenceGraphBuildOptions struct {
+	RichTypedIndex bool
 }
 
 type evidenceArtifact struct {
@@ -150,6 +160,7 @@ type pathReferenceEdge struct {
 }
 
 var pathReferencePattern = regexp.MustCompile(`(?i)([A-Za-z0-9_.@+-]+(?:/[A-Za-z0-9_.@+-]+)+\.(?:md|markdown|txt|adoc|rst|go|py|rs|java|kt|ts|tsx|js|jsx|vue|sql|toml|yaml|yml|json|dockerfile))`)
+var symbolReferencePattern = regexp.MustCompile(`[A-Za-z_$][A-Za-z0-9_$]*(?:[._-][A-Za-z0-9_$]+)*`)
 var testImportPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?m)\bfrom\s+([A-Za-z0-9_./:-]+)\s+import\b`),
 	regexp.MustCompile(`(?m)\bimport\s+([A-Za-z0-9_./:-]+)(?:\s+as\s+[A-Za-z_][A-Za-z0-9_]*)?$`),
@@ -165,12 +176,12 @@ var sourceSymbolPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?m)\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b`),
 }
 
-func (s *Scanner) rebuildEvidenceGraph(repoID, now string) (*EvidenceGraphDiagnostics, error) {
+func (s *Scanner) rebuildEvidenceGraph(repoID, now string, opts evidenceGraphBuildOptions) (*EvidenceGraphDiagnostics, error) {
 	artifacts, err := s.loadEvidenceArtifacts(repoID)
 	if err != nil {
 		return nil, err
 	}
-	built := buildEvidenceGraph(repoID, artifacts)
+	built := buildEvidenceGraphWithOptions(repoID, artifacts, opts)
 	if err := s.db.ReplaceRepoEvidence(repoID, built.concepts, built.mentions, built.edges, now); err != nil {
 		return nil, err
 	}
@@ -228,10 +239,14 @@ func (s *Scanner) loadEvidenceArtifacts(repoID string) ([]evidenceArtifact, erro
 }
 
 func buildEvidenceGraph(repoID string, artifacts []evidenceArtifact) evidenceBuildResult {
+	return buildEvidenceGraphWithOptions(repoID, artifacts, evidenceGraphBuildOptions{})
+}
+
+func buildEvidenceGraphWithOptions(repoID string, artifacts []evidenceArtifact, opts evidenceGraphBuildOptions) evidenceBuildResult {
 	artifactCount := len(artifacts)
 	rawMentions := make([]rawConceptMention, 0, artifactCount*12)
 	for _, artifact := range artifacts {
-		rawMentions = append(rawMentions, limitArtifactEvidenceMentions(extractEvidenceMentions(artifact))...)
+		rawMentions = append(rawMentions, limitArtifactEvidenceMentions(extractEvidenceMentionsWithOptions(artifact, opts))...)
 	}
 	rawMentions = limitRepoEvidenceMentions(rawMentions)
 
@@ -320,12 +335,15 @@ func buildEvidenceGraph(repoID string, artifacts []evidenceArtifact) evidenceBui
 	noisy := materializeSharedConceptEdges(artifacts, conceptsByKey, rawMentions, edgeBuilder)
 	materializeLayoutGroupEdges(artifacts, edgeBuilder)
 	materializeSameSourcePathEdges(artifacts, edgeBuilder)
-	materializeTestSourceTriangulationEdges(artifacts, edgeBuilder)
+	materializeTestSourceTriangulationEdges(artifacts, edgeBuilder, opts)
+	if opts.RichTypedIndex {
+		materializeRichSymbolReferenceEdges(artifacts, edgeBuilder)
+	}
 	materializeLinkEdges(artifacts, edgeBuilder)
 	materializePathReferenceEdges(artifacts, edgeBuilder)
 	edges := edgeBuilder.edges()
 
-	diagnostics := buildEvidenceDiagnostics(conceptInputs, mentionInputs, edges, noisy)
+	diagnostics := buildEvidenceDiagnostics(conceptInputs, mentionInputs, edges, noisy, opts)
 	return evidenceBuildResult{
 		concepts:    conceptInputs,
 		mentions:    mentionInputs,
@@ -334,7 +352,7 @@ func buildEvidenceGraph(repoID string, artifacts []evidenceArtifact) evidenceBui
 	}
 }
 
-func extractEvidenceMentions(artifact evidenceArtifact) []rawConceptMention {
+func extractEvidenceMentionsWithOptions(artifact evidenceArtifact, opts evidenceGraphBuildOptions) []rawConceptMention {
 	var mentions []rawConceptMention
 	add := func(kind, canonical, form, field, source, sectionID string, weight float64) {
 		canonical = strings.TrimSpace(canonical)
@@ -385,10 +403,21 @@ func extractEvidenceMentions(artifact evidenceArtifact) []rawConceptMention {
 	}
 
 	addMetadataMentions(artifact, add)
+	if opts.RichTypedIndex && isEvidenceSourceArtifact(artifact) {
+		addRichSourceSymbolMentions(artifact, add)
+	}
 	for _, section := range artifact.sections {
 		addSectionMentions(section, add)
 	}
 	return mentions
+}
+
+func addRichSourceSymbolMentions(artifact evidenceArtifact, add func(kind, canonical, form, field, source, sectionID string, weight float64)) {
+	symbols := extractSourceTriangulationSymbols(artifact)
+	for _, compact := range sortedStringValueMapKeys(symbols) {
+		form := firstNonEmpty(symbols[compact], compact)
+		add(conceptKindSymbol, compact, form, "symbol", "source_symbol_definition", "", 1.0)
+	}
 }
 
 func limitArtifactEvidenceMentions(mentions []rawConceptMention) []rawConceptMention {
@@ -891,7 +920,7 @@ type testSourceCandidate struct {
 	confidence  float64
 }
 
-func materializeTestSourceTriangulationEdges(artifacts []evidenceArtifact, builder *evidenceEdgeBuilder) {
+func materializeTestSourceTriangulationEdges(artifacts []evidenceArtifact, builder *evidenceEdgeBuilder, opts evidenceGraphBuildOptions) {
 	tests, sources := collectTriangulationArtifacts(artifacts)
 	if len(tests) == 0 || len(sources) == 0 {
 		return
@@ -899,9 +928,13 @@ func materializeTestSourceTriangulationEdges(artifacts []evidenceArtifact, build
 	sourcesByStem := map[string][]*sourceTriangulationInfo{}
 	sourcesByModuleKey := map[string][]*sourceTriangulationInfo{}
 	sourcesBySymbol := map[string][]*sourceTriangulationInfo{}
+	sourcesByPath := map[string]*sourceTriangulationInfo{}
 	sourceStemCount := map[string]int{}
 	for i := range sources {
 		source := &sources[i]
+		if source.path != "" {
+			sourcesByPath[source.path] = source
+		}
 		if source.stem != "" {
 			sourcesByStem[source.stem] = append(sourcesByStem[source.stem], source)
 			sourceStemCount[source.stem]++
@@ -955,6 +988,17 @@ func materializeTestSourceTriangulationEdges(artifacts []evidenceArtifact, build
 					weight = 0.9
 				}
 				addCandidate(source, "test_source_stem", weight, confidence)
+			}
+		}
+
+		if opts.RichTypedIndex {
+			for _, form := range sortedMapKeys(test.importForms) {
+				for _, source := range resolveRelativeImportSources(test.path, form, sourcesByPath) {
+					candidate := addCandidate(source, "relative_import_path", 0.96, 0.96)
+					if candidate != nil {
+						candidate.importForms[form] = true
+					}
+				}
 			}
 		}
 
@@ -1310,6 +1354,11 @@ func finalizeTestSourceCandidate(candidate *testSourceCandidate) {
 	if candidate == nil {
 		return
 	}
+	if candidate.signals["relative_import_path"] {
+		candidate.weight = maxFloat(candidate.weight, 0.96)
+		candidate.confidence = maxFloat(candidate.confidence, 0.96)
+		return
+	}
 	if candidate.signals["direct_import"] && candidate.signals["test_source_stem"] {
 		candidate.weight = maxFloat(candidate.weight, 0.95)
 		candidate.confidence = maxFloat(candidate.confidence, 0.95)
@@ -1327,7 +1376,7 @@ func finalizeTestSourceCandidate(candidate *testSourceCandidate) {
 }
 
 func strongestTestSourceSignal(signals map[string]bool) string {
-	for _, signal := range []string{"direct_import", "test_source_stem", "source_symbol_match"} {
+	for _, signal := range []string{"relative_import_path", "direct_import", "test_source_stem", "source_symbol_match"} {
 		if signals[signal] {
 			return signal
 		}
@@ -1337,6 +1386,8 @@ func strongestTestSourceSignal(signals map[string]bool) string {
 
 func testSourceExplanation(signal, testPath, sourcePath string, symbols []string) string {
 	switch signal {
+	case "relative_import_path":
+		return "test imports local source path " + sourcePath
 	case "direct_import":
 		return "test imports likely source " + sourcePath
 	case "test_source_stem":
@@ -1349,6 +1400,238 @@ func testSourceExplanation(signal, testPath, sourcePath string, symbols []string
 	return "test likely relates to source " + sourcePath + " from " + testPath
 }
 
+func resolveRelativeImportSources(testPath, importForm string, sourcesByPath map[string]*sourceTriangulationInfo) []*sourceTriangulationInfo {
+	importForm = strings.TrimSpace(strings.Trim(importForm, `"'`))
+	if !strings.HasPrefix(importForm, "./") && !strings.HasPrefix(importForm, "../") {
+		return nil
+	}
+	if strings.ContainsAny(importForm, "\x00\r\n\t ") {
+		return nil
+	}
+	if idx := strings.IndexAny(importForm, "?#"); idx >= 0 {
+		importForm = importForm[:idx]
+	}
+	base := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(testPath), filepath.FromSlash(importForm))))
+	base = strings.TrimPrefix(base, "./")
+	if base == "." || base == "" || strings.HasPrefix(base, "../") || strings.Contains(base, "/../") {
+		return nil
+	}
+	seen := map[string]bool{}
+	var candidates []string
+	add := func(path string) {
+		path = normalizeEvidencePath(path)
+		if path != "" && !seen[path] {
+			seen[path] = true
+			candidates = append(candidates, path)
+		}
+	}
+	add(base)
+	ext := strings.ToLower(filepath.Ext(base))
+	if ext == "" {
+		for _, known := range []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".py", ".go", ".rs", ".java", ".kt", ".kts", ".sql", ".toml"} {
+			add(base + known)
+			add(filepath.ToSlash(filepath.Join(base, "index"+known)))
+		}
+	}
+	sort.Strings(candidates)
+	var out []*sourceTriangulationInfo
+	for _, path := range candidates {
+		if source := sourcesByPath[path]; source != nil {
+			out = append(out, source)
+		}
+	}
+	return out
+}
+
+func materializeRichSymbolReferenceEdges(artifacts []evidenceArtifact, builder *evidenceEdgeBuilder) {
+	sourceSymbols := map[string][]sourceTriangulationInfo{}
+	for _, artifact := range artifacts {
+		if !isEvidenceSourceArtifact(artifact) {
+			continue
+		}
+		path := primaryEvidencePath(artifact)
+		if path == "" || sourcePathLooksLikeTest(path) {
+			continue
+		}
+		info := sourceTriangulationInfo{
+			artifact: artifact,
+			path:     path,
+			symbols:  extractSourceTriangulationSymbols(artifact),
+		}
+		for symbol := range info.symbols {
+			sourceSymbols[symbol] = append(sourceSymbols[symbol], info)
+		}
+	}
+	for symbol, sources := range sourceSymbols {
+		if len(sources) == 0 || len(sources) > maxRichSymbolSources {
+			delete(sourceSymbols, symbol)
+		}
+	}
+
+	type richSymbolReferenceEdge struct {
+		ref      evidenceArtifact
+		source   sourceTriangulationInfo
+		symbol   string
+		form     string
+		refField string
+	}
+	var edges []richSymbolReferenceEdge
+	perRef := map[string]int{}
+	perSource := map[string]int{}
+	for _, artifact := range artifacts {
+		if isEvidenceSourceArtifact(artifact) {
+			continue
+		}
+		refs := richSymbolReferences(artifact)
+		for _, symbol := range sortedStringValueMapKeys(refs) {
+			sources := sourceSymbols[symbol]
+			if len(sources) == 0 {
+				continue
+			}
+			for _, source := range sources {
+				if source.artifact.id == artifact.id {
+					continue
+				}
+				if perRef[artifact.id] >= maxRichSymbolReferencePerRef || perSource[source.artifact.id] >= maxRichSymbolReferencePerSource || len(edges) >= maxRichSymbolReferenceEdges {
+					continue
+				}
+				edges = append(edges, richSymbolReferenceEdge{
+					ref:      artifact,
+					source:   source,
+					symbol:   symbol,
+					form:     firstNonEmpty(refs[symbol], source.symbols[symbol], symbol),
+					refField: richSymbolReferenceField(artifact),
+				})
+				perRef[artifact.id]++
+				perSource[source.artifact.id]++
+			}
+		}
+	}
+	sort.Slice(edges, func(i, j int) bool {
+		if edges[i].ref.id == edges[j].ref.id {
+			if edges[i].source.artifact.id == edges[j].source.artifact.id {
+				return edges[i].symbol < edges[j].symbol
+			}
+			return edges[i].source.path < edges[j].source.path
+		}
+		return edges[i].ref.id < edges[j].ref.id
+	})
+	for _, edge := range edges {
+		metadata := map[string]any{
+			"symbol":      edge.form,
+			"symbol_key":  edge.symbol,
+			"source_path": edge.source.path,
+			"ref_field":   edge.refField,
+		}
+		builder.add(edge.ref.id, edge.source.artifact.id, edgeTypeMentionsSymbol, "symbol_reference", 0.78, 0.82, 1, "artifact mentions source symbol "+edge.form, metadata)
+	}
+}
+
+func richSymbolReferences(artifact evidenceArtifact) map[string]string {
+	refs := map[string]string{}
+	add := func(value string) {
+		if len(refs) >= maxRichSymbolReferencesPerArtifact {
+			return
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if !symbolReferenceTokenLooksSpecific(value) {
+			return
+		}
+		if compact := compactIdentifier(value); usefulTriangulationSymbol(compact) {
+			refs[compact] = value
+		}
+	}
+	for _, symbol := range evidenceStringSlice(artifact.extracted["symbols"]) {
+		add(symbol)
+	}
+	for _, value := range []string{artifact.title, evidenceString(artifact.extracted["test_name"]), evidenceString(artifact.extracted["parent_title"])} {
+		for _, token := range symbolReferenceTokens(value, 24) {
+			add(token)
+		}
+	}
+	for _, token := range symbolReferenceTokens(artifact.body, maxRichSymbolReferencesPerArtifact) {
+		add(token)
+	}
+	return refs
+}
+
+func richSymbolReferenceField(artifact evidenceArtifact) string {
+	if isEvidenceTestArtifact(artifact) {
+		return "test_body"
+	}
+	if normalizeRoleValue(artifact.kind) == "markdown_artifact" {
+		return "body"
+	}
+	if normalizeRoleValue(artifact.subtype) == "code_comment" {
+		return "code_comment"
+	}
+	return "body"
+}
+
+func symbolReferenceTokens(text string, limit int) []string {
+	text = strings.TrimSpace(text)
+	if text == "" || limit <= 0 {
+		return nil
+	}
+	if len(text) > 128*1024 {
+		text = text[:128*1024]
+	}
+	matches := symbolReferencePattern.FindAllString(text, limit*4)
+	seen := map[string]bool{}
+	var out []string
+	for _, match := range matches {
+		match = strings.Trim(match, "_.$")
+		if !symbolReferenceTokenLooksSpecific(match) || seen[match] {
+			continue
+		}
+		seen[match] = true
+		out = append(out, match)
+		if len(out) >= limit {
+			break
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func symbolReferenceTokenLooksSpecific(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) < 4 || len(value) > 96 {
+		return false
+	}
+	compact := compactIdentifier(value)
+	if !usefulTriangulationSymbol(compact) {
+		return false
+	}
+	hasSpecificShape := false
+	prevLowerOrDigit := false
+	for _, r := range value {
+		switch {
+		case r == '_' || r == '-' || r == '.' || r == '$':
+			hasSpecificShape = true
+		case unicode.IsDigit(r):
+			hasSpecificShape = true
+			prevLowerOrDigit = true
+		case unicode.IsUpper(r):
+			if prevLowerOrDigit {
+				hasSpecificShape = true
+			}
+			prevLowerOrDigit = false
+		case unicode.IsLower(r):
+			prevLowerOrDigit = true
+		default:
+			prevLowerOrDigit = false
+		}
+	}
+	if hasSpecificShape {
+		return true
+	}
+	return len(value) >= 12 && !genericEdgeConcept(compact)
+}
+
 func usefulTriangulationImport(value string) bool {
 	value = strings.TrimSpace(value)
 	if value == "" || len(value) > 160 {
@@ -1356,6 +1639,9 @@ func usefulTriangulationImport(value string) bool {
 	}
 	if strings.ContainsAny(value, " \t\n\r") {
 		return false
+	}
+	if strings.HasPrefix(value, "./") || strings.HasPrefix(value, "../") {
+		return true
 	}
 	return len(importKeysForModule(value)) > 0
 }
@@ -1483,8 +1769,9 @@ func materializePathReferenceEdges(artifacts []evidenceArtifact, builder *eviden
 	}
 }
 
-func buildEvidenceDiagnostics(concepts []store.ConceptInput, mentions []store.ConceptMentionInput, edges []store.ArtifactEdgeInput, noisy []EvidenceConceptExample) *EvidenceGraphDiagnostics {
+func buildEvidenceDiagnostics(concepts []store.ConceptInput, mentions []store.ConceptMentionInput, edges []store.ArtifactEdgeInput, noisy []EvidenceConceptExample, opts evidenceGraphBuildOptions) *EvidenceGraphDiagnostics {
 	d := &EvidenceGraphDiagnostics{
+		RichTypedIndex:       opts.RichTypedIndex,
 		ConceptsIndexed:      len(concepts),
 		MentionsIndexed:      len(mentions),
 		EdgesIndexed:         len(edges),

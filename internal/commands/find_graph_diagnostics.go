@@ -176,12 +176,12 @@ func buildFindGraphDiagnostics(db *store.DB, fp store.FilterParams, query string
 			if directPaths[normalizeFindGraphPath(target.Path)] || directPaths[normalizeFindGraphPath(target.Source)] {
 				continue
 			}
-			if findGraphSupportOnlyEdges[edge.EdgeType] {
+			if findGraphSupportOnlyEdge(edge) {
 				diag.Counts["suppressed_support_only"]++
 				diag.addSuppression(target, seed, edge, findGraphSuppressionSupportMsg)
 				continue
 			}
-			if !findGraphAdmittingEdges[edge.EdgeType] {
+			if !findGraphAdmittingEdge(edge) {
 				diag.Counts["suppressed_unknown_edge"]++
 				diag.addSuppression(target, seed, edge, "edge type is not enabled for graph admission")
 				continue
@@ -321,6 +321,20 @@ func findGraphCompactAlnum(value string) string {
 
 func findGraphSourceTestRole(role string) bool {
 	return role == retrieval.PackRoleImplementation || role == retrieval.PackRoleBehaviorTests
+}
+
+func findGraphSupportOnlyEdge(edge store.ArtifactEdgeRow) bool {
+	if edge.EdgeType == "mentions_symbol" && edge.SourceSignal == "symbol_reference" {
+		return true
+	}
+	return findGraphSupportOnlyEdges[edge.EdgeType]
+}
+
+func findGraphAdmittingEdge(edge store.ArtifactEdgeRow) bool {
+	if edge.EdgeType == "mentions_symbol" {
+		return edge.SourceSignal == "test_symbol_match"
+	}
+	return findGraphAdmittingEdges[edge.EdgeType]
 }
 
 func findGraphEdgeRolesCompatible(edgeType, seedRole, targetRole string) bool {

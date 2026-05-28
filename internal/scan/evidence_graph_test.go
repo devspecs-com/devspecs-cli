@@ -232,6 +232,72 @@ func TestTestSourceTriangulationSymbolMatch(t *testing.T) {
 	}
 }
 
+func TestRichTypedIndexAddsSourceSymbolMentions(t *testing.T) {
+	result := buildEvidenceGraphWithOptions("repo", []evidenceArtifact{
+		evidenceSourceArtifact("src_refresh", "src/auth/token_service.ts", "export class RefreshTokenService {}\n"),
+	}, evidenceGraphBuildOptions{RichTypedIndex: true})
+
+	if !hasConcept(result.concepts, conceptKindSymbol, "refreshtokenservice") {
+		t.Fatalf("rich typed index should persist source symbol concept, got %#v", result.concepts)
+	}
+	if result.diagnostics == nil || !result.diagnostics.RichTypedIndex {
+		t.Fatalf("rich typed diagnostics flag missing: %#v", result.diagnostics)
+	}
+
+	defaultResult := buildEvidenceGraph("repo", []evidenceArtifact{
+		evidenceSourceArtifact("src_refresh", "src/auth/token_service.ts", "export class RefreshTokenService {}\n"),
+	})
+	if hasConcept(defaultResult.concepts, conceptKindSymbol, "refreshtokenservice") {
+		t.Fatalf("default graph should not persist rich source symbol concept: %#v", defaultResult.concepts)
+	}
+}
+
+func TestRichTypedIndexResolvesRelativeImportPathForGenericIndex(t *testing.T) {
+	artifacts := []evidenceArtifact{
+		evidenceSourceArtifact("src_index", "src/auth/index.ts", "export function createAuth() { return true }\n"),
+		evidenceTestCaseArtifact("test_index", "src/auth/index.test.ts", "loads auth index", "import { createAuth } from './index'\n", nil),
+	}
+
+	defaultResult := buildEvidenceGraph("repo", artifacts)
+	if got := countEdgesByType(defaultResult.edges, edgeTypeTestsSource); got != 0 {
+		t.Fatalf("default graph should not use rich relative import path signal, got %d: %#v", got, defaultResult.edges)
+	}
+
+	result := buildEvidenceGraphWithOptions("repo", artifacts, evidenceGraphBuildOptions{RichTypedIndex: true})
+	edge := singleEdgeByType(t, result.edges, edgeTypeTestsSource)
+	if edge.SourceSignal != "relative_import_path" {
+		t.Fatalf("expected relative import path signal, got %q: %#v", edge.SourceSignal, edge)
+	}
+	if edge.Confidence < 0.95 {
+		t.Fatalf("relative import path should be high confidence, got %.3f", edge.Confidence)
+	}
+}
+
+func TestRichTypedIndexAddsSymbolReferenceEdge(t *testing.T) {
+	doc := evidenceTestArtifact("doc_refresh", "Token Refresh Plan", "docs/auth-refresh.md")
+	doc.body = "Wire the retry behavior through RefreshTokenService before updating the runbook."
+	result := buildEvidenceGraphWithOptions("repo", []evidenceArtifact{
+		evidenceSourceArtifact("src_refresh", "src/auth/token_service.ts", "export class RefreshTokenService {}\n"),
+		doc,
+	}, evidenceGraphBuildOptions{RichTypedIndex: true})
+
+	edge := singleEdgeByType(t, result.edges, edgeTypeMentionsSymbol)
+	if edge.SourceSignal != "symbol_reference" {
+		t.Fatalf("expected symbol_reference signal, got %q: %#v", edge.SourceSignal, edge)
+	}
+	if edge.SrcArtifactID != "doc_refresh" || edge.DstArtifactID != "src_refresh" {
+		t.Fatalf("symbol reference should point doc to source, got %#v", edge)
+	}
+
+	defaultResult := buildEvidenceGraph("repo", []evidenceArtifact{
+		evidenceSourceArtifact("src_refresh", "src/auth/token_service.ts", "export class RefreshTokenService {}\n"),
+		doc,
+	})
+	if got := countEdgesByType(defaultResult.edges, edgeTypeMentionsSymbol); got != 0 {
+		t.Fatalf("default graph should not emit rich symbol reference edges, got %d: %#v", got, defaultResult.edges)
+	}
+}
+
 func evidenceTestArtifact(id, title, path string) evidenceArtifact {
 	return evidenceArtifact{
 		id:        id,
@@ -290,6 +356,15 @@ func evidenceTestCaseArtifact(id, path, name, body string, symbols []string) evi
 			LayoutGroup:    path,
 		}},
 	}
+}
+
+func hasConcept(concepts []store.ConceptInput, kind, canonical string) bool {
+	for _, concept := range concepts {
+		if concept.Kind == kind && concept.Canonical == canonical {
+			return true
+		}
+	}
+	return false
 }
 
 func hasMentionField(mentions []store.ConceptMentionInput, field string) bool {

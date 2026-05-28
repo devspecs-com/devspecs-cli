@@ -42,6 +42,7 @@ func NewScanCmd() *cobra.Command {
 		experimentalIntentDiscovery    bool
 		experimentalGitEvidence        bool
 		experimentalWorkstreamEvidence bool
+		experimentalRichTypedIndex     bool
 		includeTests                   bool
 		includeCodeComments            bool
 	)
@@ -50,7 +51,7 @@ func NewScanCmd() *cobra.Command {
 		Use:   "scan",
 		Short: "Scan repository for specs, plans, and ADRs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, includeTests, includeCodeComments)
+			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, includeTests, includeCodeComments)
 		},
 	}
 
@@ -63,6 +64,7 @@ func NewScanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&experimentalIntentDiscovery, "experimental-intent-discovery", false, "Deprecated: broad scored markdown intent candidate discovery is enabled by default")
 	cmd.Flags().BoolVar(&experimentalGitEvidence, "experimental-git-evidence", false, "Index bounded local git history facts as diagnostic evidence")
 	cmd.Flags().BoolVar(&experimentalWorkstreamEvidence, "experimental-workstream-evidence", false, "Index bounded local workstream anchors as diagnostic evidence (implies --experimental-git-evidence)")
+	cmd.Flags().BoolVar(&experimentalRichTypedIndex, "experimental-rich-typed-index", false, "Index bounded richer source/test/symbol graph evidence as diagnostic substrate")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Index executable test cases as behavioral intent artifacts")
 	cmd.Flags().BoolVar(&includeTests, "experimental-test-cases", false, "Deprecated alias for --include-tests")
 	cmd.Flags().BoolVar(&includeCodeComments, "include-code-comments", false, "Index high-signal code comments as implementation intent artifacts")
@@ -70,7 +72,7 @@ func NewScanCmd() *cobra.Command {
 	return cmd
 }
 
-func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, includeTests, includeCodeComments bool) error {
+func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, includeTests, includeCodeComments bool) error {
 	start := time.Now()
 	success := false
 	props := map[string]any{
@@ -78,6 +80,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 		"include_code_comments":            includeCodeComments,
 		"experimental_git_evidence":        experimentalGitEvidence,
 		"experimental_workstream_evidence": experimentalWorkstreamEvidence,
+		"experimental_rich_typed_index":    experimentalRichTypedIndex,
 		"if_changed":                       ifChanged,
 		"rebuild":                          rebuild,
 		"json":                             asJSON,
@@ -157,6 +160,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	props["skip_authored_at_lookup"] = scanOpts.SkipAuthoredAtLookup
 	scanOpts.IncludeGitEvidence = experimentalGitEvidence || experimentalWorkstreamEvidence
 	scanOpts.IncludeWorkstreamEvidence = experimentalWorkstreamEvidence
+	scanOpts.RichTypedIndex = experimentalRichTypedIndex
 	if verbose && !quiet && scanOpts.FreshIndex {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Using fresh-index scan path for empty/rebuilt index\n")
 	}

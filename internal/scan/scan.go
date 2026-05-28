@@ -46,6 +46,7 @@ type RunOptions struct {
 	FreshIndex                bool
 	IncludeGitEvidence        bool
 	IncludeWorkstreamEvidence bool
+	RichTypedIndex            bool
 	GitMaxCommits             int
 	GitMaxFilesPerCommit      int
 	Progress                  func(ProgressEvent)
@@ -241,7 +242,7 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 	if err := s.syncOpenSpecLinks(repoID, now); err != nil {
 		return nil, fmt.Errorf("sync openspec links: %w", err)
 	}
-	if diagnostics, err := s.rebuildEvidenceGraph(repoID, now); err != nil {
+	if diagnostics, err := s.rebuildEvidenceGraph(repoID, now, evidenceGraphBuildOptions{RichTypedIndex: opts.RichTypedIndex}); err != nil {
 		return nil, fmt.Errorf("rebuild evidence graph: %w", err)
 	} else {
 		result.EvidenceGraph = diagnostics
