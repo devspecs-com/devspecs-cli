@@ -132,6 +132,45 @@ func TestBuildRoleGroupedPackIncludesProjectGuidelinesWhenRequested(t *testing.T
 	assertGroupCount(t, pack, PackRoleSupportingContext, 1)
 }
 
+func TestBuildRoleGroupedPackIncludesTopLevelClaudeGuidanceBeforeGenericSkills(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:      "agent-1",
+			Path:    "CLAUDE.md",
+			Kind:    "markdown_artifact",
+			Subtype: "agent_instruction",
+			Title:   "Claude Code Development Guidance",
+			Body:    "Guidance for working in the Deno repository",
+			Metadata: map[string]string{
+				"classifier_model":   "protocol",
+				"classifier_subtype": "agent_instruction",
+			},
+		},
+		{
+			ID:      "skill-1",
+			Path:    ".claude/skills/review-pr/SKILL.md",
+			Kind:    "markdown_artifact",
+			Subtype: "skill",
+			Title:   "Deno PR Review Skill",
+			Body:    "Skill workflow for reviewing Deno pull requests",
+			Metadata: map[string]string{
+				"classifier_model":   "protocol",
+				"classifier_subtype": "skill",
+			},
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "Claude Code development guidance for working in the Deno repository")
+
+	assertGroupCount(t, pack, PackRoleSupportingContext, 1)
+	if got := pack.Groups[0].Items[0].Path; got != "CLAUDE.md" {
+		t.Fatalf("expected top-level CLAUDE.md to be included, got %q", got)
+	}
+	if len(pack.ExcludedNoise) != 1 || pack.ExcludedNoise[0].Path != ".claude/skills/review-pr/SKILL.md" {
+		t.Fatalf("expected generic skill to be excluded, got %#v", pack.ExcludedNoise)
+	}
+}
+
 func TestBuildRoleGroupedPackExcludesUnrequestedAgentInstructionsForAgentFeature(t *testing.T) {
 	candidates := []Candidate{
 		{
@@ -391,6 +430,30 @@ func TestBuildRoleGroupedPackKeepsCurrentDesignDocWithDeprecatedBodyText(t *test
 
 	if len(pack.ExcludedNoise) != 0 {
 		t.Fatalf("expected current design doc to stay included, got excluded: %#v", pack.ExcludedNoise)
+	}
+	assertGroupCount(t, pack, PackRoleBackgroundDecisions, 1)
+}
+
+func TestBuildRoleGroupedPackKeepsRequestedBEPWithWeakStaleMetadata(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:     "bep-1",
+			Path:   "docs/architecture-decisions/beps/0012-metrics-service.md",
+			Kind:   "markdown_artifact",
+			Title:  "BEP 0012: Metrics Service",
+			Status: "unknown",
+			Body:   "Backstage metrics service proposal with OpenTelemetry naming conventions",
+			Metadata: map[string]string{
+				"classifier_model":     "design",
+				"classifier_lifecycle": "deprecated",
+			},
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "Backstage core MetricsService BEP proposal with OpenTelemetry naming conventions")
+
+	if len(pack.ExcludedNoise) != 0 {
+		t.Fatalf("expected requested BEP with weak stale metadata to stay included, got excluded: %#v", pack.ExcludedNoise)
 	}
 	assertGroupCount(t, pack, PackRoleBackgroundDecisions, 1)
 }

@@ -44,6 +44,35 @@ var packRoleBudgets = map[string]int{
 	PackRoleExcludedNoise:       5,
 }
 
+var packAgentInstructionSkillGenericTerms = map[string]bool{
+	"agent":        true,
+	"agents":       true,
+	"assistant":    true,
+	"claude":       true,
+	"codex":        true,
+	"code":         true,
+	"coding":       true,
+	"constraint":   true,
+	"constraints":  true,
+	"contributor":  true,
+	"contributors": true,
+	"developer":    true,
+	"development":  true,
+	"guidance":     true,
+	"guideline":    true,
+	"guidelines":   true,
+	"instruction":  true,
+	"instructions": true,
+	"project":      true,
+	"repo":         true,
+	"repository":   true,
+	"rule":         true,
+	"rules":        true,
+	"standard":     true,
+	"standards":    true,
+	"working":      true,
+}
+
 type RoleGroupedPack struct {
 	Mode          string            `json:"mode"`
 	Summary       PackSummary       `json:"summary,omitempty"`
@@ -299,9 +328,71 @@ func queryRequestsCurrentPackArtifact(c Candidate, role, queryLower string, skil
 		return queryRequestsTemplate(queryLower)
 	case role == "protocol":
 		return queryRequestsProtocol(queryLower)
+	case queryRequestsProposalDesignArtifact(c, role, queryLower):
+		return true
 	default:
 		return false
 	}
+}
+
+func queryRequestsProposalDesignArtifact(c Candidate, role, queryLower string) bool {
+	if !queryRequestsProposalDesign(queryLower) {
+		return false
+	}
+	if isProposalDesignCandidate(c, role) {
+		return true
+	}
+	return false
+}
+
+func queryRequestsProposalDesign(queryLower string) bool {
+	if containsAny(queryLower,
+		"design proposal",
+		"enhancement proposal",
+		"request for comments",
+		"architecture proposal",
+		"architecture design",
+	) {
+		return true
+	}
+	for _, word := range []string{"bep", "beps", "rfc", "rfcs", "kep", "keps", "proposal", "proposals", "design", "designs"} {
+		if hasQueryWord(queryLower, word) {
+			return true
+		}
+	}
+	return false
+}
+
+func isProposalDesignCandidate(c Candidate, role string) bool {
+	switch role {
+	case "rfc", "design", "prd", "openspec_design", "openspec_proposal", "openspec_spec":
+		return true
+	}
+	pathLower := strings.ToLower(filepath.ToSlash(c.Path))
+	if containsAny(pathLower,
+		"/bep/",
+		"/beps/",
+		"/kep/",
+		"/keps/",
+		"/rfc/",
+		"/rfcs/",
+		"/proposal/",
+		"/proposals/",
+		"/design/",
+		"/designs/",
+	) {
+		return true
+	}
+	descriptor := packDescriptorLower(c, role)
+	return containsAny(descriptor,
+		"bep",
+		"enhancement proposal",
+		"request for comments",
+		"design proposal",
+		"architecture proposal",
+		"classifier_subtype\ndesign",
+		"classifier_model\ndesign",
+	)
 }
 
 func isBackgroundDecisionCandidate(c Candidate, role string) bool {
@@ -315,6 +406,10 @@ func isBackgroundDecisionCandidate(c Candidate, role string) bool {
 		strings.Contains(pathLower, "/architecture/") ||
 		strings.Contains(pathLower, "/design/") ||
 		strings.Contains(pathLower, "/requirements/") ||
+		strings.Contains(pathLower, "/beps/") ||
+		strings.Contains(pathLower, "/bep/") ||
+		strings.Contains(pathLower, "/proposals/") ||
+		strings.Contains(pathLower, "/proposal/") ||
 		strings.Contains(pathLower, "/rfcs/") ||
 		strings.Contains(pathLower, "/rfc/")
 }
@@ -493,6 +588,15 @@ func queryRequestsAgentInstructions(queryLower string) bool {
 		"developer guidelines",
 		"development guidelines",
 		"coding guidelines",
+		"repo guidance",
+		"repository guidance",
+		"project guidance",
+		"agent guidance",
+		"developer guidance",
+		"development guidance",
+		"coding guidance",
+		"claude code guidance",
+		"codex guidance",
 		"repo constraints",
 		"repository constraints",
 		"project constraints",
@@ -506,15 +610,22 @@ func queryRequestsAgentInstructions(queryLower string) bool {
 	) {
 		return true
 	}
-	return (containsAny(queryLower, "claude", "cursor", "codex", "assistant", "agent") && containsAny(queryLower, "instruction", "instructions", "rules", "guidelines", "constraints", "standards")) ||
-		(containsAny(queryLower, "repo", "repository", "project", "developer", "development", "coding", "contributor", "contributors") && containsAny(queryLower, "instruction", "instructions", "rules", "guidelines", "constraints", "standards"))
+	return (containsAny(queryLower, "claude", "cursor", "codex", "assistant", "agent") && containsAny(queryLower, "instruction", "instructions", "rules", "guideline", "guidelines", "guidance", "constraints", "standards")) ||
+		(containsAny(queryLower, "repo", "repository", "project", "developer", "development", "coding", "contributor", "contributors") && containsAny(queryLower, "instruction", "instructions", "rules", "guideline", "guidelines", "guidance", "constraints", "standards"))
 }
 
 func queryRequestsSkill(c Candidate, queryLower string) bool {
-	if containsAny(queryLower, "skill", "skills", "workflow", "workflows", "playbook", "playbooks") {
+	if queryExplicitlyRequestsSkill(queryLower) {
 		return true
 	}
+	if queryRequestsAgentInstructions(queryLower) {
+		return packSpecificTitlePathOverlap(c, queryLower, packAgentInstructionSkillGenericTerms) >= 2
+	}
 	return packQueryTitlePathOverlap(c, queryLower) >= 2
+}
+
+func queryExplicitlyRequestsSkill(queryLower string) bool {
+	return containsAny(queryLower, "skill", "skills", "workflow", "workflows", "playbook", "playbooks")
 }
 
 func queryRequestsProtocol(queryLower string) bool {
@@ -552,6 +663,10 @@ func queryRequestsGeneratedOrVendor(queryLower string) bool {
 }
 
 func packQueryTitlePathOverlap(c Candidate, queryLower string) int {
+	return packSpecificTitlePathOverlap(c, queryLower, nil)
+}
+
+func packSpecificTitlePathOverlap(c Candidate, queryLower string, ignore map[string]bool) int {
 	terms := meaningfulTerms(queryLower)
 	if len(terms) == 0 {
 		return 0
@@ -559,6 +674,9 @@ func packQueryTitlePathOverlap(c Candidate, queryLower string) int {
 	haystack := strings.ToLower(c.Path + "\n" + c.Title)
 	count := 0
 	for _, term := range terms {
+		if ignore != nil && ignore[term] {
+			continue
+		}
 		if strings.Contains(haystack, term) {
 			count++
 		}
