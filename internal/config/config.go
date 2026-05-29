@@ -29,6 +29,7 @@ type ArtifactConfig struct {
 type ExperimentConfig struct {
 	IntentCandidateDiscovery *bool `yaml:"intent_candidate_discovery,omitempty"`
 	TestCaseArtifacts        *bool `yaml:"test_case_artifacts,omitempty"`
+	SupportDocDiscovery      *bool `yaml:"support_doc_discovery,omitempty"`
 }
 
 // SourceConfig defines a source type and its discovery paths.
@@ -88,6 +89,13 @@ func WithDefaultIntentCandidateDiscovery(cfg *RepoConfig, enabled bool) *RepoCon
 	return out
 }
 
+// WithSupportDocDiscovery returns a config copy with bounded support-doc discovery set.
+func WithSupportDocDiscovery(cfg *RepoConfig, enabled bool) *RepoConfig {
+	out := CloneRepoConfig(cfg)
+	out.Experiments.SupportDocDiscovery = boolPtr(enabled)
+	return out
+}
+
 // WithTestCaseArtifacts returns a config copy with test-case artifact indexing set.
 func WithTestCaseArtifacts(cfg *RepoConfig, enabled bool) *RepoConfig {
 	out := CloneRepoConfig(cfg)
@@ -113,6 +121,9 @@ func CloneRepoConfig(cfg *RepoConfig) *RepoConfig {
 	}
 	if cfg.Experiments.TestCaseArtifacts != nil {
 		out.Experiments.TestCaseArtifacts = boolPtr(*cfg.Experiments.TestCaseArtifacts)
+	}
+	if cfg.Experiments.SupportDocDiscovery != nil {
+		out.Experiments.SupportDocDiscovery = boolPtr(*cfg.Experiments.SupportDocDiscovery)
 	}
 	if cfg.Artifacts.TestCases != nil {
 		out.Artifacts.TestCases = boolPtr(*cfg.Artifacts.TestCases)
@@ -145,6 +156,13 @@ func (e ExperimentConfig) TestCaseArtifactsEnabled(defaultValue bool) bool {
 		return defaultValue
 	}
 	return *e.TestCaseArtifacts
+}
+
+func (e ExperimentConfig) SupportDocDiscoveryEnabled(defaultValue bool) bool {
+	if e.SupportDocDiscovery == nil {
+		return defaultValue
+	}
+	return *e.SupportDocDiscovery
 }
 
 func (c RepoConfig) TestCaseArtifactsEnabled(defaultValue bool) bool {

@@ -335,7 +335,15 @@ func TestDiscover_SupportDocDiscoveryFindsBoundedDocs(t *testing.T) {
 	}
 
 	a := &Adapter{}
-	candidates, err := a.Discover(context.Background(), tmp, config.WithIntentCandidateDiscovery(nil, true))
+	withoutSupport, err := a.Discover(context.Background(), tmp, config.WithIntentCandidateDiscovery(nil, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stringSliceContains(candidateRelPaths(withoutSupport), "docs/security/access-control.md") {
+		t.Fatal("support doc discovery should require explicit support-doc experiment")
+	}
+
+	candidates, err := a.Discover(context.Background(), tmp, config.WithSupportDocDiscovery(config.WithIntentCandidateDiscovery(nil, true), true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +385,7 @@ func TestDiscover_SupportDocDiscoveryIsCapped(t *testing.T) {
 	}
 
 	a := &Adapter{}
-	candidates, err := a.Discover(context.Background(), tmp, config.WithIntentCandidateDiscovery(nil, true))
+	candidates, err := a.Discover(context.Background(), tmp, config.WithSupportDocDiscovery(config.WithIntentCandidateDiscovery(nil, true), true))
 	if err != nil {
 		t.Fatal(err)
 	}

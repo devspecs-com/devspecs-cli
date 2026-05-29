@@ -131,6 +131,8 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 				})
 			}
 		}
+	}
+	if cfg != nil && cfg.Experiments.SupportDocDiscoveryEnabled(false) {
 		supportEntries, err := walkSupportMarkdownCandidates(ctx, repoRoot)
 		if err == nil {
 			for _, entry := range supportEntries {

@@ -52,6 +52,7 @@ func NewEvalCmd() *cobra.Command {
 		experimentalTieredConceptOutput bool
 		experimentalAnchorFirstRanking  = true
 		experimentalAnchorFirstMode     string
+		experimentalSupportDocs         bool
 		packDiagnostics                 bool
 		graphDiagnostics                bool
 		contextTokenBudget              int
@@ -111,7 +112,7 @@ func NewEvalCmd() *cobra.Command {
 			if cmd.Flags().Changed("experimental-anchor-first-mode") && !cmd.Flags().Changed("experimental-anchor-first-ranking") {
 				experimentalAnchorFirstRanking = true
 			}
-			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, findRuntime, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput, experimentalAnchorFirstRanking, experimentalAnchorFirstMode, packDiagnostics, graphDiagnostics, evalIndexCacheDir, refreshIndexCache, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
+			opts, err := buildRetrievalEvalOptions(cmd, asJSON, filesystem, indexed, commandUnderTest, findRuntime, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput, experimentalAnchorFirstRanking, experimentalAnchorFirstMode, experimentalSupportDocs, packDiagnostics, graphDiagnostics, evalIndexCacheDir, refreshIndexCache, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull)
 			if err != nil {
 				return err
 			}
@@ -214,6 +215,7 @@ func NewEvalCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&experimentalTieredConceptOutput, "experimental-tiered-concept-output", false, "Demote lower-confidence concept backfill artifacts to a separate related tier during retrieval evals")
 	cmd.Flags().BoolVar(&experimentalAnchorFirstRanking, "experimental-anchor-first-ranking", true, "Use repo-local TF-IDF anchor-first ordering during retrieval evals; pass false to disable")
 	cmd.Flags().StringVar(&experimentalAnchorFirstMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, selected_only, strong_field, or strict")
+	cmd.Flags().BoolVar(&experimentalSupportDocs, "experimental-support-docs", false, "Index bounded support docs as diagnostic context during indexed evals")
 	cmd.Flags().BoolVar(&packDiagnostics, "pack-diagnostics", false, "Record role-grouped pack diagnostics in per-case eval JSON without changing scoring")
 	cmd.Flags().BoolVar(&graphDiagnostics, "graph-diagnostics", false, "Record opt-in find graph context diagnostics in live command eval JSON without changing scoring")
 	cmd.Flags().StringVar(&evalIndexCacheDir, "eval-index-cache-dir", "", "Directory for strict indexed eval corpus cache; disabled when empty")
@@ -322,7 +324,7 @@ func normalizeEvalCommand(command string) (string, error) {
 	}
 }
 
-func runLiveCommandEval(command, findRuntime, fixtureAbs string, cases []evalharness.CaseSpec, includeTests, includeCodeComments, experimentalAnchorFirstRanking bool, experimentalAnchorFirstMode string, graphDiagnostics bool) (map[string]evalharness.CommandCaseOutput, error) {
+func runLiveCommandEval(command, findRuntime, fixtureAbs string, cases []evalharness.CaseSpec, includeTests, includeCodeComments, experimentalSupportDocs, experimentalAnchorFirstRanking bool, experimentalAnchorFirstMode string, graphDiagnostics bool) (map[string]evalharness.CommandCaseOutput, error) {
 	tempHome, err := os.MkdirTemp("", "devspecs-live-eval-*")
 	if err != nil {
 		return nil, fmt.Errorf("create live command eval home: %w", err)
@@ -372,6 +374,9 @@ func runLiveCommandEval(command, findRuntime, fixtureAbs string, cases []evalhar
 	}
 	if includeCodeComments {
 		scanArgs = append(scanArgs, "--include-code-comments")
+	}
+	if experimentalSupportDocs {
+		scanArgs = append(scanArgs, "--experimental-support-docs")
 	}
 	scanCmd.SetArgs(scanArgs)
 	scanCmd.SetOut(&bytes.Buffer{})

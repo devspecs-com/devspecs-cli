@@ -110,6 +110,7 @@ type Options struct {
 	ExperimentalTieredConceptOutput bool
 	ExperimentalAnchorFirstRanking  bool
 	ExperimentalAnchorFirstMode     string
+	ExperimentalSupportDocs         bool
 	PackDiagnostics                 bool
 	GraphDiagnostics                bool
 	ContextTokenBudget              int
@@ -1104,6 +1105,9 @@ func collectIndexedFiles(root string, opts Options, telemetry *phaseRecorder) ([
 	if opts.CodeCommentArtifacts {
 		cfg = config.WithCodeCommentArtifacts(cfg, true)
 	}
+	if opts.ExperimentalSupportDocs {
+		cfg = config.WithSupportDocDiscovery(cfg, true)
+	}
 	adpts := []adapters.Adapter{
 		&openspec.Adapter{},
 		&adr.Adapter{},
@@ -1335,6 +1339,7 @@ func indexedCorpusCacheKey(root string, opts Options) (string, error) {
 	fmt.Fprintf(h, "corpus=%s\n", CorpusSourceSQLiteIndex)
 	fmt.Fprintf(h, "tests=%t\n", opts.TestCaseArtifacts)
 	fmt.Fprintf(h, "comments=%t\n", opts.CodeCommentArtifacts)
+	fmt.Fprintf(h, "support_docs=%t\n", opts.ExperimentalSupportDocs)
 	fmt.Fprintf(h, "max_corpus_files=%d\n", opts.MaxCorpusFiles)
 	fmt.Fprintf(h, "max_source_files=%d\n", opts.MaxSourceFiles)
 	fmt.Fprintf(h, "max_test_case_artifacts=%d\n", opts.MaxTestCaseArtifacts)

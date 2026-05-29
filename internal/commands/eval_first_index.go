@@ -156,7 +156,7 @@ type firstIndexWeakSpot struct {
 	Message string `json:"message"`
 }
 
-func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed bool, commandUnderTest, findRuntime string, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput, experimentalAnchorFirstRanking bool, experimentalAnchorFirstMode string, packDiagnostics, graphDiagnostics bool, evalIndexCacheDir string, refreshIndexCache bool, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec int, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull float64) (evalharness.Options, error) {
+func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed bool, commandUnderTest, findRuntime string, includeTests, includeCodeComments, disableSectionAwareRetrieval, experimentalBalancedEvidence, experimentalBudgetedPacking, experimentalConceptBackfill, experimentalGlossaryConcepts, experimentalTieredConceptOutput, experimentalAnchorFirstRanking bool, experimentalAnchorFirstMode string, experimentalSupportDocs, packDiagnostics, graphDiagnostics bool, evalIndexCacheDir string, refreshIndexCache bool, maxCorpusFiles, maxSourceFiles, maxTestCaseArtifacts, maxCodeComments, maxCaseSeconds, contextTokenBudget, progressIntervalSec int, minRecall, minMeanRecall, minMustRecall, minSufficiency, minReductionFull float64) (evalharness.Options, error) {
 	normalizedAnchorMode := retrieval.NormalizeAnchorFirstMode(experimentalAnchorFirstMode)
 	if normalizedAnchorMode == "" {
 		return evalharness.Options{}, fmt.Errorf("unknown --experimental-anchor-first-mode; valid values: %s", strings.Join(retrieval.ValidAnchorFirstModes(), ", "))
@@ -173,6 +173,7 @@ func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed b
 		ExperimentalTieredConceptOutput: experimentalTieredConceptOutput,
 		ExperimentalAnchorFirstRanking:  experimentalAnchorFirstRanking,
 		ExperimentalAnchorFirstMode:     normalizedAnchorMode,
+		ExperimentalSupportDocs:         experimentalSupportDocs,
 		PackDiagnostics:                 packDiagnostics,
 		GraphDiagnostics:                graphDiagnostics,
 		ContextTokenBudget:              contextTokenBudget,
@@ -217,7 +218,7 @@ func buildRetrievalEvalOptions(cmd *cobra.Command, asJSON, filesystem, indexed b
 		}
 		opts.FindRuntime = string(normalizedRuntime)
 		opts.CommandRunner = func(fixtureAbs string, cases []evalharness.CaseSpec) (map[string]evalharness.CommandCaseOutput, error) {
-			return runLiveCommandEval(normalized, string(normalizedRuntime), fixtureAbs, cases, includeTests, includeCodeComments, experimentalAnchorFirstRanking, normalizedAnchorMode, graphDiagnostics)
+			return runLiveCommandEval(normalized, string(normalizedRuntime), fixtureAbs, cases, includeTests, includeCodeComments, experimentalSupportDocs, experimentalAnchorFirstRanking, normalizedAnchorMode, graphDiagnostics)
 		}
 	} else if strings.TrimSpace(findRuntime) != "" {
 		if graphDiagnostics {
