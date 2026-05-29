@@ -113,8 +113,14 @@ func TestRun_AgenticSaaSFixture(t *testing.T) {
 	if len(result.LaneMetrics) != 5 {
 		t.Fatalf("expected five lane metrics: %#v", result.LaneMetrics)
 	}
+	if len(result.CanonicalLanes) != 7 {
+		t.Fatalf("expected seven canonical lane metrics: %#v", result.CanonicalLanes)
+	}
 	if result.MetricNotes[LanePackedSections] == "" {
 		t.Fatalf("expected metric notes: %#v", result.MetricNotes)
+	}
+	if result.MetricNotes[CanonicalLaneIntent] == "" {
+		t.Fatalf("expected canonical lane metric notes: %#v", result.MetricNotes)
 	}
 
 	sufficiencyPasses := 0
@@ -145,6 +151,11 @@ func TestRun_AgenticSaaSFixture(t *testing.T) {
 		}
 		if len(c.ArtifactGrades) != len(c.ArtifactsIncluded) {
 			t.Fatalf("%s: artifact grade count mismatch", c.ID)
+		}
+		for _, grade := range c.ArtifactGrades {
+			if grade.CanonicalLane == "" {
+				t.Fatalf("%s: missing canonical lane on artifact grade: %#v", c.ID, grade)
+			}
 		}
 		for _, fp := range c.PrimaryFalsePositiveDiagnostics {
 			if fp.CaseID != c.ID || fp.Path == "" || fp.Position <= 0 || fp.Lane == "" || fp.Role == "" || fp.Grade == "" || fp.ReasonClass == "" {

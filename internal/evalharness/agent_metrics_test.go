@@ -103,3 +103,81 @@ func TestGradeArtifactForAgentMetricsKeepsDifferentLineRefsSameCluster(t *testin
 		t.Fatalf("different line refs in the same file should be same-cluster, got %#v", got)
 	}
 }
+
+func TestClassifyCanonicalLanePrefersConcreteDocLanes(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		file File
+		want string
+	}{
+		{
+			name: "ordinary markdown defaults to intent",
+			path: "docs/security/access-control.md",
+			file: File{Path: "docs/security/access-control.md", Kind: "markdown_artifact"},
+			want: CanonicalLaneIntent,
+		},
+		{
+			name: "protocol subtype",
+			path: "AGENTS.md",
+			file: File{Path: "AGENTS.md", Kind: "markdown_artifact", Subtype: "agent_instruction"},
+			want: CanonicalLaneProtocol,
+		},
+		{
+			name: "model classifier",
+			path: "docs/reference/openapi.md",
+			file: File{Path: "docs/reference/openapi.md", Metadata: map[string]string{"classifier_mode": "model"}},
+			want: CanonicalLaneModel,
+		},
+		{
+			name: "template subtype",
+			path: ".github/pull_request_template.md",
+			file: File{Path: ".github/pull_request_template.md", Kind: "markdown_artifact", Subtype: "pull_request_template"},
+			want: CanonicalLaneTemplate,
+		},
+		{
+			name: "source context",
+			path: "internal/controller/failover.go",
+			file: File{Path: "internal/controller/failover.go", Kind: "source_context"},
+			want: CanonicalLaneSourceContext,
+		},
+		{
+			name: "trace classifier",
+			path: ".devspecs/traces/work.jsonl",
+			file: File{Path: ".devspecs/traces/work.jsonl", Metadata: map[string]string{"classifier_mode": "trace"}},
+			want: CanonicalLaneTrace,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyCanonicalLane(tc.path, tc.file, ""); got != tc.want {
+				t.Fatalf("classifyCanonicalLane() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSummarizeCanonicalLaneMetricsCountsUnknownOnlyAsFallback(t *testing.T) {
+	cases := []CaseResult{{
+		RelevantIncluded:       []string{"docs/plan.md"},
+		MissedExpectedRelevant: []string{"src/auth/session.go"},
+		ArtifactGrades: []ArtifactGrade{
+			{Path: "docs/plan.md", CanonicalLane: CanonicalLaneIntent, Exact: true, Weight: 1},
+			{Path: "AGENTS.md", CanonicalLane: CanonicalLaneProtocol, Grade: "unlabeled"},
+		},
+	}}
+	metrics := summarizeCanonicalLaneMetrics(cases)
+	byLane := map[string]LaneMetric{}
+	for _, metric := range metrics {
+		byLane[metric.Lane] = metric
+	}
+	if byLane[CanonicalLaneIntent].IncludedArtifacts != 1 || byLane[CanonicalLaneIntent].ExactRelevantArtifacts != 1 {
+		t.Fatalf("intent lane metrics wrong: %#v", byLane[CanonicalLaneIntent])
+	}
+	if byLane[CanonicalLaneProtocol].IncludedArtifacts != 1 {
+		t.Fatalf("protocol lane metrics wrong: %#v", byLane[CanonicalLaneProtocol])
+	}
+	if byLane[CanonicalLaneUnknown].IncludedArtifacts != 0 {
+		t.Fatalf("unknown lane should be fallback only: %#v", byLane[CanonicalLaneUnknown])
+	}
+}

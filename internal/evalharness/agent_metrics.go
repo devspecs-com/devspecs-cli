@@ -13,6 +13,16 @@ const (
 	LanePackedSections     = "packed_sections"
 )
 
+const (
+	CanonicalLaneIntent        = "intent"
+	CanonicalLaneModel         = "model"
+	CanonicalLaneProtocol      = "protocol"
+	CanonicalLaneTemplate      = "template"
+	CanonicalLaneTrace         = "trace"
+	CanonicalLaneSourceContext = "source_context"
+	CanonicalLaneUnknown       = "unknown"
+)
+
 var agentMetricBudgets = []int{1024, 2048, 4096, 8192}
 
 type AgentMetrics struct {
@@ -86,13 +96,14 @@ type LaneCounts struct {
 }
 
 type ArtifactGrade struct {
-	Path         string  `json:"path"`
-	Lane         string  `json:"lane"`
-	Grade        string  `json:"grade"`
-	Weight       float64 `json:"weight"`
-	Exact        bool    `json:"exact"`
-	SameCluster  bool    `json:"same_cluster,omitempty"`
-	HardNegative bool    `json:"hard_negative,omitempty"`
+	Path          string  `json:"path"`
+	Lane          string  `json:"lane"`
+	CanonicalLane string  `json:"canonical_lane,omitempty"`
+	Grade         string  `json:"grade"`
+	Weight        float64 `json:"weight"`
+	Exact         bool    `json:"exact"`
+	SameCluster   bool    `json:"same_cluster,omitempty"`
+	HardNegative  bool    `json:"hard_negative,omitempty"`
 }
 
 type laneAccumulator struct {
@@ -167,6 +178,7 @@ func applyAgentCaseMetrics(cr *CaseResult, spec CaseSpec, files []File) {
 	for i, artifact := range cr.ArtifactsIncluded {
 		norm := normalizeMetricPath(artifact)
 		lane := classifyMetricLane(artifact, fileByPath[norm], reasonByPath[norm])
+		canonicalLane := classifyCanonicalLane(artifact, fileByPath[norm], reasonByPath[norm])
 		grade := gradeArtifactForAgentMetrics(norm, expected, hardNegatives, sameCluster)
 		if grade.weight > 0 {
 			positiveWeight += grade.weight
@@ -195,13 +207,14 @@ func applyAgentCaseMetrics(cr *CaseResult, spec CaseSpec, files []File) {
 			cr.AgentMetrics.LaneCounts.PackedSections++
 		}
 		cr.ArtifactGrades = append(cr.ArtifactGrades, ArtifactGrade{
-			Path:         artifact,
-			Lane:         lane,
-			Grade:        grade.grade,
-			Weight:       grade.weight,
-			Exact:        grade.exact,
-			SameCluster:  grade.sameCluster,
-			HardNegative: grade.hardNegative,
+			Path:          artifact,
+			Lane:          lane,
+			CanonicalLane: canonicalLane,
+			Grade:         grade.grade,
+			Weight:        grade.weight,
+			Exact:         grade.exact,
+			SameCluster:   grade.sameCluster,
+			HardNegative:  grade.hardNegative,
 		})
 	}
 	cr.AgentMetrics.IncludedArtifacts = len(cr.ArtifactsIncluded)
@@ -353,6 +366,94 @@ func summarizeLaneMetrics(cases []CaseResult) []LaneMetric {
 	return out
 }
 
+func summarizeCanonicalLaneMetrics(cases []CaseResult) []LaneMetric {
+	lanes := []string{
+		CanonicalLaneIntent,
+		CanonicalLaneModel,
+		CanonicalLaneProtocol,
+		CanonicalLaneTemplate,
+		CanonicalLaneTrace,
+		CanonicalLaneSourceContext,
+		CanonicalLaneUnknown,
+	}
+	accs := make(map[string]*laneAccumulator, len(lanes))
+	for _, lane := range lanes {
+		accs[lane] = &laneAccumulator{LaneMetric: LaneMetric{Lane: lane}}
+	}
+	for _, c := range cases {
+		for _, lane := range lanes {
+			accs[lane].Cases++
+		}
+		expectedByLane := expectedCanonicalLaneCountsFromCase(c)
+		for lane, count := range expectedByLane {
+			acc := canonicalLaneAccumulator(accs, lane)
+			acc.ExpectedArtifacts += count
+			if count > 0 {
+				acc.CasesWithExpected++
+			}
+		}
+		includedByLane := map[string]bool{}
+		for _, grade := range c.ArtifactGrades {
+			lane := grade.CanonicalLane
+			if lane == "" {
+				lane = CanonicalLaneUnknown
+			}
+			acc := canonicalLaneAccumulator(accs, lane)
+			includedByLane[lane] = true
+			acc.IncludedArtifacts++
+			if grade.Exact {
+				acc.ExactRelevantArtifacts++
+			}
+			if grade.SameCluster {
+				acc.SameClusterArtifacts++
+			}
+			if grade.HardNegative {
+				acc.HardNegativeArtifacts++
+			}
+			if grade.Weight > 0 {
+				acc.GradedRelevanceWeight += grade.Weight
+			}
+		}
+		for lane := range includedByLane {
+			canonicalLaneAccumulator(accs, lane).CasesWithIncluded++
+		}
+	}
+	out := make([]LaneMetric, 0, len(lanes))
+	for _, lane := range lanes {
+		metric := accs[lane].LaneMetric
+		if metric.IncludedArtifacts > 0 {
+			metric.StrictPrecision = float64(metric.ExactRelevantArtifacts) / float64(metric.IncludedArtifacts)
+			metric.GradedPrecision = metric.GradedRelevanceWeight / float64(metric.IncludedArtifacts)
+		}
+		if metric.ExpectedArtifacts > 0 {
+			metric.Recall = float64(metric.ExactRelevantArtifacts) / float64(metric.ExpectedArtifacts)
+		}
+		out = append(out, metric)
+	}
+	return out
+}
+
+func canonicalLaneAccumulator(accs map[string]*laneAccumulator, lane string) *laneAccumulator {
+	if lane == "" {
+		lane = CanonicalLaneUnknown
+	}
+	if accs[lane] == nil {
+		accs[lane] = &laneAccumulator{LaneMetric: LaneMetric{Lane: lane}}
+	}
+	return accs[lane]
+}
+
+func expectedCanonicalLaneCountsFromCase(c CaseResult) map[string]int {
+	out := map[string]int{}
+	for _, path := range c.RelevantIncluded {
+		out[classifyExpectedCanonicalLane(path)]++
+	}
+	for _, path := range c.MissedExpectedRelevant {
+		out[classifyExpectedCanonicalLane(path)]++
+	}
+	return out
+}
+
 func expectedLaneCountsFromCase(c CaseResult) map[string]int {
 	out := map[string]int{}
 	for _, path := range c.RelevantIncluded {
@@ -403,12 +504,241 @@ func classifyMetricLane(path string, f File, reasonText string) string {
 
 func agentMetricNotes() map[string]string {
 	return map[string]string{
-		LaneDocsPlans:          "Markdown artifacts from artifacts_included.",
-		LaneTestCase:           "Artifacts with test-case metadata, test-case behavior reasons, or test-like paths.",
-		LaneCodeComment:        "Artifacts with code-comment metadata or code-comment reason text.",
-		LaneSourceContextOther: "Non-markdown artifacts left after test_case and code_comment classification.",
-		LanePackedSections:     "Overlay lane from packed_section_artifacts; it may overlap docs_plans and does not participate in source-lane totals.",
-		"same_cluster":         "Unlabeled line-ref artifact in the same source/test file as an expected line-ref artifact.",
+		LaneDocsPlans:              "Markdown artifacts from artifacts_included.",
+		LaneTestCase:               "Artifacts with test-case metadata, test-case behavior reasons, or test-like paths.",
+		LaneCodeComment:            "Artifacts with code-comment metadata or code-comment reason text.",
+		LaneSourceContextOther:     "Non-markdown artifacts left after test_case and code_comment classification.",
+		LanePackedSections:         "Overlay lane from packed_section_artifacts; it may overlap docs_plans and does not participate in source-lane totals.",
+		"same_cluster":             "Unlabeled line-ref artifact in the same source/test file as an expected line-ref artifact.",
+		CanonicalLaneIntent:        "Canonical document lane for plans, specs, ADRs, proposals, requirements, designs, and ordinary markdown written-record docs.",
+		CanonicalLaneModel:         "Canonical document lane for API contracts, schemas, configuration, and workflow/model artifacts.",
+		CanonicalLaneProtocol:      "Canonical document lane for agent instructions, skills, policies, runbooks, procedures, and standards.",
+		CanonicalLaneTemplate:      "Canonical document lane for prompt, document, issue, and pull-request templates.",
+		CanonicalLaneTrace:         "Canonical lane for trace/work-record artifacts when explicitly classified as trace.",
+		CanonicalLaneSourceContext: "Non-document bucket for source, test, and code-comment context; not a canonical document lane.",
+		CanonicalLaneUnknown:       "Fallback only when no classifier, kind/subtype, source, or path signal can assign a lane.",
+	}
+}
+
+func classifyCanonicalLane(path string, f File, reasonText string) string {
+	if lane := canonicalLaneFromSourceContext(path, f, reasonText); lane != "" {
+		return lane
+	}
+	if lane := canonicalLaneFromMetadata(f.Metadata); lane != "" {
+		return lane
+	}
+	if lane := canonicalLaneFromKindSubtype(f.Kind, f.Subtype); lane != "" {
+		return lane
+	}
+	return classifyExpectedCanonicalLane(path)
+}
+
+func canonicalLaneFromMetadata(metadata map[string]string) string {
+	if metadata == nil {
+		return ""
+	}
+	for _, key := range []string{"classifier_mode", "mode"} {
+		if lane := normalizeCanonicalLane(metadata[key]); lane != "" {
+			return lane
+		}
+	}
+	if lane := canonicalLaneFromKindSubtype(metadata["classifier_kind"], metadata["classifier_subtype"]); lane != "" {
+		return lane
+	}
+	model := strings.ToLower(strings.TrimSpace(metadata["classifier_model"]))
+	switch model {
+	case "adr", "openspec", "plan", "prd", "rfc", "agent_note":
+		return CanonicalLaneIntent
+	case "model":
+		return CanonicalLaneModel
+	case "protocol":
+		return CanonicalLaneProtocol
+	case "template":
+		return CanonicalLaneTemplate
+	case "trace":
+		return CanonicalLaneTrace
+	default:
+		return ""
+	}
+}
+
+func normalizeCanonicalLane(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case CanonicalLaneIntent:
+		return CanonicalLaneIntent
+	case CanonicalLaneModel:
+		return CanonicalLaneModel
+	case CanonicalLaneProtocol:
+		return CanonicalLaneProtocol
+	case CanonicalLaneTemplate:
+		return CanonicalLaneTemplate
+	case CanonicalLaneTrace:
+		return CanonicalLaneTrace
+	default:
+		return ""
+	}
+}
+
+func canonicalLaneFromKindSubtype(kind, subtype string) string {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	subtype = strings.ToLower(strings.TrimSpace(subtype))
+	switch {
+	case kind == "source_context":
+		return CanonicalLaneSourceContext
+	case isProtocolCanonicalSubtype(subtype):
+		return CanonicalLaneProtocol
+	case isTemplateCanonicalSubtype(subtype):
+		return CanonicalLaneTemplate
+	case isModelCanonicalSubtype(subtype):
+		return CanonicalLaneModel
+	case kind == "contract":
+		return CanonicalLaneModel
+	case kind == "plan" || kind == "spec" || kind == "requirements" || kind == "design" || kind == "decision":
+		return CanonicalLaneIntent
+	case subtype == "adr" || subtype == "prd" || strings.HasPrefix(subtype, "openspec_"):
+		return CanonicalLaneIntent
+	default:
+		return ""
+	}
+}
+
+func canonicalLaneFromSourceContext(path string, f File, reasonText string) string {
+	if strings.EqualFold(strings.TrimSpace(f.Kind), "source_context") {
+		return CanonicalLaneSourceContext
+	}
+	if isTestCaseFile(f) || isCodeCommentFile(f) || isTestLikeMetricPath(path) {
+		return CanonicalLaneSourceContext
+	}
+	if f.Metadata != nil {
+		switch strings.ToLower(strings.TrimSpace(f.Metadata["source_type"])) {
+		case "test_case", "code_comment", "source_context":
+			return CanonicalLaneSourceContext
+		}
+	}
+	reasonText = strings.ToLower(reasonText)
+	if strings.Contains(reasonText, "test-case behavior signal") ||
+		strings.Contains(reasonText, "code comment") ||
+		strings.Contains(reasonText, "code-comment") ||
+		strings.Contains(reasonText, "comment signal") {
+		return CanonicalLaneSourceContext
+	}
+	if isSourceLikeCanonicalPath(path) {
+		return CanonicalLaneSourceContext
+	}
+	return ""
+}
+
+func classifyExpectedCanonicalLane(path string) string {
+	path = strings.ToLower(filepath.ToSlash(metricBasePath(path)))
+	switch {
+	case path == "":
+		return CanonicalLaneUnknown
+	case isProtocolCanonicalPath(path):
+		return CanonicalLaneProtocol
+	case isTemplateCanonicalPath(path):
+		return CanonicalLaneTemplate
+	case isModelCanonicalPath(path):
+		return CanonicalLaneModel
+	case isMarkdownMetricPath(path):
+		return CanonicalLaneIntent
+	case isTestLikeMetricPath(path) || isSourceLikeCanonicalPath(path):
+		return CanonicalLaneSourceContext
+	default:
+		return CanonicalLaneUnknown
+	}
+}
+
+func isProtocolCanonicalSubtype(subtype string) bool {
+	switch subtype {
+	case "agent_instruction", "skill", "maintainer_policy", "ownership_policy",
+		"governance_policy", "contribution_policy", "security_policy",
+		"procedure", "runbook", "standard":
+		return true
+	default:
+		return false
+	}
+}
+
+func isTemplateCanonicalSubtype(subtype string) bool {
+	switch subtype {
+	case "document_template", "prompt_template", "issue_template", "pull_request_template":
+		return true
+	default:
+		return false
+	}
+}
+
+func isModelCanonicalSubtype(subtype string) bool {
+	switch subtype {
+	case "api_contract", "schema_model", "configuration", "workflow_definition":
+		return true
+	default:
+		return false
+	}
+}
+
+func isProtocolCanonicalPath(path string) bool {
+	path = strings.ToLower(filepath.ToSlash(path))
+	base := filepath.Base(path)
+	stem := strings.TrimSuffix(base, filepath.Ext(base))
+	switch base {
+	case "agents.md", "agent.md", "claude.md", "codex.md", "gemini.md", "memento.md", "contributing.md", "security.md", "governance.md", "maintainers.md", ".cursorrules":
+		return true
+	}
+	if stem == "skill" || stem == "runbook" || stem == "procedure" || stem == "standard" {
+		return true
+	}
+	return strings.Contains(path, "/agents/") ||
+		strings.Contains(path, "/skills/") ||
+		strings.Contains(path, "/runbooks/") ||
+		strings.Contains(path, "/procedures/") ||
+		strings.Contains(path, "/policies/") ||
+		strings.Contains(path, "/standards/") ||
+		strings.Contains(path, "/.github/instructions/") ||
+		strings.HasSuffix(stem, ".agent") ||
+		strings.HasSuffix(stem, ".instructions")
+}
+
+func isTemplateCanonicalPath(path string) bool {
+	path = strings.ToLower(filepath.ToSlash(path))
+	base := filepath.Base(path)
+	return strings.Contains(path, "/templates/") ||
+		strings.Contains(path, "/template/") ||
+		strings.Contains(base, "template") ||
+		strings.Contains(path, ".github/issue_template") ||
+		strings.Contains(path, ".github/pull_request_template")
+}
+
+func isModelCanonicalPath(path string) bool {
+	path = strings.ToLower(filepath.ToSlash(path))
+	base := filepath.Base(path)
+	stem := strings.TrimSuffix(base, filepath.Ext(base))
+	if strings.Contains(path, "/schemas/") ||
+		strings.Contains(path, "/schema/") ||
+		strings.Contains(path, "/openapi/") ||
+		strings.Contains(path, "/api/") ||
+		strings.Contains(path, "/configs/") ||
+		strings.Contains(path, "/config/") ||
+		strings.Contains(path, "/workflows/") ||
+		strings.Contains(path, "/workflow/") ||
+		strings.Contains(path, "/.github/workflows/") {
+		return true
+	}
+	return strings.Contains(stem, "schema") ||
+		strings.Contains(stem, "openapi") ||
+		strings.Contains(stem, "config") ||
+		strings.Contains(stem, "workflow") ||
+		strings.Contains(stem, "contract")
+}
+
+func isSourceLikeCanonicalPath(path string) bool {
+	path = strings.ToLower(filepath.ToSlash(metricBasePath(path)))
+	ext := filepath.Ext(path)
+	switch ext {
+	case ".go", ".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".rb", ".php", ".java", ".kt", ".kts", ".rs", ".c", ".cc", ".cpp", ".h", ".hpp", ".cs", ".swift", ".scala", ".sql", ".sh", ".bash", ".zsh", ".ps1":
+		return true
+	default:
+		return false
 	}
 }
 

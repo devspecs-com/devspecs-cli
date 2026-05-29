@@ -528,6 +528,7 @@ type Result struct {
 	Diagnostics      Diagnostics       `json:"diagnostics"`
 	AgentMetrics     AgentMetrics      `json:"agent_metrics"`
 	LaneMetrics      []LaneMetric      `json:"lane_metrics"`
+	CanonicalLanes   []LaneMetric      `json:"canonical_lane_metrics,omitempty"`
 	MetricNotes      map[string]string `json:"metric_notes,omitempty"`
 	PhaseTelemetry   []PhaseTelemetry  `json:"phase_telemetry,omitempty"`
 	IndexCache       *IndexCacheReport `json:"index_cache,omitempty"`
@@ -826,6 +827,7 @@ func Run(fixture string, opts Options) (*Result, error) {
 	result.Diagnostics.UnindexedDocumentSummaries = summarizeUnindexedDocuments(fixtureAbs, files)
 	result.AgentMetrics = summarizeAgentMetrics(result.Cases)
 	result.LaneMetrics = summarizeLaneMetrics(result.Cases)
+	result.CanonicalLanes = summarizeCanonicalLaneMetrics(result.Cases)
 	result.MetricNotes = agentMetricNotes()
 	result.Summary.AgentMetrics = result.AgentMetrics
 	if corpusSource == CorpusSourceSQLiteIndex {
@@ -3171,6 +3173,26 @@ func FormatText(r *Result) string {
 			}
 			if lane.PackedSectionCount > 0 {
 				fmt.Fprintf(&b, " / packed sections %d", lane.PackedSectionCount)
+			}
+			fmt.Fprintln(&b)
+		}
+		fmt.Fprintln(&b)
+	}
+	if len(r.CanonicalLanes) > 0 {
+		fmt.Fprintln(&b, "Canonical Lane Metrics")
+		for _, lane := range r.CanonicalLanes {
+			fmt.Fprintf(&b, "- %s: precision %s / graded precision %s / recall %s / included %d / exact relevant %d",
+				lane.Lane,
+				pct(lane.StrictPrecision),
+				pct(lane.GradedPrecision),
+				pct(lane.Recall),
+				lane.IncludedArtifacts,
+				lane.ExactRelevantArtifacts)
+			if lane.SameClusterArtifacts > 0 {
+				fmt.Fprintf(&b, " / same-cluster %d", lane.SameClusterArtifacts)
+			}
+			if lane.HardNegativeArtifacts > 0 {
+				fmt.Fprintf(&b, " / hard-negative %d", lane.HardNegativeArtifacts)
 			}
 			fmt.Fprintln(&b)
 		}
