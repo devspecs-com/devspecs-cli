@@ -127,8 +127,8 @@ func TestDOD_03_ScanArtifacts(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if out.Found["openspec"] != 1 {
-		t.Error("expected 1 openspec found")
+	if out.Found["openspec"] != 4 {
+		t.Error("expected 4 openspec found")
 	}
 	if out.Found["adr"] != 1 {
 		t.Error("expected 1 adr found")
@@ -136,8 +136,8 @@ func TestDOD_03_ScanArtifacts(t *testing.T) {
 	if out.Found["markdown"] != 1 {
 		t.Error("expected 1 markdown found")
 	}
-	if len(out.SourcesBreakdown) != 3 {
-		t.Fatalf("sources_breakdown: want 3 rows, got %d", len(out.SourcesBreakdown))
+	if len(out.SourcesBreakdown) != 4 {
+		t.Fatalf("sources_breakdown: want 4 rows, got %d", len(out.SourcesBreakdown))
 	}
 	var sumCount int
 	for _, row := range out.SourcesBreakdown {
@@ -153,8 +153,8 @@ func TestDOD_03_ScanArtifacts(t *testing.T) {
 			t.Errorf("formats sum %d != count %d for %s", sumFormats, row.Count, row.SourceType)
 		}
 	}
-	if sumCount != 3 {
-		t.Errorf("sources_breakdown count sum: want 3, got %d", sumCount)
+	if sumCount != 6 {
+		t.Errorf("sources_breakdown count sum: want 6, got %d", sumCount)
 	}
 }
 
@@ -353,8 +353,8 @@ func TestDOD_10_RescanNoDuplicates(t *testing.T) {
 	if result["New"].(float64) != 0 {
 		t.Error("rescan created new artifacts")
 	}
-	if result["Unchanged"].(float64) != 3 {
-		t.Errorf("expected 3 unchanged, got %v", result["Unchanged"])
+	if result["Unchanged"].(float64) != 6 {
+		t.Errorf("expected 6 unchanged, got %v", result["Unchanged"])
 	}
 }
 

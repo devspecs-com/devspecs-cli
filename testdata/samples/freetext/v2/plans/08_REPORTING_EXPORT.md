@@ -1,7 +1,7 @@
-# Reporting export
+# Reporting Export
 
-Export summaries.
+Generate a compact report for review.
 
 ## Tasks
 
-- [ ] CSV
+- [ ] Add report template

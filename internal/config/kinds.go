@@ -14,13 +14,38 @@ const (
 	KindContract         = "contract"
 	KindDecision         = "decision"
 	KindMarkdownArtifact = "markdown_artifact"
+	KindSourceContext    = "source_context"
 )
 
 // Known subtypes per kind (empty subtype is always allowed).
 const (
-	SubtypeADR            = "adr"
-	SubtypeOpenspecChange = "openspec_change"
-	SubtypePRD            = "prd"
+	SubtypeADR                    = "adr"
+	SubtypeOpenspecChange         = "openspec_change"
+	SubtypeOpenspecCollection     = "openspec_collection"
+	SubtypeOpenspecChangeBundle   = "openspec_change_bundle"
+	SubtypeOpenspecChild          = "openspec_child"
+	SubtypeOpenspecCapabilitySpec = "openspec_capability_spec"
+	SubtypePRD                    = "prd"
+	SubtypeAgentInstruction       = "agent_instruction"
+	SubtypeSkill                  = "skill"
+	SubtypeMaintainerPolicy       = "maintainer_policy"
+	SubtypeOwnershipPolicy        = "ownership_policy"
+	SubtypeGovernancePolicy       = "governance_policy"
+	SubtypeContributionPolicy     = "contribution_policy"
+	SubtypeSecurityPolicy         = "security_policy"
+	SubtypeProcedure              = "procedure"
+	SubtypeRunbook                = "runbook"
+	SubtypeStandard               = "standard"
+	SubtypeAPIContract            = "api_contract"
+	SubtypeSchemaModel            = "schema_model"
+	SubtypeConfiguration          = "configuration"
+	SubtypeWorkflowDefinition     = "workflow_definition"
+	SubtypeDocumentTemplate       = "document_template"
+	SubtypePromptTemplate         = "prompt_template"
+	SubtypeIssueTemplate          = "issue_template"
+	SubtypePullRequestTemplate    = "pull_request_template"
+	SubtypeTestCase               = "test_case"
+	SubtypeCodeComment            = "code_comment"
 )
 
 var validKinds = map[string]struct{}{
@@ -31,6 +56,7 @@ var validKinds = map[string]struct{}{
 	KindContract:         {},
 	KindDecision:         {},
 	KindMarkdownArtifact: {},
+	KindSourceContext:    {},
 }
 
 // allowedSubtypes maps kind -> set of allowed non-empty subtype strings.
@@ -39,10 +65,38 @@ var allowedSubtypes = map[string]map[string]struct{}{
 		SubtypeADR: {},
 	},
 	KindSpec: {
-		SubtypeOpenspecChange: {},
+		SubtypeOpenspecChange:         {},
+		SubtypeOpenspecCollection:     {},
+		SubtypeOpenspecChangeBundle:   {},
+		SubtypeOpenspecChild:          {},
+		SubtypeOpenspecCapabilitySpec: {},
 	},
 	KindRequirements: {
 		SubtypePRD: {},
+	},
+	KindMarkdownArtifact: {
+		SubtypeAgentInstruction:    {},
+		SubtypeSkill:               {},
+		SubtypeMaintainerPolicy:    {},
+		SubtypeOwnershipPolicy:     {},
+		SubtypeGovernancePolicy:    {},
+		SubtypeContributionPolicy:  {},
+		SubtypeSecurityPolicy:      {},
+		SubtypeProcedure:           {},
+		SubtypeRunbook:             {},
+		SubtypeStandard:            {},
+		SubtypeAPIContract:         {},
+		SubtypeSchemaModel:         {},
+		SubtypeConfiguration:       {},
+		SubtypeWorkflowDefinition:  {},
+		SubtypeDocumentTemplate:    {},
+		SubtypePromptTemplate:      {},
+		SubtypeIssueTemplate:       {},
+		SubtypePullRequestTemplate: {},
+	},
+	KindSourceContext: {
+		SubtypeTestCase:    {},
+		SubtypeCodeComment: {},
 	},
 }
 

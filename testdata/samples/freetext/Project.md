@@ -4,11 +4,11 @@ Current status: active development.
 
 ## Current focus
 
-- Ship scraping MVP
+- Ship the sample capture workflow.
 
 ## What's next
 
-- [ ] Finish collection pipeline
+- [ ] Finish the collection pipeline
 - [ ] Benchmark latency
 
 ## Blockers

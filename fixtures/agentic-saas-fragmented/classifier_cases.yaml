@@ -1,0 +1,115 @@
+version: 1
+fixture: agentic-saas-fragmented
+classifier_cases:
+  - id: openspec-harden-entitlement-sync-container
+    path: openspec/changes/harden-entitlement-sync
+    scope: container
+    expected:
+      classifier: openspec
+      scope: container
+      authority: high_current_intent
+      format_profile: openspec
+      should_index: true
+      required_reasons:
+        - layout_match
+      child_candidates:
+        - path: openspec/changes/harden-entitlement-sync/proposal.md
+          role: proposal
+        - path: openspec/changes/harden-entitlement-sync/design.md
+          role: design
+        - path: openspec/changes/harden-entitlement-sync/tasks.md
+          role: tasks
+        - path: openspec/changes/harden-entitlement-sync/specs/billing/spec.md
+          role: spec_delta
+
+  - id: adr-webhook-idempotency-nygard
+    path: docs/adr/0002-webhook-idempotency-boundary.md
+    scope: document
+    expected:
+      classifier: adr
+      scope: document
+      subformat: adr.nygard
+      kind: decision
+      status: accepted
+      authority: high_decision
+      should_index: true
+      required_reasons:
+        - heading_match
+        - subformat_evidence
+
+  - id: prd-billing-entitlements
+    path: docs/prd/billing-entitlements-v1.md
+    scope: document
+    expected:
+      classifier: prd
+      scope: document
+      family: prd.product_intent
+      kind: requirements
+      subtype: prd
+      status: accepted
+      authority: product_background
+      should_index: true
+      required_reasons:
+        - frontmatter
+        - family_evidence
+
+  - id: rfc-billing-webhook-replay
+    path: docs/rfcs/0008-billing-webhook-replay-protection.md
+    scope: document
+    expected:
+      classifier: rfc
+      scope: document
+      family: rfc.section_pattern
+      kind: design
+      status: accepted
+      authority: design_proposal
+      should_index: true
+      required_reasons:
+        - path_hint
+        - family_evidence
+
+  - id: plan-entitlement-sync
+    path: docs/plans/2026-05-01-entitlement-sync-plan.md
+    scope: document
+    expected:
+      classifier: plan
+      scope: document
+      family: plan.implementation_plan
+      kind: plan
+      status: active
+      authority: working_plan
+      should_index: true
+      required_reasons:
+        - heading_match
+        - family_evidence
+
+  - id: agent-note-webhook-followup
+    path: .claude/notes/webhook-idempotency-followup.md
+    scope: document
+    expected:
+      classifier: agent_note
+      scope: document
+      family: agent_note.followup_note
+      kind: plan
+      status: active
+      authority: handoff_note
+      should_index: true
+      required_reasons:
+        - path_hint
+        - family_evidence
+
+  - id: generic-readme-fallback
+    path: README.md
+    scope: document
+    expected:
+      classifier: generic_markdown
+      scope: document
+      kind: markdown_artifact
+      authority: neutral
+      should_index: true
+      must_not_classify_as:
+        - adr
+        - prd
+        - openspec
+      required_reasons:
+        - fallback

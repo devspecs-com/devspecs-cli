@@ -4,9 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/devspecs-com/devspecs-cli/internal/store"
 )
 
 func setupReadEnv(t *testing.T) (repoDir string, artifactID string) {
@@ -452,6 +457,315 @@ func TestFind_JSONOutput(t *testing.T) {
 	}
 }
 
+func TestFindPack_JSONOutputKeepsRankedResultsAndGroups(t *testing.T) {
+	setupReadEnv(t)
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"Plan", "--json", "--pack"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out FindPackOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("find --json --pack invalid: %v\n%s", err, buf.String())
+	}
+	if out.Mode != "role_grouped_pack_v0" {
+		t.Fatalf("pack mode = %q", out.Mode)
+	}
+	if len(out.Groups) == 0 {
+		t.Fatalf("find --json --pack returned no groups: %#v", out)
+	}
+	if out.Summary.IncludedCount == 0 || out.Summary.RoleDiversity == 0 {
+		t.Fatalf("find --json --pack missing summary: %#v", out.Summary)
+	}
+	if len(out.RankedResults) == 0 {
+		t.Fatalf("find --json --pack returned no ranked results: %#v", out)
+	}
+}
+
+func TestFindPack_HumanOutputShowsReceipt(t *testing.T) {
+	setupReadEnv(t)
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"Plan", "--pack"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	output := buf.String()
+	for _, want := range []string{"Working set: Plan", "Summary:", "Coverage:", "Evidence:"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("find --pack missing %q:\n%s", want, output)
+		}
+	}
+	for _, notWant := range []string{"Retriever:", "Mode:", "Type:", "Why:", "Signals:"} {
+		if strings.Contains(output, notWant) {
+			t.Fatalf("find --pack should be concise and omit %q:\n%s", notWant, output)
+		}
+	}
+}
+
+func TestFindPack_HumanOutputShowsGitReceiptsWhenAvailable(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git executable not available")
+	}
+	repoDir, _ := setupReadEnv(t)
+	runGitForFindPack(t, repoDir, "init")
+	runGitForFindPack(t, repoDir, "checkout", "-b", "main")
+	runGitForFindPack(t, repoDir, "config", "user.email", "test@example.com")
+	runGitForFindPack(t, repoDir, "config", "user.name", "Test User")
+	runGitForFindPack(t, repoDir, "add", "plan.md")
+	runGitForFindPack(t, repoDir, "commit", "-m", "Plan token refresh work (#42)", "-m", "Connects the plan to auth implementation.")
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"token refresh plan", "--pack", "--no-refresh"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	output := buf.String()
+	for _, want := range []string{"Relevant commits (1)", "Plan token refresh work (#42)", "touched: plan.md", "matched: token, refresh"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("find --pack git receipts missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestFindPack_JSONOutputIncludesGitReceiptsWhenAvailable(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git executable not available")
+	}
+	repoDir, _ := setupReadEnv(t)
+	runGitForFindPack(t, repoDir, "init")
+	runGitForFindPack(t, repoDir, "checkout", "-b", "main")
+	runGitForFindPack(t, repoDir, "config", "user.email", "test@example.com")
+	runGitForFindPack(t, repoDir, "config", "user.name", "Test User")
+	runGitForFindPack(t, repoDir, "add", "plan.md")
+	runGitForFindPack(t, repoDir, "commit", "-m", "Plan webhook replay work", "-m", "Refs #77")
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"webhook replay plan", "--json", "--pack", "--no-refresh"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out FindPackOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("find --json --pack invalid: %v\n%s", err, buf.String())
+	}
+	if out.GitTrust == nil || len(out.GitTrust.Receipts) != 1 {
+		t.Fatalf("expected one git receipt: %#v", out.GitTrust)
+	}
+	if out.GitTrust.Receipts[0].ShortSHA == "" || !strings.Contains(out.GitTrust.Receipts[0].Subject, "webhook replay") {
+		t.Fatalf("unexpected git receipt: %#v", out.GitTrust.Receipts[0])
+	}
+}
+
+func TestFindPack_VerboseHumanOutputShowsDiagnostics(t *testing.T) {
+	setupReadEnv(t)
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"Plan", "--pack", "--verbose"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	output := buf.String()
+	for _, want := range []string{"Working set: Plan", "Retriever:", "Mode: role_grouped_pack_v0", "Source:", "Type:", "Why:"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("find --pack --verbose missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func runGitForFindPack(t *testing.T, root string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+}
+
+func TestFindPackGraphDiagnostics_HumanOutputShowsRelatedEvidenceSection(t *testing.T) {
+	repoDir, _ := setupReadEnv(t)
+	seedGraphDiagnosticArtifacts(t, repoDir)
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"--pack", "--graph-diagnostics", "--no-refresh", "rotatetoken implementation"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	output := buf.String()
+	for _, want := range []string{
+		"Working set: rotatetoken implementation",
+		"Related via test/source evidence (1)",
+		"Evidence: typed_edge_pack_scout_v1",
+		"Behavior tests (1)",
+		"Connected from: src/session.ts",
+		"Evidence: tests_source/source_symbol_match",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("pack graph output missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "Graph attachments") {
+		t.Fatalf("pack graph output should use pack presentation section, got:\n%s", output)
+	}
+}
+
+func TestFindPackGraphDiagnostics_JSONKeepsGraphContextSeparate(t *testing.T) {
+	repoDir, _ := setupReadEnv(t)
+	seedGraphDiagnosticArtifacts(t, repoDir)
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"--json", "--pack", "--graph-diagnostics", "--no-refresh", "rotatetoken implementation"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out FindPackOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("find --json --pack --graph-diagnostics invalid: %v\n%s", err, buf.String())
+	}
+	if out.GraphDiagnostics == nil {
+		t.Fatalf("expected raw graph diagnostics in pack JSON: %#v", out)
+	}
+	if out.GraphContext == nil {
+		t.Fatalf("expected graph context presentation in pack JSON: %#v", out)
+	}
+	if out.GraphContext.Mode != findGraphPackContextMode {
+		t.Fatalf("graph context mode = %q", out.GraphContext.Mode)
+	}
+	if out.GraphContext.CandidateCount != 1 || len(out.GraphContext.Groups) != 1 {
+		t.Fatalf("expected one grouped graph context candidate: %#v", out.GraphContext)
+	}
+	item := out.GraphContext.Groups[0].Items[0]
+	if item.AdmissionEdgeType != "tests_source" || item.SourcePath != "src/session.test.ts" {
+		t.Fatalf("unexpected graph context item: %#v", item)
+	}
+	for _, ranked := range out.RankedResults {
+		if ranked.ID == item.ID {
+			t.Fatalf("graph context item leaked into ranked results: %#v", out)
+		}
+	}
+}
+
+func TestFindGraphDiagnostics_AttachesTypedEdgeAndSuppressesSharedConcept(t *testing.T) {
+	repoDir, _ := setupReadEnv(t)
+	seedGraphDiagnosticArtifacts(t, repoDir)
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"--json", "--graph-diagnostics", "--no-refresh", "rotatetoken implementation"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out FindGraphOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("find --json --graph-diagnostics invalid: %v\n%s", err, buf.String())
+	}
+	if out.Mode != findGraphDiagnosticsMode {
+		t.Fatalf("graph mode = %q", out.Mode)
+	}
+	if len(out.RankedResults) == 0 {
+		t.Fatalf("expected unchanged ranked results: %#v", out)
+	}
+	if out.GraphDiagnostics.CandidateCount != 1 {
+		t.Fatalf("expected one graph candidate, got %#v", out.GraphDiagnostics)
+	}
+	got := out.GraphDiagnostics.Candidates[0]
+	if got.SourcePath != "src/session.test.ts" {
+		t.Fatalf("graph candidate source path = %q, want test attachment; diagnostics=%#v", got.SourcePath, out.GraphDiagnostics)
+	}
+	if got.AdmissionEdgeType != "tests_source" {
+		t.Fatalf("admission edge = %q", got.AdmissionEdgeType)
+	}
+	if !strings.Contains(got.Receipt, "tests_source connects src/session.test.ts#test_case -> src/session.ts") {
+		t.Fatalf("receipt missing seed and edge evidence: %q", got.Receipt)
+	}
+	for _, candidate := range out.GraphDiagnostics.Candidates {
+		if candidate.Path == "docs/noisy.md" {
+			t.Fatalf("support-only shared concept admitted graph candidate: %#v", out.GraphDiagnostics)
+		}
+	}
+	if out.GraphDiagnostics.Counts["suppressed_support_only"] == 0 {
+		t.Fatalf("expected shared concept suppression count: %#v", out.GraphDiagnostics)
+	}
+	if out.GraphDiagnostics.Counts["admitted_explicit_reference"] != 0 {
+		t.Fatalf("explicit references must stay support-only in graph diagnostics: %#v", out.GraphDiagnostics)
+	}
+}
+
+func TestFindGraphDiagnostics_RequiresSourceTestQueryIntent(t *testing.T) {
+	repoDir, _ := setupReadEnv(t)
+	seedGraphDiagnosticArtifacts(t, repoDir)
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"--json", "--graph-diagnostics", "--no-refresh", "rotatetoken"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out FindGraphOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("find --json --graph-diagnostics invalid: %v\n%s", err, buf.String())
+	}
+	if len(out.RankedResults) == 0 {
+		t.Fatalf("expected unchanged ranked results: %#v", out)
+	}
+	if out.GraphDiagnostics.CandidateCount != 0 {
+		t.Fatalf("expected query-intent gate to suppress graph candidates: %#v", out.GraphDiagnostics)
+	}
+	if out.GraphDiagnostics.Counts["suppressed_query_intent"] == 0 {
+		t.Fatalf("expected query-intent suppression count: %#v", out.GraphDiagnostics)
+	}
+}
+
+func TestFind_JSONOutputIncludesLineScopedPath(t *testing.T) {
+	repoDir, _ := setupReadEnv(t)
+	relPath := seedLineScopedTestArtifacts(t, repoDir)
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"--json", "--no-refresh", "testputandgetexposedtool"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var arts []map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &arts); err != nil {
+		t.Fatalf("find --json invalid: %v", err)
+	}
+	if len(arts) == 0 {
+		t.Fatal("find --json returned empty array")
+	}
+	wantPath := filepath.ToSlash(relPath) + "#L53"
+	if arts[0]["path"] != wantPath {
+		t.Fatalf("find --json path = %#v, want %q\nrows=%#v", arts[0]["path"], wantPath, arts)
+	}
+	if arts[0]["source_path"] != filepath.ToSlash(relPath) {
+		t.Fatalf("find --json source_path = %#v", arts[0]["source_path"])
+	}
+}
+
 func TestResume_QueryFocusedContextJSON(t *testing.T) {
 	setupReadEnv(t)
 
@@ -480,5 +794,125 @@ func TestResume_QueryFocusedContextJSON(t *testing.T) {
 	context, _ := obj["context"].(string)
 	if !strings.Contains(context, "Open task") || !strings.Contains(context, "plan.md") {
 		t.Fatalf("focused context missing expected content: %s", context)
+	}
+}
+
+func seedLineScopedTestArtifacts(t *testing.T, repoDir string) string {
+	t.Helper()
+	db, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	var repoID string
+	if err := db.QueryRow("SELECT id FROM repos LIMIT 1").Scan(&repoID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	relPath := filepath.ToSlash(filepath.Join("components", "camel-ai", "camel-langchain4j-tools", "src", "test", "java", "org", "apache", "camel", "component", "langchain4j", "tools", "spec", "CamelToolExecutorCacheTest.java"))
+	insertTestArtifact(t, db, repoID, "ds_exact_test", "rev_exact_test", "src_exact_test", relPath, 53, 67, "testPutAndGetExposedTool", "Test: testPutAndGetExposedTool\nSource: "+relPath+"\nLines: 53-67\n\ncache.put(\"users\", camelSpec);\ncache.getTools().get(\"users\");", now)
+	insertTestArtifact(t, db, repoID, "ds_other_test", "rev_other_test", "src_other_test", relPath, 151, 159, "testHasSearchableTools", "Test: testHasSearchableTools\nSource: "+relPath+"\nLines: 151-159\n\ncache.putSearchable(\"users\", camelSpec);\ncache.hasSearchableTools();", now)
+	return relPath
+}
+
+func seedGraphDiagnosticArtifacts(t *testing.T, repoDir string) {
+	t.Helper()
+	db, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	var repoID string
+	if err := db.QueryRow("SELECT id FROM repos LIMIT 1").Scan(&repoID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	insertGraphArtifact(t, db, repoID, "ds_graph_source", "rev_graph_source", "src_graph_source", "source_context", "", "src/session.ts", "Session implementation", "export function RotateToken() { return 'rotatetoken implementation'; }\n", `{"language":"typescript"}`, now)
+	insertGraphArtifact(t, db, repoID, "ds_graph_test", "rev_graph_test", "src_graph_test", "source_context", "test_case", "src/session.test.ts", "Session behavior test", "describe('session behavior', () => { it('covers rotation', () => {}); });\n", `{"mode":"intent","subtype":"test_case","source_type":"test_case","test_name":"session behavior"}`, now)
+	insertGraphArtifact(t, db, repoID, "ds_graph_noise", "rev_graph_noise", "src_graph_noise", "plan", "", "docs/noisy.md", "Noisy related doc", "This document shares a generic session concept but is not implementation context.\n", `{}`, now)
+	insertGraphArtifact(t, db, repoID, "ds_graph_reference", "rev_graph_reference", "src_graph_reference", "plan", "", "docs/session-reference.md", "Session reference", "This document explicitly references src/session.ts but should not be graph-admitted.\n", `{}`, now)
+	if err := db.UpsertArtifactEdge(store.ArtifactEdgeInput{
+		ID:            "edge_graph_test_source",
+		RepoID:        repoID,
+		SrcArtifactID: "ds_graph_test",
+		DstArtifactID: "ds_graph_source",
+		EdgeType:      "tests_source",
+		Weight:        0.8,
+		Confidence:    0.82,
+		EvidenceCount: 1,
+		SourceSignal:  "source_symbol_match",
+		Explanation:   "test mentions source symbol RotateToken",
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertArtifactEdge(store.ArtifactEdgeInput{
+		ID:            "edge_graph_shared_concept",
+		RepoID:        repoID,
+		SrcArtifactID: "ds_graph_source",
+		DstArtifactID: "ds_graph_noise",
+		EdgeType:      "mentions_same_concept",
+		Weight:        0.7,
+		Confidence:    0.9,
+		EvidenceCount: 1,
+		SourceSignal:  "shared_rare_concept",
+		Explanation:   "shares rare concept session",
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertArtifactEdge(store.ArtifactEdgeInput{
+		ID:            "edge_graph_explicit_reference",
+		RepoID:        repoID,
+		SrcArtifactID: "ds_graph_reference",
+		DstArtifactID: "ds_graph_source",
+		EdgeType:      "explicit_reference",
+		Weight:        0.9,
+		Confidence:    0.9,
+		EvidenceCount: 1,
+		SourceSignal:  "path_reference",
+		Explanation:   "explicit path reference",
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertGraphArtifact(t *testing.T, db *store.DB, repoID, artifactID, revID, sourceID, kind, subtype, relPath, title, body, extracted, now string) {
+	t.Helper()
+	relPath = filepath.ToSlash(relPath)
+	if err := db.InsertArtifactDirect(artifactID, repoID, kind, subtype, title, "unknown", revID, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertRevisionDirect(revID, artifactID, "sha256:"+artifactID, body, extracted, now); err != nil {
+		t.Fatal(err)
+	}
+	sourceType := kind
+	if subtype == "test_case" {
+		sourceType = "test_case"
+	}
+	if err := db.InsertSourceDirect(sourceID, artifactID, repoID, sourceType, relPath, relPath+"|"+sourceType, "", "", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.IndexArtifactFTS(artifactID, title, body, relPath); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertTestArtifact(t *testing.T, db *store.DB, repoID, artifactID, revID, sourceID, relPath string, startLine, endLine int, testName, body, now string) {
+	t.Helper()
+	title := "CamelToolExecutorCacheTest > " + testName
+	extracted := `{"mode":"intent","subtype":"test_case","source_type":"test_case","test_name":"` + testName + `","source_line_range":"` + strconv.Itoa(startLine) + `-` + strconv.Itoa(endLine) + `"}`
+	if err := db.InsertArtifactDirect(artifactID, repoID, "source_context", "test_case", title, "unknown", revID, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InsertRevisionDirect(revID, artifactID, "sha256:"+artifactID, body, extracted, now); err != nil {
+		t.Fatal(err)
+	}
+	sourceIdentity := relPath + "|test_case|" + strconv.Itoa(startLine) + "|" + strings.ToLower(testName)
+	if err := db.InsertSourceDirect(sourceID, artifactID, repoID, "test_case", relPath, sourceIdentity, "", "", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.IndexArtifactFTS(artifactID, title, body, relPath); err != nil {
+		t.Fatal(err)
 	}
 }

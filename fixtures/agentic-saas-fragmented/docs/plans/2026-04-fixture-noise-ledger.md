@@ -37,10 +37,10 @@ One more realistic wrinkle: many repositories keep notes from previous agents an
 
 The ledger also models temporal ambiguity. Active plans, stale scratch notes, accepted ADRs, superseded ADRs, draft PRDs, Cursor plans, Claude notes, OpenSpec proposals, OpenSpec designs, OpenSpec task lists, and spec deltas all coexist. Some are high authority, some are useful background, and some are traps. A useful eval should force the retriever to decide among them and then report the tradeoff honestly. The right result is not always perfect recall, and high token reduction alone is meaningless without recall and precision beside it.
 
-For marketing and whitepaper use, this matters because a tiny curated corpus can make any retriever look brilliant. A larger noisy corpus shows whether context packing actually saves tokens while preserving planning intent. This seed is still not a locked benchmark, but it is large enough to reveal the kinds of semantic gaps seen in real trials.
+This matters because a tiny curated corpus can make any retriever look brilliant. A larger noisy corpus shows whether context packing saves tokens while preserving planning intent. This seed is still not a locked benchmark, but it is large enough to reveal common semantic gaps.
 
 The intended interpretation is conservative: use this fixture to catch regressions, compare retriever revisions, and discuss tradeoffs. Do not claim agent coding success from it. Do not claim broad semantic understanding from one repo. Do use the missed and irrelevant artifact lists as a backlog for future retrieval architecture.
 
-In other words, this is still a seed smoke benchmark, but it is no longer a tiny happy path. That distinction should stay visible in every eval report. Future locked fixtures can make stronger claims after the case list is frozen, distractors are reviewed, and retriever tuning happens against held-out examples instead of visible cases.
+In other words, this is still a seed smoke benchmark, but it is no longer a tiny happy path. That distinction should stay visible in every eval report.
 
 Seed reports remain caveated. This final note pads planning corpus scale without adding authority, which is exactly the kind of low-value residue a real context packer must learn to ignore. It should stay irrelevant, but its presence makes token reduction and precision more meaningful than they were in the tiny first-pass fixture.

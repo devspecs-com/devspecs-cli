@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/discover"
@@ -15,6 +16,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/initflow"
 	"github.com/devspecs-com/devspecs-cli/internal/repo"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/devspecs-com/devspecs-cli/internal/telemetry"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
@@ -36,7 +38,14 @@ func NewInitCmd() *cobra.Command {
 
 Layout detection runs by default (unless --no-detect). In an interactive terminal, a workflow profile picker runs first to merge common source paths and rules; use --yes or --non-interactive to skip it (CI and scripts).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInit(cmd, force, hooks, noDetect, yes, nonInteractive)
+			start := time.Now()
+			err := runInit(cmd, force, hooks, noDetect, yes, nonInteractive)
+			telemetry.RecordCommand("init", err == nil, time.Since(start), map[string]any{
+				"force":     force,
+				"hooks":     hooks,
+				"no_detect": noDetect,
+			})
+			return err
 		},
 	}
 

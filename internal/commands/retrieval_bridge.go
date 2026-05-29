@@ -1,111 +1,39 @@
 package commands
 
 import (
-	"fmt"
 	"math"
-	"path/filepath"
-	"strings"
+	"os"
 
+	"github.com/devspecs-com/devspecs-cli/internal/indexquery"
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 )
 
-const commandTokenCounterName = "approx_chars_div_4"
+const commandTokenCounterName = indexquery.TokenCounterName
 
 func loadRetrievalCandidates(db *store.DB, fp store.FilterParams) ([]retrieval.Candidate, error) {
-	artifacts, err := db.ListArtifacts(fp)
+	return indexquery.LoadCandidates(db, fp)
+}
+
+func loadRetrievalCandidatesForQuery(db *store.DB, fp store.FilterParams, query string) ([]retrieval.Candidate, error) {
+	result, err := loadRetrievalCandidatesForQueryWithReport(db, fp, query)
+	return result.Candidates, err
+}
+
+func loadRetrievalCandidatesForQueryWithReport(db *store.DB, fp store.FilterParams, query string) (indexquery.CandidateLoadResult, error) {
+	mode, err := indexquery.ParseRuntimeMode(os.Getenv("DEVSPECS_FIND_RUNTIME"))
 	if err != nil {
-		return nil, err
+		return indexquery.CandidateLoadResult{}, err
 	}
-	candidates := make([]retrieval.Candidate, 0, len(artifacts))
-	for _, art := range artifacts {
-		sources, _ := db.GetSourcesForArtifact(art.ID)
-		todos, _ := db.GetTodosForArtifact(art.ID)
-		var body string
-		if art.CurrentRevID != "" {
-			if rev, err := db.GetRevision(art.CurrentRevID); err == nil && rev != nil {
-				body = rev.Body
-			}
-		}
-		candidates = append(candidates, artifactCandidate(art, sources, todos, body))
-	}
-	return candidates, nil
+	return indexquery.LoadCandidatesForQueryWithRuntime(db, fp, query, mode)
 }
 
-func artifactCandidate(art store.ArtifactRow, sources []store.SourceRow, todos []store.TodoRow, body string) retrieval.Candidate {
-	sourcePath := firstSourcePath(sources)
-	path := sourcePath
-	if path == "" {
-		path = art.Title
-	}
-	if path == "" {
-		path = art.ID
-	}
-	return retrieval.Candidate{
-		ID:      art.ID,
-		Path:    filepath.ToSlash(path),
-		Kind:    art.Kind,
-		Subtype: art.Subtype,
-		Title:   art.Title,
-		Status:  art.Status,
-		Source:  filepath.ToSlash(sourcePath),
-		Body:    renderRetrievalCandidateBody(art, sources, todos, body),
-		Metadata: map[string]string{
-			"repo_id":              art.RepoID,
-			"short_id":             art.ShortID,
-			"current_revision_id":  art.CurrentRevID,
-			"created_at":           art.CreatedAt,
-			"updated_at":           art.UpdatedAt,
-			"last_observed_at":     art.LastObservedAt,
-			"token_counter":        commandTokenCounterName,
-			"retrieval_candidate":  "sqlite_artifact",
-			"source_context_scope": "indexed_artifacts",
-		},
-	}
+func artifactCandidate(art store.ArtifactRow, sources []store.SourceRow, todos []store.TodoRow, body, extractedJSON string) retrieval.Candidate {
+	return indexquery.ArtifactCandidate(art, sources, todos, body, extractedJSON)
 }
 
-func renderRetrievalCandidateBody(art store.ArtifactRow, sources []store.SourceRow, todos []store.TodoRow, body string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Title: %s\n", art.Title)
-	fmt.Fprintf(&b, "Kind: %s\n", art.Kind)
-	if art.Subtype != "" {
-		fmt.Fprintf(&b, "Subtype: %s\n", art.Subtype)
-	}
-	fmt.Fprintf(&b, "Status: %s\n", art.Status)
-	for _, src := range sources {
-		if src.Path != "" {
-			fmt.Fprintf(&b, "Source: %s\n", filepath.ToSlash(src.Path))
-		}
-		if src.FormatProfile != "" {
-			fmt.Fprintf(&b, "Format profile: %s\n", src.FormatProfile)
-		}
-		if src.LayoutGroup != "" {
-			fmt.Fprintf(&b, "Layout group: %s\n", src.LayoutGroup)
-		}
-	}
-	if len(todos) > 0 {
-		fmt.Fprintln(&b, "\nTasks:")
-		for _, td := range todos {
-			marker := "[ ]"
-			if td.Done {
-				marker = "[x]"
-			}
-			fmt.Fprintf(&b, "- %s %s\n", marker, td.Text)
-		}
-	}
-	if strings.TrimSpace(body) != "" {
-		fmt.Fprintf(&b, "\n%s", strings.TrimRight(body, "\r\n"))
-	}
-	return b.String()
-}
-
-func firstSourcePath(sources []store.SourceRow) string {
-	for _, src := range sources {
-		if strings.TrimSpace(src.Path) != "" {
-			return filepath.ToSlash(src.Path)
-		}
-	}
-	return ""
+func artifactCandidateWithLinks(art store.ArtifactRow, sources []store.SourceRow, links []store.LinkRow, todos []store.TodoRow, body, extractedJSON string) retrieval.Candidate {
+	return indexquery.ArtifactCandidateWithLinks(art, sources, links, todos, nil, body, extractedJSON)
 }
 
 func approximateTokenCount(text string) int {

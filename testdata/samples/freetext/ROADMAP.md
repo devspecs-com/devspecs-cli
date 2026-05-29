@@ -1,8 +1,8 @@
 # Roadmap
 
-High-level product direction.
+High-level product direction for the sample application.
 
 ## Milestones
 
-- [ ] Q1 foundation
-- [ ] Q2 GA
+- [ ] Foundation
+- [ ] Beta

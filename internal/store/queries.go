@@ -2,8 +2,12 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode"
+
+	docsections "github.com/devspecs-com/devspecs-cli/internal/sections"
 )
 
 // ArtifactRow represents a row from the artifacts table.
@@ -29,6 +33,23 @@ type RevisionRow struct {
 	Body          string
 	ExtractedJSON string
 	ObservedAt    string
+}
+
+// SectionRow represents a persisted section extracted from an artifact revision.
+type SectionRow struct {
+	ID            string
+	ArtifactID    string
+	RevisionID    string
+	SourcePath    string
+	HeadingPath   string
+	HeadingDepth  int
+	StartLine     int
+	EndLine       int
+	Title         string
+	Body          string
+	TokenEstimate int
+	SectionKind   string
+	MetadataJSON  string
 }
 
 // SourceRow represents a row from the sources table.
@@ -104,7 +125,7 @@ type TagRow struct {
 
 // ListArtifacts returns artifacts filtered by the given parameters.
 func (db *DB) ListArtifacts(fp FilterParams) ([]ArtifactRow, error) {
-	query := `SELECT a.id, a.repo_id, COALESCE(a.short_id,''), a.kind, COALESCE(a.subtype,''), a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at FROM artifacts a`
+	query := `SELECT DISTINCT a.id, a.repo_id, COALESCE(a.short_id,''), a.kind, COALESCE(a.subtype,''), a.title, a.status, COALESCE(a.current_revision_id,''), a.created_at, a.updated_at, a.last_observed_at FROM artifacts a`
 	var joins []string
 	var conditions []string
 	var args []any
@@ -241,7 +262,7 @@ func (db *DB) GetRevision(id string) (*RevisionRow, error) {
 // GetSourcesForArtifact returns all sources for an artifact.
 func (db *DB) GetSourcesForArtifact(artifactID string) ([]SourceRow, error) {
 	rows, err := db.Query(
-		"SELECT id, artifact_id, source_type, COALESCE(path,''), source_identity, COALESCE(format_profile,''), COALESCE(layout_group,'') FROM sources WHERE artifact_id = ?",
+		"SELECT id, artifact_id, source_type, COALESCE(path,''), source_identity, COALESCE(format_profile,''), COALESCE(layout_group,'') FROM sources WHERE artifact_id = ? ORDER BY path, id",
 		artifactID,
 	)
 	if err != nil {
@@ -263,7 +284,7 @@ func (db *DB) GetSourcesForArtifact(artifactID string) ([]SourceRow, error) {
 // GetLinksForArtifact returns all links for an artifact.
 func (db *DB) GetLinksForArtifact(artifactID string) ([]LinkRow, error) {
 	rows, err := db.Query(
-		"SELECT id, artifact_id, link_type, target, created_at FROM links WHERE artifact_id = ?",
+		"SELECT id, artifact_id, link_type, target, created_at FROM links WHERE artifact_id = ? ORDER BY link_type, target",
 		artifactID,
 	)
 	if err != nil {
@@ -595,6 +616,189 @@ func (db *DB) IndexArtifactFTS(artifactID, title, body, sourcePath string) error
 	_, err := db.Exec("INSERT INTO artifacts_fts (artifact_id, title, body, source_path) VALUES (?, ?, ?, ?)",
 		artifactID, title, body, sourcePath)
 	return err
+}
+
+// ReplaceArtifactSections replaces persisted sections and section FTS rows for one artifact.
+func (db *DB) ReplaceArtifactSections(artifactID, revisionID string, sections []docsections.Section, now string) error {
+	if _, err := db.Exec("DELETE FROM artifact_sections_fts WHERE artifact_id = ?", artifactID); err != nil {
+		return err
+	}
+	if _, err := db.Exec("DELETE FROM artifact_sections WHERE artifact_id = ?", artifactID); err != nil {
+		return err
+	}
+	for _, section := range sections {
+		metadataJSON := "{}"
+		if len(section.Metadata) > 0 || len(section.Tasks) > 0 || len(section.AcceptanceCriteria) > 0 || len(section.Links) > 0 || len(section.Frontmatter) > 0 {
+			payload := map[string]any{}
+			if len(section.Metadata) > 0 {
+				payload["metadata"] = section.Metadata
+			}
+			if len(section.Tasks) > 0 {
+				payload["tasks"] = section.Tasks
+			}
+			if len(section.AcceptanceCriteria) > 0 {
+				payload["acceptance_criteria"] = section.AcceptanceCriteria
+			}
+			if len(section.Links) > 0 {
+				payload["links"] = section.Links
+			}
+			if len(section.Frontmatter) > 0 {
+				payload["frontmatter"] = section.Frontmatter
+			}
+			if b, err := json.Marshal(payload); err == nil {
+				metadataJSON = string(b)
+			}
+		}
+		if _, err := db.Exec(
+			`INSERT INTO artifact_sections
+			 (id, artifact_id, revision_id, source_path, heading_path, heading_depth, start_line, end_line, title, body, token_estimate, section_kind, metadata_json, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			section.ID, artifactID, revisionID, section.SourcePath, section.HeadingPath, section.HeadingDepth, section.StartLine, section.EndLine,
+			section.Title, section.Body, section.TokenEstimate, section.Kind, metadataJSON, now,
+		); err != nil {
+			return err
+		}
+		if _, err := db.Exec(
+			"INSERT INTO artifact_sections_fts (section_id, artifact_id, heading_path, title, body) VALUES (?, ?, ?, ?, ?)",
+			section.ID, artifactID, section.HeadingPath, section.Title, section.Body,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GetSectionsForArtifact returns persisted sections for an artifact.
+func (db *DB) GetSectionsForArtifact(artifactID string) ([]SectionRow, error) {
+	rows, err := db.Query(
+		`SELECT id, artifact_id, revision_id, source_path, heading_path, heading_depth, start_line, end_line, title, body, token_estimate, section_kind, metadata_json
+		 FROM artifact_sections
+		 WHERE artifact_id = ?
+		 ORDER BY start_line, heading_path`,
+		artifactID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSectionRows(rows)
+}
+
+// FindArtifactSections returns section hits for a query using section FTS.
+func (db *DB) FindArtifactSections(query string, fp FilterParams, limit int) ([]SectionRow, error) {
+	match := sectionFTSQuery(query)
+	if match == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	sqlQuery := `SELECT s.id, s.artifact_id, s.revision_id, s.source_path, s.heading_path, s.heading_depth, s.start_line, s.end_line, s.title, s.body, s.token_estimate, s.section_kind, s.metadata_json
+		FROM artifact_sections_fts
+		JOIN artifact_sections s ON s.id = artifact_sections_fts.section_id
+		JOIN artifacts a ON a.id = s.artifact_id`
+	args := []any{match}
+	conditions := []string{"artifact_sections_fts MATCH ?"}
+	if fp.Kind != "" {
+		conditions = append(conditions, "a.kind = ?")
+		args = append(args, fp.Kind)
+	}
+	if fp.Subtype != "" {
+		conditions = append(conditions, "a.subtype = ?")
+		args = append(args, fp.Subtype)
+	}
+	if fp.Tag != "" {
+		sqlQuery += " JOIN artifact_tags at ON at.artifact_id = a.id"
+		conditions = append(conditions, "at.tag = ?")
+		args = append(args, fp.Tag)
+	}
+	if fp.RepoRoot != "" || fp.Branch != "" || fp.User != "" {
+		sqlQuery += " JOIN repos r ON a.repo_id = r.id"
+		if fp.RepoRoot != "" {
+			conditions = append(conditions, "r.root_path = ?")
+			args = append(args, fp.RepoRoot)
+		}
+		if fp.Branch != "" {
+			conditions = append(conditions, "r.git_current_branch = ?")
+			args = append(args, fp.Branch)
+		}
+		if fp.User != "" {
+			conditions = append(conditions, "r.scanned_by = ?")
+			args = append(args, fp.User)
+		}
+	}
+	sqlQuery += " WHERE " + strings.Join(conditions, " AND ")
+	sqlQuery += " ORDER BY bm25(artifact_sections_fts), s.start_line LIMIT ?"
+	args = append(args, limit)
+	rows, err := db.Query(sqlQuery, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSectionRows(rows)
+}
+
+func scanSectionRows(rows *sql.Rows) ([]SectionRow, error) {
+	var out []SectionRow
+	for rows.Next() {
+		var r SectionRow
+		if err := rows.Scan(&r.ID, &r.ArtifactID, &r.RevisionID, &r.SourcePath, &r.HeadingPath, &r.HeadingDepth, &r.StartLine, &r.EndLine,
+			&r.Title, &r.Body, &r.TokenEstimate, &r.SectionKind, &r.MetadataJSON); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func sectionFTSQuery(query string) string {
+	seen := map[string]bool{}
+	var terms []string
+	addTerm := func(term string) {
+		term = strings.ToLower(term)
+		if len(term) < 3 || seen[term] || sectionFTSStopWord(term) {
+			return
+		}
+		seen[term] = true
+		terms = append(terms, `"`+strings.ReplaceAll(term, `"`, `""`)+`"`)
+	}
+	var b strings.Builder
+	flush := func() {
+		if b.Len() == 0 {
+			return
+		}
+		term := strings.ToLower(b.String())
+		b.Reset()
+		addTerm(term)
+		if strings.ContainsAny(term, "_.-") {
+			for _, part := range strings.FieldsFunc(term, func(r rune) bool {
+				return r == '_' || r == '-' || r == '.'
+			}) {
+				addTerm(part)
+			}
+		}
+	}
+	for _, r := range query {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' || r == '.' {
+			b.WriteRune(unicode.ToLower(r))
+			continue
+		}
+		flush()
+	}
+	flush()
+	if len(terms) > 12 {
+		terms = terms[:12]
+	}
+	return strings.Join(terms, " OR ")
+}
+
+func sectionFTSStopWord(term string) bool {
+	switch term {
+	case "the", "and", "for", "with", "that", "this", "from", "into", "context", "artifact", "document", "documents":
+		return true
+	default:
+		return false
+	}
 }
 
 // InsertLink adds a link for an artifact.

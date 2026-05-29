@@ -72,8 +72,31 @@ func TestLoadRepoConfig_Valid(t *testing.T) {
 	if loaded.Version != 1 {
 		t.Errorf("expected version 1, got %d", loaded.Version)
 	}
-	if len(loaded.Sources) != 3 {
-		t.Errorf("expected 3 sources, got %d", len(loaded.Sources))
+	if len(loaded.Sources) != 4 {
+		t.Errorf("expected 4 sources, got %d", len(loaded.Sources))
+	}
+}
+
+func TestArtifactConfig_RoundTripAndLegacyFallback(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := WithCodeCommentArtifacts(WithTestCaseArtifacts(DefaultRepoConfig(), true), true)
+	if err := WriteRepoConfig(tmp, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadRepoConfig(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.TestCaseArtifactsEnabled(false) {
+		t.Fatal("test case artifacts should be enabled")
+	}
+	if !loaded.CodeCommentArtifactsEnabled(false) {
+		t.Fatal("code comment artifacts should be enabled")
+	}
+
+	legacy := &RepoConfig{Experiments: ExperimentConfig{TestCaseArtifacts: boolPtr(true)}}
+	if !legacy.TestCaseArtifactsEnabled(false) {
+		t.Fatal("legacy experiment key should still enable test cases")
 	}
 }
 
@@ -117,14 +140,14 @@ func TestDefaultRepoConfig_Structure(t *testing.T) {
 	if cfg.Version != 1 {
 		t.Errorf("version: want 1, got %d", cfg.Version)
 	}
-	if len(cfg.Sources) != 3 {
-		t.Fatalf("sources: want 3, got %d", len(cfg.Sources))
+	if len(cfg.Sources) != 4 {
+		t.Fatalf("sources: want 4, got %d", len(cfg.Sources))
 	}
 	types := map[string]bool{}
 	for _, s := range cfg.Sources {
 		types[s.Type] = true
 	}
-	for _, want := range []string{"openspec", "adr", "markdown"} {
+	for _, want := range []string{"openspec", "adr", "markdown", "source_context"} {
 		if !types[want] {
 			t.Errorf("missing source type %q", want)
 		}
@@ -135,7 +158,7 @@ func TestDefaultRepoConfig_Structure(t *testing.T) {
 			markdownPaths = s.Paths
 		}
 	}
-	for _, want := range []string{"docs/specs", "docs/plans", "docs/prd", "docs/design", "docs/technical"} {
+	for _, want := range []string{".claude/notes", "docs/specs", "docs/plans", "docs/prd", "docs/rfcs", "rfcs", "docs/design", "docs/technical"} {
 		if !containsString(markdownPaths, want) {
 			t.Errorf("missing default markdown path %q", want)
 		}

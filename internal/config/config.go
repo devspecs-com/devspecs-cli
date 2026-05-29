@@ -11,8 +11,25 @@ import (
 
 // RepoConfig represents the .devspecs/config.yaml file in a repository.
 type RepoConfig struct {
-	Version int            `yaml:"version"`
-	Sources []SourceConfig `yaml:"sources"`
+	Version     int              `yaml:"version"`
+	Sources     []SourceConfig   `yaml:"sources"`
+	Artifacts   ArtifactConfig   `yaml:"artifacts,omitempty"`
+	Experiments ExperimentConfig `yaml:"experiments,omitempty"`
+}
+
+// ArtifactConfig holds canonical opt-in artifact sources that can be expensive
+// or noisy on large repositories.
+type ArtifactConfig struct {
+	TestCases    *bool `yaml:"test_cases,omitempty"`
+	CodeComments *bool `yaml:"code_comments,omitempty"`
+}
+
+// ExperimentConfig holds legacy opt-in scan/indexing experiments. New callers
+// should prefer ArtifactConfig; these fields remain for config compatibility.
+type ExperimentConfig struct {
+	IntentCandidateDiscovery *bool `yaml:"intent_candidate_discovery,omitempty"`
+	TestCaseArtifacts        *bool `yaml:"test_case_artifacts,omitempty"`
+	SupportDocDiscovery      *bool `yaml:"support_doc_discovery,omitempty"`
 }
 
 // SourceConfig defines a source type and its discovery paths.
@@ -40,11 +57,130 @@ func DefaultRepoConfig() *RepoConfig {
 			{Type: "adr", Paths: []string{"docs/adr", "docs/adrs", "adr", "adrs"}},
 			{Type: "markdown", Paths: []string{
 				"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans",
-				"docs/prd", "docs/design", "docs/technical",
+				".claude/notes", ".claude/plans", ".codex/plans", ".codex/notes",
+				".claude/skills", ".codex/skills", "agents",
+				"docs/prd", "docs/product-specs", "product-specs", "docs/requirements", "requirements",
+				"rfcs", "rfc", "RFCS", "docs/rfcs", "docs/rfc", "docs/RFCS",
+				"roadmaps", "docs/roadmaps",
+				"docs/design", "docs/design-docs", "design-docs", "docs/technical",
+				"architecture", "docs/architecture",
 				"_bmad-output", ".specify/memory",
 			}},
+			{Type: "source_context"},
 		},
 	}
+}
+
+// WithIntentCandidateDiscovery returns a config copy with the intent candidate
+// discovery experiment set. A nil input starts from the default repo config.
+func WithIntentCandidateDiscovery(cfg *RepoConfig, enabled bool) *RepoConfig {
+	out := CloneRepoConfig(cfg)
+	out.Experiments.IntentCandidateDiscovery = boolPtr(enabled)
+	return out
+}
+
+// WithDefaultIntentCandidateDiscovery enables broad intent discovery only when
+// the repo config did not explicitly opt in or out.
+func WithDefaultIntentCandidateDiscovery(cfg *RepoConfig, enabled bool) *RepoConfig {
+	out := CloneRepoConfig(cfg)
+	if out.Experiments.IntentCandidateDiscovery == nil {
+		out.Experiments.IntentCandidateDiscovery = boolPtr(enabled)
+	}
+	return out
+}
+
+// WithSupportDocDiscovery returns a config copy with bounded support-doc discovery set.
+func WithSupportDocDiscovery(cfg *RepoConfig, enabled bool) *RepoConfig {
+	out := CloneRepoConfig(cfg)
+	out.Experiments.SupportDocDiscovery = boolPtr(enabled)
+	return out
+}
+
+// WithTestCaseArtifacts returns a config copy with test-case artifact indexing set.
+func WithTestCaseArtifacts(cfg *RepoConfig, enabled bool) *RepoConfig {
+	out := CloneRepoConfig(cfg)
+	out.Artifacts.TestCases = boolPtr(enabled)
+	return out
+}
+
+// WithCodeCommentArtifacts returns a config copy with code-comment artifact indexing set.
+func WithCodeCommentArtifacts(cfg *RepoConfig, enabled bool) *RepoConfig {
+	out := CloneRepoConfig(cfg)
+	out.Artifacts.CodeComments = boolPtr(enabled)
+	return out
+}
+
+// CloneRepoConfig returns a deep-enough copy for scan-time option mutation.
+func CloneRepoConfig(cfg *RepoConfig) *RepoConfig {
+	if cfg == nil {
+		cfg = DefaultRepoConfig()
+	}
+	out := *cfg
+	if cfg.Experiments.IntentCandidateDiscovery != nil {
+		out.Experiments.IntentCandidateDiscovery = boolPtr(*cfg.Experiments.IntentCandidateDiscovery)
+	}
+	if cfg.Experiments.TestCaseArtifacts != nil {
+		out.Experiments.TestCaseArtifacts = boolPtr(*cfg.Experiments.TestCaseArtifacts)
+	}
+	if cfg.Experiments.SupportDocDiscovery != nil {
+		out.Experiments.SupportDocDiscovery = boolPtr(*cfg.Experiments.SupportDocDiscovery)
+	}
+	if cfg.Artifacts.TestCases != nil {
+		out.Artifacts.TestCases = boolPtr(*cfg.Artifacts.TestCases)
+	}
+	if cfg.Artifacts.CodeComments != nil {
+		out.Artifacts.CodeComments = boolPtr(*cfg.Artifacts.CodeComments)
+	}
+	out.Sources = make([]SourceConfig, len(cfg.Sources))
+	for i, src := range cfg.Sources {
+		out.Sources[i] = src
+		out.Sources[i].Paths = append([]string(nil), src.Paths...)
+		out.Sources[i].Rules = make([]SourceRule, len(src.Rules))
+		for j, rule := range src.Rules {
+			out.Sources[i].Rules[j] = rule
+			out.Sources[i].Rules[j].Tags = append([]string(nil), rule.Tags...)
+		}
+	}
+	return &out
+}
+
+func (e ExperimentConfig) IntentCandidateDiscoveryEnabled(defaultValue bool) bool {
+	if e.IntentCandidateDiscovery == nil {
+		return defaultValue
+	}
+	return *e.IntentCandidateDiscovery
+}
+
+func (e ExperimentConfig) TestCaseArtifactsEnabled(defaultValue bool) bool {
+	if e.TestCaseArtifacts == nil {
+		return defaultValue
+	}
+	return *e.TestCaseArtifacts
+}
+
+func (e ExperimentConfig) SupportDocDiscoveryEnabled(defaultValue bool) bool {
+	if e.SupportDocDiscovery == nil {
+		return defaultValue
+	}
+	return *e.SupportDocDiscovery
+}
+
+func (c RepoConfig) TestCaseArtifactsEnabled(defaultValue bool) bool {
+	if c.Artifacts.TestCases != nil {
+		return *c.Artifacts.TestCases
+	}
+	return c.Experiments.TestCaseArtifactsEnabled(defaultValue)
+}
+
+func (c RepoConfig) CodeCommentArtifactsEnabled(defaultValue bool) bool {
+	if c.Artifacts.CodeComments == nil {
+		return defaultValue
+	}
+	return *c.Artifacts.CodeComments
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 // RepoConfigPath returns the path to the repo config file for the given root.

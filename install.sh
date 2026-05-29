@@ -59,6 +59,21 @@ download() {
     fi
 }
 
+telemetry_install_completed() {
+    case "${DEVSPECS_TELEMETRY:-${DS_TELEMETRY:-}}" in
+        0|false|False|FALSE|off|Off|OFF|no|No|NO|disabled|Disabled|DISABLED) return 0 ;;
+    esac
+
+    TELEMETRY_URL="${DEVSPECS_TELEMETRY_URL:-${DS_TELEMETRY_URL:-https://devspecs.com/api/telemetry}}"
+    PAYLOAD=$(printf '{"event":"install_completed","properties":{"install_method":"install.sh","install_os":"%s","install_arch":"%s","install_version":"%s"}}' "$OS" "$ARCH" "$VERSION")
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -m 2 -fsS -o /dev/null -X POST -H "content-type: application/json" -d "$PAYLOAD" "$TELEMETRY_URL" >/dev/null 2>&1 || true
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO- --timeout=2 --header="content-type: application/json" --post-data="$PAYLOAD" "$TELEMETRY_URL" >/dev/null 2>&1 || true
+    fi
+}
+
 main() {
     info "Detecting system..."
     OS=$(detect_os)
@@ -97,6 +112,7 @@ main() {
 
     info "DevSpecs CLI installed successfully!"
     info "Run 'ds --help' to get started"
+    telemetry_install_completed
 
     if command -v ds >/dev/null 2>&1; then
         ds --version

@@ -9,6 +9,7 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/devspecs-com/devspecs-cli/internal/telemetry"
 	"github.com/spf13/cobra"
 )
 
@@ -51,6 +52,19 @@ var settledStatuses = map[string]bool{
 }
 
 func runResume(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, asJSON, noRefresh bool, limit int, all bool) error {
+	start := time.Now()
+	success := false
+	props := map[string]any{
+		"focused": strings.TrimSpace(query) != "",
+		"json":    asJSON,
+	}
+	if strings.TrimSpace(query) != "" {
+		props["query_length_bucket"] = telemetry.QueryLengthBucket(query)
+	}
+	defer func() {
+		telemetry.RecordCommand("resume", success, time.Since(start), props)
+	}()
+
 	db, err := openDB()
 	if err != nil {
 		return err
@@ -65,7 +79,9 @@ func runResume(cmd *cobra.Command, query string, fp store.FilterParams, repoName
 	fp.RepoRoot = repoRoot
 
 	if strings.TrimSpace(query) != "" {
-		return runFocusedResume(cmd, db, repoRoot, query, fp, asJSON, limit)
+		err := runFocusedResume(cmd, db, repoRoot, query, fp, asJSON, limit)
+		success = err == nil
+		return err
 	}
 
 	rows, err := db.ResumeArtifacts(repoRoot, fp)
@@ -75,6 +91,8 @@ func runResume(cmd *cobra.Command, query string, fp store.FilterParams, repoName
 
 	if len(rows) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "No DevSpecs indexed yet. Run: ds scan")
+		success = true
+		props["result_count_bucket"] = telemetry.CountBucket(0)
 		return nil
 	}
 
@@ -117,6 +135,8 @@ func runResume(cmd *cobra.Command, query string, fp store.FilterParams, repoName
 		}
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
+		success = true
+		props["result_count_bucket"] = telemetry.CountBucket(len(inProgress) + len(settled) + len(stale))
 		return enc.Encode(obj)
 	}
 
@@ -152,11 +172,13 @@ func runResume(cmd *cobra.Command, query string, fp store.FilterParams, repoName
 		}
 	}
 
+	success = true
+	props["result_count_bucket"] = telemetry.CountBucket(len(inProgress) + len(settled) + len(stale))
 	return nil
 }
 
 func runFocusedResume(cmd *cobra.Command, db *store.DB, repoRoot, query string, fp store.FilterParams, asJSON bool, limit int) error {
-	candidates, err := loadRetrievalCandidates(db, fp)
+	candidates, err := loadRetrievalCandidatesForQuery(db, fp, query)
 	if err != nil {
 		return fmt.Errorf("resume query: %w", err)
 	}
@@ -206,8 +228,15 @@ func runFocusedResume(cmd *cobra.Command, db *store.DB, repoRoot, query string, 
 	for i, c := range matches {
 		fmt.Fprintf(out, "\n%2d. %s  %s\n", i+1, shortCandidateID(c), c.Title)
 		fmt.Fprintf(out, "    Status: %s  |  Kind: %s\n", c.Status, c.Kind)
-		if c.Source != "" {
-			fmt.Fprintf(out, "    Source: %s\n", c.Source)
+		source := c.Path
+		if source == "" {
+			source = c.Source
+		}
+		if source != "" {
+			fmt.Fprintf(out, "    Source: %s\n", source)
+		}
+		if cues := retrieval.AuthorityCues(c); len(cues) > 0 {
+			fmt.Fprintf(out, "    Cues: %s\n", strings.Join(cues, "; "))
 		}
 		if rs := reasons[c.Path]; len(rs) > 0 {
 			fmt.Fprintf(out, "    Reasons: %s\n", strings.Join(rs, "; "))
@@ -225,9 +254,9 @@ func buildFocusedResumeContext(query string, candidates []retrieval.Candidate) s
 	fmt.Fprintf(&b, "# DevSpecs Focused Resume Context\n\n")
 	fmt.Fprintf(&b, "Query: %s\n\n", query)
 	for _, c := range candidates {
-		path := c.Source
+		path := c.Path
 		if path == "" {
-			path = c.Path
+			path = c.Source
 		}
 		fmt.Fprintf(&b, "## %s\n\n", path)
 		fmt.Fprintf(&b, "Title: %s\n", c.Title)
@@ -235,7 +264,11 @@ func buildFocusedResumeContext(query string, candidates []retrieval.Candidate) s
 		if c.Subtype != "" {
 			fmt.Fprintf(&b, "Subtype: %s\n", c.Subtype)
 		}
-		fmt.Fprintf(&b, "Status: %s\n\n", c.Status)
+		fmt.Fprintf(&b, "Status: %s\n", c.Status)
+		if cues := retrieval.AuthorityCues(c); len(cues) > 0 {
+			fmt.Fprintf(&b, "Authority cues: %s\n", strings.Join(cues, "; "))
+		}
+		fmt.Fprintln(&b)
 		fmt.Fprintf(&b, "```text\n%s\n```\n\n", strings.TrimRight(c.Body, "\r\n"))
 	}
 	return b.String()
@@ -250,9 +283,13 @@ func resumeCandidatesToJSON(candidates []retrieval.Candidate, reasons map[string
 			"kind":        c.Kind,
 			"subtype":     c.Subtype,
 			"title":       c.Title,
+			"path":        c.Path,
 			"status":      c.Status,
 			"source_path": c.Source,
 			"reasons":     reasons[c.Path],
+		}
+		if cues := retrieval.AuthorityCues(c); len(cues) > 0 {
+			item["authority_cues"] = cues
 		}
 		out = append(out, item)
 	}

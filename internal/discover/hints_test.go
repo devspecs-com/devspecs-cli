@@ -123,6 +123,28 @@ func TestScanHintCandidates_speckitFeatureDir(t *testing.T) {
 	}
 }
 
+func TestScanHintCandidates_AgentPlanDirs(t *testing.T) {
+	tmp := t.TempDir()
+	for _, rel := range []string{".claude/plans", ".codex/plans"} {
+		if err := os.MkdirAll(filepath.Join(tmp, filepath.FromSlash(rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := discover.ScanHintCandidates(tmp, nil)
+	for _, rel := range []string{".claude/plans", ".codex/plans"} {
+		var seen bool
+		for _, h := range c {
+			if h.RelPath == rel {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			t.Fatalf("missing %s in %#v", rel, c)
+		}
+	}
+}
+
 func TestScanHintCandidates_docsDense(t *testing.T) {
 	tmp := t.TempDir()
 	for _, name := range []string{"a.plan.md", "b.plan.md"} {

@@ -3,6 +3,7 @@ package scan
 import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/format"
+	"github.com/devspecs-com/devspecs-cli/internal/openspecmetrics"
 )
 
 // SourceBreakdownRow is one element of `ds scan --json` field "sources_breakdown".
@@ -20,6 +21,65 @@ type ScanHint struct {
 	SuggestCommand string `json:"suggest_command,omitempty"`
 }
 
+// SourceCompanionAdmissionDiagnostics summarizes bounded source files admitted
+// because indexed tests pointed at likely implementation companions.
+type SourceCompanionAdmissionDiagnostics struct {
+	Enabled                  bool                              `json:"enabled"`
+	TestFiles                int                               `json:"test_files,omitempty"`
+	ExistingSourceCandidates int                               `json:"existing_source_candidates,omitempty"`
+	CandidatesConsidered     int                               `json:"candidates_considered,omitempty"`
+	Admitted                 int                               `json:"admitted,omitempty"`
+	AlreadyPresent           int                               `json:"already_present,omitempty"`
+	SkippedByCap             int                               `json:"skipped_by_cap,omitempty"`
+	RejectedByReason         map[string]int                    `json:"rejected_by_reason,omitempty"`
+	TopAdmitted              []SourceCompanionAdmissionExample `json:"top_admitted,omitempty"`
+	TopRejected              []SourceCompanionRejectionExample `json:"top_rejected,omitempty"`
+}
+
+// SourceCompanionAdmissionExample is a compact receipt for one admitted source companion.
+type SourceCompanionAdmissionExample struct {
+	Path       string   `json:"path"`
+	Signals    []string `json:"signals,omitempty"`
+	Confidence string   `json:"confidence,omitempty"`
+	TestPaths  []string `json:"test_paths,omitempty"`
+}
+
+// SourceCompanionRejectionExample is a compact receipt for one rejected source companion.
+type SourceCompanionRejectionExample struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+	Signal string `json:"signal,omitempty"`
+}
+
+// ProgressEvent is a coarse scan heartbeat for long eval/index runs.
+type ProgressEvent struct {
+	Phase                string         `json:"phase"`
+	Event                string         `json:"event,omitempty"`
+	ElapsedMS            int64          `json:"elapsed_ms,omitempty"`
+	FilesTotal           int            `json:"files_total,omitempty"`
+	FilesScanned         int            `json:"files_scanned,omitempty"`
+	CurrentAdapter       string         `json:"current_adapter,omitempty"`
+	CandidatesTotal      int            `json:"candidates_total,omitempty"`
+	CandidatesProcessed  int            `json:"candidates_processed,omitempty"`
+	CandidatesDiscovered map[string]int `json:"candidates_discovered,omitempty"`
+	CandidatesParsed     map[string]int `json:"candidates_parsed,omitempty"`
+	ArtifactsUpserted    map[string]int `json:"artifacts_upserted,omitempty"`
+	ParseDurationMS      int64          `json:"parse_duration_ms,omitempty"`
+	ClassifierDurationMS int64          `json:"classifier_duration_ms,omitempty"`
+	WriterDurationMS     int64          `json:"writer_duration_ms,omitempty"`
+	FlushDurationMS      int64          `json:"flush_duration_ms,omitempty"`
+	FTSDurationMS        int64          `json:"fts_duration_ms,omitempty"`
+	RowsWritten          map[string]int `json:"rows_written,omitempty"`
+	ChunksFlushed        map[string]int `json:"chunks_flushed,omitempty"`
+	DeferredFTSRows      int            `json:"deferred_fts_rows,omitempty"`
+	InventoryFiles       int            `json:"inventory_files,omitempty"`
+	SharedDiscovery      bool           `json:"shared_discovery,omitempty"`
+	ParallelWorkers      int            `json:"parallel_workers,omitempty"`
+	CappedDiscovery      bool           `json:"capped_discovery,omitempty"`
+	TransactionEnabled   bool           `json:"transaction_enabled,omitempty"`
+	SkipAuthoredAtLookup bool           `json:"skip_authored_at_lookup,omitempty"`
+}
+
 type sourceAgg struct {
 	count   int
 	formats map[string]int
@@ -34,12 +94,17 @@ type sourceAgg struct {
 //   - "hints": optional; only when all adapters indexed zero artifacts AND at least one hint
 //     candidate exists. Empty candidate list omits the key (encoding/json omitempty on []ScanHint).
 type Result struct {
-	Found            map[string]int       `json:"Found"`
-	SourcesBreakdown []SourceBreakdownRow `json:"sources_breakdown"`
-	New              int                  `json:"New"`
-	Updated          int                  `json:"Updated"`
-	Unchanged        int                  `json:"Unchanged"`
-	Hints            []ScanHint           `json:"hints,omitempty"`
+	Found              map[string]int                       `json:"Found"`
+	SourcesBreakdown   []SourceBreakdownRow                 `json:"sources_breakdown"`
+	New                int                                  `json:"New"`
+	Updated            int                                  `json:"Updated"`
+	Unchanged          int                                  `json:"Unchanged"`
+	Hints              []ScanHint                           `json:"hints,omitempty"`
+	OpenSpec           *openspecmetrics.Metrics             `json:"openspec,omitempty"`
+	EvidenceGraph      *EvidenceGraphDiagnostics            `json:"evidence_graph,omitempty"`
+	GitEvidence        *GitEvidenceDiagnostics              `json:"git_evidence,omitempty"`
+	WorkstreamEvidence *WorkstreamEvidenceDiagnostics       `json:"workstream_evidence,omitempty"`
+	SourceCompanions   *SourceCompanionAdmissionDiagnostics `json:"source_companion_admission,omitempty"`
 
 	sourcesAgg map[string]*sourceAgg `json:"-"`
 }
@@ -58,7 +123,13 @@ func newResult(adapters []string) *Result {
 func (r *Result) finalizeSourcesBreakdown() {
 	// Fixed pipeline list for phase-2 UX and stable JSON. New adapters still
 	// increment Found[adapterName] but need an explicit row here + labels to appear in sources_breakdown.
-	order := []string{"markdown", "openspec", "adr"}
+	order := []string{"markdown", "openspec", "adr", "source_context"}
+	if _, enabled := r.Found["test_case"]; enabled || r.sourcesAgg["test_case"] != nil {
+		order = append(order, "test_case")
+	}
+	if _, enabled := r.Found["code_comment"]; enabled || r.sourcesAgg["code_comment"] != nil {
+		order = append(order, "code_comment")
+	}
 	out := make([]SourceBreakdownRow, 0, len(order))
 	for _, st := range order {
 		row := SourceBreakdownRow{

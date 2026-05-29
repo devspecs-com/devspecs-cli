@@ -12,6 +12,35 @@ function Get-LatestVersion {
     return $release.tag_name
 }
 
+function Send-TelemetryInstallCompleted {
+    param(
+        [string]$Version,
+        [string]$Arch
+    )
+
+    $mode = if ($env:DEVSPECS_TELEMETRY) { $env:DEVSPECS_TELEMETRY } else { $env:DS_TELEMETRY }
+    if ($mode -match "^(0|false|off|no|disabled)$") {
+        return
+    }
+
+    $url = if ($env:DEVSPECS_TELEMETRY_URL) { $env:DEVSPECS_TELEMETRY_URL } elseif ($env:DS_TELEMETRY_URL) { $env:DS_TELEMETRY_URL } else { "https://devspecs.com/api/telemetry" }
+    $payload = @{
+        event = "install_completed"
+        properties = @{
+            install_method = "install.ps1"
+            install_os = "windows"
+            install_arch = $Arch
+            install_version = $Version
+        }
+    } | ConvertTo-Json -Depth 4 -Compress
+
+    try {
+        Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json" -Body $payload -TimeoutSec 2 | Out-Null
+    } catch {
+        # Telemetry is best effort and must never break installation.
+    }
+}
+
 function Install-DevSpecs {
     Write-Host "[INFO] Detecting system..." -ForegroundColor Green
 
@@ -56,6 +85,7 @@ function Install-DevSpecs {
 
     Write-Host "[INFO] DevSpecs CLI installed successfully!" -ForegroundColor Green
     Write-Host "[INFO] Run 'ds --help' to get started" -ForegroundColor Green
+    Send-TelemetryInstallCompleted -Version $Version -Arch $Arch
 }
 
 Install-DevSpecs

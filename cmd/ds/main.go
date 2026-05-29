@@ -20,10 +20,14 @@ func main() {
 func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "ds",
-		Short: "DevSpecs — index and reference your specs, plans, and ADRs",
+		Short: "DevSpecs - index and reference your specs, plans, and ADRs",
 		Long: `DevSpecs indexes planning and specification artifacts in your repository,
 assigns stable IDs, and makes them easy to reference from agents, PRs,
-issues, and future workflows.`,
+issues, and future workflows.
+
+Telemetry: DevSpecs sends minimal anonymous usage counts for install, init,
+scan, and query flows. It never sends repo names, file paths, git remotes,
+document text, or raw queries. Disable with DEVSPECS_TELEMETRY=0.`,
 		Version: fmt.Sprintf("%s (commit: %s, built: %s)", version.Version, version.Commit, version.Date),
 	}
 

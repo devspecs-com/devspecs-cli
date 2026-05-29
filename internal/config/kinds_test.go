@@ -14,7 +14,7 @@ func TestValidateKind(t *testing.T) {
 	}
 	for _, k := range []string{
 		KindPlan, KindSpec, KindRequirements, KindDesign, KindContract,
-		KindDecision, KindMarkdownArtifact,
+		KindDecision, KindMarkdownArtifact, KindSourceContext,
 	} {
 		if err := ValidateKind(k); err != nil {
 			t.Fatalf("%q: %v", k, err)
@@ -36,6 +36,18 @@ func TestValidateSubtype(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := ValidateSubtype(KindRequirements, SubtypePRD); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateSubtype(KindMarkdownArtifact, SubtypeAgentInstruction); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateSubtype(KindMarkdownArtifact, SubtypeAPIContract); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateSubtype(KindMarkdownArtifact, SubtypeDocumentTemplate); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateSubtype(KindSourceContext, SubtypeTestCase); err != nil {
 		t.Fatal(err)
 	}
 	if err := ValidateSubtype(KindPlan, SubtypeADR); err == nil {

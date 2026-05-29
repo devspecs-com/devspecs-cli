@@ -8,7 +8,7 @@ Implementation under test: [`internal/adapters/todoparse`](../../../internal/ada
 
 | Fixture | Real-world analogue |
 |--------|----------------------|
-| [`todoparse/supported-syntax-examples.md`](todoparse/supported-syntax-examples.md) | [`v0.spec.md`](../../../v0.spec.md) — section *Explicit Todo Extraction*, *Supported syntax* (~lines 1246–1250). `ds todos` on that artifact reports an open item for the illustrative `- [ ] Incomplete task` line. |
+| [`todoparse/supported-syntax-examples.md`](todoparse/supported-syntax-examples.md) | A generic markdown syntax reference. `ds todos` on that artifact reports an open item for the illustrative `- [ ] Incomplete task` line. |
 
 ### Workaround for authors
 

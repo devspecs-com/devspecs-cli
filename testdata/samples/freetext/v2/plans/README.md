@@ -1,7 +1,9 @@
-# Plans index
+# Plan Index
 
-Numbered feature plans and nested implementation steps.
+This directory contains synthetic planning notes used by adapter discovery tests.
 
-## Ordering
+## Contents
 
-Root files are feature-level; subfolders hold implementation plans.
+- Capture workflow
+- Topic grouping
+- Export and reporting

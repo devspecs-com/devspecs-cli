@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,11 +10,15 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/adr"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/codecomment"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/sourcecontext"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/testcase"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/discover"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
@@ -21,25 +26,33 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/repo"
 	"github.com/devspecs-com/devspecs-cli/internal/scan"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/devspecs-com/devspecs-cli/internal/telemetry"
 	"github.com/spf13/cobra"
 )
 
 // NewScanCmd creates the ds scan command.
 func NewScanCmd() *cobra.Command {
 	var (
-		path      string
-		verbose   bool
-		asJSON    bool
-		quiet     bool
-		ifChanged bool
-		rebuild   bool
+		path                           string
+		verbose                        bool
+		asJSON                         bool
+		quiet                          bool
+		ifChanged                      bool
+		rebuild                        bool
+		experimentalIntentDiscovery    bool
+		experimentalGitEvidence        bool
+		experimentalWorkstreamEvidence bool
+		experimentalRichTypedIndex     bool
+		experimentalSupportDocs        bool
+		includeTests                   bool
+		includeCodeComments            bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "scan",
 		Short: "Scan repository for specs, plans, and ADRs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild)
+			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, includeTests, includeCodeComments)
 		},
 	}
 
@@ -49,10 +62,37 @@ func NewScanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress human scan summary and empty-scan hints (redundant when --json is set)")
 	cmd.Flags().BoolVar(&ifChanged, "if-changed", false, "Only scan if source paths were touched in the last commit")
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "Remove the global index database and create a fresh index (requires re-scan)")
+	cmd.Flags().BoolVar(&experimentalIntentDiscovery, "experimental-intent-discovery", false, "Deprecated: broad scored markdown intent candidate discovery is enabled by default")
+	cmd.Flags().BoolVar(&experimentalGitEvidence, "experimental-git-evidence", false, "Index bounded local git history facts as diagnostic evidence")
+	cmd.Flags().BoolVar(&experimentalWorkstreamEvidence, "experimental-workstream-evidence", false, "Index bounded local workstream anchors as diagnostic evidence (implies --experimental-git-evidence)")
+	cmd.Flags().BoolVar(&experimentalRichTypedIndex, "experimental-rich-typed-index", false, "Index bounded richer source/test/symbol graph evidence as diagnostic substrate")
+	cmd.Flags().BoolVar(&experimentalSupportDocs, "experimental-support-docs", false, "Index bounded support docs as diagnostic context")
+	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Index executable test cases as behavioral intent artifacts")
+	cmd.Flags().BoolVar(&includeTests, "experimental-test-cases", false, "Deprecated alias for --include-tests")
+	cmd.Flags().BoolVar(&includeCodeComments, "include-code-comments", false, "Index high-signal code comments as implementation intent artifacts")
+	_ = cmd.Flags().MarkDeprecated("experimental-test-cases", "use --include-tests")
 	return cmd
 }
 
-func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild bool) error {
+func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, includeTests, includeCodeComments bool) error {
+	start := time.Now()
+	success := false
+	props := map[string]any{
+		"include_tests":                    includeTests,
+		"include_code_comments":            includeCodeComments,
+		"experimental_git_evidence":        experimentalGitEvidence,
+		"experimental_workstream_evidence": experimentalWorkstreamEvidence,
+		"experimental_rich_typed_index":    experimentalRichTypedIndex,
+		"experimental_support_docs":        experimentalSupportDocs,
+		"if_changed":                       ifChanged,
+		"rebuild":                          rebuild,
+		"json":                             asJSON,
+		"quiet":                            quiet,
+	}
+	defer func() {
+		telemetry.RecordCommand("scan", success, time.Since(start), props)
+	}()
+
 	repoRoot, err := resolveRepoRoot(path)
 	if err != nil {
 		return err
@@ -62,8 +102,24 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	cfg = config.WithDefaultIntentCandidateDiscovery(cfg, true)
+	if experimentalIntentDiscovery {
+		cfg = config.WithIntentCandidateDiscovery(cfg, true)
+	}
+	if experimentalSupportDocs {
+		cfg = config.WithSupportDocDiscovery(cfg, true)
+	}
+	if includeTests {
+		cfg = config.WithTestCaseArtifacts(cfg, true)
+	}
+	if includeCodeComments {
+		cfg = config.WithCodeCommentArtifacts(cfg, true)
+	}
 
 	if ifChanged && !sourcePathsChanged(repoRoot, cfg) {
+		success = true
+		props["artifact_count_bucket"] = telemetry.CountBucket(0)
+		props["found_any"] = false
 		return nil
 	}
 
@@ -86,15 +142,35 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 		return fmt.Errorf("open database: %w", err)
 	}
 	defer db.Close()
+	db.SetMaxOpenConns(1)
 
 	ids := idgen.NewFactory()
-	adpts := []adapters.Adapter{&openspec.Adapter{}, &adr.Adapter{}, &markdown.Adapter{}}
+	adpts := []adapters.Adapter{&openspec.Adapter{}, &adr.Adapter{}, &markdown.Adapter{}, &sourcecontext.Adapter{}}
+	if cfg.TestCaseArtifactsEnabled(false) {
+		adpts = append(adpts, &testcase.Adapter{})
+	}
+	if cfg.CodeCommentArtifactsEnabled(false) {
+		adpts = append(adpts, &codecomment.Adapter{})
+	}
 
 	scanner := scan.New(db, ids, adpts)
 	if verbose && !quiet {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Respecting repo-root .gitignore, .git/info/exclude, and .aiignore during configured walks\n")
 	}
-	result, err := scanner.Run(context.Background(), repoRoot, cfg)
+	scanOpts, err := liveScanRunOptions(db)
+	if err != nil {
+		return fmt.Errorf("inspect index state: %w", err)
+	}
+	props["transaction_enabled"] = scanOpts.UseTransaction
+	props["fresh_index"] = scanOpts.FreshIndex
+	props["skip_authored_at_lookup"] = scanOpts.SkipAuthoredAtLookup
+	scanOpts.IncludeGitEvidence = experimentalGitEvidence || experimentalWorkstreamEvidence
+	scanOpts.IncludeWorkstreamEvidence = experimentalWorkstreamEvidence
+	scanOpts.RichTypedIndex = experimentalRichTypedIndex
+	if verbose && !quiet && scanOpts.FreshIndex {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Using fresh-index scan path for empty/rebuilt index\n")
+	}
+	result, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, scanOpts)
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
@@ -103,6 +179,14 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 		matcher, _ := ignore.NewMatcher(repoRoot)
 		attachScanHints(result, repoRoot, matcher)
 	}
+	totalFound := scanTotalFound(result)
+	success = true
+	props["artifact_count_bucket"] = telemetry.CountBucket(totalFound)
+	props["new_count_bucket"] = telemetry.CountBucket(result.New)
+	props["updated_count_bucket"] = telemetry.CountBucket(result.Updated)
+	props["unchanged_count_bucket"] = telemetry.CountBucket(result.Unchanged)
+	props["source_count_bucket"] = telemetry.CountBucket(len(result.SourcesBreakdown))
+	props["found_any"] = totalFound > 0
 
 	if asJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
@@ -137,6 +221,31 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	fmt.Fprintf(out, "  %d unchanged artifacts\n", result.Unchanged)
 	fmt.Fprintln(out, "\nRun:\n  ds list")
 	return nil
+}
+
+func liveScanRunOptions(db *store.DB) (scan.RunOptions, error) {
+	opts := scan.RunOptions{UseTransaction: true}
+	hasArtifacts, err := scanIndexHasArtifacts(db)
+	if err != nil {
+		return opts, err
+	}
+	if !hasArtifacts {
+		opts.FreshIndex = true
+		opts.SkipAuthoredAtLookup = true
+	}
+	return opts, nil
+}
+
+func scanIndexHasArtifacts(db *store.DB) (bool, error) {
+	var one int
+	err := db.QueryRow("SELECT 1 FROM artifacts LIMIT 1").Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func scanTotalFound(r *scan.Result) int {
@@ -225,6 +334,12 @@ func sourcePathsChanged(repoRoot string, cfg *config.RepoConfig) bool {
 
 	for _, f := range changedFiles {
 		f = filepath.ToSlash(f)
+		if cfg.TestCaseArtifactsEnabled(false) && looksLikeTestArtifactPath(f) {
+			return true
+		}
+		if cfg.CodeCommentArtifactsEnabled(false) && looksLikeCodeCommentArtifactPath(f) {
+			return true
+		}
 		// Root-level spec/plan files always count
 		if strings.HasSuffix(f, ".spec.md") || strings.HasSuffix(f, ".plan.md") {
 			if !strings.Contains(f, "/") {
@@ -238,6 +353,56 @@ func sourcePathsChanged(repoRoot string, cfg *config.RepoConfig) bool {
 		}
 	}
 	return false
+}
+
+func looksLikeCodeCommentArtifactPath(rel string) bool {
+	rel = strings.ToLower(filepath.ToSlash(rel))
+	switch filepath.Ext(rel) {
+	case ".go", ".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".rb", ".php", ".java", ".kt", ".kts", ".rs":
+		return true
+	default:
+		return false
+	}
+}
+
+func looksLikeTestArtifactPath(rel string) bool {
+	rel = strings.ToLower(filepath.ToSlash(rel))
+	base := filepath.Base(rel)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	switch {
+	case strings.HasSuffix(base, "_test.go"):
+		return true
+	case ext == ".py" && (strings.HasPrefix(base, "test_") || strings.HasSuffix(name, "_test")):
+		return true
+	case ext == ".rb" && strings.HasSuffix(base, "_spec.rb"):
+		return true
+	case ext == ".php" && strings.HasSuffix(base, "test.php"):
+		return true
+	case isJSTestArtifactPath(rel, ext, name):
+		return true
+	}
+	for _, segment := range strings.Split(rel, "/") {
+		switch segment {
+		case "tests", "__tests__", "spec", "cypress", "e2e":
+			return true
+		}
+	}
+	return false
+}
+
+func isJSTestArtifactPath(rel, ext, name string) bool {
+	switch ext {
+	case ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs":
+		return strings.HasSuffix(name, ".test") ||
+			strings.HasSuffix(name, ".spec") ||
+			strings.Contains(rel, "/__tests__/") ||
+			strings.Contains(rel, "/tests/") ||
+			strings.Contains(rel, "/cypress/") ||
+			strings.Contains(rel, "/e2e/")
+	default:
+		return false
+	}
 }
 
 func resolveRepoRoot(path string) (string, error) {

@@ -30,6 +30,8 @@ func writeMisconfiguredSources(t *testing.T, repoRoot string) {
 	t.Helper()
 	cfgDir := filepath.Join(repoRoot, ".devspecs")
 	cfg := `version: 1
+experiments:
+  intent_candidate_discovery: false
 sources:
   - type: openspec
     path: z_missing_openspec
@@ -192,7 +194,7 @@ func TestScan_EmptyArtifacts_JSONHints(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &payload); err != nil {
 		t.Fatalf("json: %v\n%s", err, buf.String())
 	}
-	if payload.Found["markdown"] != 0 || payload.Found["openspec"] != 0 || payload.Found["adr"] != 0 {
+	if payload.Found["markdown"] != 0 || payload.Found["openspec"] != 0 || payload.Found["adr"] != 0 || payload.Found["source_context"] != 0 {
 		t.Fatalf("expected zero Found, got %#v", payload.Found)
 	}
 	if len(payload.Hints) == 0 {

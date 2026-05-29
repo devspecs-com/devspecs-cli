@@ -29,7 +29,11 @@ func TestFromPath(t *testing.T) {
 		{"plans/foo.md", ProfileGeneric},
 		{".cursor/plans/x.md", ProfileCursorPlan},
 		{"specs/001-fe/spec.md", ProfileSpeckit},
+		{"specs/001-fe/plan.md", ProfileSpeckit},
+		{"specs/001-fe/tasks.md", ProfileSpeckit},
 		{"_bmad-output/planning-artifacts/prd.md", ProfileBmad},
+		{".claude/notes/handoff.md", ProfileClaude},
+		{".codex/plans/PLAN.md", ProfileCodex},
 	}
 	for _, tc := range tests {
 		if g := FromPath(tc.path); g != tc.want {
@@ -48,7 +52,13 @@ func TestFromFrontmatterTool(t *testing.T) {
 }
 
 func TestLayoutGroup(t *testing.T) {
-	if g := LayoutGroup("specs/001-discover-related-specs/spec.md"); g != "specs/001-discover-related-specs" {
+	if g := LayoutGroup("specs/001-synthetic-feature/spec.md"); g != "specs/001-synthetic-feature" {
+		t.Errorf("got %q", g)
+	}
+	if g := LayoutGroup("specs/001-synthetic-feature/plan.md"); g != "specs/001-synthetic-feature" {
+		t.Errorf("got %q", g)
+	}
+	if g := LayoutGroup("specs/001-synthetic-feature/contracts/api.md"); g != "specs/001-synthetic-feature" {
 		t.Errorf("got %q", g)
 	}
 	if g := LayoutGroup("_bmad-output/planning-artifacts/prd.md"); g != "_bmad-output/planning-artifacts" {

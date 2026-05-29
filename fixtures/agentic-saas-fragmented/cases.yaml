@@ -13,6 +13,10 @@ cases:
         importance: must
       - path: docs/adr/0002-webhook-idempotency-boundary.md
         importance: must
+      - path: openspec/changes/harden-entitlement-sync/specs/billing/spec.md
+        importance: helpful
+      - path: docs/plans/2026-05-01-entitlement-sync-plan.md
+        importance: helpful
       - path: .cursor/plans/entitlement-sync-implementation.md
         importance: helpful
       - path: .claude/notes/webhook-idempotency-followup.md
@@ -41,6 +45,10 @@ cases:
         importance: must
       - path: docs/adr/0002-webhook-idempotency-boundary.md
         importance: must
+      - path: docs/rfcs/0008-billing-webhook-replay-protection.md
+        importance: helpful
+      - path: .claude/notes/webhook-idempotency-followup.md
+        importance: helpful
       - path: services/api/src/billing/webhooks.ts
         importance: must
       - path: services/api/migrations/20260501090000_add_stripe_event_id.sql
@@ -62,6 +70,8 @@ cases:
     expected_relevant:
       - path: docs/adr/0003-superseded-local-entitlements.md
         importance: must
+      - path: .claude/notes/local-entitlements-experiment.md
+        importance: helpful
     expected_excluded:
       - scratch/old-billing-plan.md
       - openspec/changes/harden-entitlement-sync/proposal.md
@@ -86,6 +96,12 @@ cases:
         importance: must
       - path: docs/adr/0002-webhook-idempotency-boundary.md
         importance: must
+      - path: docs/rfcs/0008-billing-webhook-replay-protection.md
+        importance: helpful
+      - path: .claude/notes/webhook-idempotency-followup.md
+        importance: helpful
+      - path: services/api/migrations/20260501090000_add_stripe_event_id.sql
+        importance: background
       - path: services/api/src/billing/webhooks.ts
         importance: must
     expected_excluded:
@@ -136,6 +152,16 @@ cases:
         importance: must
       - path: openspec/changes/refactor-auth-session/design.md
         importance: must
+      - path: openspec/changes/refactor-auth-session/proposal.md
+        importance: helpful
+      - path: openspec/changes/refactor-auth-session/specs/auth/spec.md
+        importance: helpful
+      - path: openspec/changes/refactor-auth-session/tasks.md
+        importance: helpful
+      - path: docs/rfcs/0007-auth-session-token-handoff.md
+        importance: helpful
+      - path: docs/plans/2026-04-auth-session-rollout.md
+        importance: background
       - path: services/api/src/auth/session.ts
         importance: must
       - path: services/api/src/auth/tokens.ts
@@ -231,6 +257,10 @@ cases:
         importance: must
       - path: docs/adr/0005-auth-session-cookie-boundary.md
         importance: helpful
+      - path: docs/rfcs/0007-auth-session-token-handoff.md
+        importance: helpful
+      - path: services/api/src/auth/session.ts
+        importance: background
     expected_excluded:
       - docs/adr/0002-webhook-idempotency-boundary.md
       - openspec/changes/harden-entitlement-sync/design.md
@@ -244,3 +274,27 @@ cases:
       must_not_contain_artifacts:
         - docs/adr/0002-webhook-idempotency-boundary.md
         - openspec/changes/harden-entitlement-sync/design.md
+
+  - id: rfc-webhook-replay-alternatives
+    query: "RFC for webhook replay protection alternatives"
+    expected_relevant:
+      - path: docs/rfcs/0008-billing-webhook-replay-protection.md
+        importance: must
+      - path: openspec/changes/harden-entitlement-sync/design.md
+        importance: helpful
+      - path: docs/adr/0002-webhook-idempotency-boundary.md
+        importance: helpful
+      - path: services/api/src/billing/webhooks.ts
+        importance: background
+    expected_excluded:
+      - docs/rfcs/0009-support-search-ranking.md
+      - docs/plans/2026-04-billing-ops-runbook.md
+    success_criteria:
+      must_contain_terms:
+        - stripe_event_id
+        - Alternatives
+      must_contain_artifacts:
+        - docs/rfcs/0008-billing-webhook-replay-protection.md
+      must_not_contain_artifacts:
+        - docs/rfcs/0009-support-search-ranking.md
+        - docs/plans/2026-04-billing-ops-runbook.md

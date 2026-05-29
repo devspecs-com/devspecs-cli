@@ -17,7 +17,7 @@ import (
 var schemaDDL string
 
 // SchemaVersion is the current schema version. Bump when schema.sql changes.
-const SchemaVersion = 7
+const SchemaVersion = 11
 
 // DB wraps *sql.DB with DevSpecs-specific operations.
 type DB struct {
@@ -86,6 +86,26 @@ func (db *DB) migrate() error {
 				return err
 			}
 			maxVersion = 7
+		case 7:
+			if err := db.migrate7To8(now); err != nil {
+				return err
+			}
+			maxVersion = 8
+		case 8:
+			if err := db.migrate8To9(now); err != nil {
+				return err
+			}
+			maxVersion = 9
+		case 9:
+			if err := db.migrate9To10(now); err != nil {
+				return err
+			}
+			maxVersion = 10
+		case 10:
+			if err := db.migrate10To11(now); err != nil {
+				return err
+			}
+			maxVersion = 11
 		default:
 			return fmt.Errorf(
 				"index was created with schema v%d but this CLI requires v%d. Run 'ds scan --rebuild' or delete ~/.devspecs/devspecs.db and run 'ds scan' to rebuild",
@@ -157,5 +177,158 @@ func (db *DB) migrate6To7(now string) error {
 		return fmt.Errorf("migrate v6→v7 remap prd: %w", err)
 	}
 	_, err = db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 7, now)
+	return err
+}
+
+func (db *DB) migrate7To8(now string) error {
+	if err := tryAlterTable(db.DB, `ALTER TABLE artifact_todos ADD COLUMN section_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("migrate v7â†’v8 todo section_id: %w", err)
+	}
+	if err := tryAlterTable(db.DB, `ALTER TABLE artifact_criteria ADD COLUMN section_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("migrate v7â†’v8 criteria section_id: %w", err)
+	}
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS artifact_sections (
+			id             TEXT PRIMARY KEY,
+			artifact_id    TEXT NOT NULL,
+			revision_id    TEXT NOT NULL,
+			source_path    TEXT NOT NULL,
+			heading_path   TEXT NOT NULL,
+			heading_depth  INTEGER NOT NULL,
+			start_line     INTEGER NOT NULL,
+			end_line       INTEGER NOT NULL,
+			title          TEXT NOT NULL,
+			body           TEXT NOT NULL,
+			token_estimate INTEGER NOT NULL,
+			section_kind   TEXT NOT NULL DEFAULT '',
+			metadata_json  TEXT NOT NULL DEFAULT '{}',
+			created_at     TEXT NOT NULL,
+			FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE,
+			FOREIGN KEY (revision_id) REFERENCES artifact_revisions(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_todos_section ON artifact_todos(section_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_criteria_section ON artifact_criteria(section_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_sections_artifact ON artifact_sections(artifact_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_sections_revision ON artifact_sections(revision_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_sections_source_path ON artifact_sections(source_path)`,
+		`CREATE VIRTUAL TABLE IF NOT EXISTS artifact_sections_fts USING fts5(
+			section_id UNINDEXED,
+			artifact_id UNINDEXED,
+			heading_path,
+			title,
+			body,
+			tokenize='unicode61'
+		)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate v7â†’v8 section schema: %w", err)
+		}
+	}
+	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 8, now)
+	return err
+}
+
+func (db *DB) migrate8To9(now string) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS concepts (
+			id                         TEXT PRIMARY KEY,
+			repo_id                    TEXT NOT NULL,
+			canonical                  TEXT NOT NULL,
+			kind                       TEXT NOT NULL,
+			forms_json                 TEXT NOT NULL DEFAULT '[]',
+			document_frequency         INTEGER NOT NULL DEFAULT 0,
+			inverse_document_frequency REAL NOT NULL DEFAULT 0,
+			created_at                 TEXT NOT NULL,
+			updated_at                 TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS concept_mentions (
+			id            TEXT PRIMARY KEY,
+			concept_id    TEXT NOT NULL,
+			artifact_id   TEXT NOT NULL,
+			section_id    TEXT NOT NULL DEFAULT '',
+			field         TEXT NOT NULL,
+			weight        REAL NOT NULL,
+			evidence_json TEXT NOT NULL DEFAULT '{}',
+			created_at    TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS artifact_edges (
+			id              TEXT PRIMARY KEY,
+			repo_id         TEXT NOT NULL,
+			src_artifact_id TEXT NOT NULL,
+			dst_artifact_id TEXT NOT NULL,
+			edge_type       TEXT NOT NULL,
+			weight          REAL NOT NULL,
+			confidence      REAL NOT NULL,
+			evidence_count  INTEGER NOT NULL DEFAULT 1,
+			freshness       TEXT NOT NULL DEFAULT '',
+			source_signal   TEXT NOT NULL,
+			explanation     TEXT NOT NULL DEFAULT '',
+			metadata_json   TEXT NOT NULL DEFAULT '{}',
+			created_at      TEXT NOT NULL,
+			updated_at      TEXT NOT NULL
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_concepts_repo_kind_canonical ON concepts(repo_id, kind, canonical)`,
+		`CREATE INDEX IF NOT EXISTS idx_concept_mentions_concept ON concept_mentions(concept_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_concept_mentions_artifact ON concept_mentions(artifact_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_concept_mentions_artifact_section ON concept_mentions(artifact_id, section_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_artifact_edges_src ON artifact_edges(repo_id, src_artifact_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_artifact_edges_dst ON artifact_edges(repo_id, dst_artifact_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_artifact_edges_type ON artifact_edges(repo_id, edge_type)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_edges_identity ON artifact_edges(repo_id, src_artifact_id, dst_artifact_id, edge_type, source_signal)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate v8->v9 evidence graph schema: %w", err)
+		}
+	}
+	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 9, now)
+	return err
+}
+
+func (db *DB) migrate9To10(now string) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS git_commits (
+			repo_id       TEXT NOT NULL,
+			sha           TEXT NOT NULL,
+			branch        TEXT NOT NULL DEFAULT '',
+			author_name   TEXT NOT NULL DEFAULT '',
+			author_email  TEXT NOT NULL DEFAULT '',
+			message       TEXT NOT NULL,
+			body_preview  TEXT NOT NULL DEFAULT '',
+			committed_at  TEXT NOT NULL,
+			files_changed INTEGER NOT NULL DEFAULT 0,
+			is_merge      INTEGER NOT NULL DEFAULT 0,
+			history_shape TEXT NOT NULL DEFAULT '',
+			indexed_at    TEXT NOT NULL,
+			PRIMARY KEY (repo_id, sha)
+		)`,
+		`CREATE TABLE IF NOT EXISTS git_commit_files (
+			repo_id     TEXT NOT NULL,
+			commit_sha  TEXT NOT NULL,
+			file_path   TEXT NOT NULL,
+			change_type TEXT NOT NULL DEFAULT '',
+			old_path    TEXT NOT NULL DEFAULT '',
+			indexed_at  TEXT NOT NULL,
+			PRIMARY KEY (repo_id, commit_sha, file_path)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_git_commits_repo_committed ON git_commits(repo_id, committed_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_git_commit_files_repo_file ON git_commit_files(repo_id, file_path)`,
+		`CREATE INDEX IF NOT EXISTS idx_git_commit_files_commit ON git_commit_files(commit_sha)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate v9->v10 git fact schema: %w", err)
+		}
+	}
+	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 10, now)
+	return err
+}
+
+func (db *DB) migrate10To11(now string) error {
+	if err := tryAlterTable(db.DB, `ALTER TABLE git_commits ADD COLUMN body_preview TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("migrate v10->v11 git commit body_preview: %w", err)
+	}
+	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 11, now)
 	return err
 }
