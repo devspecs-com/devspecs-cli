@@ -31,6 +31,7 @@ func NewFindCmd() *cobra.Command {
 		pack        bool
 		verbose     bool
 		graphDiag   bool
+		gitReceipts = true
 		anchorFirst = true
 		anchorMode  string
 	)
@@ -44,7 +45,7 @@ func NewFindCmd() *cobra.Command {
 			if cmd.Flags().Changed("experimental-anchor-first-mode") && !cmd.Flags().Changed("experimental-anchor-first-ranking") {
 				anchorFirst = true
 			}
-			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, anchorFirst, anchorMode)
+			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst, anchorMode)
 		},
 	}
 
@@ -60,12 +61,13 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&pack, "pack", false, "Group results into a role-based context pack with inclusion and exclusion receipts")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show detailed human output for pack receipts and diagnostics")
 	cmd.Flags().BoolVar(&graphDiag, "graph-diagnostics", false, "Attach opt-in typed-edge graph diagnostics without changing ranked results")
+	cmd.Flags().BoolVar(&gitReceipts, "git-receipts", true, "Attach bounded local git commit receipts to pack output when available")
 	cmd.Flags().BoolVar(&anchorFirst, "experimental-anchor-first-ranking", true, "Use repo-local TF-IDF anchor-first ordering; pass false to disable")
 	cmd.Flags().StringVar(&anchorMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, selected_only, strong_field, or strict")
 	return cmd
 }
 
-func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, anchorFirst bool, anchorMode string) error {
+func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst bool, anchorMode string) error {
 	start := time.Now()
 	success := false
 	anchorMode = retrieval.NormalizeAnchorFirstMode(anchorMode)
@@ -78,6 +80,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 		"pack":                pack,
 		"verbose":             verbose,
 		"graph_diagnostics":   graphDiag,
+		"git_receipts":        gitReceipts,
 		"anchor_first":        anchorFirst,
 		"anchor_first_mode":   anchorMode,
 	}
@@ -120,15 +123,23 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 
 	if pack {
 		rolePack := retrieval.BuildRoleGroupedPack(matches, reasons, query)
+		var gitTrust *FindGitTrustContext
+		if gitReceipts && fp.RepoRoot != "" {
+			gitTrust = buildFindGitTrustContext(cmd.Context(), fp.RepoRoot, query, rolePack)
+			if gitTrust != nil {
+				props["git_receipt_count_bucket"] = telemetry.CountBucket(len(gitTrust.Receipts))
+			}
+		}
 		if asJSON {
 			out := findPackOutput(query, retriever.Name(), matches, reasons, rolePack)
+			out.GitTrust = gitTrust
 			if graphDiag {
 				out.GraphDiagnostics = &graphDiagnostics
 				out.GraphContext = findGraphPackContext(graphDiagnostics)
 			}
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(out)
 		}
-		if err := writeFindPackText(cmd.OutOrStdout(), query, retriever.Name(), rolePack, verbose); err != nil {
+		if err := writeFindPackText(cmd.OutOrStdout(), query, retriever.Name(), rolePack, gitTrust, verbose); err != nil {
 			return err
 		}
 		if graphDiag {

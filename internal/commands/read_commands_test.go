@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -508,6 +509,64 @@ func TestFindPack_HumanOutputShowsReceipt(t *testing.T) {
 	}
 }
 
+func TestFindPack_HumanOutputShowsGitReceiptsWhenAvailable(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git executable not available")
+	}
+	repoDir, _ := setupReadEnv(t)
+	runGitForFindPack(t, repoDir, "init")
+	runGitForFindPack(t, repoDir, "checkout", "-b", "main")
+	runGitForFindPack(t, repoDir, "config", "user.email", "test@example.com")
+	runGitForFindPack(t, repoDir, "config", "user.name", "Test User")
+	runGitForFindPack(t, repoDir, "add", "plan.md")
+	runGitForFindPack(t, repoDir, "commit", "-m", "Plan token refresh work (#42)", "-m", "Connects the plan to auth implementation.")
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"token refresh plan", "--pack", "--no-refresh"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	output := buf.String()
+	for _, want := range []string{"Relevant commits (1)", "Plan token refresh work (#42)", "touched: plan.md", "matched: token, refresh"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("find --pack git receipts missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestFindPack_JSONOutputIncludesGitReceiptsWhenAvailable(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git executable not available")
+	}
+	repoDir, _ := setupReadEnv(t)
+	runGitForFindPack(t, repoDir, "init")
+	runGitForFindPack(t, repoDir, "checkout", "-b", "main")
+	runGitForFindPack(t, repoDir, "config", "user.email", "test@example.com")
+	runGitForFindPack(t, repoDir, "config", "user.name", "Test User")
+	runGitForFindPack(t, repoDir, "add", "plan.md")
+	runGitForFindPack(t, repoDir, "commit", "-m", "Plan webhook replay work", "-m", "Refs #77")
+
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"webhook replay plan", "--json", "--pack", "--no-refresh"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out FindPackOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("find --json --pack invalid: %v\n%s", err, buf.String())
+	}
+	if out.GitTrust == nil || len(out.GitTrust.Receipts) != 1 {
+		t.Fatalf("expected one git receipt: %#v", out.GitTrust)
+	}
+	if out.GitTrust.Receipts[0].ShortSHA == "" || !strings.Contains(out.GitTrust.Receipts[0].Subject, "webhook replay") {
+		t.Fatalf("unexpected git receipt: %#v", out.GitTrust.Receipts[0])
+	}
+}
+
 func TestFindPack_VerboseHumanOutputShowsDiagnostics(t *testing.T) {
 	setupReadEnv(t)
 
@@ -523,6 +582,15 @@ func TestFindPack_VerboseHumanOutputShowsDiagnostics(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("find --pack --verbose missing %q:\n%s", want, output)
 		}
+	}
+}
+
+func runGitForFindPack(t *testing.T, root string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
 	}
 }
 

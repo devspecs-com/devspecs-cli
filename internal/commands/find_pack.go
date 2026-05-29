@@ -17,6 +17,7 @@ type FindPackOutput struct {
 	ExcludedNoise    []retrieval.PackItem  `json:"excluded_noise,omitempty"`
 	Counts           map[string]int        `json:"counts,omitempty"`
 	RankedResults    []FindResult          `json:"ranked_results"`
+	GitTrust         *FindGitTrustContext  `json:"git_trust,omitempty"`
 	GraphContext     *FindGraphPackContext `json:"graph_context,omitempty"`
 	GraphDiagnostics *FindGraphDiagnostics `json:"graph_diagnostics,omitempty"`
 }
@@ -34,7 +35,7 @@ func findPackOutput(query, retrieverName string, candidates []retrieval.Candidat
 	}
 }
 
-func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retrieval.RoleGroupedPack, verbose bool) error {
+func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retrieval.RoleGroupedPack, gitTrust *FindGitTrustContext, verbose bool) error {
 	fmt.Fprintf(out, "Working set: %s\n", query)
 	if verbose {
 		fmt.Fprintf(out, "Retriever: %s\n", retrieverName)
@@ -75,7 +76,38 @@ func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retr
 			writePackItem(out, item, true, verbose)
 		}
 	}
+	writeGitTrustText(out, gitTrust)
 	return nil
+}
+
+func writeGitTrustText(out io.Writer, gitTrust *FindGitTrustContext) {
+	if gitTrust == nil || len(gitTrust.Receipts) == 0 {
+		return
+	}
+	fmt.Fprintf(out, "\nRelevant commits (%d)\n", len(gitTrust.Receipts))
+	for _, receipt := range gitTrust.Receipts {
+		label := receipt.ShortSHA
+		if label == "" {
+			label = receipt.SHA
+		}
+		if receipt.CommittedAt != "" {
+			fmt.Fprintf(out, "  - %s  %s  %s\n", label, receipt.CommittedAt, receipt.Subject)
+		} else {
+			fmt.Fprintf(out, "  - %s  %s\n", label, receipt.Subject)
+		}
+		if receipt.Detail != "" && !strings.EqualFold(receipt.Detail, receipt.Subject) {
+			fmt.Fprintf(out, "      %s\n", receipt.Detail)
+		}
+		if len(receipt.MatchedPaths) > 0 {
+			fmt.Fprintf(out, "      touched: %s\n", strings.Join(firstStrings(receipt.MatchedPaths, 3), "; "))
+		}
+		if len(receipt.MatchedTerms) > 0 {
+			fmt.Fprintf(out, "      matched: %s\n", strings.Join(firstStrings(receipt.MatchedTerms, 4), ", "))
+		}
+		if len(receipt.Signals) > 0 {
+			fmt.Fprintf(out, "      signals: %s\n", strings.Join(firstStrings(receipt.Signals, 3), "; "))
+		}
+	}
 }
 
 func writePackSummary(out io.Writer, summary retrieval.PackSummary) {
