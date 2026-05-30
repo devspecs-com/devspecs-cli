@@ -105,3 +105,33 @@ func TestApplyBoundaryPrimaryPackPreservesAllItems(t *testing.T) {
 		t.Fatalf("expected some docs to be related")
 	}
 }
+
+func TestApplyBoundaryPrimaryPackForQueryKeepsProposalFamilyAnchorVisible(t *testing.T) {
+	pack := RoleGroupedPack{
+		Mode: "role_grouped_pack_v0",
+		Groups: []PackGroup{
+			{
+				Role:  PackRoleBackgroundDecisions,
+				Title: PackRoleTitle(PackRoleBackgroundDecisions),
+				Items: []PackItem{
+					{OriginalRank: 1, ID: "bep", Path: "beps/0012-metrics-service/README.md", Title: "Backstage Metrics Service"},
+					{OriginalRank: 2, ID: "naming", Path: "docs/backend-system/architecture/08-naming-patterns.md", Title: "Backend System Naming Patterns"},
+					{OriginalRank: 3, ID: "adr", Path: "docs/architecture-decisions/adr005-catalog-core-entities.md", Title: "ADR005"},
+					{OriginalRank: 4, ID: "frontend", Path: "docs/frontend-system/architecture/50-naming-patterns.md", Title: "Frontend System Naming Patterns"},
+					{OriginalRank: 5, ID: "beps", Path: "beps/README.md", Title: "Backstage Enhancement Proposals (BEPs)"},
+				},
+			},
+		},
+	}
+
+	got := ApplyBoundaryPrimaryPackForQuery(pack, "Backstage core MetricsService proposal with OpenTelemetry naming conventions")
+	tiers := map[string]string{}
+	for _, group := range got.Groups {
+		for _, item := range group.Items {
+			tiers[item.Path] = item.PackTier
+		}
+	}
+	if tiers["beps/README.md"] != PackTierPrimary {
+		t.Fatalf("proposal family anchor should remain primary, tiers=%#v", tiers)
+	}
+}

@@ -127,7 +127,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	if pack {
 		rolePack := retrieval.BuildRoleGroupedPack(matches, reasons, query)
 		if boundaryPrimary {
-			rolePack = retrieval.ApplyBoundaryPrimaryPack(rolePack)
+			rolePack = retrieval.ApplyBoundaryPrimaryPackForQuery(rolePack, query)
 		}
 		var gitTrust *FindGitTrustContext
 		if gitReceipts && fp.RepoRoot != "" {

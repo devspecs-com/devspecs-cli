@@ -102,7 +102,7 @@ func TestWriteFindPackTextBoundaryPrimarySummarizesRelatedByDefault(t *testing.T
 	if !strings.Contains(out, "Primary Auth Design") {
 		t.Fatalf("default boundary output missing primary item:\n%s", out)
 	}
-	if !strings.Contains(out, "Related context:") {
+	if !strings.Contains(out, "Related context kept for verbose/JSON:") {
 		t.Fatalf("default boundary output missing related summary:\n%s", out)
 	}
 	if strings.Contains(out, "   4. d  Related Auth Followup") {
@@ -138,7 +138,7 @@ func TestWriteFindPackTextBoundaryPrimaryVerboseShowsRelatedItems(t *testing.T) 
 	if !strings.Contains(out, "Related Auth Notes") {
 		t.Fatalf("verbose boundary output should show related items:\n%s", out)
 	}
-	if strings.Contains(out, "Related context:") {
+	if strings.Contains(out, "Related context kept for verbose/JSON:") {
 		t.Fatalf("verbose boundary output should keep detailed role groups instead of compact summary:\n%s", out)
 	}
 }

@@ -39,6 +39,10 @@ type PackBoundarySummary struct {
 // view plus related context. It is presentation/ranking only: no candidates are
 // admitted or removed from JSON/verbose output.
 func ApplyBoundaryPrimaryPack(pack RoleGroupedPack) RoleGroupedPack {
+	return ApplyBoundaryPrimaryPackForQuery(pack, "")
+}
+
+func ApplyBoundaryPrimaryPackForQuery(pack RoleGroupedPack, query string) RoleGroupedPack {
 	flat := flattenPackItems(pack.Groups)
 	if len(flat) == 0 {
 		pack.Mode = BoundaryPrimaryPackMode
@@ -53,7 +57,7 @@ func ApplyBoundaryPrimaryPack(pack RoleGroupedPack) RoleGroupedPack {
 		return flat[i].item.OriginalRank < flat[j].item.OriginalRank
 	})
 
-	selected := selectBoundaryPrimaryItems(flat)
+	selected := selectBoundaryPrimaryItems(flat, strings.ToLower(query))
 	primaryCount := 0
 	relatedCount := 0
 	for groupIdx := range pack.Groups {
@@ -157,7 +161,7 @@ func flattenPackItems(groups []PackGroup) []boundaryPackItem {
 	return out
 }
 
-func selectBoundaryPrimaryItems(items []boundaryPackItem) map[string]bool {
+func selectBoundaryPrimaryItems(items []boundaryPackItem, queryLower string) map[string]bool {
 	selected := map[string]bool{}
 	roleCounts := map[string]int{}
 	boundaryCounts := map[string]int{}
@@ -170,14 +174,14 @@ func selectBoundaryPrimaryItems(items []boundaryPackItem) map[string]bool {
 		if key == "" || selected[key] {
 			continue
 		}
-		protected := boundaryProtectedClass(entry.class)
+		protected := boundaryProtectedClass(entry.class) || boundaryFamilyAnchor(entry, queryLower)
 		if len(selected) >= boundaryPrimaryTarget && !protected {
 			continue
 		}
 		if !protected && !boundaryRoleBudgetAllows(roleCounts, entry.groupRole) {
 			continue
 		}
-		if !boundaryCapAllows(boundaryCounts, entry) {
+		if !protected && !boundaryCapAllows(boundaryCounts, entry) {
 			continue
 		}
 		selected[key] = true
@@ -216,6 +220,33 @@ func boundaryCapAllows(boundaryCounts map[string]int, entry boundaryPackItem) bo
 
 func boundaryProtectedClass(class string) bool {
 	return class == "source" || class == "test"
+}
+
+func boundaryFamilyAnchor(entry boundaryPackItem, queryLower string) bool {
+	pathLower := strings.ToLower(filepath.ToSlash(entry.item.Path))
+	titleLower := strings.ToLower(strings.TrimSpace(entry.item.Title))
+	base := strings.ToLower(filepath.Base(pathLower))
+	if pathLower == "" && titleLower == "" {
+		return false
+	}
+	if queryRequestsProposalDesign(queryLower) {
+		if base == "readme.md" && (hasPathSegment(pathLower, "beps") || hasPathSegment(pathLower, "bep") || hasPathSegment(pathLower, "rfcs") || hasPathSegment(pathLower, "rfc") || hasPathSegment(pathLower, "proposals") || hasPathSegment(pathLower, "proposal")) {
+			return true
+		}
+		if containsAny(titleLower, "enhancement proposals", "request for comments", "proposal process") {
+			return true
+		}
+	}
+	if hasNonIntentModeIntent(queryLower, "protocol") || queryRequestsAgentInstructions(queryLower) || queryRequestsProtocol(queryLower) {
+		switch base {
+		case "agents.md", "claude.md", "codex.md", "contributing.md", "contribution.md":
+			return true
+		}
+	}
+	if strings.Contains(queryLower, "openspec") || strings.Contains(queryLower, "open spec") {
+		return pathLower == "openspec" || base == "openspec.md" || (base == "readme.md" && hasPathSegment(pathLower, "openspec"))
+	}
+	return false
 }
 
 func packItemBoundary(role string, item PackItem) string {

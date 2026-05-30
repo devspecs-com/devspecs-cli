@@ -113,7 +113,7 @@ func writeBoundaryPrimarySummary(out io.Writer, rolePack retrieval.RoleGroupedPa
 	for _, summary := range related {
 		total += summary.Count
 	}
-	fmt.Fprintf(out, "Related context: %d artifact(s) kept in verbose/JSON\n", total)
+	fmt.Fprintf(out, "Related context kept for verbose/JSON: %d artifact(s)\n", total)
 	for _, summary := range firstBoundarySummaries(related, 4) {
 		label := summary.Title
 		if label == "" {
