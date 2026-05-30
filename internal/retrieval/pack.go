@@ -121,6 +121,7 @@ type PackItem struct {
 	RoleReason     string   `json:"role_reason,omitempty"`
 	Reasons        []string `json:"reasons,omitempty"`
 	AuthorityCues  []string `json:"authority_cues,omitempty"`
+	Boundary       string   `json:"boundary,omitempty"`
 	TokenEstimate  int      `json:"token_estimate,omitempty"`
 }
 

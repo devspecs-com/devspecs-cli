@@ -42,6 +42,7 @@ func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retr
 		fmt.Fprintf(out, "Mode: %s\n", rolePack.Mode)
 	}
 	writePackSummary(out, rolePack.Summary)
+	boundaryPrimary := retrieval.IsBoundaryPrimaryPack(rolePack) && !verbose
 
 	if len(rolePack.Groups) == 0 && len(rolePack.ExcludedNoise) == 0 {
 		fmt.Fprintln(out)
@@ -53,17 +54,40 @@ func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retr
 		if len(group.Items) == 0 {
 			continue
 		}
+		items := group.Items
+		relatedCount := 0
+		if boundaryPrimary {
+			items = make([]retrieval.PackItem, 0, len(group.Items))
+			for _, item := range group.Items {
+				if retrieval.PackItemIsRelated(item) {
+					relatedCount++
+					continue
+				}
+				items = append(items, item)
+			}
+			if len(items) == 0 {
+				continue
+			}
+		}
 		title := group.Title
 		if title == "" {
 			title = retrieval.PackRoleTitle(group.Role)
 		}
-		fmt.Fprintf(out, "\n%s (%d)\n", title, len(group.Items))
-		if group.OverflowCount > 0 {
+		if boundaryPrimary && relatedCount > 0 {
+			fmt.Fprintf(out, "\n%s (%d primary, %d related)\n", title, len(items), relatedCount)
+		} else {
+			fmt.Fprintf(out, "\n%s (%d)\n", title, len(items))
+		}
+		if group.OverflowCount > 0 && !boundaryPrimary {
 			fmt.Fprintf(out, "  Note: %d item(s) over the recommended budget of %d.\n", group.OverflowCount, group.Budget)
 		}
-		for _, item := range group.Items {
+		for _, item := range items {
 			writePackItem(out, item, false, verbose)
 		}
+	}
+
+	if boundaryPrimary {
+		writeBoundaryPrimarySummary(out, rolePack)
 	}
 
 	if len(rolePack.ExcludedNoise) > 0 {
@@ -78,6 +102,39 @@ func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retr
 	}
 	writeGitTrustText(out, gitTrust)
 	return nil
+}
+
+func writeBoundaryPrimarySummary(out io.Writer, rolePack retrieval.RoleGroupedPack) {
+	related := retrieval.BoundaryRelatedSummaries(rolePack)
+	if len(related) == 0 {
+		return
+	}
+	total := 0
+	for _, summary := range related {
+		total += summary.Count
+	}
+	fmt.Fprintf(out, "Related context: %d artifact(s) kept in verbose/JSON\n", total)
+	for _, summary := range firstBoundarySummaries(related, 4) {
+		label := summary.Title
+		if label == "" {
+			label = retrieval.PackRoleTitle(summary.Role)
+		}
+		fmt.Fprintf(out, "  - %s: %d from %s", label, summary.Count, summary.Boundary)
+		if len(summary.Examples) > 0 {
+			fmt.Fprintf(out, " (%s)", strings.Join(firstStrings(summary.Examples, 2), "; "))
+		}
+		fmt.Fprintln(out)
+	}
+	if len(related) > 4 {
+		fmt.Fprintf(out, "  - +%d more related group(s)\n", len(related)-4)
+	}
+}
+
+func firstBoundarySummaries(values []retrieval.PackBoundarySummary, limit int) []retrieval.PackBoundarySummary {
+	if limit <= 0 || len(values) <= limit {
+		return values
+	}
+	return values[:limit]
 }
 
 func writeGitTrustText(out io.Writer, gitTrust *FindGitTrustContext) {
