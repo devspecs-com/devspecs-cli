@@ -138,6 +138,25 @@ func findGitLogForPaths(ctx context.Context, repoRoot string, paths []string) ([
 	return parseFindGitLog(string(out)), true
 }
 
+func findGitLogRecent(ctx context.Context, repoRoot string, limit int) ([]parsedFindGitCommit, bool) {
+	if limit <= 0 {
+		limit = findGitReceiptMaxDisplay
+	}
+	args := []string{
+		"-C", filepath.Clean(repoRoot),
+		"log",
+		"--date=short",
+		"--pretty=format:" + findGitCommitMarker + "%x1f%H%x1f%ad%x1f%s%n" + findGitBodyMarker + "%n%b%n" + findGitFilesMarker,
+		"--name-only",
+		"-n", fmt.Sprintf("%d", limit),
+	}
+	out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput()
+	if err != nil {
+		return nil, false
+	}
+	return parseFindGitLog(string(out)), true
+}
+
 func parseFindGitLog(raw string) []parsedFindGitCommit {
 	var commits []parsedFindGitCommit
 	var current *parsedFindGitCommit

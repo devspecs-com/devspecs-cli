@@ -222,6 +222,106 @@ func TestMapAreaDrilldownUsesMatchedDocTopicOverLocaleBucket(t *testing.T) {
 	}
 }
 
+func TestMapRecentTopicsSkipNoiseAndBuildPackHandoff(t *testing.T) {
+	topics, skipped := buildMapRecentTopics([]parsedFindGitCommit{
+		{
+			sha:     "bot",
+			subject: "Update dependency yaml-unist-parser to v3.2.0 (#19257)",
+			body:    "Co-authored-by: renovate[bot] <29139614+renovate[bot]@users.noreply.github.com>",
+			paths:   []string{"package.json", "yarn.lock"},
+		},
+		{
+			sha:         "human",
+			committedAt: "2026-05-22",
+			subject:     "Implement public form endpoints",
+			paths: []string{
+				"apps/web/app/public-forms/page.tsx",
+				"apps/api/internal/app/service.go",
+				"apps/api/migrations/001_initial.sql",
+			},
+		},
+	}, "", 5)
+	if skipped != 1 {
+		t.Fatalf("skipped = %d, want 1", skipped)
+	}
+	if len(topics) != 1 {
+		t.Fatalf("topics = %#v, want one", topics)
+	}
+	topic := topics[0]
+	if topic.Label != "Public Form Endpoints" {
+		t.Fatalf("label = %q, want Public Form Endpoints", topic.Label)
+	}
+	if topic.Try != `ds find --pack "public form endpoints"` {
+		t.Fatalf("try = %q", topic.Try)
+	}
+	if topic.EvidenceCounts["source"] == 0 || topic.EvidenceCounts["config"] == 0 {
+		t.Fatalf("expected source/config evidence, got %#v", topic.EvidenceCounts)
+	}
+}
+
+func TestMapRecentTopicsFilterByAreaQuery(t *testing.T) {
+	topics, _ := buildMapRecentTopics([]parsedFindGitCommit{
+		{
+			sha:     "bounce",
+			subject: "feat: implement bounce feature for blips",
+			paths: []string{
+				"apps/app/app/blip/[id]/bounce.tsx",
+				"backend/internal/application/blip/bounce_blip.go",
+			},
+		},
+		{
+			sha:     "release",
+			subject: "Replace main branch in changelog link with tags (#19054)",
+			paths:   []string{"scripts/release/steps/show-instructions-after-npm-publish.js"},
+		},
+	}, "bounce", 5)
+	if len(topics) != 1 {
+		t.Fatalf("filtered topics = %#v, want one", topics)
+	}
+	if !strings.Contains(topics[0].Query, "bounce") {
+		t.Fatalf("filtered topic = %#v, want bounce", topics[0])
+	}
+}
+
+func TestMapRecentTextAvoidsTaskStatusClaims(t *testing.T) {
+	out := mapRecentOutput{
+		Schema: mapRecentSchemaVersion,
+		Repo:   mapRepo{Name: "repo", Path: t.TempDir(), Confidence: mapMediumConfidence},
+		Topics: []mapRecentTopic{{
+			Label:          "Expedition Enemy Pressure",
+			Query:          "expedition enemy pressure",
+			CommitCount:    1,
+			FileCount:      2,
+			EvidenceCounts: map[string]int{"source": 2},
+			KeyPaths:       []string{"server/internal/core/pressure.go", "client/src/game/Game.ts"},
+			RecentSignals: []mapTraceReceipt{{
+				SHA:     "df68f82",
+				Subject: "Add expedition enemy pressure phases A-D for Killer Slice 001.",
+			}},
+			Try: `ds find --pack "expedition enemy pressure"`,
+		}},
+	}
+	var buf bytes.Buffer
+	writeMapRecentText(&buf, out, false)
+	text := buf.String()
+	for _, want := range []string{
+		"Recently active topics",
+		"Expedition Enemy Pressure",
+		"Evidence: 1 commit, 2 files, source",
+		"Recent signal: df68f82 Add expedition enemy pressure phases A-D for Killer Slice 001.",
+		`Try: ds find --pack "expedition enemy pressure"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("recent output missing %q:\n%s", want, text)
+		}
+	}
+	for _, notWant := range []string{"Open tasks", "In progress", "Done", "Stale", "Resume work"} {
+		if strings.Contains(text, notWant) {
+			t.Fatalf("recent output made task-status claim %q:\n%s", notWant, text)
+		}
+	}
+}
+
 func TestBuildCachedMapResultUsesStoredWorkstreamEdges(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "devspecs.db"))
 	if err != nil {

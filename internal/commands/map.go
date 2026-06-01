@@ -36,7 +36,10 @@ const (
 	mapMaxCoversPerArea    = 5
 	mapMaxTraceReceipts    = 3
 	mapMaxVerboseTrace     = 4
+	mapRecentMaxCommits    = 40
+	mapRecentMaxTopics     = 5
 	mapSchemaVersion       = "devspecs.map.v1"
+	mapRecentSchemaVersion = "devspecs.map.recent.v1"
 	mapTraceReceiptMode    = "bounded_git_path_receipts_v0"
 	mapLowConfidence       = "low"
 	mapMediumConfidence    = "medium"
@@ -69,6 +72,7 @@ func NewMapCmd() *cobra.Command {
 		path     string
 		asJSON   bool
 		verbose  bool
+		recent   bool
 		maxAreas int
 	)
 
@@ -86,6 +90,7 @@ func NewMapCmd() *cobra.Command {
 				AreaQuery: areaQuery,
 				JSON:      asJSON,
 				Verbose:   verbose,
+				Recent:    recent,
 				MaxAreas:  maxAreas,
 			})
 		},
@@ -94,6 +99,7 @@ func NewMapCmd() *cobra.Command {
 	cmd.Flags().StringVar(&path, "path", ".", "Repository path to map")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show map diagnostics and extra evidence")
+	cmd.Flags().BoolVar(&recent, "recent", false, "Show recently active topics from local git history")
 	cmd.Flags().IntVar(&maxAreas, "max-areas", mapDefaultMaxAreas, "Maximum areas to show")
 	return cmd
 }
@@ -103,6 +109,7 @@ type mapOptions struct {
 	AreaQuery string
 	JSON      bool
 	Verbose   bool
+	Recent    bool
 	MaxAreas  int
 }
 
@@ -113,6 +120,34 @@ type mapOutput struct {
 	Areas                []mapArea               `json:"areas"`
 	Caveats              []string                `json:"caveats,omitempty"`
 	Diagnostics          mapDiagnostics          `json:"diagnostics,omitempty"`
+}
+
+type mapRecentOutput struct {
+	Schema      string               `json:"schema"`
+	Repo        mapRepo              `json:"repo"`
+	AreaQuery   string               `json:"area_query,omitempty"`
+	Topics      []mapRecentTopic     `json:"topics"`
+	Caveats     []string             `json:"caveats,omitempty"`
+	Diagnostics mapRecentDiagnostics `json:"diagnostics,omitempty"`
+}
+
+type mapRecentTopic struct {
+	Label          string            `json:"label"`
+	Query          string            `json:"query"`
+	CommitCount    int               `json:"commit_count"`
+	FileCount      int               `json:"file_count"`
+	EvidenceCounts map[string]int    `json:"evidence_counts,omitempty"`
+	KeyPaths       []string          `json:"key_paths,omitempty"`
+	RecentSignals  []mapTraceReceipt `json:"recent_signals,omitempty"`
+	Try            string            `json:"try,omitempty"`
+	Score          int               `json:"score,omitempty"`
+}
+
+type mapRecentDiagnostics struct {
+	CommitsRead       int `json:"commits_read,omitempty"`
+	CommitsSkipped    int `json:"commits_skipped,omitempty"`
+	RawTopicCount     int `json:"raw_topic_count,omitempty"`
+	MatchedTopicCount int `json:"matched_topic_count,omitempty"`
 }
 
 type mapRepo struct {
@@ -279,6 +314,7 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 	props := map[string]any{
 		"json":       opts.JSON,
 		"verbose":    opts.Verbose,
+		"recent":     opts.Recent,
 		"max_areas":  opts.MaxAreas,
 		"area_query": opts.AreaQuery != "",
 	}
@@ -292,6 +328,18 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 	repoRoot, err := resolveRepoRoot(opts.Path)
 	if err != nil {
 		return err
+	}
+	if opts.Recent {
+		out := buildMapRecentOutput(cmd.Context(), repoRoot, opts)
+		success = true
+		props["recent_topic_count_bucket"] = telemetry.CountBucket(len(out.Topics))
+		if opts.JSON {
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			return enc.Encode(out)
+		}
+		writeMapRecentText(cmd.OutOrStdout(), out, opts.Verbose)
+		return nil
 	}
 	var result *scan.Result
 	var cachedOutput *mapOutput
@@ -1190,6 +1238,485 @@ func writeMapAreaText(out io.Writer, m mapOutput, query string, verbose bool) {
 		fmt.Fprintln(out)
 	}
 	writeMapCaveats(out, append([]string{}, primary.Caveats...))
+}
+
+type mapRecentTopicBuilder struct {
+	Label          string
+	Query          string
+	Key            string
+	CommitSHAs     map[string]bool
+	PathSet        map[string]bool
+	EvidenceCounts map[string]int
+	RecentSignals  []mapTraceReceipt
+	Score          int
+	Order          int
+}
+
+func buildMapRecentOutput(ctx context.Context, repoRoot string, opts mapOptions) mapRecentOutput {
+	repoName := filepath.Base(repoRoot)
+	out := mapRecentOutput{
+		Schema:    mapRecentSchemaVersion,
+		Repo:      mapRepo{Name: repoName, Path: repoRoot, Confidence: mapMediumConfidence},
+		AreaQuery: opts.AreaQuery,
+	}
+	gitCtx, cancel := context.WithTimeout(ctx, findGitReceiptTimeout)
+	defer cancel()
+	if !findGitRepoAvailable(gitCtx, repoRoot) {
+		out.Repo.Confidence = mapLowConfidence
+		out.Caveats = append(out.Caveats, "local git history is unavailable")
+		return out
+	}
+	commits, ok := findGitLogRecent(gitCtx, repoRoot, mapRecentMaxCommits)
+	if !ok {
+		out.Repo.Confidence = mapLowConfidence
+		out.Caveats = append(out.Caveats, "recent git history could not be read within the time budget")
+		return out
+	}
+	topics, skipped := buildMapRecentTopics(commits, opts.AreaQuery, mapRecentMaxTopics)
+	out.Topics = topics
+	out.Diagnostics = mapRecentDiagnostics{
+		CommitsRead:       len(commits),
+		CommitsSkipped:    skipped,
+		RawTopicCount:     len(topics),
+		MatchedTopicCount: len(topics),
+	}
+	if opts.AreaQuery != "" && len(topics) == 0 {
+		out.Caveats = append(out.Caveats, "no recent topic matched the supplied area query")
+	}
+	if len(topics) == 0 {
+		out.Repo.Confidence = mapLowConfidence
+		out.Caveats = append(out.Caveats, "no non-noisy recent topics found")
+	}
+	return out
+}
+
+func buildMapRecentTopics(commits []parsedFindGitCommit, areaQuery string, limit int) ([]mapRecentTopic, int) {
+	if limit <= 0 {
+		limit = mapRecentMaxTopics
+	}
+	builders := map[string]*mapRecentTopicBuilder{}
+	order := 0
+	skipped := 0
+	for _, commit := range commits {
+		if mapRecentCommitNoisy(commit) {
+			skipped++
+			continue
+		}
+		query := mapRecentCommitQuery(commit)
+		if query == "" {
+			skipped++
+			continue
+		}
+		label := displayMapLabel(query)
+		key := normalizeMapKey(query)
+		if key == "" {
+			skipped++
+			continue
+		}
+		builder := builders[key]
+		if builder == nil {
+			builder = &mapRecentTopicBuilder{
+				Label:          label,
+				Query:          strings.ToLower(strings.TrimSpace(query)),
+				Key:            key,
+				CommitSHAs:     map[string]bool{},
+				PathSet:        map[string]bool{},
+				EvidenceCounts: map[string]int{},
+				Order:          order,
+			}
+			builders[key] = builder
+			order++
+		}
+		addMapRecentCommit(builder, commit)
+	}
+	topics := make([]mapRecentTopic, 0, len(builders))
+	for _, builder := range builders {
+		topic := builder.mapRecentTopic()
+		if areaQuery != "" && !mapRecentTopicMatches(topic, areaQuery) {
+			continue
+		}
+		topics = append(topics, topic)
+	}
+	sort.SliceStable(topics, func(i, j int) bool {
+		if topics[i].Score != topics[j].Score {
+			return topics[i].Score > topics[j].Score
+		}
+		return topics[i].Label < topics[j].Label
+	})
+	if len(topics) > limit {
+		topics = topics[:limit]
+	}
+	return topics, skipped
+}
+
+func addMapRecentCommit(builder *mapRecentTopicBuilder, commit parsedFindGitCommit) {
+	if commit.sha != "" && !builder.CommitSHAs[commit.sha] {
+		builder.CommitSHAs[commit.sha] = true
+		builder.Score += 12
+	}
+	if len(builder.RecentSignals) < mapMaxTraceReceipts {
+		builder.RecentSignals = append(builder.RecentSignals, mapTraceReceipt{
+			SHA:     shortFindGitSHA(commit.sha),
+			Subject: limitRunes(commit.subject, 120),
+		})
+	}
+	for _, path := range commit.paths {
+		path = normalizeFindGitReceiptPath(path)
+		if path == "" || mapRecentPathNoisy(path) || builder.PathSet[path] {
+			continue
+		}
+		builder.PathSet[path] = true
+		builder.Score += 2
+		family := mapRecentPathFamily(path)
+		if family != "" {
+			builder.EvidenceCounts[family]++
+		}
+	}
+	if len(commit.paths) > 1 {
+		builder.Score += 3
+	}
+	if len(builder.EvidenceCounts) >= 2 {
+		builder.Score += 4
+	}
+	if findGitWorkRefPattern.MatchString(commit.subject + "\n" + commit.body) {
+		builder.Score += 2
+	}
+}
+
+func (builder *mapRecentTopicBuilder) mapRecentTopic() mapRecentTopic {
+	paths := make([]string, 0, len(builder.PathSet))
+	for path := range builder.PathSet {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return mapRecentTopic{
+		Label:          builder.Label,
+		Query:          builder.Query,
+		CommitCount:    len(builder.CommitSHAs),
+		FileCount:      len(builder.PathSet),
+		EvidenceCounts: builder.EvidenceCounts,
+		KeyPaths:       firstStrings(mapRecentKeyPaths(paths), 4),
+		RecentSignals:  builder.RecentSignals,
+		Try:            mapFindPackCommand(builder.Query),
+		Score:          builder.Score,
+	}
+}
+
+func mapRecentKeyPaths(paths []string) []string {
+	sort.SliceStable(paths, func(i, j int) bool {
+		return mapRecentPathRank(paths[i]) < mapRecentPathRank(paths[j])
+	})
+	return paths
+}
+
+func mapRecentPathRank(path string) int {
+	switch mapRecentPathFamily(path) {
+	case "source":
+		return 0
+	case "test":
+		return 1
+	case "config":
+		return 2
+	case "doc":
+		return 3
+	default:
+		return 4
+	}
+}
+
+func mapRecentTopicMatches(topic mapRecentTopic, query string) bool {
+	queryKey := normalizeMapKey(query)
+	if queryKey == "" {
+		return true
+	}
+	values := []string{topic.Label, topic.Query}
+	values = append(values, topic.KeyPaths...)
+	for _, receipt := range topic.RecentSignals {
+		values = append(values, receipt.Subject)
+	}
+	for _, value := range values {
+		if scoreMapKeyMatch(normalizeMapKey(value), queryKey) > 0 {
+			return true
+		}
+	}
+	queryWords := mapRecentComparableWords(query)
+	if len(queryWords) == 0 {
+		return false
+	}
+	for _, value := range values {
+		valueWords := mapStringSet(mapRecentComparableWords(value))
+		matched := 0
+		for _, word := range queryWords {
+			if valueWords[word] {
+				matched++
+			}
+		}
+		if matched == len(queryWords) || (len(queryWords) > 2 && matched >= 2) {
+			return true
+		}
+	}
+	return false
+}
+
+func mapRecentCommitQuery(commit parsedFindGitCommit) string {
+	terms := mapRecentSubjectTerms(commit.subject)
+	if len(terms) < 2 {
+		pathTerms := mapRecentPathTerms(commit.paths)
+		for _, term := range pathTerms {
+			if len(terms) >= 4 {
+				break
+			}
+			if !mapRecentContainsString(terms, term) {
+				terms = append(terms, term)
+			}
+		}
+	}
+	if len(terms) == 0 {
+		return ""
+	}
+	if len(terms) > 4 {
+		terms = terms[:4]
+	}
+	return strings.Join(terms, " ")
+}
+
+func mapRecentSubjectTerms(subject string) []string {
+	subject = stripMapCommitPrefix(subject)
+	var terms []string
+	for _, word := range wordsFromMap(subject) {
+		if mapRecentStopWord(word) {
+			continue
+		}
+		terms = appendUniqueString(terms, word)
+		if len(terms) >= 4 {
+			break
+		}
+	}
+	return terms
+}
+
+func mapRecentContainsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func mapRecentPathTerms(paths []string) []string {
+	counts := map[string]int{}
+	for _, path := range paths {
+		if mapRecentPathNoisy(path) {
+			continue
+		}
+		parts := strings.Split(normalizeMapPath(path), "/")
+		for _, part := range parts {
+			stem := strings.TrimSuffix(part, filepath.Ext(part))
+			for _, word := range wordsFromMap(stem) {
+				if mapRecentStopWord(word) {
+					continue
+				}
+				counts[word]++
+			}
+		}
+	}
+	type countedTerm struct {
+		term  string
+		count int
+	}
+	var counted []countedTerm
+	for term, count := range counts {
+		counted = append(counted, countedTerm{term: term, count: count})
+	}
+	sort.SliceStable(counted, func(i, j int) bool {
+		if counted[i].count != counted[j].count {
+			return counted[i].count > counted[j].count
+		}
+		return counted[i].term < counted[j].term
+	})
+	var out []string
+	for _, item := range counted {
+		out = append(out, item.term)
+		if len(out) >= 3 {
+			break
+		}
+	}
+	return out
+}
+
+func mapRecentCommitNoisy(commit parsedFindGitCommit) bool {
+	if findGitReceiptCommitNoisy(commit) || mapCommitNoisy(commit) {
+		return true
+	}
+	if len(commit.paths) == 0 {
+		return true
+	}
+	subject := strings.ToLower(commit.subject)
+	switch {
+	case strings.Contains(subject, "coverage reports") ||
+		strings.Contains(subject, "update release notes") ||
+		strings.Contains(subject, "move tests to correct location") ||
+		strings.Contains(subject, "update yarn") ||
+		strings.Contains(subject, "working/agents tracker") ||
+		strings.Contains(subject, "refactor architecture") ||
+		strings.Contains(subject, "audit feedback") ||
+		strings.Contains(subject, "pivot planning document") ||
+		(strings.Contains(subject, "initial") && strings.Contains(subject, "scaffold")) ||
+		(strings.Contains(subject, "foundation") && (strings.Contains(subject, "phase") || strings.Contains(subject, "hpases"))):
+		return true
+	}
+	lockOnly := true
+	hasUsefulPath := false
+	for _, path := range commit.paths {
+		lower := strings.ToLower(filepath.ToSlash(path))
+		if !strings.HasSuffix(lower, ".lock") && !strings.HasSuffix(lower, "/yarn.lock") && !strings.HasSuffix(lower, "/package-lock.json") {
+			lockOnly = false
+		}
+		if !mapRecentPathNoisy(path) {
+			hasUsefulPath = true
+		}
+	}
+	return lockOnly || !hasUsefulPath
+}
+
+func mapRecentPathNoisy(path string) bool {
+	parts := strings.Split(normalizeMapPath(path), "/")
+	for _, part := range parts {
+		if mapSuppressedPathSegments[part] || part == "coverage" || part == ".next" {
+			return true
+		}
+	}
+	lower := strings.ToLower(filepath.ToSlash(path))
+	return strings.Contains(lower, "/coverage/") ||
+		strings.Contains(lower, "/snapshots/") ||
+		strings.HasSuffix(lower, "cover.out") ||
+		strings.HasSuffix(lower, "lcov.info") ||
+		strings.HasSuffix(lower, "clover.xml") ||
+		strings.HasSuffix(lower, ".snap")
+}
+
+func mapRecentComparableWords(value string) []string {
+	var out []string
+	for _, word := range wordsFromMap(value) {
+		if mapRecentStopWord(word) {
+			continue
+		}
+		word = strings.TrimSuffix(word, "s")
+		if word != "" {
+			out = appendUniqueString(out, word)
+		}
+	}
+	return out
+}
+
+func mapRecentStopWord(word string) bool {
+	switch word {
+	case "public", "private", "yaml", "yml", "json", "sql", "markdown":
+		return false
+	}
+	if mapTraceStopWord(word) {
+		return true
+	}
+	switch word {
+	case "feat", "feature", "features", "implement", "implements", "implemented",
+		"complete", "completed", "prepare", "preparation", "release", "notes",
+		"dependency", "dependencies", "bump", "chore", "minor", "major", "patch",
+		"phase", "phases", "step", "steps", "wip", "work", "todo", "todos",
+		"near", "based", "expected", "actual", "anonymous", "context", "contexts",
+		"working", "tracker", "expand", "architecture", "audit", "feedback", "hpases",
+		"to", "in", "of", "instead":
+		return true
+	default:
+		return false
+	}
+}
+
+func mapRecentPathFamily(path string) string {
+	lower := strings.ToLower(filepath.ToSlash(path))
+	ext := strings.ToLower(filepath.Ext(lower))
+	switch {
+	case strings.Contains(lower, "/test/") ||
+		strings.Contains(lower, "/tests/") ||
+		strings.Contains(lower, "__tests__") ||
+		strings.Contains(lower, "_test.") ||
+		strings.Contains(lower, ".test.") ||
+		strings.Contains(lower, ".spec."):
+		return "test"
+	case strings.Contains(lower, "/docs/") ||
+		strings.HasPrefix(lower, "docs/") ||
+		ext == ".md" || ext == ".mdx" || ext == ".rst" || ext == ".adoc":
+		return "doc"
+	case ext == ".sql" ||
+		strings.Contains(lower, "/migrations/") ||
+		strings.HasSuffix(lower, "package.json") ||
+		strings.HasSuffix(lower, "go.mod") ||
+		strings.HasSuffix(lower, "cargo.toml") ||
+		strings.HasSuffix(lower, ".yaml") ||
+		strings.HasSuffix(lower, ".yml") ||
+		strings.HasSuffix(lower, ".json"):
+		return "config"
+	default:
+		return "source"
+	}
+}
+
+func writeMapRecentText(out io.Writer, m mapRecentOutput, verbose bool) {
+	if m.AreaQuery != "" {
+		fmt.Fprintf(out, "Recently active topics matching: %s\n", m.AreaQuery)
+	} else {
+		fmt.Fprintln(out, "Recently active topics")
+	}
+	fmt.Fprintf(out, "Repo: %s\n\n", m.Repo.Name)
+	if len(m.Topics) == 0 {
+		fmt.Fprintln(out, "No recent topics found.")
+		writeMapCaveats(out, m.Caveats)
+		return
+	}
+	for i, topic := range m.Topics {
+		fmt.Fprintf(out, "%d. %s\n", i+1, topic.Label)
+		fmt.Fprintf(out, "   Evidence: %s\n", mapRecentEvidenceText(topic))
+		if len(topic.RecentSignals) > 0 {
+			receipt := topic.RecentSignals[0]
+			if receipt.SHA != "" {
+				fmt.Fprintf(out, "   Recent signal: %s %s\n", receipt.SHA, receipt.Subject)
+			} else {
+				fmt.Fprintf(out, "   Recent signal: %s\n", receipt.Subject)
+			}
+		}
+		if len(topic.KeyPaths) > 0 {
+			fmt.Fprintln(out, "   Key files:")
+			for _, path := range firstStrings(topic.KeyPaths, 3) {
+				fmt.Fprintf(out, "   - %s\n", path)
+			}
+		}
+		if topic.Try != "" {
+			fmt.Fprintf(out, "   Try: %s\n", topic.Try)
+		}
+		if verbose {
+			fmt.Fprintf(out, "   Diagnostics: score=%d query=%q files=%d commits=%d\n", topic.Score, topic.Query, topic.FileCount, topic.CommitCount)
+		}
+		fmt.Fprintln(out)
+	}
+	writeMapCaveats(out, m.Caveats)
+}
+
+func mapRecentEvidenceText(topic mapRecentTopic) string {
+	var parts []string
+	if topic.CommitCount == 1 {
+		parts = append(parts, "1 commit")
+	} else {
+		parts = append(parts, fmt.Sprintf("%d commits", topic.CommitCount))
+	}
+	if topic.FileCount == 1 {
+		parts = append(parts, "1 file")
+	} else {
+		parts = append(parts, fmt.Sprintf("%d files", topic.FileCount))
+	}
+	if families := mapAreaEvidenceText(topic.EvidenceCounts); families != "local evidence" {
+		parts = append(parts, families)
+	}
+	return strings.Join(parts, ", ")
 }
 
 func refineMapAreaForDrilldownQuery(area mapArea, query string) mapArea {
