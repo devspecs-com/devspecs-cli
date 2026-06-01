@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -23,7 +22,6 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
 	"github.com/devspecs-com/devspecs-cli/internal/ignore"
 	"github.com/devspecs-com/devspecs-cli/internal/scan"
-	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/devspecs-com/devspecs-cli/internal/telemetry"
 	"github.com/spf13/cobra"
 )
@@ -32,7 +30,7 @@ const (
 	mapDefaultMaxAreas     = 8
 	mapMaxArtifactsPerArea = 4
 	mapMaxCoversPerArea    = 5
-	mapMaxTraceReceipts    = 1
+	mapMaxTraceReceipts    = 3
 	mapMaxVerboseTrace     = 4
 	mapSchemaVersion       = "devspecs.map.v1"
 	mapTraceReceiptMode    = "bounded_git_path_receipts_v0"
@@ -71,14 +69,20 @@ func NewMapCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "map",
+		Use:   "map [area]",
 		Short: "Show a concise repo map and useful follow-up context commands",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			areaQuery := ""
+			if len(args) > 0 {
+				areaQuery = args[0]
+			}
 			return runMap(cmd, mapOptions{
-				Path:     path,
-				JSON:     asJSON,
-				Verbose:  verbose,
-				MaxAreas: maxAreas,
+				Path:      path,
+				AreaQuery: areaQuery,
+				JSON:      asJSON,
+				Verbose:   verbose,
+				MaxAreas:  maxAreas,
 			})
 		},
 	}
@@ -91,10 +95,11 @@ func NewMapCmd() *cobra.Command {
 }
 
 type mapOptions struct {
-	Path     string
-	JSON     bool
-	Verbose  bool
-	MaxAreas int
+	Path      string
+	AreaQuery string
+	JSON      bool
+	Verbose   bool
+	MaxAreas  int
 }
 
 type mapOutput struct {
@@ -149,6 +154,8 @@ type mapDiagnostics struct {
 	RawClusterCount           int      `json:"raw_cluster_count,omitempty"`
 	WorkstreamAnchorsSeen     int      `json:"workstream_anchors_seen,omitempty"`
 	WorkstreamMaterialized    int      `json:"workstream_materialized,omitempty"`
+	AreaQuery                 string   `json:"area_query,omitempty"`
+	MatchedAreaCount          int      `json:"matched_area_count,omitempty"`
 	SuppressedLabels          []string `json:"suppressed_labels,omitempty"`
 	TraceNoisyCommitsFiltered int      `json:"trace_noisy_commits_filtered,omitempty"`
 }
@@ -266,9 +273,10 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 	start := time.Now()
 	success := false
 	props := map[string]any{
-		"json":      opts.JSON,
-		"verbose":   opts.Verbose,
-		"max_areas": opts.MaxAreas,
+		"json":       opts.JSON,
+		"verbose":    opts.Verbose,
+		"max_areas":  opts.MaxAreas,
+		"area_query": opts.AreaQuery != "",
 	}
 	defer func() {
 		telemetry.RecordCommand("map", success, time.Since(start), props)
@@ -291,9 +299,16 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 	props["area_count_bucket"] = telemetry.CountBucket(len(out.Areas))
 
 	if opts.JSON {
+		if opts.AreaQuery != "" {
+			out = filterMapOutputByAreaQuery(out, opts.AreaQuery)
+		}
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)
+	}
+	if opts.AreaQuery != "" {
+		writeMapAreaText(cmd.OutOrStdout(), out, opts.AreaQuery, opts.Verbose)
+		return nil
 	}
 	writeMapText(cmd.OutOrStdout(), out, opts.Verbose)
 	return nil
@@ -308,15 +323,9 @@ func runMapScan(ctx context.Context, repoRoot string) (*scan.Result, error) {
 	cfg = config.WithTestCaseArtifacts(cfg, true)
 	cfg = config.WithCodeCommentArtifacts(cfg, true)
 
-	tempDir, err := os.MkdirTemp("", "devspecs-map-*")
+	db, err := openDB()
 	if err != nil {
-		return nil, fmt.Errorf("create temporary map index: %w", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	db, err := store.Open(filepath.Join(tempDir, "devspecs-map.db"))
-	if err != nil {
-		return nil, fmt.Errorf("open temporary map index: %w", err)
+		return nil, fmt.Errorf("open map index: %w", err)
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
@@ -330,13 +339,20 @@ func runMapScan(ctx context.Context, repoRoot string) (*scan.Result, error) {
 		&codecomment.Adapter{},
 	}
 	scanner := scan.New(db, idgen.NewFactory(), adpts)
+	scanOpts, err := liveScanRunOptions(db)
+	if err != nil {
+		return nil, fmt.Errorf("inspect map index state: %w", err)
+	}
+	scanOpts.IncludeGitEvidence = true
+	scanOpts.IncludeWorkstreamEvidence = true
+	scanOpts.RichTypedIndex = true
 	result, err := scanner.RunWithOptions(ctx, repoRoot, cfg, scan.RunOptions{
-		UseTransaction:            true,
-		FreshIndex:                true,
-		SkipAuthoredAtLookup:      true,
-		IncludeGitEvidence:        true,
-		IncludeWorkstreamEvidence: true,
-		RichTypedIndex:            true,
+		UseTransaction:            scanOpts.UseTransaction,
+		FreshIndex:                scanOpts.FreshIndex,
+		SkipAuthoredAtLookup:      scanOpts.SkipAuthoredAtLookup,
+		IncludeGitEvidence:        scanOpts.IncludeGitEvidence,
+		IncludeWorkstreamEvidence: scanOpts.IncludeWorkstreamEvidence,
+		RichTypedIndex:            scanOpts.RichTypedIndex,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("map scan: %w", err)
@@ -614,6 +630,8 @@ func publicMapAreas(repoRoot, repoName string, areas []*mapAreaInternal, maxArea
 		}
 		covers := sortedMapSet(area.Subareas)
 		covers = cleanMapCovers(label, covers)
+		label = refineMapAreaLabel(label, covers)
+		covers = cleanMapCovers(label, covers)
 		traceReceipts := mapTraceReceipts(repoRoot, area, covers)
 		try := mapTryCommand(label, covers, traceReceipts, confidence)
 		areaType := classifyMapAreaType(area, label, areaClass, isRoot, covers)
@@ -701,6 +719,277 @@ func writeMapText(out io.Writer, m mapOutput, verbose bool) {
 		fmt.Fprintln(out)
 	}
 	writeMapCaveats(out, m.Caveats)
+}
+
+func writeMapAreaText(out io.Writer, m mapOutput, query string, verbose bool) {
+	matches := matchMapAreas(m.Areas, query)
+	if len(matches) == 0 {
+		fmt.Fprintf(out, "Map area: %s\n", query)
+		fmt.Fprintf(out, "Repo: %s\n\n", m.Repo.Name)
+		fmt.Fprintln(out, "No matching map area found.")
+		if len(m.Areas) > 0 {
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, "Available areas:")
+			for _, area := range firstMapAreas(m.Areas, mapDefaultMaxAreas) {
+				fmt.Fprintf(out, "- %s (%s)\n", area.Label, displayMapAreaType(area.AreaType))
+			}
+		}
+		writeMapCaveats(out, m.Caveats)
+		return
+	}
+
+	primary := matches[0].Area
+	fmt.Fprintf(out, "Map area: %s\n", primary.Label)
+	fmt.Fprintf(out, "Repo: %s\n", m.Repo.Name)
+	if primary.AreaType != "" {
+		fmt.Fprintf(out, "Type: %s\n", displayMapAreaType(primary.AreaType))
+	}
+	fmt.Fprintf(out, "Confidence: %s\n", primary.Confidence)
+	fmt.Fprintf(out, "Evidence: %s\n", mapAreaEvidenceText(primary.EvidenceCounts))
+	fmt.Fprintln(out)
+	if len(primary.Covers) > 0 {
+		fmt.Fprintf(out, "Covers: %s\n\n", strings.Join(primary.Covers, ", "))
+	}
+	if len(primary.KeyPaths) > 0 {
+		fmt.Fprintln(out, "Key files:")
+		for _, p := range firstStrings(primary.KeyPaths, 6) {
+			fmt.Fprintf(out, "- %s\n", p)
+		}
+		fmt.Fprintln(out)
+	}
+	if len(primary.TraceReceipts) > 0 {
+		if len(primary.TraceReceipts) == 1 {
+			fmt.Fprintln(out, "Recent signal:")
+		} else {
+			fmt.Fprintln(out, "Recent signals:")
+		}
+		for _, receipt := range firstMapTraceReceipts(primary.TraceReceipts, 3) {
+			if receipt.SHA != "" {
+				fmt.Fprintf(out, "- %s %s\n", receipt.SHA, receipt.Subject)
+			} else {
+				fmt.Fprintf(out, "- %s\n", receipt.Subject)
+			}
+		}
+		fmt.Fprintln(out)
+	}
+	commands := mapAreaPackCommands(primary)
+	if len(commands) > 0 {
+		fmt.Fprintln(out, "Pack this context:")
+		for _, cmd := range commands {
+			fmt.Fprintf(out, "- %s\n", cmd)
+		}
+		fmt.Fprintln(out)
+	}
+	related := relatedMapAreas(primary, m.Areas)
+	if len(related) > 0 {
+		fmt.Fprintln(out, "Related areas:")
+		for _, area := range related {
+			fmt.Fprintf(out, "- %s (%s)\n", area.Label, displayMapAreaType(area.AreaType))
+		}
+		fmt.Fprintln(out)
+	}
+	otherMatches := otherMapAreaMatches(matches, related)
+	if len(otherMatches) > 0 {
+		fmt.Fprintln(out, "Other matches:")
+		for _, match := range firstMapAreaMatches(otherMatches, 3) {
+			fmt.Fprintf(out, "- %s (%s)\n", match.Area.Label, displayMapAreaType(match.Area.AreaType))
+		}
+		fmt.Fprintln(out)
+	}
+	if verbose {
+		fmt.Fprintf(out, "Diagnostics: match_score=%d class=%s key=%s\n", matches[0].Score, primary.Class, primary.Diagnostics.Key)
+		if len(primary.Diagnostics.RawAnchors) > 0 {
+			fmt.Fprintf(out, "Raw anchors: %s\n", strings.Join(primary.Diagnostics.RawAnchors, ", "))
+		}
+		if len(primary.Diagnostics.TraceTerms) > 0 {
+			fmt.Fprintf(out, "Trace terms: %s\n", strings.Join(firstStrings(primary.Diagnostics.TraceTerms, mapMaxVerboseTrace), ", "))
+		}
+		fmt.Fprintln(out)
+	}
+	writeMapCaveats(out, append([]string{}, primary.Caveats...))
+}
+
+func filterMapOutputByAreaQuery(m mapOutput, query string) mapOutput {
+	matches := matchMapAreas(m.Areas, query)
+	filtered := make([]mapArea, 0, len(matches))
+	for _, match := range matches {
+		filtered = append(filtered, match.Area)
+	}
+	m.Areas = filtered
+	m.Diagnostics.AreaQuery = query
+	m.Diagnostics.MatchedAreaCount = len(filtered)
+	if len(filtered) == 0 {
+		m.Caveats = appendUniqueString(m.Caveats, "no map area matched the supplied area query")
+	}
+	return m
+}
+
+type mapAreaMatch struct {
+	Area  mapArea
+	Score int
+}
+
+func matchMapAreas(areas []mapArea, query string) []mapAreaMatch {
+	queryKey := normalizeMapKey(query)
+	if queryKey == "" {
+		return nil
+	}
+	var matches []mapAreaMatch
+	for _, area := range areas {
+		score := scoreMapAreaMatch(area, queryKey)
+		if score > 0 {
+			matches = append(matches, mapAreaMatch{Area: area, Score: score})
+		}
+	}
+	sort.SliceStable(matches, func(i, j int) bool {
+		if matches[i].Score == matches[j].Score {
+			return matches[i].Area.Label < matches[j].Area.Label
+		}
+		return matches[i].Score > matches[j].Score
+	})
+	return matches
+}
+
+func scoreMapAreaMatch(area mapArea, queryKey string) int {
+	best := 0
+	for _, value := range mapAreaSearchValues(area) {
+		key := normalizeMapKey(value)
+		if key == "" {
+			continue
+		}
+		score := 0
+		switch {
+		case key == queryKey:
+			score = 100
+		case strings.HasPrefix(key, queryKey+"-") || strings.HasPrefix(key, queryKey+"/"):
+			score = 82
+		case strings.Contains(key, "-"+queryKey+"-") || strings.Contains(key, "/"+queryKey+"/"):
+			score = 72
+		case strings.Contains(key, queryKey) && len(queryKey) >= 4:
+			score = 58
+		case strings.Contains(queryKey, key) && len(key) >= 4:
+			score = 50
+		}
+		if score > best {
+			best = score
+		}
+	}
+	if best > 0 && normalizeMapKey(area.AreaType) == queryKey {
+		best += 8
+	}
+	return best
+}
+
+func mapAreaSearchValues(area mapArea) []string {
+	values := []string{
+		area.ID,
+		area.Label,
+		area.AreaType,
+		displayMapAreaType(area.AreaType),
+		area.Diagnostics.Key,
+	}
+	values = append(values, area.Covers...)
+	values = append(values, area.KeyPaths...)
+	values = append(values, area.Diagnostics.RawAnchors...)
+	values = append(values, area.Diagnostics.TraceTerms...)
+	return values
+}
+
+func mapAreaPackCommands(area mapArea) []string {
+	var commands []string
+	if area.Try != "" {
+		commands = appendUniqueString(commands, area.Try)
+	}
+	for _, cover := range firstStrings(area.Covers, 4) {
+		if query := joinMapQuery(area.Label, cover); query != "" {
+			commands = appendUniqueString(commands, mapFindPackCommand(query))
+		}
+	}
+	for _, receipt := range firstMapTraceReceipts(area.TraceReceipts, 2) {
+		if query := mapTraceQuery(area.Label, area.Covers, receipt.Subject); query != "" {
+			commands = appendUniqueString(commands, mapFindPackCommand(query))
+		}
+	}
+	if len(commands) == 0 && area.Label != "" {
+		commands = append(commands, mapFindPackCommand(area.Label))
+	}
+	return firstStrings(commands, 4)
+}
+
+func relatedMapAreas(primary mapArea, areas []mapArea) []mapArea {
+	var related []mapArea
+	for _, area := range areas {
+		if area.ID == primary.ID {
+			continue
+		}
+		if area.AreaType == primary.AreaType && len(related) < 3 {
+			related = append(related, area)
+			continue
+		}
+		if len(related) < 3 && mapAreasShareCover(primary, area) {
+			related = append(related, area)
+		}
+	}
+	return firstMapAreas(related, 3)
+}
+
+func otherMapAreaMatches(matches []mapAreaMatch, related []mapArea) []mapAreaMatch {
+	if len(matches) <= 1 {
+		return nil
+	}
+	relatedIDs := map[string]bool{}
+	for _, area := range related {
+		relatedIDs[area.ID] = true
+	}
+	topScore := matches[0].Score
+	var out []mapAreaMatch
+	for _, match := range matches[1:] {
+		if relatedIDs[match.Area.ID] {
+			continue
+		}
+		if topScore >= 100 && match.Score < 90 {
+			continue
+		}
+		out = append(out, match)
+	}
+	return out
+}
+
+func mapAreasShareCover(a, b mapArea) bool {
+	terms := map[string]bool{}
+	for _, value := range append(a.Covers, a.Label) {
+		for _, word := range wordsFromMap(value) {
+			if len(word) >= 4 && !mapGenericTerms[word] {
+				terms[word] = true
+			}
+		}
+	}
+	for _, value := range append(b.Covers, b.Label) {
+		for _, word := range wordsFromMap(value) {
+			if terms[word] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func firstMapAreas(values []mapArea, limit int) []mapArea {
+	if limit <= 0 || len(values) <= limit {
+		return values
+	}
+	out := make([]mapArea, limit)
+	copy(out, values[:limit])
+	return out
+}
+
+func firstMapAreaMatches(values []mapAreaMatch, limit int) []mapAreaMatch {
+	if limit <= 0 || len(values) <= limit {
+		return values
+	}
+	out := make([]mapAreaMatch, limit)
+	copy(out, values[:limit])
+	return out
 }
 
 func writeMapCaveats(out io.Writer, caveats []string) {
@@ -1079,6 +1368,32 @@ func reframeMapRootLabel(area *mapAreaInternal, repoName, confidence string) str
 	return base + " overview"
 }
 
+func refineMapAreaLabel(label string, covers []string) string {
+	key := normalizeMapKey(label)
+	switch {
+	case strings.HasPrefix(key, "lib-") && len(wordsFromMap(label)) > 1:
+		return displayMapLabel(strings.TrimPrefix(key, "lib-"))
+	case key == "application":
+		if lead := firstMapCoverLead(covers); lead != "" {
+			return displayMapLabel(lead + " application")
+		}
+	case key == "cmd":
+		return "Commands"
+	}
+	return label
+}
+
+func firstMapCoverLead(covers []string) string {
+	for _, cover := range covers {
+		for _, word := range wordsFromMap(cover) {
+			if len(word) >= 4 && !mapGenericTerms[word] {
+				return word
+			}
+		}
+	}
+	return ""
+}
+
 func mapTryCommand(label string, covers []string, receipts []mapTraceReceipt, confidence string) string {
 	if confidence == mapLowConfidence && len(covers) == 0 {
 		return ""
@@ -1092,6 +1407,14 @@ func mapTryCommand(label string, covers []string, receipts []mapTraceReceipt, co
 			query = traceQuery
 		}
 	}
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return ""
+	}
+	return mapFindPackCommand(query)
+}
+
+func mapFindPackCommand(query string) string {
 	query = strings.ToLower(strings.TrimSpace(query))
 	if query == "" {
 		return ""
@@ -1275,6 +1598,9 @@ func cleanMapCovers(label string, covers []string) []string {
 	for _, cover := range covers {
 		key := normalizeMapKey(cover)
 		if key == "" || seen[key] {
+			continue
+		}
+		if len(key) <= 2 {
 			continue
 		}
 		words := wordsFromMap(cover)

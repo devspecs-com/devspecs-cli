@@ -129,8 +129,84 @@ func TestMapRootOnlyAreaStaysLowConfidence(t *testing.T) {
 }
 
 func TestMapAreaTypeClassifiesProductBoundaries(t *testing.T) {
+	out := buildProductMapTestOutput(t)
+
+	types := map[string]string{}
+	for _, area := range out.Areas {
+		types[area.Label] = area.AreaType
+	}
+	if types["Flowable"] != mapTypeExternal {
+		t.Fatalf("Flowable type = %q, want external integration; all=%#v", types["Flowable"], types)
+	}
+	if types["Status Pill"] != mapTypeUI {
+		t.Fatalf("Status Pill type = %q, want UI surface; all=%#v", types["Status Pill"], types)
+	}
+	if types["Submission"] != mapTypeBusinessFlow {
+		t.Fatalf("Submission type = %q, want business workflow; all=%#v", types["Submission"], types)
+	}
+}
+
+func TestMapAreaDrilldownIsActionable(t *testing.T) {
+	out := buildProductMapTestOutput(t)
+	var buf bytes.Buffer
+	writeMapAreaText(&buf, out, "submission", false)
+	text := buf.String()
+	for _, want := range []string{
+		"Map area: Submission",
+		"Type: business workflow",
+		"Key files:",
+		"apps/api/internal/submission/redaction.go",
+		"Pack this context:",
+		`ds find --pack "submission redaction"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("area drilldown missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestMapAreaDrilldownNoMatchListsAvailableAreas(t *testing.T) {
+	out := buildProductMapTestOutput(t)
+	var buf bytes.Buffer
+	writeMapAreaText(&buf, out, "not-a-real-area", false)
+	text := buf.String()
+	for _, want := range []string{"No matching map area found.", "Available areas:", "Submission", "Flowable"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("no-match drilldown missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestFilterMapOutputByAreaQueryNarrowsJSONPayload(t *testing.T) {
+	out := buildProductMapTestOutput(t)
+	filtered := filterMapOutputByAreaQuery(out, "redaction")
+	if len(filtered.Areas) != 1 {
+		t.Fatalf("filtered area count = %d, want 1; areas=%#v", len(filtered.Areas), filtered.Areas)
+	}
+	if filtered.Areas[0].Label != "Submission" {
+		t.Fatalf("filtered label = %q, want Submission", filtered.Areas[0].Label)
+	}
+	if filtered.Diagnostics.AreaQuery != "redaction" || filtered.Diagnostics.MatchedAreaCount != 1 {
+		t.Fatalf("unexpected diagnostics: %#v", filtered.Diagnostics)
+	}
+}
+
+func TestRefineMapAreaLabelMakesLayerLabelsMoreProductReadable(t *testing.T) {
+	if got := refineMapAreaLabel("Lib Anthropic", []string{"Anthropic Ts"}); got != "Anthropic" {
+		t.Fatalf("refined lib label = %q, want Anthropic", got)
+	}
+	if got := refineMapAreaLabel("Application", []string{"Blip Get Canonical Path"}); got != "Blip Application" {
+		t.Fatalf("refined application label = %q, want Blip Application", got)
+	}
+	if got := cleanMapCovers("Game", []string{"Ks", "Rts Camera Mode"}); strings.Join(got, ", ") != "Rts Camera Mode" {
+		t.Fatalf("clean covers kept short raw anchor: %#v", got)
+	}
+}
+
+func buildProductMapTestOutput(t *testing.T) mapOutput {
+	t.Helper()
 	repoRoot := filepath.Join(t.TempDir(), "product")
-	out := buildMapOutput(repoRoot, &scan.Result{
+	return buildMapOutput(repoRoot, &scan.Result{
 		Found: map[string]int{"source_context": 6, "test_case": 2},
 		WorkstreamEvidence: &scan.WorkstreamEvidenceDiagnostics{
 			TopClusters: []scan.WorkstreamClusterExample{
@@ -163,18 +239,4 @@ func TestMapAreaTypeClassifiesProductBoundaries(t *testing.T) {
 			},
 		},
 	}, mapOptions{MaxAreas: 6})
-
-	types := map[string]string{}
-	for _, area := range out.Areas {
-		types[area.Label] = area.AreaType
-	}
-	if types["Flowable"] != mapTypeExternal {
-		t.Fatalf("Flowable type = %q, want external integration; all=%#v", types["Flowable"], types)
-	}
-	if types["Status Pill"] != mapTypeUI {
-		t.Fatalf("Status Pill type = %q, want UI surface; all=%#v", types["Status Pill"], types)
-	}
-	if types["Submission"] != mapTypeBusinessFlow {
-		t.Fatalf("Submission type = %q, want business workflow; all=%#v", types["Submission"], types)
-	}
 }
