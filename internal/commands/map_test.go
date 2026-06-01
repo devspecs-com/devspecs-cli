@@ -41,7 +41,7 @@ func TestMapTextHidesReviewerDiagnosticsByDefault(t *testing.T) {
 			t.Fatalf("default map output leaked reviewer diagnostic %q:\n%s", notWant, text)
 		}
 	}
-	for _, want := range []string{"Repo map: payments-api", "Candidate areas", "Try: ds find --pack"} {
+	for _, want := range []string{"Repo map: payments-api", "Candidate areas", "Type:", "Try: ds find --pack"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("default map output missing %q:\n%s", want, text)
 		}
@@ -83,6 +83,9 @@ func TestMapJSONSchemaIsAgentReadable(t *testing.T) {
 	if len(decoded.Areas) == 0 {
 		t.Fatalf("expected at least one area in JSON:\n%s", string(data))
 	}
+	if decoded.Areas[0].AreaType == "" {
+		t.Fatalf("expected area_type in JSON:\n%s", string(data))
+	}
 }
 
 func TestMapEvidenceCountsUsesPathFamilies(t *testing.T) {
@@ -119,5 +122,59 @@ func TestMapRootOnlyAreaStaysLowConfidence(t *testing.T) {
 	}
 	if len(out.Areas) == 0 || !out.Areas[0].IsRepoRootUmbrella {
 		t.Fatalf("expected root umbrella area, got %#v", out.Areas)
+	}
+	if out.Areas[0].AreaType != mapTypeRoot {
+		t.Fatalf("root area type = %q, want %q", out.Areas[0].AreaType, mapTypeRoot)
+	}
+}
+
+func TestMapAreaTypeClassifiesProductBoundaries(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "product")
+	out := buildMapOutput(repoRoot, &scan.Result{
+		Found: map[string]int{"source_context": 6, "test_case": 2},
+		WorkstreamEvidence: &scan.WorkstreamEvidenceDiagnostics{
+			TopClusters: []scan.WorkstreamClusterExample{
+				{
+					Anchor:        "flowable process definitions",
+					Confidence:    0.9,
+					EvidenceCount: 4,
+					ExampleArtifacts: []scan.WorkstreamArtifactExample{
+						{Kind: "source_context", Path: "app/api/private/flowable/v1/process_definitions.py"},
+						{Kind: "source_context", Path: "app/core/flowable.py"},
+					},
+				},
+				{
+					Anchor:        "status pill",
+					Confidence:    0.85,
+					EvidenceCount: 3,
+					ExampleArtifacts: []scan.WorkstreamArtifactExample{
+						{Kind: "source_context", Path: "apps/web/components/status-pill.tsx"},
+					},
+				},
+				{
+					Anchor:        "submission redaction",
+					Confidence:    0.8,
+					EvidenceCount: 3,
+					ExampleArtifacts: []scan.WorkstreamArtifactExample{
+						{Kind: "source_context", Path: "apps/api/internal/submission/redaction.go"},
+						{Kind: "test_case", Path: "apps/api/internal/submission/redaction_test.go"},
+					},
+				},
+			},
+		},
+	}, mapOptions{MaxAreas: 6})
+
+	types := map[string]string{}
+	for _, area := range out.Areas {
+		types[area.Label] = area.AreaType
+	}
+	if types["Flowable"] != mapTypeExternal {
+		t.Fatalf("Flowable type = %q, want external integration; all=%#v", types["Flowable"], types)
+	}
+	if types["Status Pill"] != mapTypeUI {
+		t.Fatalf("Status Pill type = %q, want UI surface; all=%#v", types["Status Pill"], types)
+	}
+	if types["Submission"] != mapTypeBusinessFlow {
+		t.Fatalf("Submission type = %q, want business workflow; all=%#v", types["Submission"], types)
 	}
 }

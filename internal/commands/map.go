@@ -44,6 +44,21 @@ const (
 	mapClassDocTopic       = "doc_topic"
 	mapClassProtocol       = "protocol"
 	mapClassLowConfidence  = "low_confidence"
+	mapTypeDomainFeature   = "domain_feature"
+	mapTypeBusinessFlow    = "business_workflow"
+	mapTypeExternal        = "external_integration"
+	mapTypeAPI             = "api_surface"
+	mapTypeUI              = "ui_surface"
+	mapTypeDataModel       = "data_model"
+	mapTypeDataPipeline    = "data_pipeline"
+	mapTypePlatform        = "platform_capability"
+	mapTypeOps             = "ops_runtime"
+	mapTypeTooling         = "tooling_script"
+	mapTypeTestQuality     = "test_quality"
+	mapTypeProtocol        = "protocol_process"
+	mapTypeDocs            = "docs_reference"
+	mapTypeRoot            = "repo_root_umbrella"
+	mapTypeUnknown         = "unknown_area"
 )
 
 // NewMapCmd creates the ds map command.
@@ -113,6 +128,7 @@ type mapArea struct {
 	ID                 string             `json:"id"`
 	Label              string             `json:"label"`
 	Class              string             `json:"class"`
+	AreaType           string             `json:"area_type"`
 	Confidence         string             `json:"confidence"`
 	IsRepoRootUmbrella bool               `json:"is_repo_root_umbrella,omitempty"`
 	Covers             []string           `json:"covers,omitempty"`
@@ -600,6 +616,7 @@ func publicMapAreas(repoRoot, repoName string, areas []*mapAreaInternal, maxArea
 		covers = cleanMapCovers(label, covers)
 		traceReceipts := mapTraceReceipts(repoRoot, area, covers)
 		try := mapTryCommand(label, covers, traceReceipts, confidence)
+		areaType := classifyMapAreaType(area, label, areaClass, isRoot, covers)
 		caveats := mapAreaCaveats(area, areaClass, isRoot)
 		if isRoot && len(covers) == 0 {
 			caveats = appendUniqueString(caveats, "package-root signal only")
@@ -608,6 +625,7 @@ func publicMapAreas(repoRoot, repoName string, areas []*mapAreaInternal, maxArea
 			ID:                 "area." + normalizeMapKey(label),
 			Label:              label,
 			Class:              areaClass,
+			AreaType:           areaType,
 			Confidence:         confidence,
 			IsRepoRootUmbrella: isRoot,
 			Covers:             firstStrings(covers, mapMaxCoversPerArea),
@@ -649,6 +667,9 @@ func writeMapText(out io.Writer, m mapOutput, verbose bool) {
 	fmt.Fprintln(out)
 	for i, area := range m.Areas {
 		fmt.Fprintf(out, "%d. %s\n", i+1, area.Label)
+		if area.AreaType != "" {
+			fmt.Fprintf(out, "   Type: %s\n", displayMapAreaType(area.AreaType))
+		}
 		if len(area.Covers) > 0 {
 			fmt.Fprintf(out, "   Covers: %s\n", strings.Join(area.Covers, ", "))
 		}
@@ -857,6 +878,139 @@ func classifyMapArea(area *mapAreaInternal) string {
 		return mapClassStableArea
 	}
 	return mapClassLowConfidence
+}
+
+func classifyMapAreaType(area *mapAreaInternal, label, class string, root bool, covers []string) string {
+	if root {
+		return mapTypeRoot
+	}
+	if class == mapClassProtocol {
+		return mapTypeProtocol
+	}
+
+	values := mapAreaTypeValues(area, label, covers)
+	primaryValues := mapAreaPrimaryTypeValues(area, label, covers)
+	source := area.EvidenceCounts["source"] > 0
+	test := area.EvidenceCounts["test"] > 0
+	doc := area.EvidenceCounts["doc"] > 0 || area.EvidenceCounts["intent"] > 0
+
+	if !source && test && !doc {
+		return mapTypeTestQuality
+	}
+	if mapAnyContains(values, "docker", "compose", "deploy", "deployment", "helm", "kubernetes", "k8s", "terraform", "infra", "infrastructure", "postgres", "redis", "queue", "worker") {
+		return mapTypeOps
+	}
+	if mapAnyContains(values, "flowable", "stripe", "github", "linear", "jira", "slack", "salesforce", "hubspot", "sendgrid", "mailgun", "twilio", "aws", "s3", "azure", "gcp", "openai", "anthropic", "kafka", "webhook") {
+		return mapTypeExternal
+	}
+	if mapAnyContains(primaryValues, "httpapi", "api", "router", "route", "routes", "endpoint", "endpoints", "controller", "controllers", "handler", "handlers", "grpc", "graphql", "rest") {
+		return mapTypeAPI
+	}
+	if mapAnyContains(values, "submission", "lead", "application", "booking", "order", "checkout", "billing", "payment", "invoice", "workflow", "approval", "review", "form", "claim", "policy", "quote", "customer", "admin") {
+		return mapTypeBusinessFlow
+	}
+	if mapAnyContains(values, "httpapi", "api", "router", "route", "routes", "endpoint", "endpoints", "controller", "controllers", "handler", "handlers", "grpc", "graphql", "rest") {
+		return mapTypeAPI
+	}
+	if mapAnyContains(values, "component", "components", "page", "pages", "screen", "screens", "view", "views", "frontend", "web", "tsx", "jsx", "css", "status-pill", "top-nav", "dashboard", "ui") {
+		return mapTypeUI
+	}
+	if mapAnyContains(values, "script", "scripts", "cmd", "cli", "command", "commands", "generator", "generate", "build", "tool", "tools", "devtool", "devtools") {
+		return mapTypeTooling
+	}
+	if mapAnyContains(values, "sync", "ingest", "ingestion", "pipeline", "etl", "extract", "transform", "loader", "backfill", "data-import", "data-export", "migration-job") {
+		return mapTypeDataPipeline
+	}
+	if mapAnyContains(values, "model", "models", "schema", "schemas", "entity", "entities", "migration", "migrations", "database", "db", "sql", "psql", "prisma", "table", "tables") {
+		return mapTypeDataModel
+	}
+	if mapAnyContains(values, "auth", "authentication", "authorization", "session", "permission", "permissions", "role", "roles", "tenant", "tenants", "config", "settings", "feature-flag", "feature-flags") {
+		return mapTypePlatform
+	}
+	if !source && doc {
+		return mapTypeDocs
+	}
+	if source || test {
+		return mapTypeDomainFeature
+	}
+	return mapTypeUnknown
+}
+
+func mapAreaTypeValues(area *mapAreaInternal, label string, covers []string) []string {
+	var values []string
+	values = append(values, label, area.Key)
+	values = append(values, area.RawAnchors...)
+	values = append(values, covers...)
+	for _, art := range area.Artifacts {
+		values = append(values, art.Path, art.Title, art.Subtype)
+	}
+	return values
+}
+
+func mapAreaPrimaryTypeValues(area *mapAreaInternal, label string, covers []string) []string {
+	values := []string{label, area.Key}
+	values = append(values, covers...)
+	return values
+}
+
+func mapAnyContains(values []string, needles ...string) bool {
+	for _, value := range values {
+		normalized := normalizeMapKey(value)
+		if normalized == "" {
+			continue
+		}
+		for _, needle := range needles {
+			needle = normalizeMapKey(needle)
+			if needle == "" {
+				continue
+			}
+			if normalized == needle ||
+				strings.HasPrefix(normalized, needle+"-") ||
+				strings.HasSuffix(normalized, "-"+needle) ||
+				strings.Contains(normalized, "-"+needle+"-") ||
+				strings.Contains(normalized, "/"+needle+"/") ||
+				strings.HasPrefix(normalized, needle+"/") ||
+				strings.HasSuffix(normalized, "/"+needle) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func displayMapAreaType(areaType string) string {
+	switch areaType {
+	case mapTypeDomainFeature:
+		return "domain feature"
+	case mapTypeBusinessFlow:
+		return "business workflow"
+	case mapTypeExternal:
+		return "external integration"
+	case mapTypeAPI:
+		return "API surface"
+	case mapTypeUI:
+		return "UI surface"
+	case mapTypeDataModel:
+		return "data model"
+	case mapTypeDataPipeline:
+		return "data pipeline"
+	case mapTypePlatform:
+		return "platform capability"
+	case mapTypeOps:
+		return "ops/runtime"
+	case mapTypeTooling:
+		return "tooling/script"
+	case mapTypeTestQuality:
+		return "test/quality"
+	case mapTypeProtocol:
+		return "protocol/process"
+	case mapTypeDocs:
+		return "docs/reference"
+	case mapTypeRoot:
+		return "repo-root umbrella"
+	default:
+		return "unknown"
+	}
 }
 
 func mapAreaConfidence(area *mapAreaInternal, class string) string {
@@ -1610,6 +1764,8 @@ func displayMapLabel(value string) string {
 		switch word {
 		case "api", "cli", "mcp", "gkapi", "adr", "http", "json", "yaml", "sql", "seo", "og", "db", "ui":
 			words[i] = strings.ToUpper(word)
+		case "httpapi":
+			words[i] = "HTTP API"
 		default:
 			if word == "" {
 				continue
