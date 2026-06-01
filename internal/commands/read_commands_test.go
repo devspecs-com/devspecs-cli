@@ -567,6 +567,38 @@ func TestFindPack_JSONOutputIncludesGitReceiptsWhenAvailable(t *testing.T) {
 	}
 }
 
+func TestFindGitReceiptScoringSkipsBotNoise(t *testing.T) {
+	receipts := scoreFindGitReceipts([]parsedFindGitCommit{
+		{
+			sha:     "bot",
+			subject: "Update dependency @angular/compiler to v21.1.1 (#18717)",
+			body:    "Co-authored-by: renovate[bot] <29139614+renovate[bot]@users.noreply.github.com>",
+			paths: []string{
+				"scripts/release/run.js",
+				"scripts/release/steps/index.js",
+				"scripts/release/steps/post-publish-steps.js",
+			},
+		},
+		{
+			sha:         "human",
+			committedAt: "2026-04-15",
+			subject:     "Replace main branch in changelog link with tags (#19054)",
+			paths:       []string{"scripts/release/steps/show-instructions-after-npm-publish.js"},
+		},
+	}, []string{
+		"scripts/release/run.js",
+		"scripts/release/steps/index.js",
+		"scripts/release/steps/post-publish-steps.js",
+		"scripts/release/steps/show-instructions-after-npm-publish.js",
+	}, "release publish npm")
+	if len(receipts) != 1 {
+		t.Fatalf("expected one non-noisy receipt, got %#v", receipts)
+	}
+	if receipts[0].SHA != "human" {
+		t.Fatalf("expected human receipt, got %#v", receipts[0])
+	}
+}
+
 func TestFindPack_VerboseHumanOutputShowsDiagnostics(t *testing.T) {
 	setupReadEnv(t)
 

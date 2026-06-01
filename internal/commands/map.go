@@ -311,7 +311,7 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 			props["cache_hit"] = true
 		}
 	}
-	if result == nil {
+	if result == nil && cachedOutput == nil {
 		result, err = runMapScan(cmd.Context(), repoRoot)
 		if err != nil {
 			return err
@@ -410,14 +410,26 @@ func loadMapOutputCache(repoRoot string, maxAreas int) (mapOutput, bool, error) 
 	if err != nil {
 		return mapOutput{}, false, fmt.Errorf("open map output cache db: %w", err)
 	}
-	defer db.Close()
 	db.SetMaxOpenConns(1)
-	if status := freshness.Check(db, repoRoot); status == nil || status.Stale {
-		return mapOutput{}, false, nil
-	}
 	meta := db.GetRepoByRoot(repoRoot)
 	if meta == nil {
+		_ = db.Close()
+		debugLog("map output cache miss: repo not indexed")
 		return mapOutput{}, false, nil
+	}
+	if meta.LastScanCommit == "" {
+		if status := freshness.Check(db, repoRoot); status == nil || status.Stale {
+			_ = db.Close()
+			if status == nil {
+				debugLog("map output cache miss: freshness unavailable for non-git repo")
+			} else {
+				debugLog("map output cache miss: stale non-git index (%s)", status.Reason)
+			}
+			return mapOutput{}, false, nil
+		}
+	}
+	if err := db.Close(); err != nil {
+		return mapOutput{}, false, fmt.Errorf("close map output cache db: %w", err)
 	}
 	path, err := mapOutputCachePath(repoRoot)
 	if err != nil {
@@ -425,6 +437,7 @@ func loadMapOutputCache(repoRoot string, maxAreas int) (mapOutput, bool, error) 
 	}
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
+		debugLog("map output cache miss: file not found")
 		return mapOutput{}, false, nil
 	}
 	if err != nil {
@@ -436,14 +449,16 @@ func loadMapOutputCache(repoRoot string, maxAreas int) (mapOutput, bool, error) 
 	}
 	if cached.Schema != mapSchemaVersion ||
 		cached.RepoRoot != repoRoot ||
-		cached.LastScanCommit != meta.LastScanCommit ||
-		cached.LastScanAt != meta.LastScanAt ||
+		!mapOutputCacheScanMetaMatches(cached, meta) ||
 		cached.MaxAreas != maxAreas {
+		debugLog("map output cache miss: schema/root/scan/max mismatch cached_commit=%s meta_commit=%s cached_at=%s meta_at=%s cached_max=%d requested_max=%d cached_root=%q repo_root=%q", cached.LastScanCommit, meta.LastScanCommit, cached.LastScanAt, meta.LastScanAt, cached.MaxAreas, maxAreas, cached.RepoRoot, repoRoot)
 		return mapOutput{}, false, nil
 	}
 	if cached.Output.Schema != mapSchemaVersion || cached.Output.Repo.Path != repoRoot {
+		debugLog("map output cache miss: output schema/root mismatch output_root=%q repo_root=%q", cached.Output.Repo.Path, repoRoot)
 		return mapOutput{}, false, nil
 	}
+	debugLog("map output cache hit repo_root=%q areas=%d", repoRoot, len(cached.Output.Areas))
 	return cached.Output, true, nil
 }
 
@@ -487,6 +502,16 @@ func mapOutputCachePath(repoRoot string) (string, error) {
 	}
 	sum := sha256.Sum256([]byte(filepath.Clean(repoRoot)))
 	return filepath.Join(home, "map-cache", fmt.Sprintf("%x.json", sum[:])), nil
+}
+
+func mapOutputCacheScanMetaMatches(cached cachedMapOutputFile, meta *store.RepoMeta) bool {
+	if meta == nil {
+		return false
+	}
+	if meta.LastScanCommit != "" || cached.LastScanCommit != "" {
+		return cached.LastScanCommit == meta.LastScanCommit
+	}
+	return cached.LastScanAt == meta.LastScanAt
 }
 
 func runCachedMapScan(repoRoot string) (*scan.Result, bool, error) {

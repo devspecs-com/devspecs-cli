@@ -204,6 +204,9 @@ func scoreFindGitReceipts(commits []parsedFindGitCommit, packedPaths []string, q
 	anchors := findGitReceiptQueryAnchors(query)
 	var scored []FindGitReceipt
 	for _, commit := range commits {
+		if findGitReceiptCommitNoisy(commit) {
+			continue
+		}
 		matchedPaths := commitMatchedPackPaths(commit.paths, pathSet)
 		if len(matchedPaths) == 0 {
 			continue
@@ -254,6 +257,26 @@ func scoreFindGitReceipts(commits []parsedFindGitCommit, packedPaths []string, q
 		scored = scored[:findGitReceiptMaxDisplay]
 	}
 	return scored
+}
+
+func findGitReceiptCommitNoisy(commit parsedFindGitCommit) bool {
+	subject := strings.ToLower(strings.TrimSpace(commit.subject))
+	combined := subject + "\n" + strings.ToLower(commit.body)
+	switch {
+	case strings.Contains(combined, "dependabot") ||
+		strings.Contains(combined, "renovate[bot]") ||
+		strings.Contains(combined, "github-actions[bot]"):
+		return true
+	case strings.HasPrefix(subject, "update dependency ") ||
+		strings.HasPrefix(subject, "bump ") ||
+		strings.Contains(subject, "lockfile"):
+		return true
+	case strings.Contains(subject, "update translations") ||
+		strings.Contains(subject, "translations for "):
+		return true
+	default:
+		return false
+	}
 }
 
 func findGitReceiptQueryAnchors(query string) []string {
