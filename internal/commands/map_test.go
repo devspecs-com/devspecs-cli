@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -248,6 +249,46 @@ func TestMapTryCommandAvoidsUnsupportedCommitVerb(t *testing.T) {
 		if strings.Contains(cmd, "release replace") {
 			t.Fatalf("unsupported commit verb leaked into commands: %#v", commands)
 		}
+	}
+}
+
+func TestMapOutputCacheRoundTripsFreshMap(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	db, err := store.Open(filepath.Join(home, "devspecs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := "2026-06-01T00:00:00Z"
+	repoRoot := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO repos (id, root_path, last_scan_at, created_at, updated_at) VALUES ('repo_cache_out', ?, ?, ?, ?)", repoRoot, now, now, now); err != nil {
+		t.Fatal(err)
+	}
+	out := mapOutput{
+		Schema: mapSchemaVersion,
+		Repo: mapRepo{
+			Name:       "repo",
+			Path:       repoRoot,
+			Confidence: mapMediumConfidence,
+		},
+		Areas: []mapArea{{Label: "Release", Try: `ds find --pack "release publish npm"`}},
+	}
+	if err := saveMapOutputCache(repoRoot, mapDefaultMaxAreas, out); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := loadMapOutputCache(repoRoot, mapDefaultMaxAreas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected map output cache hit")
+	}
+	if got.Areas[0].Try != out.Areas[0].Try {
+		t.Fatalf("cached try = %q, want %q", got.Areas[0].Try, out.Areas[0].Try)
 	}
 }
 

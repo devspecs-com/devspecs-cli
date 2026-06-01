@@ -2,9 +2,11 @@ package commands
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -292,7 +294,16 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 		return err
 	}
 	var result *scan.Result
+	var cachedOutput *mapOutput
 	if opts.AreaQuery != "" {
+		if cached, ok, cacheErr := loadMapOutputCache(repoRoot, opts.MaxAreas); cacheErr != nil {
+			debugLog("map output cache unavailable: %v", cacheErr)
+		} else if ok {
+			cachedOutput = &cached
+			props["output_cache_hit"] = true
+		}
+	}
+	if cachedOutput == nil && opts.AreaQuery != "" {
 		if cached, ok, cacheErr := runCachedMapScan(repoRoot); cacheErr != nil {
 			debugLog("map cache unavailable: %v", cacheErr)
 		} else if ok {
@@ -306,7 +317,15 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 			return err
 		}
 	}
-	out := buildMapOutput(repoRoot, result, opts)
+	var out mapOutput
+	if cachedOutput != nil {
+		out = *cachedOutput
+	} else {
+		out = buildMapOutput(repoRoot, result, opts)
+		if err := saveMapOutputCache(repoRoot, opts.MaxAreas, out); err != nil {
+			debugLog("save map output cache: %v", err)
+		}
+	}
 	success = true
 	props["confidence"] = out.Repo.Confidence
 	props["area_count_bucket"] = telemetry.CountBucket(len(out.Areas))
@@ -375,6 +394,99 @@ func runMapScan(ctx context.Context, repoRoot string) (*scan.Result, error) {
 		attachScanHints(result, repoRoot, matcher)
 	}
 	return result, nil
+}
+
+type cachedMapOutputFile struct {
+	Schema         string    `json:"schema"`
+	RepoRoot       string    `json:"repo_root"`
+	LastScanCommit string    `json:"last_scan_commit,omitempty"`
+	LastScanAt     string    `json:"last_scan_at,omitempty"`
+	MaxAreas       int       `json:"max_areas"`
+	Output         mapOutput `json:"output"`
+}
+
+func loadMapOutputCache(repoRoot string, maxAreas int) (mapOutput, bool, error) {
+	db, err := openDB()
+	if err != nil {
+		return mapOutput{}, false, fmt.Errorf("open map output cache db: %w", err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if status := freshness.Check(db, repoRoot); status == nil || status.Stale {
+		return mapOutput{}, false, nil
+	}
+	meta := db.GetRepoByRoot(repoRoot)
+	if meta == nil {
+		return mapOutput{}, false, nil
+	}
+	path, err := mapOutputCachePath(repoRoot)
+	if err != nil {
+		return mapOutput{}, false, err
+	}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return mapOutput{}, false, nil
+	}
+	if err != nil {
+		return mapOutput{}, false, err
+	}
+	var cached cachedMapOutputFile
+	if err := json.Unmarshal(data, &cached); err != nil {
+		return mapOutput{}, false, err
+	}
+	if cached.Schema != mapSchemaVersion ||
+		cached.RepoRoot != repoRoot ||
+		cached.LastScanCommit != meta.LastScanCommit ||
+		cached.LastScanAt != meta.LastScanAt ||
+		cached.MaxAreas != maxAreas {
+		return mapOutput{}, false, nil
+	}
+	if cached.Output.Schema != mapSchemaVersion || cached.Output.Repo.Path != repoRoot {
+		return mapOutput{}, false, nil
+	}
+	return cached.Output, true, nil
+}
+
+func saveMapOutputCache(repoRoot string, maxAreas int, out mapOutput) error {
+	db, err := openDB()
+	if err != nil {
+		return fmt.Errorf("open map output cache db: %w", err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	meta := db.GetRepoByRoot(repoRoot)
+	if meta == nil {
+		return nil
+	}
+	path, err := mapOutputCachePath(repoRoot)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	payload := cachedMapOutputFile{
+		Schema:         mapSchemaVersion,
+		RepoRoot:       repoRoot,
+		LastScanCommit: meta.LastScanCommit,
+		LastScanAt:     meta.LastScanAt,
+		MaxAreas:       maxAreas,
+		Output:         out,
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func mapOutputCachePath(repoRoot string) (string, error) {
+	home, err := config.HomeDir()
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(filepath.Clean(repoRoot)))
+	return filepath.Join(home, "map-cache", fmt.Sprintf("%x.json", sum[:])), nil
 }
 
 func runCachedMapScan(repoRoot string) (*scan.Result, bool, error) {
