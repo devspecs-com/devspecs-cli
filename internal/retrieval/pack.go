@@ -2,6 +2,7 @@ package retrieval
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -131,7 +132,99 @@ type PackRoleDecision struct {
 	Reason     string  `json:"reason,omitempty"`
 }
 
+func collapsePackLocalizedVariants(candidates []Candidate, query string) []Candidate {
+	if len(candidates) <= 1 {
+		return candidates
+	}
+	queryLower := strings.ToLower(query)
+	groups := map[string][]int{}
+	for i, c := range candidates {
+		variant := variantFingerprint(c, queryLower)
+		if variant.key == "" || variant.role != "translation" {
+			continue
+		}
+		pathLower := strings.ToLower(filepath.ToSlash(c.Path))
+		if !isLikelyUnrequestedLocalizedPath(pathLower, queryLower) && !packPathHasEnglishLocale(pathLower) {
+			continue
+		}
+		groups[variant.key] = append(groups[variant.key], i)
+	}
+	if len(groups) == 0 {
+		return candidates
+	}
+
+	drop := map[int]bool{}
+	keeperMetadata := map[int]map[string]string{}
+	for key, indexes := range groups {
+		if len(indexes) < 2 {
+			continue
+		}
+		keep := indexes[0]
+		for _, idx := range indexes[1:] {
+			if packLocalizedVariantScore(candidates[idx]) > packLocalizedVariantScore(candidates[keep]) {
+				keep = idx
+			}
+		}
+		var collapsed []string
+		for _, idx := range indexes {
+			if idx == keep {
+				continue
+			}
+			drop[idx] = true
+			collapsed = append(collapsed, candidates[idx].Path)
+		}
+		if len(collapsed) > 0 {
+			metadata := copyMetadata(candidates[keep].Metadata)
+			metadata["variant_group_id"] = key
+			metadata["variant_role"] = "translation"
+			metadata["variant_collapsed_count"] = strconv.Itoa(len(collapsed))
+			metadata["variant_collapsed_paths"] = strings.Join(uniqueStrings(collapsed), "\n")
+			metadata["variant_reason"] = "localized mirror collapsed for default pack"
+			keeperMetadata[keep] = metadata
+		}
+	}
+	if len(drop) == 0 {
+		return candidates
+	}
+	out := make([]Candidate, 0, len(candidates)-len(drop))
+	for i, c := range candidates {
+		if drop[i] {
+			continue
+		}
+		if metadata := keeperMetadata[i]; metadata != nil {
+			c.Metadata = metadata
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+func packLocalizedVariantScore(c Candidate) int {
+	path := strings.ToLower(filepath.ToSlash(c.Path))
+	score := 0
+	switch {
+	case strings.Contains(path, "/en/"):
+		score += 20
+	case strings.Contains(path, "/en-us/") || strings.Contains(path, "/en-gb/"):
+		score += 18
+	}
+	if !isLikelyUnrequestedLocalizedPath(path, "") {
+		score += 8
+	}
+	if strings.Contains(path, "/docs/en/docs/") {
+		score += 4
+	}
+	return score
+}
+
+func packPathHasEnglishLocale(pathLower string) bool {
+	return strings.Contains(pathLower, "/en/") ||
+		strings.Contains(pathLower, "/en-us/") ||
+		strings.Contains(pathLower, "/en-gb/")
+}
+
 func BuildRoleGroupedPack(candidates []Candidate, reasons map[string][]string, query string) RoleGroupedPack {
+	candidates = collapsePackLocalizedVariants(candidates, query)
 	groupsByRole := make(map[string]PackGroup, len(packRoleOrder))
 	counts := make(map[string]int, len(packRoleOrder)+1)
 	for _, role := range packRoleOrder {
@@ -299,7 +392,7 @@ func classifyExcludedNoise(c Candidate, role, queryLower string) (bool, string) 
 	skillLike := role == "skill" || strings.EqualFold(strings.TrimSpace(c.Subtype), "skill") || isSkillPathCandidate(pathLower)
 	agentInstructionLike := !skillLike && (role == "agent_instruction" || isAgentInstructionPath(c.Path))
 	switch {
-	case isStaleArchiveCandidate(c) && !queryRequestsStaleOrHistory(queryLower) && !queryRequestsCurrentPackArtifact(c, role, queryLower, skillLike, agentInstructionLike) && packQueryTitlePathOverlap(c, queryLower) < 2:
+	case isStaleArchiveCandidate(c) && !queryRequestsStaleOrHistory(queryLower) && !queryRequestsCurrentPackArtifact(c, role, queryLower, skillLike, agentInstructionLike) && !sourceHasStrongCurrentPackSignal(c, queryLower) && packQueryTitlePathOverlap(c, queryLower) < 2:
 		return true, "stale, archived, deprecated, or superseded artifact; query does not ask for historical context"
 	case (role == "template" || isTemplatePathCandidate(pathLower)) && !queryRequestsTemplate(queryLower):
 		return true, "template-like artifact; query does not ask for templates"
@@ -334,6 +427,16 @@ func queryRequestsCurrentPackArtifact(c Candidate, role, queryLower string, skil
 	default:
 		return false
 	}
+}
+
+func sourceHasStrongCurrentPackSignal(c Candidate, queryLower string) bool {
+	if hasExplicitStalePathOrStatus(c) || !IsSourceContextCandidate(c) {
+		return false
+	}
+	if packQueryTitlePathOverlap(c, queryLower) >= 2 {
+		return true
+	}
+	return packSpecificCandidateOverlap(c, queryLower) >= 2
 }
 
 func queryRequestsProposalDesignArtifact(c Candidate, role, queryLower string) bool {
@@ -678,6 +781,21 @@ func packSpecificTitlePathOverlap(c Candidate, queryLower string, ignore map[str
 		if ignore != nil && ignore[term] {
 			continue
 		}
+		if strings.Contains(haystack, term) {
+			count++
+		}
+	}
+	return count
+}
+
+func packSpecificCandidateOverlap(c Candidate, queryLower string) int {
+	terms := meaningfulTerms(queryLower)
+	if len(terms) == 0 {
+		return 0
+	}
+	haystack := strings.ToLower(c.Path + "\n" + c.Title + "\n" + c.Body)
+	count := 0
+	for _, term := range terms {
 		if strings.Contains(haystack, term) {
 			count++
 		}

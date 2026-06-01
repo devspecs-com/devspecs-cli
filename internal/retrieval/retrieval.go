@@ -1792,7 +1792,7 @@ func variantHasExactQueryAnchor(c Candidate, queryLower string) bool {
 
 func isLocaleSegment(segment string) bool {
 	switch segment {
-	case "en", "en-us", "en-gb", "zh", "zh-cn", "zh-tw", "ja", "ko", "fr", "de", "es", "pt", "pt-br", "ru":
+	case "en", "en-us", "en-gb", "zh", "zh-cn", "zh-tw", "zh-hant", "zh-hans", "ja", "ko", "fr", "de", "es", "pt", "pt-br", "ru", "uk":
 		return true
 	default:
 		return false
@@ -3839,7 +3839,7 @@ func isLikelyUnrequestedLocalizedPath(pathLower, queryLower string) bool {
 		hasQueryWord(queryLower, "ru") {
 		return false
 	}
-	for _, marker := range []string{"/zh/", "/zh-cn/", "/zh-tw/", "/ja/", "/ko/", "/fr/", "/de/", "/es/", "/pt/", "/ru/"} {
+	for _, marker := range []string{"/zh/", "/zh-cn/", "/zh-tw/", "/zh-hant/", "/zh-hans/", "/ja/", "/ko/", "/fr/", "/de/", "/es/", "/pt/", "/ru/", "/uk/"} {
 		if strings.Contains(pathLower, marker) {
 			return true
 		}

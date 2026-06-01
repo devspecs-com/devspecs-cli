@@ -19,9 +19,11 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/sourcecontext"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/testcase"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/devspecs-com/devspecs-cli/internal/freshness"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
 	"github.com/devspecs-com/devspecs-cli/internal/ignore"
 	"github.com/devspecs-com/devspecs-cli/internal/scan"
+	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/devspecs-com/devspecs-cli/internal/telemetry"
 	"github.com/spf13/cobra"
 )
@@ -289,9 +291,20 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 	if err != nil {
 		return err
 	}
-	result, err := runMapScan(cmd.Context(), repoRoot)
-	if err != nil {
-		return err
+	var result *scan.Result
+	if opts.AreaQuery != "" {
+		if cached, ok, cacheErr := runCachedMapScan(repoRoot); cacheErr != nil {
+			debugLog("map cache unavailable: %v", cacheErr)
+		} else if ok {
+			result = cached
+			props["cache_hit"] = true
+		}
+	}
+	if result == nil {
+		result, err = runMapScan(cmd.Context(), repoRoot)
+		if err != nil {
+			return err
+		}
 	}
 	out := buildMapOutput(repoRoot, result, opts)
 	success = true
@@ -362,6 +375,238 @@ func runMapScan(ctx context.Context, repoRoot string) (*scan.Result, error) {
 		attachScanHints(result, repoRoot, matcher)
 	}
 	return result, nil
+}
+
+func runCachedMapScan(repoRoot string) (*scan.Result, bool, error) {
+	db, err := openDB()
+	if err != nil {
+		return nil, false, fmt.Errorf("open map cache: %w", err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	if status := freshness.Check(db, repoRoot); status == nil || status.Stale {
+		return nil, false, nil
+	}
+	result, ok, err := buildCachedMapResult(db, repoRoot)
+	if err != nil {
+		return nil, false, err
+	}
+	return result, ok, nil
+}
+
+type cachedMapEdgeMetadata struct {
+	Anchors       []cachedMapAnchor `json:"anchors"`
+	PackStrength  string            `json:"pack_strength"`
+	RoleMix       map[string]int    `json:"role_mix"`
+	RoleFamilyMix map[string]int    `json:"role_family_mix"`
+}
+
+type cachedMapAnchor struct {
+	Anchor string `json:"anchor"`
+}
+
+type cachedMapCluster struct {
+	anchor       string
+	confidence   float64
+	evidence     int
+	packStrength string
+	roleMix      map[string]int
+	roleFamily   map[string]int
+	artifactIDs  map[string]bool
+}
+
+func buildCachedMapResult(db *store.DB, repoRoot string) (*scan.Result, bool, error) {
+	meta := db.GetRepoByRoot(repoRoot)
+	if meta == nil {
+		return nil, false, nil
+	}
+	edges, err := db.GetArtifactEdges(store.ArtifactEdgeFilter{RepoID: meta.ID, EdgeType: "same_workstream_anchor"})
+	if err != nil {
+		return nil, false, fmt.Errorf("load map cache edges: %w", err)
+	}
+	if len(edges) == 0 {
+		return nil, false, nil
+	}
+
+	clustersByAnchor := map[string]*cachedMapCluster{}
+	artifactIDs := map[string]bool{}
+	for _, edge := range edges {
+		edgeMeta := cachedMapEdgeMetadata{}
+		_ = json.Unmarshal([]byte(edge.MetadataJSON), &edgeMeta)
+		anchors := cachedMapEdgeAnchors(edge, edgeMeta)
+		for _, anchor := range anchors {
+			cluster := clustersByAnchor[anchor]
+			if cluster == nil {
+				cluster = &cachedMapCluster{
+					anchor:      anchor,
+					artifactIDs: map[string]bool{},
+				}
+				clustersByAnchor[anchor] = cluster
+			}
+			cluster.confidence = maxFloat(cluster.confidence, edge.Confidence)
+			cluster.evidence += maxInt(edge.EvidenceCount, 1)
+			if cluster.packStrength == "" {
+				cluster.packStrength = edgeMeta.PackStrength
+			}
+			if len(cluster.roleMix) == 0 {
+				cluster.roleMix = edgeMeta.RoleMix
+			}
+			if len(cluster.roleFamily) == 0 {
+				cluster.roleFamily = edgeMeta.RoleFamilyMix
+			}
+			cluster.artifactIDs[edge.SrcArtifactID] = true
+			cluster.artifactIDs[edge.DstArtifactID] = true
+			artifactIDs[edge.SrcArtifactID] = true
+			artifactIDs[edge.DstArtifactID] = true
+		}
+	}
+	if len(clustersByAnchor) == 0 {
+		return nil, false, nil
+	}
+
+	ids := sortedMapSet(artifactIDs)
+	rows, err := db.ListArtifactsByIDs(ids, store.FilterParams{RepoRoot: repoRoot})
+	if err != nil {
+		return nil, false, fmt.Errorf("load map cache artifacts: %w", err)
+	}
+	artifactByID := map[string]store.ArtifactRow{}
+	for _, row := range rows {
+		artifactByID[row.ID] = row
+	}
+	sourcePathByID := map[string]string{}
+	for _, id := range ids {
+		sources, err := db.GetSourcesForArtifact(id)
+		if err != nil {
+			return nil, false, fmt.Errorf("load map cache source %s: %w", id, err)
+		}
+		sourcePathByID[id] = firstCachedMapSourcePath(sources)
+	}
+
+	clusters := make([]scan.WorkstreamClusterExample, 0, len(clustersByAnchor))
+	for _, cluster := range clustersByAnchor {
+		examples := make([]scan.WorkstreamArtifactExample, 0, len(cluster.artifactIDs))
+		for _, id := range sortedMapSet(cluster.artifactIDs) {
+			row, ok := artifactByID[id]
+			if !ok {
+				continue
+			}
+			examples = append(examples, scan.WorkstreamArtifactExample{
+				ID:      row.ID,
+				Title:   row.Title,
+				Kind:    row.Kind,
+				Subtype: row.Subtype,
+				Path:    sourcePathByID[id],
+			})
+		}
+		if len(examples) == 0 {
+			continue
+		}
+		clusters = append(clusters, scan.WorkstreamClusterExample{
+			Anchor:           cluster.anchor,
+			PackStrength:     cluster.packStrength,
+			Confidence:       cluster.confidence,
+			ConfidenceRule:   "cached_workstream_edges",
+			ArtifactCount:    len(cluster.artifactIDs),
+			EvidenceCount:    cluster.evidence,
+			RoleMix:          cluster.roleMix,
+			RoleFamilyMix:    cluster.roleFamily,
+			EvidenceSources:  []string{"cached_workstream_edges"},
+			ExampleArtifacts: firstWorkstreamArtifactExamples(examples, mapMaxArtifactsPerArea),
+		})
+	}
+	if len(clusters) == 0 {
+		return nil, false, nil
+	}
+	sort.SliceStable(clusters, func(i, j int) bool {
+		if clusters[i].EvidenceCount == clusters[j].EvidenceCount {
+			if clusters[i].Confidence == clusters[j].Confidence {
+				return clusters[i].Anchor < clusters[j].Anchor
+			}
+			return clusters[i].Confidence > clusters[j].Confidence
+		}
+		return clusters[i].EvidenceCount > clusters[j].EvidenceCount
+	})
+	if len(clusters) > 10 {
+		clusters = clusters[:10]
+	}
+
+	found, err := cachedMapFoundCounts(db, repoRoot)
+	if err != nil {
+		return nil, false, err
+	}
+	gitCounts, _ := db.CountGitFacts(meta.ID)
+	return &scan.Result{
+		Found: found,
+		GitEvidence: &scan.GitEvidenceDiagnostics{
+			CommitsStored: gitCounts.Commits,
+			FilesStored:   gitCounts.Files,
+		},
+		WorkstreamEvidence: &scan.WorkstreamEvidenceDiagnostics{
+			TopClusters:         clusters,
+			AnchorsMaterialized: len(clusters),
+		},
+	}, true, nil
+}
+
+func cachedMapEdgeAnchors(edge store.ArtifactEdgeRow, meta cachedMapEdgeMetadata) []string {
+	var anchors []string
+	for _, anchor := range meta.Anchors {
+		if value := strings.TrimSpace(anchor.Anchor); value != "" {
+			anchors = appendUniqueString(anchors, value)
+		}
+	}
+	if len(anchors) > 0 {
+		return anchors
+	}
+	explanation := strings.TrimSpace(edge.Explanation)
+	if strings.HasPrefix(explanation, "shares workstream anchor ") {
+		value := strings.Trim(strings.TrimPrefix(explanation, "shares workstream anchor "), "\"")
+		if value != "" {
+			return []string{value}
+		}
+	}
+	return nil
+}
+
+func firstCachedMapSourcePath(sources []store.SourceRow) string {
+	for _, src := range sources {
+		if strings.TrimSpace(src.Path) != "" && src.SourceType != "test_case" && src.SourceType != "code_comment" {
+			return filepath.ToSlash(src.Path)
+		}
+	}
+	for _, src := range sources {
+		if strings.TrimSpace(src.Path) != "" {
+			return filepath.ToSlash(src.Path)
+		}
+	}
+	return ""
+}
+
+func firstWorkstreamArtifactExamples(values []scan.WorkstreamArtifactExample, limit int) []scan.WorkstreamArtifactExample {
+	if limit <= 0 || len(values) <= limit {
+		return values
+	}
+	return values[:limit]
+}
+
+func cachedMapFoundCounts(db *store.DB, repoRoot string) (map[string]int, error) {
+	found := map[string]int{
+		"markdown":       0,
+		"openspec":       0,
+		"adr":            0,
+		"source_context": 0,
+		"test_case":      0,
+		"code_comment":   0,
+	}
+	for _, sourceType := range []string{"markdown", "openspec", "adr", "source_context", "test_case", "code_comment"} {
+		count, err := db.CountArtifacts(store.FilterParams{RepoRoot: repoRoot, SourceType: sourceType})
+		if err != nil {
+			return nil, fmt.Errorf("count cached map %s artifacts: %w", sourceType, err)
+		}
+		found[sourceType] = count
+	}
+	return found, nil
 }
 
 func buildMapOutput(repoRoot string, result *scan.Result, opts mapOptions) mapOutput {
@@ -1424,10 +1669,10 @@ func mapFindPackCommand(query string) string {
 
 func mapTraceQuery(label string, covers []string, subject string) string {
 	labelWords := mapStringSet(wordsFromMap(label))
-	coverWords := map[string]bool{}
+	supportWords := map[string]bool{}
 	for _, cover := range covers {
 		for _, word := range wordsFromMap(cover) {
-			coverWords[word] = true
+			supportWords[word] = true
 		}
 	}
 	var extra []string
@@ -1435,7 +1680,7 @@ func mapTraceQuery(label string, covers []string, subject string) string {
 		if mapTraceStopWord(word) || labelWords[word] {
 			continue
 		}
-		if coverWords[word] || len(extra) == 0 {
+		if supportWords[word] {
 			extra = appendUniqueString(extra, word)
 		}
 		if len(extra) >= 3 {
@@ -2215,6 +2460,20 @@ func firstMapKey(values map[string]bool) string {
 
 func mapMinInt(a, b int) int {
 	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func maxFloat(a, b float64) float64 {
+	if a > b {
 		return a
 	}
 	return b

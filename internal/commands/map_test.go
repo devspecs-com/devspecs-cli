@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/scan"
+	"github.com/devspecs-com/devspecs-cli/internal/store"
 )
 
 func TestMapTextHidesReviewerDiagnosticsByDefault(t *testing.T) {
@@ -177,6 +178,79 @@ func TestMapAreaDrilldownNoMatchListsAvailableAreas(t *testing.T) {
 	}
 }
 
+func TestBuildCachedMapResultUsesStoredWorkstreamEdges(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "devspecs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := "2026-06-01T00:00:00Z"
+	repoRoot := filepath.Join(t.TempDir(), "repo")
+	if _, err := db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('repo_cached', ?, ?, ?)", repoRoot, now, now); err != nil {
+		t.Fatal(err)
+	}
+	mustMapTestNoErr(t, db.InsertArtifactDirect("ds_game", "repo_cached", "source_context", "", "Game", "unknown", "rev_game", now, now))
+	mustMapTestNoErr(t, db.InsertArtifactDirect("ds_camera", "repo_cached", "source_context", "", "Camera RTS", "unknown", "rev_camera", now, now))
+	mustMapTestNoErr(t, db.InsertSourceDirect("src_game", "ds_game", "repo_cached", "source_context", "client/src/game/Game.ts", "client/src/game/Game.ts|source_context", "", "", now))
+	mustMapTestNoErr(t, db.InsertSourceDirect("src_camera", "ds_camera", "repo_cached", "source_context", "client/src/world/cameraRTS.ts", "client/src/world/cameraRTS.ts|source_context", "", "", now))
+	mustMapTestNoErr(t, db.UpsertArtifactEdge(store.ArtifactEdgeInput{
+		ID:            "edge_rts",
+		RepoID:        "repo_cached",
+		SrcArtifactID: "ds_game",
+		DstArtifactID: "ds_camera",
+		EdgeType:      "same_workstream_anchor",
+		Weight:        0.8,
+		Confidence:    0.9,
+		EvidenceCount: 3,
+		SourceSignal:  "workstream_anchor",
+		Explanation:   `shares workstream anchor "rts camera mode"`,
+		MetadataJSON:  `{"anchors":[{"anchor":"rts camera mode"}],"pack_strength":"support_local","role_mix":{"source":2}}`,
+	}, now))
+
+	result, ok, err := buildCachedMapResult(db, repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected cached map result")
+	}
+	out := buildMapOutput(repoRoot, result, mapOptions{MaxAreas: 4})
+	if len(out.Areas) == 0 {
+		t.Fatalf("expected cached areas: %#v", out)
+	}
+	if got := out.Areas[0].Label; got != "Game" {
+		t.Fatalf("cached map label = %q, want Game; areas=%#v", got, out.Areas)
+	}
+	if !strings.Contains(strings.Join(out.Areas[0].Covers, "\n"), "Rts Camera Mode") {
+		t.Fatalf("cached map covers missing Rts Camera Mode: %#v", out.Areas[0].Covers)
+	}
+	if !strings.Contains(strings.Join(out.Areas[0].KeyPaths, "\n"), "cameraRTS.ts") {
+		t.Fatalf("cached area missing source path: %#v", out.Areas[0].KeyPaths)
+	}
+}
+
+func TestMapTryCommandAvoidsUnsupportedCommitVerb(t *testing.T) {
+	query := mapTryCommand("Release", []string{"Publish Npm"}, []mapTraceReceipt{{
+		SHA:     "abc1234",
+		Subject: "Replace `main` branch in changelog link with tags (#19054)",
+	}}, mapMediumConfidence)
+	if query != `ds find --pack "release publish npm"` {
+		t.Fatalf("query = %q, want release publish npm", query)
+	}
+	commands := mapAreaPackCommands(mapArea{
+		Label:         "Release",
+		Confidence:    mapMediumConfidence,
+		Covers:        []string{"Publish Npm"},
+		TraceReceipts: []mapTraceReceipt{{Subject: "Replace `main` branch in changelog link with tags (#19054)"}},
+		Try:           query,
+	})
+	for _, cmd := range commands {
+		if strings.Contains(cmd, "release replace") {
+			t.Fatalf("unsupported commit verb leaked into commands: %#v", commands)
+		}
+	}
+}
+
 func TestFilterMapOutputByAreaQueryNarrowsJSONPayload(t *testing.T) {
 	out := buildProductMapTestOutput(t)
 	filtered := filterMapOutputByAreaQuery(out, "redaction")
@@ -239,4 +313,11 @@ func buildProductMapTestOutput(t *testing.T) mapOutput {
 			},
 		},
 	}, mapOptions{MaxAreas: 6})
+}
+
+func mustMapTestNoErr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
 }

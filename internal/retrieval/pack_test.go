@@ -484,6 +484,63 @@ func TestBuildRoleGroupedPackKeepsRequestedInstructionWithWeakStaleMetadata(t *t
 	assertGroupCount(t, pack, PackRoleSupportingContext, 1)
 }
 
+func TestBuildRoleGroupedPackKeepsStrongSourceDespiteWeakStaleMetadata(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:     "game",
+			Path:   "client/src/game/Game.ts",
+			Kind:   "source_context",
+			Title:  "Game",
+			Status: "unknown",
+			Body:   "The game coordinates RTS camera mode and input controls.",
+			Metadata: map[string]string{
+				"source_type":           "source_context",
+				"classifier_lifecycle":  "stale",
+				"classifier_confidence": "0.51",
+			},
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "game rts camera mode")
+
+	if len(pack.ExcludedNoise) != 0 {
+		t.Fatalf("expected strong source match to stay included, got excluded: %#v", pack.ExcludedNoise)
+	}
+	assertGroupCount(t, pack, PackRoleImplementation, 1)
+}
+
+func TestBuildRoleGroupedPackCollapsesLocalizedMirrors(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "en",
+			Path:  "docs/en/docs/tutorial/background-tasks.md",
+			Kind:  "markdown_artifact",
+			Title: "Background Tasks",
+		},
+		{
+			ID:    "uk",
+			Path:  "docs/uk/docs/tutorial/background-tasks.md",
+			Kind:  "markdown_artifact",
+			Title: "Background Tasks",
+		},
+		{
+			ID:    "zh",
+			Path:  "docs/zh-hant/docs/tutorial/background-tasks.md",
+			Kind:  "markdown_artifact",
+			Title: "Background Tasks",
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "background tasks")
+
+	if pack.Summary.IncludedCount != 1 {
+		t.Fatalf("expected one localized mirror keeper, got summary=%#v groups=%#v", pack.Summary, pack.Groups)
+	}
+	if len(pack.Groups) != 1 || len(pack.Groups[0].Items) != 1 || pack.Groups[0].Items[0].Path != "docs/en/docs/tutorial/background-tasks.md" {
+		t.Fatalf("expected English doc keeper, got %#v", pack.Groups)
+	}
+}
+
 func TestBuildRoleGroupedPackExcludesArchivedInstructionWhenCurrentRulesRequested(t *testing.T) {
 	candidates := []Candidate{
 		{
