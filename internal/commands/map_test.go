@@ -179,6 +179,49 @@ func TestMapAreaDrilldownNoMatchListsAvailableAreas(t *testing.T) {
 	}
 }
 
+func TestMapAreaDrilldownUsesMatchedDocTopicOverLocaleBucket(t *testing.T) {
+	out := mapOutput{
+		Schema: mapSchemaVersion,
+		Repo:   mapRepo{Name: "fastapi", Path: t.TempDir(), Confidence: mapLowConfidence},
+		Areas: []mapArea{{
+			Label:      "Docs/Fr",
+			AreaType:   mapTypeDocs,
+			Confidence: mapLowConfidence,
+			Covers:     []string{"Background Tasks", "Tutorial Background"},
+			KeyPaths: []string{
+				"docs/de/docs/tutorial/background-tasks.md",
+				"docs/en/docs/tutorial/background-tasks.md",
+				"docs/es/docs/tutorial/background-tasks.md",
+				"docs/fr/docs/tutorial/background-tasks.md",
+			},
+			Try: "ds find --pack \"docs fr background\"",
+		}},
+	}
+	var buf bytes.Buffer
+	writeMapAreaText(&buf, out, "background tasks", false)
+	text := buf.String()
+	for _, want := range []string{
+		"Map area: Background Tasks",
+		"docs/en/docs/tutorial/background-tasks.md",
+		`ds find --pack "background tasks"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("doc drilldown missing %q:\n%s", want, text)
+		}
+	}
+	for _, notWant := range []string{
+		"Map area: Docs/Fr",
+		"docs/de/docs/tutorial/background-tasks.md",
+		"docs/es/docs/tutorial/background-tasks.md",
+		"docs/fr/docs/tutorial/background-tasks.md",
+		`ds find --pack "docs fr background"`,
+	} {
+		if strings.Contains(text, notWant) {
+			t.Fatalf("doc drilldown leaked %q:\n%s", notWant, text)
+		}
+	}
+}
+
 func TestBuildCachedMapResultUsesStoredWorkstreamEdges(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "devspecs.db"))
 	if err != nil {

@@ -1121,6 +1121,7 @@ func writeMapAreaText(out io.Writer, m mapOutput, query string, verbose bool) {
 	}
 
 	primary := matches[0].Area
+	primary = refineMapAreaForDrilldownQuery(primary, query)
 	fmt.Fprintf(out, "Map area: %s\n", primary.Label)
 	fmt.Fprintf(out, "Repo: %s\n", m.Repo.Name)
 	if primary.AreaType != "" {
@@ -1191,6 +1192,155 @@ func writeMapAreaText(out io.Writer, m mapOutput, query string, verbose bool) {
 	writeMapCaveats(out, append([]string{}, primary.Caveats...))
 }
 
+func refineMapAreaForDrilldownQuery(area mapArea, query string) mapArea {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return area
+	}
+	renamed := false
+	if isMapDocsArea(area) {
+		if cover := bestMapCoverForQuery(area.Covers, query); cover != "" {
+			area.Label = cover
+			area.Covers = removeMapCover(area.Covers, cover)
+			renamed = true
+		}
+	}
+	area.KeyPaths = collapseMapLocalizedKeyPaths(area.KeyPaths, query)
+	if renamed {
+		area.Try = mapTryCommand(area.Label, area.Covers, area.TraceReceipts, area.Confidence)
+	}
+	return area
+}
+
+func isMapDocsArea(area mapArea) bool {
+	return area.AreaType == mapTypeDocs || area.Class == mapClassDocTopic || strings.HasPrefix(normalizeMapKey(area.Label), "docs/")
+}
+
+func bestMapCoverForQuery(covers []string, query string) string {
+	queryKey := normalizeMapKey(query)
+	if queryKey == "" {
+		return ""
+	}
+	bestScore := 0
+	best := ""
+	for _, cover := range covers {
+		key := normalizeMapKey(cover)
+		if key == "" {
+			continue
+		}
+		score := scoreMapKeyMatch(key, queryKey)
+		if score > bestScore {
+			bestScore = score
+			best = cover
+		}
+	}
+	if bestScore < 50 {
+		return ""
+	}
+	return best
+}
+
+func scoreMapKeyMatch(key, queryKey string) int {
+	switch {
+	case key == queryKey:
+		return 100
+	case strings.HasPrefix(key, queryKey+"-") || strings.HasPrefix(key, queryKey+"/"):
+		return 82
+	case strings.Contains(key, "-"+queryKey+"-") || strings.Contains(key, "/"+queryKey+"/"):
+		return 72
+	case strings.Contains(key, queryKey) && len(queryKey) >= 4:
+		return 58
+	case strings.Contains(queryKey, key) && len(key) >= 4:
+		return 50
+	default:
+		return 0
+	}
+}
+
+func removeMapCover(covers []string, remove string) []string {
+	removeKey := normalizeMapKey(remove)
+	var out []string
+	for _, cover := range covers {
+		if normalizeMapKey(cover) == removeKey {
+			continue
+		}
+		out = append(out, cover)
+	}
+	return out
+}
+
+func collapseMapLocalizedKeyPaths(paths []string, query string) []string {
+	if len(paths) <= 1 || mapQueryRequestsLocale(query) {
+		return paths
+	}
+	type localizedPath struct {
+		path   string
+		locale string
+	}
+	groups := map[string][]localizedPath{}
+	groupOrder := []string{}
+	for _, path := range paths {
+		key, locale, ok := mapLocalizedPathKey(path)
+		if !ok {
+			groupOrder = append(groupOrder, path)
+			groups[path] = append(groups[path], localizedPath{path: path})
+			continue
+		}
+		if _, seen := groups[key]; !seen {
+			groupOrder = append(groupOrder, key)
+		}
+		groups[key] = append(groups[key], localizedPath{path: path, locale: locale})
+	}
+	var out []string
+	for _, key := range groupOrder {
+		candidates := groups[key]
+		if len(candidates) == 0 {
+			continue
+		}
+		chosen := candidates[0]
+		for _, candidate := range candidates {
+			if candidate.locale == "en" {
+				chosen = candidate
+				break
+			}
+		}
+		out = append(out, chosen.path)
+	}
+	return out
+}
+
+func mapLocalizedPathKey(path string) (string, string, bool) {
+	parts := strings.Split(normalizeMapPath(path), "/")
+	for i := 0; i+2 < len(parts); i++ {
+		if parts[i] == "docs" && parts[i+2] == "docs" && isMapLocaleSegment(parts[i+1]) {
+			keyParts := append([]string{}, parts...)
+			keyParts[i+1] = "{locale}"
+			return strings.Join(keyParts, "/"), parts[i+1], true
+		}
+	}
+	return "", "", false
+}
+
+func mapQueryRequestsLocale(query string) bool {
+	for _, word := range wordsFromMap(query) {
+		if isMapLocaleSegment(word) {
+			return true
+		}
+	}
+	return false
+}
+
+func isMapLocaleSegment(segment string) bool {
+	segment = strings.ToLower(strings.TrimSpace(segment))
+	switch segment {
+	case "ar", "de", "en", "es", "fa", "fr", "id", "it", "ja", "ko", "nl", "pl", "pt", "ru", "tr", "uk", "vi",
+		"pt-br", "zh-cn", "zh-hans", "zh-hant":
+		return true
+	default:
+		return false
+	}
+}
+
 func filterMapOutputByAreaQuery(m mapOutput, query string) mapOutput {
 	matches := matchMapAreas(m.Areas, query)
 	filtered := make([]mapArea, 0, len(matches))
@@ -1239,19 +1389,7 @@ func scoreMapAreaMatch(area mapArea, queryKey string) int {
 		if key == "" {
 			continue
 		}
-		score := 0
-		switch {
-		case key == queryKey:
-			score = 100
-		case strings.HasPrefix(key, queryKey+"-") || strings.HasPrefix(key, queryKey+"/"):
-			score = 82
-		case strings.Contains(key, "-"+queryKey+"-") || strings.Contains(key, "/"+queryKey+"/"):
-			score = 72
-		case strings.Contains(key, queryKey) && len(queryKey) >= 4:
-			score = 58
-		case strings.Contains(queryKey, key) && len(key) >= 4:
-			score = 50
-		}
+		score := scoreMapKeyMatch(key, queryKey)
 		if score > best {
 			best = score
 		}
