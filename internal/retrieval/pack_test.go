@@ -137,6 +137,41 @@ func TestBuildRoleGroupedPackAddsLocalLanguageReceipts(t *testing.T) {
 	}
 }
 
+func TestBuildRoleGroupedPackClassifiesRawTestSourceByPath(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "src",
+			Path:  "src/language-yaml/parser-yaml.js",
+			Kind:  "source_context",
+			Title: "parser-yaml.js",
+			Body:  "YAML parser implementation",
+		},
+		{
+			ID:    "raw-test",
+			Path:  "tests/format/yaml/yaml-test-suite/format.test.js",
+			Kind:  "source_context",
+			Title: "format.test.js",
+			Body:  "YAML formatting behavior",
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "yaml parser formatting")
+
+	assertGroupCount(t, pack, PackRoleImplementation, 1)
+	assertGroupCount(t, pack, PackRoleBehaviorTests, 1)
+	if !pack.Summary.HasBehaviorTests {
+		t.Fatalf("expected behavior-test coverage in summary: %#v", pack.Summary)
+	}
+	for _, group := range pack.Groups {
+		if group.Role != PackRoleBehaviorTests {
+			continue
+		}
+		if group.Items[0].RoleReason != "test file captures expected behavior" {
+			t.Fatalf("role reason = %q", group.Items[0].RoleReason)
+		}
+	}
+}
+
 func TestBuildRoleGroupedPackIncludesProjectGuidelinesWhenRequested(t *testing.T) {
 	candidates := []Candidate{
 		{

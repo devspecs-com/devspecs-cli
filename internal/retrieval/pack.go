@@ -469,6 +469,9 @@ func ClassifyPackRole(c Candidate, query string) PackRoleDecision {
 	if isTestCaseCandidate(c) || role == "test_case" {
 		return PackRoleDecision{Role: PackRoleBehaviorTests, Confidence: 0.92, Reason: "test artifact captures expected behavior"}
 	}
+	if isRawTestSourceCandidate(c) {
+		return PackRoleDecision{Role: PackRoleBehaviorTests, Confidence: 0.84, Reason: "test file captures expected behavior"}
+	}
 	if isConfigSchemaCandidate(c, role) {
 		return PackRoleDecision{Role: PackRoleConfigSchema, Confidence: 0.82, Reason: "configuration, schema, workflow, or contract artifact"}
 	}

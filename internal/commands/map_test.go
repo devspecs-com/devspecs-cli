@@ -490,6 +490,18 @@ func TestRefineMapAreaLabelMakesLayerLabelsMoreProductReadable(t *testing.T) {
 	}
 }
 
+func TestMapRecentSubjectTermsFiltersFillerLabels(t *testing.T) {
+	got := mapRecentSubjectTerms("fix: clean up error handling, fix a proto-pollution gap, and seal a few loose ends")
+	if strings.Join(got, " ") != "proto pollution" {
+		t.Fatalf("recent subject terms = %#v", got)
+	}
+
+	got = mapRecentSubjectTerms("feat: add open spec")
+	if len(got) != 0 {
+		t.Fatalf("open spec subject should defer to path terms, got %#v", got)
+	}
+}
+
 func buildProductMapTestOutput(t *testing.T) mapOutput {
 	t.Helper()
 	repoRoot := filepath.Join(t.TempDir(), "product")

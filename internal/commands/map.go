@@ -1720,6 +1720,8 @@ func mapRecentStopWord(word string) bool {
 		"phase", "phases", "step", "steps", "wip", "work", "todo", "todos",
 		"near", "based", "expected", "actual", "anonymous", "context", "contexts",
 		"working", "tracker", "expand", "architecture", "audit", "feedback", "hpases",
+		"a", "an", "open", "opened", "opening", "up", "error", "errors", "gap", "gaps",
+		"seal", "sealed", "loose", "few", "end", "ends", "spec",
 		"to", "in", "of", "instead":
 		return true
 	default:
