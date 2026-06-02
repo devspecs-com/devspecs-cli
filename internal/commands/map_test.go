@@ -528,6 +528,65 @@ func TestPathBoundaryMapAggregatesTwentyConceptualParents(t *testing.T) {
 	}
 }
 
+func TestPathBoundaryMapRanksConceptualParentKeyFiles(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "twenty")
+	files := []string{
+		"packages/twenty-docs/getting-started/core-concepts/data-model.mdx",
+		"packages/twenty-docs/l/ar/user-guide/data-model/capabilities/fields.mdx",
+		"packages/twenty-docs/l/ar/developers/extend/apps/data-model.mdx",
+		"packages/twenty-server/src/metadata-modules/object-metadata/object-metadata.service.ts",
+		"packages/twenty-server/src/metadata-modules/field-metadata/field-metadata.service.ts",
+		"packages/twenty-front/src/modules/settings/data-model/object-details.tsx",
+	}
+	for _, file := range files {
+		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
+	}
+
+	areas, _, _ := buildPathBoundaryAreas(repoRoot, "twenty", files, nil, 8)
+	metadata := findMapTestArea(areas, "Metadata Engine & Data Model")
+	if metadata == nil {
+		t.Fatalf("expected metadata parent, got %#v", areas)
+	}
+	if len(metadata.KeyPaths) == 0 {
+		t.Fatalf("expected key paths")
+	}
+	if strings.Contains(metadata.KeyPaths[0], "twenty-docs") {
+		t.Fatalf("metadata parent should prefer implementation over docs, got %#v", metadata.KeyPaths)
+	}
+}
+
+func TestPathBoundaryMapDedupesIdentityConceptualParents(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "crm")
+	files := []string{
+		"apps/web/app/auth/login/page.tsx",
+		"apps/web/app/billing/plans/page.tsx",
+		"apps/web/app/members/page.tsx",
+		"packages/server/src/modules/auth/session.service.ts",
+		"packages/server/src/modules/users/user.service.ts",
+		"packages/server/src/modules/roles/permissions.service.ts",
+		"packages/server/src/modules/workspaces/invitations.service.ts",
+		"packages/server/src/modules/saml/saml.service.ts",
+	}
+	for _, file := range files {
+		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
+	}
+
+	areas, _, _ := buildPathBoundaryAreas(repoRoot, "crm", files, nil, 8)
+	identityParents := 0
+	for _, label := range []string{
+		"Workspace Identity, Access & Billing",
+		"Identity, Auth & Workspace Tenancy",
+		"Identity, Auth & Access Control",
+	} {
+		if findMapTestArea(areas, label) != nil {
+			identityParents++
+		}
+	}
+	if identityParents != 1 {
+		t.Fatalf("expected exactly one identity parent, got %d in %#v", identityParents, areas)
+	}
+}
+
 func TestMapAreaMatchPrefersPluralLabelOverPathOnlyMatch(t *testing.T) {
 	areas := []mapArea{
 		{Label: "Cron", KeyPaths: []string{"apps/web/app/api/cron/notify-partners/route.ts"}, Diagnostics: mapAreaDiagnostics{TraceTerms: []string{"partner"}}},

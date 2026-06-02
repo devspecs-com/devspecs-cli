@@ -34,48 +34,51 @@ import (
 )
 
 const (
-	mapDefaultMaxAreas            = 8
-	mapMaxArtifactsPerArea        = 4
-	mapMaxCoversPerArea           = 5
-	mapMaxTraceReceipts           = 3
-	mapMaxVerboseTrace            = 4
-	mapRecentMaxCommits           = 40
-	mapRecentMaxTopics            = 5
-	mapBoundaryMaxFiles           = 30000
-	mapBoundaryMaxCommits         = 60
-	mapBoundaryMaxArtifacts       = 24
-	mapBoundaryMaxImportFiles     = 8000
-	mapBoundaryMaxImportBytes     = 512 * 1024
-	mapBoundaryImportScoreCap     = 40
-	mapBoundaryTestImportScoreCap = 16
-	mapBoundaryFilesTimeout       = 3 * time.Second
-	mapSchemaVersion              = "devspecs.map.v1"
-	mapRecentSchemaVersion        = "devspecs.map.recent.v1"
-	mapTraceReceiptMode           = "bounded_git_path_receipts_v0"
-	mapIndexRequiredCaveat        = "context packing requires an index; run ds scan before using suggested ds find --pack commands"
-	mapLowConfidence              = "low"
-	mapMediumConfidence           = "medium"
-	mapHighConfidence             = "high"
-	mapClassStableArea            = "stable_area"
-	mapClassWorkstream            = "workstream"
-	mapClassDocTopic              = "doc_topic"
-	mapClassProtocol              = "protocol"
-	mapClassLowConfidence         = "low_confidence"
-	mapTypeDomainFeature          = "domain_feature"
-	mapTypeBusinessFlow           = "business_workflow"
-	mapTypeExternal               = "external_integration"
-	mapTypeAPI                    = "api_surface"
-	mapTypeUI                     = "ui_surface"
-	mapTypeDataModel              = "data_model"
-	mapTypeDataPipeline           = "data_pipeline"
-	mapTypePlatform               = "platform_capability"
-	mapTypeOps                    = "ops_runtime"
-	mapTypeTooling                = "tooling_script"
-	mapTypeTestQuality            = "test_quality"
-	mapTypeProtocol               = "protocol_process"
-	mapTypeDocs                   = "docs_reference"
-	mapTypeRoot                   = "repo_root_umbrella"
-	mapTypeUnknown                = "unknown_area"
+	mapDefaultMaxAreas                 = 8
+	mapMaxArtifactsPerArea             = 4
+	mapMaxCoversPerArea                = 5
+	mapMaxTraceReceipts                = 3
+	mapMaxVerboseTrace                 = 4
+	mapRecentMaxCommits                = 40
+	mapRecentMaxTopics                 = 5
+	mapBoundaryMaxFiles                = 30000
+	mapBoundaryMaxCommits              = 60
+	mapBoundaryMaxArtifacts            = 24
+	mapBoundaryMaxImportFiles          = 8000
+	mapBoundaryMaxImportFilesLargeRepo = 4500
+	mapBoundaryLargeRepoFiles          = 12000
+	mapBoundaryMaxConceptualFiles      = 14000
+	mapBoundaryMaxImportBytes          = 512 * 1024
+	mapBoundaryImportScoreCap          = 40
+	mapBoundaryTestImportScoreCap      = 16
+	mapBoundaryFilesTimeout            = 3 * time.Second
+	mapSchemaVersion                   = "devspecs.map.v1"
+	mapRecentSchemaVersion             = "devspecs.map.recent.v1"
+	mapTraceReceiptMode                = "bounded_git_path_receipts_v0"
+	mapIndexRequiredCaveat             = "context packing requires an index; run ds scan before using suggested ds find --pack commands"
+	mapLowConfidence                   = "low"
+	mapMediumConfidence                = "medium"
+	mapHighConfidence                  = "high"
+	mapClassStableArea                 = "stable_area"
+	mapClassWorkstream                 = "workstream"
+	mapClassDocTopic                   = "doc_topic"
+	mapClassProtocol                   = "protocol"
+	mapClassLowConfidence              = "low_confidence"
+	mapTypeDomainFeature               = "domain_feature"
+	mapTypeBusinessFlow                = "business_workflow"
+	mapTypeExternal                    = "external_integration"
+	mapTypeAPI                         = "api_surface"
+	mapTypeUI                          = "ui_surface"
+	mapTypeDataModel                   = "data_model"
+	mapTypeDataPipeline                = "data_pipeline"
+	mapTypePlatform                    = "platform_capability"
+	mapTypeOps                         = "ops_runtime"
+	mapTypeTooling                     = "tooling_script"
+	mapTypeTestQuality                 = "test_quality"
+	mapTypeProtocol                    = "protocol_process"
+	mapTypeDocs                        = "docs_reference"
+	mapTypeRoot                        = "repo_root_umbrella"
+	mapTypeUnknown                     = "unknown_area"
 )
 
 // NewMapCmd creates the ds map command.
@@ -248,6 +251,7 @@ type mapArtifact struct {
 	Kind    string
 	Subtype string
 	Path    string
+	Rank    int
 }
 
 type mapPreparedCluster struct {
@@ -345,10 +349,10 @@ var mapWeakStandaloneAreaLabels = map[string]bool{
 
 var mapBoundarySuppressedStandaloneLabels = map[string]bool{
 	"all": true, "dashboard": true, "dashboards": true, "engine": true, "hook": true,
-	"hooks": true, "icon": true, "icons": true, "modal": true, "modals": true,
+	"graphql": true, "hooks": true, "icon": true, "icons": true, "modal": true, "modals": true,
 	"nucleo": true, "page-layout": true, "propel": true, "states": true, "store": true,
 	"stores": true, "story": true, "stories": true, "suite": true, "suites": true,
-	"view": true, "views": true,
+	"view": true, "views": true, "workflow": true, "workflows": true,
 }
 
 var mapSuppressedPathSegments = map[string]bool{
@@ -523,7 +527,7 @@ var mapConceptualBoundaryRules = []mapConceptualBoundaryRule{
 		Label: "Work Items & Project Delivery",
 		Score: 14,
 		Patterns: []mapConceptualBoundaryPattern{
-			{Any: []string{"issues", "issue", "projects", "project", "state", "states", "labels", "label", "estimate", "estimates"}},
+			{Any: []string{"issues", "issue", "projects", "project", "estimate", "estimates"}},
 		},
 		Covers: []mapConceptualCoverRule{
 			{Label: "Issues", Any: []string{"issues", "issue"}},
@@ -1654,7 +1658,7 @@ func addMapBoundaryPathCandidates(candidates map[string]*mapPathBoundaryCandidat
 
 func applyMapBoundaryConceptualParents(candidates map[string]*mapPathBoundaryCandidate, repoName string, files []string) {
 	needleCache := map[string]mapConceptualNeedle{}
-	for _, path := range files {
+	for _, path := range mapConceptualParentFiles(files) {
 		family := mapBoundaryPathFamily(path)
 		if family == "" {
 			continue
@@ -1699,9 +1703,9 @@ func addMapConceptualParentCandidate(candidates map[string]*mapPathBoundaryCandi
 		candidate.EvidenceCounts[family]++
 		candidate.Score += mapBoundaryFamilyScore(family)*1.6 + rule.Score*0.22
 		candidate.LabelScore += rule.Score * 0.08
-		if len(candidate.Artifacts) < mapBoundaryMaxArtifacts*3 {
-			candidate.Artifacts = append(candidate.Artifacts, mapArtifactForBoundaryPath(filePath, family))
-		}
+		art := mapArtifactForBoundaryPath(filePath, family)
+		art.Rank = mapConceptualArtifactRank(rule, pathValue, pathKey, family, needleCache)
+		appendMapBoundaryArtifactCandidate(candidate, art, mapBoundaryMaxArtifacts*3)
 	}
 	if dir := pathpkg.Dir(normalizeMapPath(filePath)); dir != "." && dir != "" {
 		candidate.BoundaryPaths[dir] = true
@@ -1711,6 +1715,110 @@ func addMapConceptualParentCandidate(candidates map[string]*mapPathBoundaryCandi
 			candidate.Subareas[cover] = true
 		}
 	}
+}
+
+func mapConceptualParentFiles(files []string) []string {
+	if len(files) <= mapBoundaryMaxConceptualFiles {
+		return files
+	}
+	var selected []string
+	for _, path := range files {
+		pathValue := normalizeMapPath(path)
+		if mapConceptualPathNoisy(pathValue) || mapPathLooksDocExample(pathValue) {
+			continue
+		}
+		family := mapBoundaryPathFamily(pathValue)
+		if family == "source" || family == "test" {
+			selected = append(selected, path)
+			if len(selected) >= mapBoundaryMaxConceptualFiles {
+				return selected
+			}
+		}
+	}
+	for _, path := range files {
+		pathValue := normalizeMapPath(path)
+		if mapConceptualPathNoisy(pathValue) {
+			continue
+		}
+		selected = append(selected, path)
+		if len(selected) >= mapBoundaryMaxConceptualFiles {
+			return selected
+		}
+	}
+	return selected
+}
+
+func appendMapBoundaryArtifactCandidate(candidate *mapPathBoundaryCandidate, art mapArtifact, limit int) {
+	if art.Path == "" || limit <= 0 {
+		return
+	}
+	for i := range candidate.Artifacts {
+		if candidate.Artifacts[i].Path == art.Path {
+			if art.Rank > candidate.Artifacts[i].Rank {
+				candidate.Artifacts[i].Rank = art.Rank
+			}
+			return
+		}
+	}
+	if len(candidate.Artifacts) < limit {
+		candidate.Artifacts = append(candidate.Artifacts, art)
+		return
+	}
+	lowestIndex := -1
+	lowestRank := art.Rank
+	for i, existing := range candidate.Artifacts {
+		if lowestIndex < 0 || existing.Rank < lowestRank {
+			lowestIndex = i
+			lowestRank = existing.Rank
+		}
+	}
+	if lowestIndex >= 0 && art.Rank > lowestRank {
+		candidate.Artifacts[lowestIndex] = art
+	}
+}
+
+func mapConceptualArtifactRank(rule mapConceptualBoundaryRule, pathValue, pathKey, family string, needleCache map[string]mapConceptualNeedle) int {
+	score := 0
+	switch family {
+	case "source":
+		score += 500
+	case "test":
+		score += 460
+	case "config":
+		score += 130
+	case "doc":
+		score += 90
+	default:
+		score += 40
+	}
+	for _, pattern := range rule.Patterns {
+		for _, needle := range pattern.All {
+			if mapConceptualPathContains(pathValue, pathKey, needle, needleCache) {
+				score += 60
+			}
+		}
+		for _, needle := range pattern.Any {
+			if mapConceptualPathContains(pathValue, pathKey, needle, needleCache) {
+				score += 45
+			}
+		}
+	}
+	for _, cover := range rule.Covers {
+		if mapConceptualPatternMatchesPath(mapConceptualBoundaryPattern{All: cover.All, Any: cover.Any}, pathValue, pathKey, needleCache) {
+			score += 35
+		}
+	}
+	switch {
+	case strings.Contains(pathValue, "/docs/") || strings.HasPrefix(pathValue, "docs/") || strings.Contains(pathValue, "/twenty-docs/"):
+		score -= 260
+	case strings.Contains(pathValue, "/templates/") || strings.Contains(pathValue, "/template/"):
+		score -= 180
+	case strings.Contains(pathValue, "/connector/") || strings.Contains(pathValue, "-connector/"):
+		score -= 110
+	case strings.Contains(pathValue, "/examples/") || strings.Contains(pathValue, "/fixtures/"):
+		score -= 120
+	}
+	return score
 }
 
 func mapConceptualRuleMatchesPath(rule mapConceptualBoundaryRule, pathValue, pathKey string, needleCache map[string]mapConceptualNeedle) bool {
@@ -1841,8 +1949,9 @@ func applyMapBoundaryImportEvidence(repoRoot, repoName string, files []string, c
 		}
 	}
 	sourceRead := 0
+	importFileLimit := mapBoundaryImportFileLimit(len(files))
 	for _, sourcePath := range files {
-		if sourceRead >= mapBoundaryMaxImportFiles {
+		if sourceRead >= importFileLimit {
 			break
 		}
 		family := mapBoundaryPathFamily(sourcePath)
@@ -1865,6 +1974,13 @@ func applyMapBoundaryImportEvidence(repoRoot, repoName string, files []string, c
 			addMapBoundaryImportEdge(candidates, pathKeys, sourcePath, targetPath)
 		}
 	}
+}
+
+func mapBoundaryImportFileLimit(fileCount int) int {
+	if fileCount >= mapBoundaryLargeRepoFiles {
+		return mapBoundaryMaxImportFilesLargeRepo
+	}
+	return mapBoundaryMaxImportFiles
 }
 
 func mapBoundaryCandidateKeysForPath(path, repoName string) []string {
@@ -2339,8 +2455,15 @@ func selectMapBoundaryAreas(areas []*mapAreaInternal, limit int) []*mapAreaInter
 	}
 	var out []*mapAreaInternal
 	for _, area := range areas {
+		if mapBoundaryWeakBroadAreaSuppressed(area, out) {
+			continue
+		}
 		overlapped := false
 		for _, selected := range out {
+			if mapBoundaryConceptualParentsRedundant(selected, area) {
+				overlapped = true
+				break
+			}
 			if mapArtifactOverlap(selected.ArtifactPathSet, area.ArtifactPathSet) >= 0.72 {
 				overlapped = true
 				break
@@ -2359,6 +2482,46 @@ func selectMapBoundaryAreas(areas []*mapAreaInternal, limit int) []*mapAreaInter
 		}
 	}
 	return out
+}
+
+func mapBoundaryWeakBroadAreaSuppressed(area *mapAreaInternal, selected []*mapAreaInternal) bool {
+	if area == nil {
+		return false
+	}
+	switch area.Key {
+	case "settings":
+		return mapBoundarySelectedConceptualParentCount(selected) >= 3
+	default:
+		return false
+	}
+}
+
+func mapBoundarySelectedConceptualParentCount(areas []*mapAreaInternal) int {
+	count := 0
+	for _, area := range areas {
+		if area != nil && area.EvidenceSources["conceptual_parent"] {
+			count++
+		}
+	}
+	return count
+}
+
+func mapBoundaryConceptualParentsRedundant(selected, candidate *mapAreaInternal) bool {
+	if selected == nil || candidate == nil {
+		return false
+	}
+	selectedGroup := mapBoundaryConceptualDuplicateGroup(selected.Key)
+	candidateGroup := mapBoundaryConceptualDuplicateGroup(candidate.Key)
+	return selectedGroup != "" && selectedGroup == candidateGroup
+}
+
+func mapBoundaryConceptualDuplicateGroup(key string) string {
+	switch key {
+	case "workspace-identity-access-billing", "identity-auth-workspace-tenancy", "identity-auth-access-control":
+		return "identity-access"
+	default:
+		return ""
+	}
 }
 
 func mapBoundaryKeysRedundant(a, b string) bool {
@@ -4029,6 +4192,11 @@ func classifyMapAreaType(area *mapAreaInternal, label, class string, root bool, 
 	if class == mapClassProtocol {
 		return mapTypeProtocol
 	}
+	if area != nil && area.EvidenceSources["conceptual_parent"] {
+		if areaType := conceptualMapAreaType(area.Key, label); areaType != "" {
+			return areaType
+		}
+	}
 
 	values := mapAreaTypeValues(area, label, covers)
 	primaryValues := mapAreaPrimaryTypeValues(area, label, covers)
@@ -4076,6 +4244,34 @@ func classifyMapAreaType(area *mapAreaInternal, label, class string, root bool, 
 		return mapTypeDomainFeature
 	}
 	return mapTypeUnknown
+}
+
+func conceptualMapAreaType(key, label string) string {
+	value := normalizeMapKey(firstNonEmpty(key, label))
+	switch value {
+	case "public-api-layer", "public-http-api-developer-platform":
+		return mapTypeAPI
+	case "metadata-engine-data-model":
+		return mapTypeDataModel
+	case "self-host-runtime-deployments", "background-jobs-email-automation", "django-api-persistence-async-workers":
+		return mapTypeOps
+	case "identity-auth-workspace-tenancy", "identity-auth-access-control", "workspace-identity-access-billing", "multi-tenant-workspace-platform":
+		return mapTypePlatform
+	case "third-party-integrations":
+		return mapTypeExternal
+	case "apps-developer-extension-platform":
+		return mapTypeTooling
+	case "ai-agents-chat-skills":
+		return mapTypePlatform
+	case "crm-record-experience":
+		return mapTypeDomainFeature
+	case "pages-stickies-collaborative-editing":
+		return mapTypeUI
+	case "work-items-project-delivery", "workflows-automation", "affiliate-partner-programs", "click-analytics-conversion-attribution", "short-link-redirect-click-capture", "planning-cycles-modules-views", "intake-publishing-public-space", "analytics-export-reporting", "partner-portal", "custom-domains-link-infrastructure":
+		return mapTypeBusinessFlow
+	default:
+		return ""
+	}
 }
 
 func mapAreaTypeValues(area *mapAreaInternal, label string, covers []string) []string {
@@ -4813,13 +5009,25 @@ func dedupeMapArtifacts(artifacts []mapArtifact) []mapArtifact {
 	seen := map[string]bool{}
 	var out []mapArtifact
 	for _, art := range artifacts {
-		if art.Path == "" || seen[art.Path] {
+		if art.Path == "" {
+			continue
+		}
+		if seen[art.Path] {
+			for i := range out {
+				if out[i].Path == art.Path && art.Rank > out[i].Rank {
+					out[i].Rank = art.Rank
+					break
+				}
+			}
 			continue
 		}
 		seen[art.Path] = true
 		out = append(out, art)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Rank != out[j].Rank {
+			return out[i].Rank > out[j].Rank
+		}
 		if mapArtifactRank(out[i]) == mapArtifactRank(out[j]) {
 			return out[i].Path < out[j].Path
 		}
