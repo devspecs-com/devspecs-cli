@@ -354,6 +354,64 @@ func TestPathBoundaryMapBuildsSubareasFromChildPaths(t *testing.T) {
 	}
 }
 
+func TestPathBoundaryMapAddsImportStructureReceipts(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "dub")
+	files := []string{
+		"apps/web/modules/webhooks/lib/events.ts",
+		"apps/web/modules/webhooks/lib/handler.ts",
+		"apps/web/modules/webhooks/lib/handler.test.ts",
+		"apps/web/modules/webhooks/components/WebhookForm.tsx",
+	}
+	writeMapTestFile(t, repoRoot, "apps/web/modules/webhooks/lib/events.ts", "export const webhookEvent = 'event';\n")
+	writeMapTestFile(t, repoRoot, "apps/web/modules/webhooks/lib/handler.ts", "import { webhookEvent } from './events';\nexport const handler = webhookEvent;\n")
+	writeMapTestFile(t, repoRoot, "apps/web/modules/webhooks/lib/handler.test.ts", "import { handler } from './handler';\nhandler;\n")
+	writeMapTestFile(t, repoRoot, "apps/web/modules/webhooks/components/WebhookForm.tsx", "import { handler } from '../lib/handler';\nexport function WebhookForm(){ return handler; }\n")
+
+	areas, _, _ := buildPathBoundaryAreas(repoRoot, "dub", files, nil, 5)
+	webhooks := findMapTestArea(areas, "Webhooks")
+	if webhooks == nil {
+		t.Fatalf("expected Webhooks area, got %#v", areas)
+	}
+	if webhooks.EvidenceCounts["import"] == 0 {
+		t.Fatalf("expected import structure evidence, got %#v", webhooks.EvidenceCounts)
+	}
+	if webhooks.EvidenceCounts["test_import"] == 0 {
+		t.Fatalf("expected test->source evidence, got %#v", webhooks.EvidenceCounts)
+	}
+	if !strings.Contains(mapAreaEvidenceText(webhooks.EvidenceCounts), "import structure") {
+		t.Fatalf("evidence text missing import structure: %s", mapAreaEvidenceText(webhooks.EvidenceCounts))
+	}
+}
+
+func TestPathBoundaryMapSuppressesWrapperAndDomainShellLabels(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "dub")
+	files := []string{
+		"apps/web/hooks/webhooks/use-webhook.ts",
+		"apps/web/hooks/webhooks/use-webhook.test.ts",
+		"apps/web/app/(ee)/app.dub.co/(dashboard)/partners/page.tsx",
+		"apps/web/app/(ee)/app.dub.co/(dashboard)/partners/detail.tsx",
+		"apps/web/app/(ee)/app.dub.co/(dashboard)/partners/fraud.tsx",
+		"apps/web/app/(ee)/app.dub.co/(dashboard)/partners/settings.tsx",
+	}
+	for _, file := range files {
+		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
+	}
+
+	areas, _, _ := buildPathBoundaryAreas(repoRoot, "dub", files, nil, 8)
+	for _, area := range areas {
+		switch area.Label {
+		case "Hooks", "Dashboard", "App Dub Co":
+			t.Fatalf("wrapper/domain shell label leaked into map: %#v", areas)
+		}
+	}
+	if findMapTestArea(areas, "Webhooks") == nil {
+		t.Fatalf("expected Webhooks to survive wrapper suppression, got %#v", areas)
+	}
+	if findMapTestArea(areas, "Partners") == nil {
+		t.Fatalf("expected Partners to survive domain-shell suppression, got %#v", areas)
+	}
+}
+
 func TestMapAreaMatchPrefersPluralLabelOverPathOnlyMatch(t *testing.T) {
 	areas := []mapArea{
 		{Label: "Cron", KeyPaths: []string{"apps/web/app/api/cron/notify-partners/route.ts"}, Diagnostics: mapAreaDiagnostics{TraceTerms: []string{"partner"}}},
@@ -654,4 +712,24 @@ func mustMapTestNoErr(t *testing.T, err error) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func writeMapTestFile(t *testing.T, repoRoot, rel, body string) {
+	t.Helper()
+	full := filepath.Join(repoRoot, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func findMapTestArea(areas []mapArea, label string) *mapArea {
+	for i := range areas {
+		if areas[i].Label == label {
+			return &areas[i]
+		}
+	}
+	return nil
 }

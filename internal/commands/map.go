@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	pathpkg "path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -32,44 +34,48 @@ import (
 )
 
 const (
-	mapDefaultMaxAreas      = 8
-	mapMaxArtifactsPerArea  = 4
-	mapMaxCoversPerArea     = 5
-	mapMaxTraceReceipts     = 3
-	mapMaxVerboseTrace      = 4
-	mapRecentMaxCommits     = 40
-	mapRecentMaxTopics      = 5
-	mapBoundaryMaxFiles     = 30000
-	mapBoundaryMaxCommits   = 60
-	mapBoundaryMaxArtifacts = 24
-	mapBoundaryFilesTimeout = 3 * time.Second
-	mapSchemaVersion        = "devspecs.map.v1"
-	mapRecentSchemaVersion  = "devspecs.map.recent.v1"
-	mapTraceReceiptMode     = "bounded_git_path_receipts_v0"
-	mapIndexRequiredCaveat  = "context packing requires an index; run ds scan before using suggested ds find --pack commands"
-	mapLowConfidence        = "low"
-	mapMediumConfidence     = "medium"
-	mapHighConfidence       = "high"
-	mapClassStableArea      = "stable_area"
-	mapClassWorkstream      = "workstream"
-	mapClassDocTopic        = "doc_topic"
-	mapClassProtocol        = "protocol"
-	mapClassLowConfidence   = "low_confidence"
-	mapTypeDomainFeature    = "domain_feature"
-	mapTypeBusinessFlow     = "business_workflow"
-	mapTypeExternal         = "external_integration"
-	mapTypeAPI              = "api_surface"
-	mapTypeUI               = "ui_surface"
-	mapTypeDataModel        = "data_model"
-	mapTypeDataPipeline     = "data_pipeline"
-	mapTypePlatform         = "platform_capability"
-	mapTypeOps              = "ops_runtime"
-	mapTypeTooling          = "tooling_script"
-	mapTypeTestQuality      = "test_quality"
-	mapTypeProtocol         = "protocol_process"
-	mapTypeDocs             = "docs_reference"
-	mapTypeRoot             = "repo_root_umbrella"
-	mapTypeUnknown          = "unknown_area"
+	mapDefaultMaxAreas            = 8
+	mapMaxArtifactsPerArea        = 4
+	mapMaxCoversPerArea           = 5
+	mapMaxTraceReceipts           = 3
+	mapMaxVerboseTrace            = 4
+	mapRecentMaxCommits           = 40
+	mapRecentMaxTopics            = 5
+	mapBoundaryMaxFiles           = 30000
+	mapBoundaryMaxCommits         = 60
+	mapBoundaryMaxArtifacts       = 24
+	mapBoundaryMaxImportFiles     = 8000
+	mapBoundaryMaxImportBytes     = 512 * 1024
+	mapBoundaryImportScoreCap     = 40
+	mapBoundaryTestImportScoreCap = 16
+	mapBoundaryFilesTimeout       = 3 * time.Second
+	mapSchemaVersion              = "devspecs.map.v1"
+	mapRecentSchemaVersion        = "devspecs.map.recent.v1"
+	mapTraceReceiptMode           = "bounded_git_path_receipts_v0"
+	mapIndexRequiredCaveat        = "context packing requires an index; run ds scan before using suggested ds find --pack commands"
+	mapLowConfidence              = "low"
+	mapMediumConfidence           = "medium"
+	mapHighConfidence             = "high"
+	mapClassStableArea            = "stable_area"
+	mapClassWorkstream            = "workstream"
+	mapClassDocTopic              = "doc_topic"
+	mapClassProtocol              = "protocol"
+	mapClassLowConfidence         = "low_confidence"
+	mapTypeDomainFeature          = "domain_feature"
+	mapTypeBusinessFlow           = "business_workflow"
+	mapTypeExternal               = "external_integration"
+	mapTypeAPI                    = "api_surface"
+	mapTypeUI                     = "ui_surface"
+	mapTypeDataModel              = "data_model"
+	mapTypeDataPipeline           = "data_pipeline"
+	mapTypePlatform               = "platform_capability"
+	mapTypeOps                    = "ops_runtime"
+	mapTypeTooling                = "tooling_script"
+	mapTypeTestQuality            = "test_quality"
+	mapTypeProtocol               = "protocol_process"
+	mapTypeDocs                   = "docs_reference"
+	mapTypeRoot                   = "repo_root_umbrella"
+	mapTypeUnknown                = "unknown_area"
 )
 
 // NewMapCmd creates the ds map command.
@@ -309,6 +315,13 @@ var mapWeakStandaloneAreaLabels = map[string]bool{
 	"scripts": true, "self": true, "tutorial": true, "type": true,
 }
 
+var mapBoundarySuppressedStandaloneLabels = map[string]bool{
+	"all": true, "dashboard": true, "dashboards": true, "hook": true, "hooks": true,
+	"icon": true, "icons": true, "modal": true, "modals": true, "nucleo": true,
+	"store": true, "stores": true, "story": true, "stories": true, "suite": true,
+	"suites": true, "view": true, "views": true,
+}
+
 var mapSuppressedPathSegments = map[string]bool{
 	"_ignore": true, ".git": true, "node_modules": true, "vendor": true, "dist": true,
 	"build": true, "target": true, ".next": true, "coverage": true, "fixtures": true,
@@ -320,8 +333,30 @@ var mapProtocolSubtypes = map[string]bool{
 }
 
 var mapBoundaryAllowedGenericAreaLabels = map[string]bool{
-	"workflow": true, "workflows": true,
+	"issue": true, "issues": true, "workflow": true, "workflows": true,
 }
+
+var mapBoundarySourceExtensions = []string{
+	".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte",
+	".py", ".go", ".rs", ".java", ".kt", ".kts", ".cs",
+}
+
+var mapBoundaryJSImportRegexes = []*regexp.Regexp{
+	regexp.MustCompile(`\bimport\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?["']([^"']+)["']`),
+	regexp.MustCompile(`\bexport\s+(?:type\s+)?[^'"]*?\s+from\s+["']([^"']+)["']`),
+	regexp.MustCompile(`\brequire\s*\(\s*["']([^"']+)["']\s*\)`),
+	regexp.MustCompile(`\bimport\s*\(\s*["']([^"']+)["']\s*\)`),
+}
+
+var (
+	mapBoundaryPythonFromImportRegex = regexp.MustCompile(`(?m)^\s*from\s+([A-Za-z_][\w.]*|\.[\w.]*)\s+import\s+`)
+	mapBoundaryPythonImportRegex     = regexp.MustCompile(`(?m)^\s*import\s+([A-Za-z_][\w.]*)`)
+	mapBoundaryGoImportRegex         = regexp.MustCompile(`\bimport\s+"([^"]+)"`)
+	mapBoundaryGoImportBlockRegex    = regexp.MustCompile(`(?m)^\s*"([^"]+)"\s*$`)
+	mapBoundaryRustUseRegex          = regexp.MustCompile(`(?m)^\s*use\s+([^;]+);`)
+	mapBoundaryRustModRegex          = regexp.MustCompile(`(?m)^\s*mod\s+([A-Za-z_]\w*)\s*;`)
+	mapBoundaryJavaLikeImportRegex   = regexp.MustCompile(`(?m)^\s*import\s+(?:static\s+)?([A-Za-z_][\w.]*)(?:\.\*)?\s*;`)
+)
 
 func runMap(cmd *cobra.Command, opts mapOptions) error {
 	start := time.Now()
@@ -1119,6 +1154,7 @@ func buildPathBoundaryAreas(repoRoot, repoName string, files []string, commits [
 		}
 		addMapBoundaryPathCandidates(candidates, repoName, path, family)
 	}
+	applyMapBoundaryImportEvidence(repoRoot, repoName, files, candidates)
 	applyMapBoundaryRecentCommits(candidates, repoName, commits)
 	if len(commits) > 0 {
 		evidence.Trace = true
@@ -1185,6 +1221,263 @@ func addMapBoundaryPathCandidates(candidates map[string]*mapPathBoundaryCandidat
 	}
 }
 
+func applyMapBoundaryImportEvidence(repoRoot, repoName string, files []string, candidates map[string]*mapPathBoundaryCandidate) {
+	if len(files) == 0 || len(candidates) == 0 {
+		return
+	}
+	fileSet := map[string]bool{}
+	for _, path := range files {
+		fileSet[normalizeMapPath(path)] = true
+	}
+	suffixIndex := buildMapBoundarySuffixIndex(files)
+	pathKeys := map[string][]string{}
+	for _, path := range files {
+		family := mapBoundaryPathFamily(path)
+		if family != "source" && family != "test" {
+			continue
+		}
+		keys := mapBoundaryCandidateKeysForPath(path, repoName)
+		if len(keys) > 0 {
+			pathKeys[path] = keys
+		}
+	}
+	sourceRead := 0
+	for _, sourcePath := range files {
+		if sourceRead >= mapBoundaryMaxImportFiles {
+			break
+		}
+		family := mapBoundaryPathFamily(sourcePath)
+		if family != "source" && family != "test" {
+			continue
+		}
+		if len(pathKeys[sourcePath]) == 0 {
+			continue
+		}
+		body := readMapBoundaryImportBody(filepath.Join(repoRoot, filepath.FromSlash(sourcePath)))
+		if body == "" {
+			continue
+		}
+		sourceRead++
+		for _, spec := range extractMapBoundaryImports(sourcePath, body) {
+			targetPath := resolveMapBoundaryImport(sourcePath, spec, fileSet, suffixIndex)
+			if targetPath == "" || targetPath == sourcePath || !fileSet[targetPath] {
+				continue
+			}
+			addMapBoundaryImportEdge(candidates, pathKeys, sourcePath, targetPath)
+		}
+	}
+}
+
+func mapBoundaryCandidateKeysForPath(path, repoName string) []string {
+	var out []string
+	for _, candidate := range mapBoundaryLabelCandidatesForPath(path, repoName) {
+		out = appendUniqueString(out, candidate.Key)
+	}
+	return out
+}
+
+func addMapBoundaryImportEdge(candidates map[string]*mapPathBoundaryCandidate, pathKeys map[string][]string, sourcePath, targetPath string) {
+	sourceKeys := pathKeys[sourcePath]
+	targetKeys := pathKeys[targetPath]
+	if len(sourceKeys) == 0 || len(targetKeys) == 0 {
+		return
+	}
+	sourceKeySet := mapStringSet(sourceKeys)
+	sourceFamily := mapBoundaryPathFamily(sourcePath)
+	targetFamily := mapBoundaryPathFamily(targetPath)
+	for _, key := range targetKeys {
+		if !sourceKeySet[key] {
+			continue
+		}
+		candidate := candidates[key]
+		if candidate == nil {
+			continue
+		}
+		candidate.EvidenceCounts["import"]++
+		candidate.EvidenceSources["import"] = true
+		if candidate.EvidenceCounts["import"] <= mapBoundaryImportScoreCap {
+			candidate.Score += 0.65
+		}
+		if sourceFamily == "test" && targetFamily == "source" {
+			candidate.EvidenceCounts["test_import"]++
+			if candidate.EvidenceCounts["test_import"] <= mapBoundaryTestImportScoreCap {
+				candidate.Score += 1.4
+			}
+		}
+	}
+}
+
+func readMapBoundaryImportBody(path string) string {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() || info.Size() > mapBoundaryMaxImportBytes {
+		return ""
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(body)
+}
+
+func extractMapBoundaryImports(path, body string) []string {
+	ext := strings.ToLower(filepath.Ext(path))
+	var specs []string
+	switch ext {
+	case ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte":
+		for _, re := range mapBoundaryJSImportRegexes {
+			specs = appendMapBoundaryRegexSpecs(specs, re, body)
+		}
+	case ".py":
+		specs = appendMapBoundaryRegexSpecs(specs, mapBoundaryPythonFromImportRegex, body)
+		specs = appendMapBoundaryRegexSpecs(specs, mapBoundaryPythonImportRegex, body)
+	case ".go":
+		specs = appendMapBoundaryRegexSpecs(specs, mapBoundaryGoImportRegex, body)
+		specs = appendMapBoundaryRegexSpecs(specs, mapBoundaryGoImportBlockRegex, body)
+	case ".rs":
+		specs = appendMapBoundaryRegexSpecs(specs, mapBoundaryRustUseRegex, body)
+		specs = appendMapBoundaryRegexSpecs(specs, mapBoundaryRustModRegex, body)
+	case ".java", ".kt", ".kts", ".cs":
+		specs = appendMapBoundaryRegexSpecs(specs, mapBoundaryJavaLikeImportRegex, body)
+	default:
+		return nil
+	}
+	var out []string
+	for _, spec := range specs {
+		spec = strings.TrimSpace(spec)
+		if spec == "" || !mapBoundaryLocalImportSpec(spec) {
+			continue
+		}
+		out = appendUniqueString(out, spec)
+	}
+	return out
+}
+
+func appendMapBoundaryRegexSpecs(out []string, re *regexp.Regexp, body string) []string {
+	for _, match := range re.FindAllStringSubmatch(body, -1) {
+		if len(match) > 1 {
+			out = append(out, match[1])
+		}
+	}
+	return out
+}
+
+func mapBoundaryLocalImportSpec(spec string) bool {
+	if spec == "" {
+		return false
+	}
+	switch {
+	case strings.HasPrefix(spec, "."):
+		return true
+	case strings.HasPrefix(spec, "@/") || strings.HasPrefix(spec, "~/"):
+		return true
+	case strings.HasPrefix(spec, "src/") || strings.HasPrefix(spec, "app/") ||
+		strings.HasPrefix(spec, "apps/") || strings.HasPrefix(spec, "packages/") ||
+		strings.HasPrefix(spec, "libs/") || strings.HasPrefix(spec, "lib/") ||
+		strings.HasPrefix(spec, "internal/") || strings.HasPrefix(spec, "pkg/"):
+		return true
+	case strings.HasPrefix(spec, "crate::") || strings.HasPrefix(spec, "self::") || strings.HasPrefix(spec, "super::"):
+		return true
+	case strings.HasPrefix(spec, "@") && strings.Contains(spec, "/"):
+		return true
+	}
+	for _, r := range spec {
+		if r == '.' || r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func resolveMapBoundaryImport(fromPath, spec string, fileSet map[string]bool, suffixIndex map[string]string) string {
+	fromDir := pathpkg.Dir(normalizeMapPath(fromPath))
+	spec = strings.TrimSpace(spec)
+	switch {
+	case strings.HasPrefix(spec, "."):
+		return resolveMapBoundaryPathCandidate(pathpkg.Clean(pathpkg.Join(fromDir, spec)), fileSet)
+	case strings.HasPrefix(spec, "@/") || strings.HasPrefix(spec, "~/"):
+		return resolveMapBoundaryPathCandidate(strings.TrimPrefix(strings.TrimPrefix(spec, "@/"), "~/"), fileSet)
+	case strings.HasPrefix(spec, "src/") || strings.HasPrefix(spec, "app/") ||
+		strings.HasPrefix(spec, "apps/") || strings.HasPrefix(spec, "packages/") ||
+		strings.HasPrefix(spec, "libs/") || strings.HasPrefix(spec, "lib/") ||
+		strings.HasPrefix(spec, "internal/") || strings.HasPrefix(spec, "pkg/"):
+		return resolveMapBoundaryPathCandidate(spec, fileSet)
+	case strings.HasPrefix(spec, "crate::") || strings.HasPrefix(spec, "self::"):
+		modulePath := mapBoundaryRustImportPath(strings.TrimPrefix(strings.TrimPrefix(spec, "crate::"), "self::"))
+		return firstNonEmpty(resolveMapBoundaryPathCandidate(modulePath, fileSet), suffixIndex[modulePath])
+	case strings.HasPrefix(spec, "super::"):
+		modulePath := pathpkg.Clean(pathpkg.Join(fromDir, "..", mapBoundaryRustImportPath(strings.TrimPrefix(spec, "super::"))))
+		return resolveMapBoundaryPathCandidate(modulePath, fileSet)
+	default:
+		modulePath := strings.TrimPrefix(spec, "@")
+		if idx := strings.Index(modulePath, "/"); strings.HasPrefix(spec, "@") && idx >= 0 {
+			modulePath = modulePath[idx+1:]
+		}
+		modulePath = strings.ReplaceAll(modulePath, ".", "/")
+		modulePath = strings.ReplaceAll(modulePath, "::", "/")
+		return firstNonEmpty(resolveMapBoundaryPathCandidate(modulePath, fileSet), suffixIndex[modulePath])
+	}
+}
+
+func mapBoundaryRustImportPath(spec string) string {
+	spec = strings.ReplaceAll(spec, "::", "/")
+	spec = strings.ReplaceAll(spec, "{", "")
+	spec = strings.ReplaceAll(spec, "}", "")
+	if idx := strings.Index(spec, ","); idx >= 0 {
+		spec = spec[:idx]
+	}
+	return strings.TrimSpace(spec)
+}
+
+func resolveMapBoundaryPathCandidate(base string, fileSet map[string]bool) string {
+	base = normalizeMapPath(base)
+	if base == "" {
+		return ""
+	}
+	candidates := []string{base}
+	for _, ext := range mapBoundarySourceExtensions {
+		candidates = append(candidates, base+ext)
+	}
+	for _, ext := range mapBoundarySourceExtensions {
+		candidates = append(candidates, pathpkg.Join(base, "index"+ext))
+	}
+	candidates = append(candidates, pathpkg.Join(base, "__init__.py"))
+	for _, candidate := range candidates {
+		candidate = normalizeMapPath(candidate)
+		if fileSet[candidate] {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func buildMapBoundarySuffixIndex(files []string) map[string]string {
+	index := map[string]string{}
+	for _, file := range files {
+		if mapBoundaryPathFamily(file) != "source" && mapBoundaryPathFamily(file) != "test" {
+			continue
+		}
+		addMapBoundarySuffixes(index, normalizeMapPath(file))
+		ext := filepath.Ext(file)
+		if ext != "" {
+			addMapBoundarySuffixes(index, strings.TrimSuffix(normalizeMapPath(file), ext))
+		}
+	}
+	return index
+}
+
+func addMapBoundarySuffixes(index map[string]string, file string) {
+	parts := strings.Split(normalizeMapPath(file), "/")
+	for n := 1; n <= mapMinInt(5, len(parts)); n++ {
+		suffix := strings.Join(parts[len(parts)-n:], "/")
+		if existing, ok := index[suffix]; ok && existing != file {
+			index[suffix] = ""
+		} else if !ok {
+			index[suffix] = file
+		}
+	}
+}
+
 func applyMapBoundaryRecentCommits(candidates map[string]*mapPathBoundaryCandidate, repoName string, commits []parsedFindGitCommit) {
 	for _, commit := range commits {
 		touched := map[string]bool{}
@@ -1208,9 +1501,6 @@ func applyMapBoundaryRecentCommits(candidates map[string]*mapPathBoundaryCandida
 						SHA:     shortFindGitSHA(commit.sha),
 						Subject: limitRunes(commit.subject, 120),
 					})
-				}
-				if query := mapRecentCommitQuery(commit); query != "" && !mapBoundaryQueryMatchesCandidate(query, candidate.Key) && len(candidate.Subareas) < 20 {
-					candidate.Subareas[displayMapLabel(query)] = true
 				}
 			}
 		}
@@ -1264,7 +1554,8 @@ func mapBoundaryLabelCandidateAllowed(candidate mapLabelCandidate, repoName stri
 			return false
 		}
 		for _, part := range pairParts {
-			if mapBoundaryRepoPackageKey(normalizeMapKey(part), repoKey) {
+			partKey := normalizeMapKey(part)
+			if mapBoundarySuppressedStandaloneLabels[partKey] || mapBoundaryRepoPackageKey(partKey, repoKey) || mapBoundaryRouteShellKey(partKey, repoKey) {
 				return false
 			}
 		}
@@ -1273,11 +1564,14 @@ func mapBoundaryLabelCandidateAllowed(candidate mapLabelCandidate, repoName stri
 	if key == "" || key != candidate.Key {
 		candidate.Key = key
 	}
+	if mapBoundarySuppressedStandaloneLabels[key] || mapBoundaryRouteShellKey(key, repoKey) {
+		return false
+	}
 	if key == "" || (isMapGenericAnchor(key) && !mapBoundaryAllowedGenericAreaLabels[key]) || mapGenericAreaLabels[key] || mapKeyMatchesRepoRoot(key, repoKey) || mapBoundaryRepoPackageKey(key, repoKey) {
 		return false
 	}
 	switch key {
-	case "type", "types", "constant", "constants", "suite", "suites", "mock", "mocks", "fixture", "fixtures", "icon", "icons":
+	case "type", "types", "constant", "constants", "mock", "mocks", "fixture", "fixtures":
 		return false
 	}
 	parts := strings.FieldsFunc(key, func(r rune) bool { return r == '-' || r == '/' })
@@ -1295,6 +1589,17 @@ func mapBoundaryLabelCandidateAllowed(candidate mapLabelCandidate, repoName stri
 		}
 	}
 	return meaningful > 0
+}
+
+func mapBoundaryRouteShellKey(key, repoKey string) bool {
+	if key == "" || repoKey == "" {
+		return false
+	}
+	parts := mapStringSet(strings.Split(key, "-"))
+	if !parts[repoKey] {
+		return false
+	}
+	return parts["co"] || parts["com"] || parts["org"] || parts["io"] || parts["app"]
 }
 
 func mapBoundaryRepoPackageKey(key, repoKey string) bool {
@@ -1468,6 +1773,8 @@ func mapBoundaryAreaScore(area *mapAreaInternal) float64 {
 	score += float64(mapMinInt(len(area.Subareas), 5)) * 3
 	score += float64(mapMinInt(len(area.ArtifactPathSet), 40)) * 0.25
 	score += float64(mapMinInt(area.EvidenceCounts["trace"], 4)) * 4
+	score += float64(mapMinInt(area.EvidenceCounts["import"], mapBoundaryImportScoreCap)) * 0.35
+	score += float64(mapMinInt(area.EvidenceCounts["test_import"], mapBoundaryTestImportScoreCap)) * 0.9
 	if area.EvidenceCounts["source"] > 0 && area.EvidenceCounts["test"] > 0 {
 		score += 5
 	}
@@ -1599,16 +1906,6 @@ func mapBoundaryPathFamily(path string) string {
 		return "config"
 	}
 	return mapRecentPathFamily(path)
-}
-
-func mapBoundaryQueryMatchesCandidate(query, key string) bool {
-	queryWords := mapStringSet(wordsFromMap(query))
-	for _, word := range wordsFromMap(key) {
-		if queryWords[word] {
-			return true
-		}
-	}
-	return false
 }
 
 func copyBoolMap(in map[string]bool) map[string]bool {
@@ -2997,13 +3294,17 @@ func mapEvidenceText(e mapEvidenceAvailability) string {
 
 func mapAreaEvidenceText(counts map[string]int) string {
 	var parts []string
-	for _, key := range []string{"source", "test", "intent", "doc", "protocol", "trace", "other"} {
+	for _, key := range []string{"source", "test", "import", "test_import", "intent", "doc", "protocol", "trace", "other"} {
 		if counts[key] > 0 {
 			switch key {
 			case "source":
 				parts = append(parts, "source")
 			case "test":
 				parts = append(parts, "tests")
+			case "import":
+				parts = append(parts, "import structure")
+			case "test_import":
+				parts = append(parts, "test->source")
 			case "intent":
 				parts = append(parts, "intent docs")
 			case "doc":
