@@ -1192,6 +1192,91 @@ var mapConceptualBoundaryRules = []mapConceptualBoundaryRule{
 	},
 }
 
+var mapDynamicConceptRules = []mapConceptualBoundaryRule{
+	{
+		Key:   "document-signing-authoring",
+		Label: "Document Signing & Authoring",
+		Score: 13,
+		Patterns: []mapConceptualBoundaryPattern{
+			{All: []string{"document"}, Any: []string{"sign", "signing", "signature", "recipient", "recipients", "authoring", "template", "templates", "field"}},
+			{Any: []string{"field-signing", "signature-pad", "document-flow", "template-flow"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Documents", Any: []string{"document", "documents"}},
+			{Label: "Templates / Authoring", Any: []string{"template", "templates", "authoring"}},
+			{Label: "Recipients", Any: []string{"recipient", "recipients"}},
+			{Label: "Field Signing", Any: []string{"field-signing", "field", "signature"}},
+			{Label: "Signing UI", Any: []string{"signature-pad", "sign"}},
+		},
+	},
+	{
+		Key:   "content-data-model",
+		Label: "Content/Data Model",
+		Score: 13,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"content", "collection", "collections", "relation", "relations", "data-model", "object-metadata", "field-metadata"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Collections", Any: []string{"collection", "collections"}},
+			{Label: "Items", Any: []string{"item", "items"}},
+			{Label: "Fields", Any: []string{"field", "fields", "field-metadata"}},
+			{Label: "Relations", Any: []string{"relation", "relations"}},
+			{Label: "Content", Any: []string{"content"}},
+		},
+	},
+	{
+		Key:   "extension-surfaces",
+		Label: "Extension Surfaces",
+		Score: 12,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"interface", "interfaces", "display", "displays", "layout", "layouts", "panel", "panels", "extension", "extensions"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Interfaces", Any: []string{"interface", "interfaces"}},
+			{Label: "Displays", Any: []string{"display", "displays"}},
+			{Label: "Layouts", Any: []string{"layout", "layouts"}},
+			{Label: "Panels", Any: []string{"panel", "panels"}},
+			{Label: "Extensions", Any: []string{"extension", "extensions"}},
+		},
+	},
+	{
+		Key:   "flows-automation",
+		Label: "Flows & Automation",
+		Score: 12,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"flow", "flows", "operation", "operations", "automation", "automations", "trigger", "triggers"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Flows", Any: []string{"flow", "flows"}},
+			{Label: "Operations", Any: []string{"operation", "operations"}},
+			{Label: "Automation", Any: []string{"automation", "automations", "trigger", "triggers"}},
+			{Label: "Webhooks", Any: []string{"webhook", "webhooks"}},
+		},
+	},
+	{
+		Key:   "files-assets-storage",
+		Label: "Files, Assets & Storage",
+		Score: 11,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"file", "files", "asset", "assets", "storage", "upload", "uploads", "s3", "blob", "media"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Files", Any: []string{"file", "files"}},
+			{Label: "Assets", Any: []string{"asset", "assets", "media"}},
+			{Label: "Storage", Any: []string{"storage", "s3", "blob"}},
+			{Label: "Upload", Any: []string{"upload", "uploads"}},
+		},
+	},
+}
+
+var mapDynamicConceptPathTerms = []string{
+	"document", "documents", "signing", "signature", "recipient", "recipients", "authoring", "template", "templates", "field-signing", "signature-pad", "document-flow", "template-flow",
+	"content", "collection", "collections", "relation", "relations", "data-model", "object-metadata", "field-metadata",
+	"interface", "interfaces", "display", "displays", "layout", "layouts", "panel", "panels", "extension", "extensions",
+	"flow", "flows", "operation", "operations", "automation", "automations", "trigger", "triggers",
+	"file", "files", "asset", "assets", "storage", "upload", "uploads", "blob", "media",
+}
+
 func runMap(cmd *cobra.Command, opts mapOptions) error {
 	start := time.Now()
 	success := false
@@ -1990,6 +2075,7 @@ func buildPathBoundaryAreas(repoRoot, repoName string, files []string, commits [
 		addMapBoundaryPathCandidates(candidates, repoName, path, family)
 	}
 	applyMapBoundaryConceptualParents(candidates, repoName, files, repoShape)
+	applyMapBoundaryDynamicConceptParents(candidates, repoName, files, commits, repoShape)
 	applyMapBoundaryImportEvidence(repoRoot, repoName, files, candidates)
 	applyMapBoundaryRecentCommits(candidates, repoName, commits)
 	if len(commits) > 0 {
@@ -2160,6 +2246,94 @@ func applyMapBoundaryConceptualParents(candidates map[string]*mapPathBoundaryCan
 			}
 			addMapConceptualParentCandidate(candidates, repoName, path, pathValue, pathKey, family, rule, needleCache)
 		}
+	}
+}
+
+func applyMapBoundaryDynamicConceptParents(candidates map[string]*mapPathBoundaryCandidate, repoName string, files []string, commits []parsedFindGitCommit, repoShape string) {
+	needleCache := map[string]mapConceptualNeedle{}
+	for _, path := range mapConceptualParentFiles(files) {
+		family := mapBoundaryPathFamily(path)
+		if family == "" {
+			continue
+		}
+		pathValue := normalizeMapPath(path)
+		if mapConceptualPathNoisy(pathValue) {
+			continue
+		}
+		pathKey := normalizeMapKey(pathValue)
+		if !mapDynamicConceptPathMightMatch(pathKey) {
+			continue
+		}
+		for _, rule := range mapDynamicConceptRules {
+			if !mapDynamicConceptRuleAllowedForShape(rule, repoShape) {
+				continue
+			}
+			if !mapConceptualRuleMatchesPath(rule, pathValue, pathKey, needleCache) {
+				continue
+			}
+			addMapConceptualParentCandidate(candidates, repoName, path, pathValue, pathKey, family, rule, needleCache)
+			if candidate := candidates[normalizeMapKey(rule.Key)]; candidate != nil {
+				candidate.EvidenceSources["dynamic_parent"] = true
+			}
+		}
+	}
+	for _, commit := range commits {
+		if mapCommitNoisy(commit) {
+			continue
+		}
+		subjectKey := normalizeMapKey(stripMapCommitPrefix(commit.subject))
+		if subjectKey == "" {
+			continue
+		}
+		for _, path := range commit.paths {
+			pathValue := normalizeMapPath(path)
+			family := mapBoundaryPathFamily(pathValue)
+			if family == "" || mapConceptualPathNoisy(pathValue) {
+				continue
+			}
+			combinedKey := normalizeMapKey(pathValue + " " + subjectKey)
+			if !mapDynamicConceptPathMightMatch(combinedKey) {
+				continue
+			}
+			for _, rule := range mapDynamicConceptRules {
+				if !mapDynamicConceptRuleAllowedForShape(rule, repoShape) {
+					continue
+				}
+				if !mapConceptualRuleMatchesPath(rule, pathValue, combinedKey, needleCache) {
+					continue
+				}
+				addMapConceptualParentCandidate(candidates, repoName, path, pathValue, combinedKey, family, rule, needleCache)
+				if candidate := candidates[normalizeMapKey(rule.Key)]; candidate != nil {
+					candidate.EvidenceSources["dynamic_parent"] = true
+					candidate.EvidenceSources["git"] = true
+					candidate.EvidenceCounts["trace"]++
+				}
+			}
+		}
+	}
+}
+
+func mapDynamicConceptPathMightMatch(pathKey string) bool {
+	if pathKey == "" {
+		return false
+	}
+	for _, term := range mapDynamicConceptPathTerms {
+		if strings.Contains(pathKey, term) {
+			return true
+		}
+	}
+	return false
+}
+
+func mapDynamicConceptRuleAllowedForShape(rule mapConceptualBoundaryRule, repoShape string) bool {
+	if len(rule.Shapes) > 0 {
+		return mapConceptualRuleAllowedForShape(rule, repoShape)
+	}
+	switch repoShape {
+	case mapRepoShapeTool, mapRepoShapeDocsSite:
+		return false
+	default:
+		return true
 	}
 }
 
@@ -2997,6 +3171,9 @@ func mapBoundaryWeakBroadAreaSuppressed(area *mapAreaInternal, selected []*mapAr
 		return false
 	}
 	if strongConceptualAvailable {
+		if mapBoundaryShellLikeArea(area) {
+			return true
+		}
 		switch area.Key {
 		case "controllers", "db/migrate", "db-migrate", "migrate", "migrations", "scripts", "github", "www", "api-reference", "code-samples", "design-system", "integration-tests", "crates", "http", "shell", "steps":
 			return true
@@ -3018,6 +3195,34 @@ func mapBoundaryWeakBroadAreaSuppressed(area *mapAreaInternal, selected []*mapAr
 	default:
 		return false
 	}
+}
+
+func mapBoundaryShellLikeArea(area *mapAreaInternal) bool {
+	if area == nil {
+		return false
+	}
+	key := normalizeMapKey(area.Key)
+	switch key {
+	case "remix", "trpc", "server-only", "primitives", "universal", "composables", "blackbox", "general", "ui-primitives":
+		return true
+	}
+	parts := mapStringSet(strings.FieldsFunc(key, func(r rune) bool { return r == '-' || r == '/' }))
+	if parts["server"] && parts["only"] {
+		return true
+	}
+	if parts["blackbox"] || parts["composable"] || parts["composables"] {
+		return true
+	}
+	if parts["ui"] && (parts["primitive"] || parts["primitives"]) {
+		return true
+	}
+	if (parts["primitive"] || parts["primitives"] || parts["universal"]) && len(area.Subareas) >= 2 {
+		return true
+	}
+	if (parts["remix"] || parts["trpc"]) && len(area.ArtifactPathSet) >= 2 {
+		return true
+	}
+	return false
 }
 
 func mapBoundaryConceptualParentCount(areas []*mapAreaInternal) int {
@@ -3053,6 +3258,12 @@ func mapBoundaryConceptualDuplicateGroup(key string) string {
 	switch key {
 	case "workspace-identity-access-billing", "identity-auth-workspace-tenancy", "identity-auth-access-control":
 		return "identity-access"
+	case "public-api-layer", "public-http-api-developer-platform", "external-http-api-v1", "http-api-layer":
+		return "api-platform"
+	case "metadata-engine-data-model", "content-data-model":
+		return "data-model"
+	case "workflows-automation", "flows-automation":
+		return "automation"
 	default:
 		return ""
 	}
@@ -4785,15 +4996,15 @@ func conceptualMapAreaType(key, label string) string {
 	switch value {
 	case "public-api-layer", "public-http-api-developer-platform", "external-http-api-v1", "http-api-layer":
 		return mapTypeAPI
-	case "metadata-engine-data-model":
+	case "metadata-engine-data-model", "content-data-model":
 		return mapTypeDataModel
-	case "self-host-runtime-deployments", "background-jobs-email-automation", "django-api-persistence-async-workers", "framework-runtime-module-platform":
+	case "self-host-runtime-deployments", "background-jobs-email-automation", "django-api-persistence-async-workers", "framework-runtime-module-platform", "files-assets-storage":
 		return mapTypeOps
 	case "identity-auth-workspace-tenancy", "identity-auth-access-control", "workspace-identity-access-billing", "multi-tenant-workspace-platform":
 		return mapTypePlatform
 	case "third-party-integrations", "bank-connectivity-plaid-sync", "provider-adapters-pluggable-infrastructure", "payments-tax-monetary-configuration":
 		return mapTypeExternal
-	case "apps-developer-extension-platform", "pip-compatible-interface", "tools-ephemeral-environments", "build-publish-auth-audit", "run-scripts-inline-dependencies":
+	case "apps-developer-extension-platform", "extension-surfaces", "pip-compatible-interface", "tools-ephemeral-environments", "build-publish-auth-audit", "run-scripts-inline-dependencies":
 		return mapTypeTooling
 	case "ai-agents-chat-skills":
 		return mapTypePlatform
@@ -4801,7 +5012,7 @@ func conceptualMapAreaType(key, label string) string {
 		return mapTypeDomainFeature
 	case "pages-stickies-collaborative-editing":
 		return mapTypeUI
-	case "project-workspace-lifecycle", "dependency-resolution-lockfile", "package-install-virtual-environments", "registry-cache-artifact-fetching", "managed-python-interpreters", "csv-manual-data-import", "billing-subscriptions-self-host", "cart-checkout-promotions", "orders-fulfillment-post-purchase", "work-items-project-delivery", "workflows-automation", "affiliate-partner-programs", "click-analytics-conversion-attribution", "short-link-redirect-click-capture", "planning-cycles-modules-views", "intake-publishing-public-space", "analytics-export-reporting", "partner-portal", "custom-domains-link-infrastructure":
+	case "project-workspace-lifecycle", "dependency-resolution-lockfile", "package-install-virtual-environments", "registry-cache-artifact-fetching", "managed-python-interpreters", "csv-manual-data-import", "billing-subscriptions-self-host", "cart-checkout-promotions", "orders-fulfillment-post-purchase", "work-items-project-delivery", "workflows-automation", "flows-automation", "document-signing-authoring", "affiliate-partner-programs", "click-analytics-conversion-attribution", "short-link-redirect-click-capture", "planning-cycles-modules-views", "intake-publishing-public-space", "analytics-export-reporting", "partner-portal", "custom-domains-link-infrastructure":
 		return mapTypeBusinessFlow
 	default:
 		return ""

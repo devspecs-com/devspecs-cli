@@ -744,6 +744,98 @@ func TestPathBoundaryMapFoldsPlatformShellsIntoCommerceParents(t *testing.T) {
 	}
 }
 
+func TestPathBoundaryMapDiscoversDocumentSigningParentOverFrameworkShells(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "documenso")
+	files := []string{
+		"apps/remix/app/routes/_recipient+/sign.$token+/_index.tsx",
+		"apps/remix/app/routes/_recipient+/sign.$token+/complete.tsx",
+		"apps/remix/app/routes/embed+/v1+/authoring+/template.$templateId.tsx",
+		"apps/remix/app/routes/embed+/v1+/authoring+/document.$documentId.tsx",
+		"apps/remix/app/utils/field-signing/document-flow.ts",
+		"apps/remix/app/utils/field-signing/signature.ts",
+		"apps/remix/app/utils/field-signing/recipient.ts",
+		"apps/remix/server/trpc/routers/document-router.ts",
+		"packages/lib/server-only/document/create-document.ts",
+		"packages/lib/jobs/definitions/emails/send-document-completed-email.ts",
+		"packages/ui/primitives/signature-pad.tsx",
+		"packages/ui/primitives/accordion.tsx",
+	}
+	for _, file := range files {
+		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
+	}
+
+	areas, _, _ := buildPathBoundaryAreas(repoRoot, "documenso", files, nil, 8)
+	signing := findMapTestArea(areas, "Document Signing & Authoring")
+	if signing == nil {
+		t.Fatalf("expected document signing parent, got %#v", areas)
+	}
+	covers := strings.Join(signing.Covers, "\n")
+	for _, want := range []string{"Documents", "Recipients", "Field Signing"} {
+		if !strings.Contains(covers, want) {
+			t.Fatalf("document signing parent missing cover %q: %#v", want, signing.Covers)
+		}
+	}
+	for _, label := range []string{"Remix", "Trpc", "Server Only", "Primitives", "Universal"} {
+		if findMapTestArea(areas, label) != nil {
+			t.Fatalf("framework/package shell %q leaked into top-level map: %#v", label, areas)
+		}
+	}
+}
+
+func TestPathBoundaryMapDiscoversPlatformConceptsOverComposablesAndBlackbox(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "directus")
+	files := []string{
+		"app/src/composables/use-collection.ts",
+		"app/src/composables/use-item.ts",
+		"app/src/modules/content/routes/item.vue",
+		"api/src/services/items.ts",
+		"api/src/services/collections.ts",
+		"api/src/services/fields.ts",
+		"api/src/services/relations.ts",
+		"api/src/database/migrations/20240601_create_relations.ts",
+		"app/src/interfaces/input/input.vue",
+		"app/src/displays/related-values/related-values.vue",
+		"app/src/layouts/cards/cards.vue",
+		"app/src/panels/metric/metric.vue",
+		"api/src/flows/operations/webhook.ts",
+		"api/src/operations/run-script.ts",
+		"tests/blackbox/action-verify/create.test.ts",
+		"tests/blackbox/action-verify/schema.test.ts",
+		"sdk/src/rest/commands/server/openapi.ts",
+		"api/src/controllers/graphql.ts",
+		"api/src/ai/mcp/server.ts",
+	}
+	for _, file := range files {
+		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
+	}
+
+	areas, _, _ := buildPathBoundaryAreas(repoRoot, "directus", files, nil, 8)
+	for _, label := range []string{
+		"Content/Data Model",
+		"Extension Surfaces",
+		"Flows & Automation",
+		"Public API Layer",
+	} {
+		if findMapTestArea(areas, label) == nil {
+			t.Fatalf("expected platform concept parent %q, got %#v", label, areas)
+		}
+	}
+	for _, label := range []string{"Composables", "Blackbox"} {
+		if findMapTestArea(areas, label) != nil {
+			t.Fatalf("implementation/test shell %q leaked into top-level map: %#v", label, areas)
+		}
+	}
+	apiParents := 0
+	for _, label := range []string{"Public API Layer", "Public HTTP API & Developer Platform"} {
+		if findMapTestArea(areas, label) != nil {
+			apiParents++
+		}
+	}
+	if apiParents != 1 {
+		t.Fatalf("expected exactly one API parent, got %d in %#v", apiParents, areas)
+	}
+}
+
 func TestMapAreaMatchPrefersPluralLabelOverPathOnlyMatch(t *testing.T) {
 	areas := []mapArea{
 		{Label: "Cron", KeyPaths: []string{"apps/web/app/api/cron/notify-partners/route.ts"}, Diagnostics: mapAreaDiagnostics{TraceTerms: []string{"partner"}}},
