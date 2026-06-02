@@ -1308,6 +1308,9 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 	if err != nil {
 		return err
 	}
+	if err := ensureMapRepoIndexed(cmd, repoRoot); err != nil {
+		return err
+	}
 	if opts.Boundary {
 		out := buildPathBoundaryMapOutput(cmd.Context(), repoRoot, opts)
 		success = true
@@ -1423,6 +1426,17 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 		return nil
 	}
 	writeMapText(cmd.OutOrStdout(), out, opts.Verbose)
+	return nil
+}
+
+func ensureMapRepoIndexed(cmd *cobra.Command, repoRoot string) error {
+	db, err := openDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	ensureRepoIndexed(cmd, db, repoRoot)
 	return nil
 }
 

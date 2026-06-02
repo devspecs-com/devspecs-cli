@@ -444,6 +444,96 @@ func TestAutoScan_WorksFromSubdirectory(t *testing.T) {
 	}
 }
 
+func TestFindAutoScan_TriggersWhenIndexMissing(t *testing.T) {
+	dir := setupGitRepo(t)
+	home := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", home)
+
+	planDir := filepath.Join(dir, "plans")
+	os.MkdirAll(planDir, 0o755)
+	os.WriteFile(filepath.Join(planDir, "credentials-plan.md"), []byte("# Credentials Rotation\n\nRotate credentials for webhook ingestion.\n"), 0o644)
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test",
+			"GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=Test",
+			"GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		cmd.CombinedOutput()
+	}
+	run("add", ".")
+	run("commit", "-m", "add credentials plan")
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(oldWd)
+
+	findCmd := NewFindCmd()
+	findCmd.SetArgs([]string{"credentials rotation", "--pack"})
+	outBuf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	findCmd.SetOut(outBuf)
+	findCmd.SetErr(errBuf)
+	if err := findCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(errBuf.String(), "Index updated") {
+		t.Fatalf("expected missing-index find to auto-scan, stderr: %s", errBuf.String())
+	}
+	output := outBuf.String()
+	if !strings.Contains(output, "Working set: credentials rotation") || !strings.Contains(output, "Credentials Rotation") {
+		t.Fatalf("find output missing auto-scanned plan.\nOutput: %s\nStderr: %s", output, errBuf.String())
+	}
+}
+
+func TestFindAutoScan_SkippedWithNoRefreshWhenIndexMissing(t *testing.T) {
+	dir := setupGitRepo(t)
+	home := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", home)
+
+	planDir := filepath.Join(dir, "plans")
+	os.MkdirAll(planDir, 0o755)
+	os.WriteFile(filepath.Join(planDir, "credentials-plan.md"), []byte("# Credentials Rotation\n\nRotate credentials for webhook ingestion.\n"), 0o644)
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test",
+			"GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=Test",
+			"GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		cmd.CombinedOutput()
+	}
+	run("add", ".")
+	run("commit", "-m", "add credentials plan")
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(oldWd)
+
+	findCmd := NewFindCmd()
+	findCmd.SetArgs([]string{"credentials rotation", "--pack", "--no-refresh"})
+	outBuf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	findCmd.SetOut(outBuf)
+	findCmd.SetErr(errBuf)
+	if err := findCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(errBuf.String(), "Index updated") {
+		t.Fatalf("--no-refresh should skip missing-index auto-scan, stderr: %s", errBuf.String())
+	}
+	output := outBuf.String()
+	if !strings.Contains(output, "No matching artifacts found.") || strings.Contains(output, "Credentials Rotation") {
+		t.Fatalf("--no-refresh should not discover unindexed plan.\nOutput: %s\nStderr: %s", output, errBuf.String())
+	}
+}
+
 func TestSchemaVersion(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	db, err := store.Open(dbPath)

@@ -49,6 +49,28 @@ func ensureFresh(cmd *cobra.Command, db *store.DB) {
 	}
 
 	debugLog("ensureFresh: stale — reason=%s, triggering auto-scan", status.Reason)
+	runScanQuietAndNotify(cmd, db, repoRoot)
+}
+
+func ensureRepoIndexed(cmd *cobra.Command, db *store.DB, repoRoot string) {
+	repoRoot = canonicalRepoRoot(repoRoot)
+	if repoRoot == "" {
+		return
+	}
+	status := freshness.Check(db, repoRoot)
+	if status != nil && !status.Stale {
+		debugLog("ensureRepoIndexed: index is fresh for %s", repoRoot)
+		return
+	}
+	if status == nil {
+		debugLog("ensureRepoIndexed: no repo row for %s; triggering auto-scan", repoRoot)
+	} else {
+		debugLog("ensureRepoIndexed: stale reason=%s; triggering auto-scan", status.Reason)
+	}
+	runScanQuietAndNotify(cmd, db, repoRoot)
+}
+
+func runScanQuietAndNotify(cmd *cobra.Command, db *store.DB, repoRoot string) {
 	result := runScanQuiet(db, repoRoot)
 	if result != nil && (result.New > 0 || result.Updated > 0) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Index updated (%d new, %d updated)\n", result.New, result.Updated)
@@ -96,9 +118,13 @@ func runScanQuiet(db *store.DB, repoRoot string) *scan.Result {
 	if cfg != nil && cfg.CodeCommentArtifactsEnabled(false) {
 		adpts = append(adpts, &codecomment.Adapter{})
 	}
-
 	scanner := scan.New(db, ids, adpts)
-	result, err := scanner.Run(context.Background(), repoRoot, cfg)
+	scanOpts, err := liveScanRunOptions(db, repoRoot)
+	if err != nil {
+		debugLog("runScanQuiet: live scan option error: %v", err)
+		return nil
+	}
+	result, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, scanOpts)
 	if err != nil {
 		debugLog("runScanQuiet: scan error: %v", err)
 		return nil

@@ -98,7 +98,20 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	defer db.Close()
 
 	if !noRefresh {
-		ensureFresh(cmd, db)
+		if allRepos {
+			ensureFresh(cmd, db)
+		} else if repoName != "" {
+			if repoRoot := resolveRepoRootByName(db, repoName); repoRoot != "" {
+				ensureRepoIndexed(cmd, db, repoRoot)
+			}
+		} else {
+			wd, _ := os.Getwd()
+			repoRoot := resolveIndexedRepoRoot(db, wd)
+			if repoRoot == "" {
+				repoRoot = canonicalRepoRoot(resolveRepoRootFromWd(wd))
+			}
+			ensureRepoIndexed(cmd, db, repoRoot)
+		}
 	}
 
 	fp.RepoRoot = resolveRepoScope(db, repoName, allRepos)

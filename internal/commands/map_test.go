@@ -1156,6 +1156,88 @@ func TestMapOutputCacheRoundTripsFreshMap(t *testing.T) {
 	}
 }
 
+func TestMapAutoScanLeavesUsableIndexForFindPack(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	home := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", home)
+
+	writeMapTestFile(t, repoRoot, "plans/credentials-plan.md", "# Credentials Rotation\n\nRotate credentials for webhook ingestion.\n")
+	writeMapTestFile(t, repoRoot, "app/auth/credentials.go", "package auth\n\nfunc RotateCredentials() {}\n")
+	runGitForFindPack(t, repoRoot, "add", ".")
+	runGitForFindPack(t, repoRoot, "commit", "-m", "add credentials rotation context")
+
+	mapCmd := NewMapCmd()
+	mapCmd.SetArgs([]string{"--experimental-boundaries", "--path", repoRoot, "--max-areas", "4"})
+	mapOut := &bytes.Buffer{}
+	mapErr := &bytes.Buffer{}
+	mapCmd.SetOut(mapOut)
+	mapCmd.SetErr(mapErr)
+	if err := mapCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(mapErr.String(), "Index updated") {
+		t.Fatalf("expected map to auto-scan missing index, stderr: %s", mapErr.String())
+	}
+	if strings.Contains(mapOut.String(), mapIndexRequiredCaveat) {
+		t.Fatalf("map should not ask for manual scan after auto-scan:\n%s", mapOut.String())
+	}
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(repoRoot)
+	defer os.Chdir(oldWd)
+
+	findCmd := NewFindCmd()
+	findCmd.SetArgs([]string{"credentials rotation", "--pack", "--no-refresh"})
+	findOut := &bytes.Buffer{}
+	findErr := &bytes.Buffer{}
+	findCmd.SetOut(findOut)
+	findCmd.SetErr(findErr)
+	if err := findCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(findErr.String(), "Index updated") {
+		t.Fatalf("find --no-refresh should use map-created index without rescanning, stderr: %s", findErr.String())
+	}
+	output := findOut.String()
+	if !strings.Contains(output, "Working set: credentials rotation") || !strings.Contains(output, "Credentials Rotation") {
+		t.Fatalf("find --pack did not use map-created index.\nOutput: %s\nStderr: %s", output, findErr.String())
+	}
+}
+
+func TestMapJSONAutoScanKeepsStdoutJSON(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	home := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", home)
+
+	writeMapTestFile(t, repoRoot, "plans/credentials-plan.md", "# Credentials Rotation\n\nRotate credentials for webhook ingestion.\n")
+	writeMapTestFile(t, repoRoot, "app/auth/credentials.go", "package auth\n\nfunc RotateCredentials() {}\n")
+	runGitForFindPack(t, repoRoot, "add", ".")
+	runGitForFindPack(t, repoRoot, "commit", "-m", "add credentials rotation context")
+
+	cmd := NewMapCmd()
+	cmd.SetArgs([]string{"--experimental-boundaries", "--json", "--path", repoRoot})
+	outBuf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	cmd.SetOut(outBuf)
+	cmd.SetErr(errBuf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errBuf.String(), "Index updated") {
+		t.Fatalf("expected JSON map to auto-scan missing index, stderr: %s", errBuf.String())
+	}
+	var out mapOutput
+	if err := json.Unmarshal(outBuf.Bytes(), &out); err != nil {
+		t.Fatalf("map --json stdout should remain valid JSON: %v\nstdout=%s\nstderr=%s", err, outBuf.String(), errBuf.String())
+	}
+	if out.Schema != mapSchemaVersion || out.Repo.Path == "" {
+		t.Fatalf("unexpected JSON map payload: %#v", out)
+	}
+	if strings.Contains(outBuf.String(), "Index updated") {
+		t.Fatalf("scan notice leaked into JSON stdout:\n%s", outBuf.String())
+	}
+}
+
 func TestFilterMapOutputByAreaQueryNarrowsJSONPayload(t *testing.T) {
 	out := buildProductMapTestOutput(t)
 	filtered := filterMapOutputByAreaQuery(out, "redaction")
