@@ -335,13 +335,13 @@ func TestPathBoundaryMapBuildsSubareasFromChildPaths(t *testing.T) {
 	areas, _, _ := buildPathBoundaryAreas(repoRoot, "twenty", files, nil, 5)
 	var workflow *mapArea
 	for i := range areas {
-		if areas[i].Label == "Workflow" {
+		if areas[i].Label == "Workflows & Automation" {
 			workflow = &areas[i]
 			break
 		}
 	}
 	if workflow == nil {
-		t.Fatalf("expected Workflow boundary, got %#v", areas)
+		t.Fatalf("expected Workflows & Automation boundary, got %#v", areas)
 	}
 	covers := strings.Join(workflow.Covers, "\n")
 	for _, want := range []string{"Workflow Executor", "Workflow Builder", "Workflow Trigger"} {
@@ -407,8 +407,124 @@ func TestPathBoundaryMapSuppressesWrapperAndDomainShellLabels(t *testing.T) {
 	if findMapTestArea(areas, "Webhooks") == nil {
 		t.Fatalf("expected Webhooks to survive wrapper suppression, got %#v", areas)
 	}
-	if findMapTestArea(areas, "Partners") == nil {
-		t.Fatalf("expected Partners to survive domain-shell suppression, got %#v", areas)
+	if findMapTestArea(areas, "Affiliate / Partner Programs") == nil {
+		t.Fatalf("expected partner parent to survive domain-shell suppression, got %#v", areas)
+	}
+}
+
+func TestPathBoundaryMapAggregatesDubConceptualParents(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "dub")
+	files := []string{
+		"apps/web/app/(ee)/app.dub.co/(dashboard)/partners/programs/page.tsx",
+		"apps/web/app/(ee)/app.dub.co/(dashboard)/partners/commissions/page.tsx",
+		"apps/web/app/(ee)/app.dub.co/(dashboard)/partners/payouts/page.tsx",
+		"apps/web/app/(ee)/app.dub.co/(dashboard)/links/page.tsx",
+		"apps/web/middleware/link.ts",
+		"packages/tinybird/src/clicks.ts",
+		"packages/tinybird/src/clicks.test.ts",
+		"apps/web/app/api/tokens/route.ts",
+		"packages/cli/src/commands/links.ts",
+	}
+	for _, file := range files {
+		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
+	}
+
+	areas, _, _ := buildPathBoundaryAreas(repoRoot, "dub", files, nil, 8)
+	partners := findMapTestArea(areas, "Affiliate / Partner Programs")
+	if partners == nil {
+		t.Fatalf("expected Affiliate / Partner Programs, got %#v", areas)
+	}
+	if !strings.Contains(strings.Join(partners.Covers, "\n"), "Commissions") {
+		t.Fatalf("partner parent missing concrete covers: %#v", partners.Covers)
+	}
+	redirect := findMapTestArea(areas, "Short-Link Redirect & Click Capture")
+	if redirect == nil {
+		t.Fatalf("expected Short-Link Redirect & Click Capture, got %#v", areas)
+	}
+	if !strings.Contains(redirect.Try, "short-link redirect") {
+		t.Fatalf("conceptual try command should use parent label, got %q", redirect.Try)
+	}
+	if findMapTestArea(areas, "Program") != nil || findMapTestArea(areas, "Programs") != nil {
+		t.Fatalf("child program labels should be folded behind parent: %#v", areas)
+	}
+}
+
+func TestPathBoundaryMapAggregatesPlaneConceptualParents(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "plane")
+	files := []string{
+		"apps/api/plane/db/models/issue.py",
+		"apps/api/plane/db/models/project.py",
+		"apps/api/plane/db/models/state.py",
+		"apps/api/plane/db/models/label.py",
+		"apps/api/plane/bgtasks/issue.py",
+		"apps/api/plane/urls.py",
+		"apps/api/plane/migrations/001_initial.py",
+		"apps/api/plane/celery.py",
+		"apps/web/core/issues/issue-detail.tsx",
+		"apps/web/core/projects/project-page.tsx",
+		"apps/web/core/cycles/cycle-page.tsx",
+		"apps/web/core/modules/module-view.tsx",
+		"apps/web/core/workspace-views/rich-filters.tsx",
+		"deployments/docker-compose.yml",
+	}
+	for _, file := range files {
+		writeMapTestFile(t, repoRoot, file, "value = 1\n")
+	}
+
+	areas, _, _ := buildPathBoundaryAreas(repoRoot, "plane", files, nil, 8)
+	workItems := findMapTestArea(areas, "Work Items & Project Delivery")
+	if workItems == nil {
+		t.Fatalf("expected Work Items & Project Delivery, got %#v", areas)
+	}
+	if !strings.Contains(strings.Join(workItems.Covers, "\n"), "Issues") {
+		t.Fatalf("work item parent missing issue cover: %#v", workItems.Covers)
+	}
+	if findMapTestArea(areas, "Planning: Cycles, Modules & Views") == nil {
+		t.Fatalf("expected planning parent, got %#v", areas)
+	}
+	if findMapTestArea(areas, "Django API, Persistence & Async Workers") == nil {
+		t.Fatalf("expected Django API parent, got %#v", areas)
+	}
+	if findMapTestArea(areas, "States") != nil {
+		t.Fatalf("suppressed implementation-shaped States label leaked: %#v", areas)
+	}
+}
+
+func TestPathBoundaryMapAggregatesTwentyConceptualParents(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "twenty")
+	files := []string{
+		"packages/twenty-server/src/metadata-modules/object-metadata/object-metadata.service.ts",
+		"packages/twenty-server/src/metadata-modules/field-metadata/field-metadata.service.ts",
+		"packages/twenty-front/src/modules/settings/data-model/object-details.tsx",
+		"packages/twenty-server/src/modules/object-record/object-record.service.ts",
+		"packages/twenty-front/src/modules/object-record/record-table/record-table.tsx",
+		"packages/twenty-server/src/modules/workflow/workflow-runner/runner.ts",
+		"packages/twenty-front/src/modules/workflow/workflow-builder/builder.tsx",
+		"packages/twenty-server/src/modules/graphql/graphql.controller.ts",
+		"packages/twenty-server/src/modules/rest-api/rest-api.controller.ts",
+		"packages/twenty-server/src/modules/connected-account/connected-account.service.ts",
+		"packages/twenty-server/src/modules/messaging/mailbox.service.ts",
+	}
+	for _, file := range files {
+		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
+	}
+
+	areas, _, _ := buildPathBoundaryAreas(repoRoot, "twenty", files, nil, 8)
+	if findMapTestArea(areas, "Metadata Engine & Data Model") == nil {
+		t.Fatalf("expected metadata parent, got %#v", areas)
+	}
+	if findMapTestArea(areas, "CRM Record Experience") == nil {
+		t.Fatalf("expected CRM record parent, got %#v", areas)
+	}
+	if findMapTestArea(areas, "Workflows & Automation") == nil {
+		t.Fatalf("expected workflow parent, got %#v", areas)
+	}
+	api := findMapTestArea(areas, "Public API Layer")
+	if api == nil {
+		t.Fatalf("expected public API parent, got %#v", areas)
+	}
+	if !strings.Contains(api.Try, "public api layer") {
+		t.Fatalf("conceptual API try command should use parent label, got %q", api.Try)
 	}
 }
 

@@ -276,6 +276,34 @@ type mapLabelCandidate struct {
 	ArtifactPaths map[string]bool
 }
 
+type mapConceptualBoundaryPattern struct {
+	All []string
+	Any []string
+}
+
+type mapConceptualCoverRule struct {
+	Label string
+	All   []string
+	Any   []string
+}
+
+type mapConceptualBoundaryRule struct {
+	Key      string
+	Label    string
+	Score    float64
+	Patterns []mapConceptualBoundaryPattern
+	Covers   []mapConceptualCoverRule
+}
+
+type mapConceptualNeedle struct {
+	raw        string
+	path       string
+	key        string
+	hasSlash   bool
+	segmentSeq bool
+	dotted     bool
+}
+
 var mapGenericTerms = map[string]bool{
 	"app": true, "apps": true, "src": true, "source": true, "lib": true, "libs": true,
 	"pkg": true, "packages": true, "internal": true, "external": true, "api": true,
@@ -316,10 +344,11 @@ var mapWeakStandaloneAreaLabels = map[string]bool{
 }
 
 var mapBoundarySuppressedStandaloneLabels = map[string]bool{
-	"all": true, "dashboard": true, "dashboards": true, "hook": true, "hooks": true,
-	"icon": true, "icons": true, "modal": true, "modals": true, "nucleo": true,
-	"store": true, "stores": true, "story": true, "stories": true, "suite": true,
-	"suites": true, "view": true, "views": true,
+	"all": true, "dashboard": true, "dashboards": true, "engine": true, "hook": true,
+	"hooks": true, "icon": true, "icons": true, "modal": true, "modals": true,
+	"nucleo": true, "page-layout": true, "propel": true, "states": true, "store": true,
+	"stores": true, "story": true, "stories": true, "suite": true, "suites": true,
+	"view": true, "views": true,
 }
 
 var mapSuppressedPathSegments = map[string]bool{
@@ -357,6 +386,407 @@ var (
 	mapBoundaryRustModRegex          = regexp.MustCompile(`(?m)^\s*mod\s+([A-Za-z_]\w*)\s*;`)
 	mapBoundaryJavaLikeImportRegex   = regexp.MustCompile(`(?m)^\s*import\s+(?:static\s+)?([A-Za-z_][\w.]*)(?:\.\*)?\s*;`)
 )
+
+var mapConceptualBoundaryRules = []mapConceptualBoundaryRule{
+	{
+		Key:   "short-link-redirect-click-capture",
+		Label: "Short-Link Redirect & Click Capture",
+		Score: 14,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"middleware/link", "short-link", "shortlink", "tinybird", "click", "clicks", "/stats/", "/links/"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Links", Any: []string{"/links/", "link"}},
+			{Label: "Redirect Middleware", Any: []string{"middleware/link", "redirect"}},
+			{Label: "Click Events", Any: []string{"click", "clicks"}},
+			{Label: "Tinybird", Any: []string{"tinybird"}},
+			{Label: "Stats", Any: []string{"/stats/", "stats"}},
+		},
+	},
+	{
+		Key:   "click-analytics-conversion-attribution",
+		Label: "Click Analytics & Conversion Attribution",
+		Score: 13,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"analytics", "conversion", "conversions", "events", "tracking", "attribution", "tinybird", "customer"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Analytics", Any: []string{"analytics"}},
+			{Label: "Conversions", Any: []string{"conversion", "conversions"}},
+			{Label: "Events", Any: []string{"events", "tracking"}},
+			{Label: "Attribution", Any: []string{"attribution"}},
+			{Label: "Customers", Any: []string{"customer", "customers"}},
+		},
+	},
+	{
+		Key:   "custom-domains-link-infrastructure",
+		Label: "Custom Domains & Link Infrastructure",
+		Score: 12,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"/domains/", "domain", "domains", "dns", "dynadot", "well-known", "hostname"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Domains", Any: []string{"domain", "domains"}},
+			{Label: "DNS", Any: []string{"dns"}},
+			{Label: "Dynadot", Any: []string{"dynadot"}},
+			{Label: "Well-Known Routes", Any: []string{"well-known"}},
+			{Label: "Hostnames", Any: []string{"hostname"}},
+		},
+	},
+	{
+		Key:   "affiliate-partner-programs",
+		Label: "Affiliate / Partner Programs",
+		Score: 13,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"affiliate", "partners", "partner", "program", "programs", "commission", "commissions", "payout", "payouts", "bounty", "bounties", "campaign", "campaigns"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Partners", Any: []string{"partners", "partner"}},
+			{Label: "Programs", Any: []string{"program", "programs"}},
+			{Label: "Commissions", Any: []string{"commission", "commissions"}},
+			{Label: "Payouts", Any: []string{"payout", "payouts"}},
+			{Label: "Campaigns", Any: []string{"campaign", "campaigns"}},
+		},
+	},
+	{
+		Key:   "partner-portal",
+		Label: "Partner Portal",
+		Score: 11,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"partners.dub.co", "partner-profile", "partner-user", "partner-users", "partner-portal"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Partner Profiles", Any: []string{"partner-profile"}},
+			{Label: "Partner Users", Any: []string{"partner-user", "partner-users"}},
+			{Label: "Portal Routes", Any: []string{"partners.dub.co", "partner-portal"}},
+		},
+	},
+	{
+		Key:   "public-http-api-developer-platform",
+		Label: "Public HTTP API & Developer Platform",
+		Score: 12,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"openapi", "api/tokens", "api/oauth", "api/webhooks", "api.dub.co", "packages/cli", "/cli/", "/sdk/"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "OpenAPI", Any: []string{"openapi"}},
+			{Label: "Tokens", Any: []string{"api/tokens", "tokens"}},
+			{Label: "OAuth", Any: []string{"oauth"}},
+			{Label: "Webhooks", Any: []string{"api/webhooks", "webhooks"}},
+			{Label: "CLI / SDK", Any: []string{"packages/cli", "/cli/", "/sdk/"}},
+		},
+	},
+	{
+		Key:   "workspace-identity-access-billing",
+		Label: "Workspace Identity, Access & Billing",
+		Score: 10,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"billing", "plans", "members", "saml", "scim", "auth", "session", "stripe"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Workspaces", Any: []string{"workspace", "workspaces"}},
+			{Label: "Billing", Any: []string{"billing", "stripe", "plans"}},
+			{Label: "Members", Any: []string{"members"}},
+			{Label: "SAML / SCIM", Any: []string{"saml", "scim"}},
+			{Label: "Auth", Any: []string{"auth", "session"}},
+		},
+	},
+	{
+		Key:   "third-party-integrations",
+		Label: "Third-Party Integrations",
+		Score: 10,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"integrations", "hubspot", "segment", "shopify", "zapier", "salesforce", "slack", "stripe"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Integrations", Any: []string{"integrations"}},
+			{Label: "Commerce / CRM", Any: []string{"hubspot", "shopify", "salesforce", "stripe"}},
+			{Label: "Event Destinations", Any: []string{"segment", "zapier", "slack"}},
+		},
+	},
+	{
+		Key:   "background-jobs-email-automation",
+		Label: "Background Jobs, Email & Automation",
+		Score: 10,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"cron", "qstash", "job", "jobs", "worker", "workers", "queue", "queues", "email", "emails", "postback"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Cron", Any: []string{"cron"}},
+			{Label: "Queues / Workers", Any: []string{"qstash", "queue", "queues", "worker", "workers", "job", "jobs"}},
+			{Label: "Email", Any: []string{"email", "emails"}},
+			{Label: "Postbacks", Any: []string{"postback"}},
+		},
+	},
+	{
+		Key:   "work-items-project-delivery",
+		Label: "Work Items & Project Delivery",
+		Score: 14,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"issues", "issue", "projects", "project", "state", "states", "labels", "label", "estimate", "estimates"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Issues", Any: []string{"issues", "issue"}},
+			{Label: "Projects", Any: []string{"projects", "project"}},
+			{Label: "States", Any: []string{"state", "states"}},
+			{Label: "Labels", Any: []string{"label", "labels"}},
+			{Label: "Estimates", Any: []string{"estimate", "estimates"}},
+		},
+	},
+	{
+		Key:   "planning-cycles-modules-views",
+		Label: "Planning: Cycles, Modules & Views",
+		Score: 12,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"cycles", "cycle", "workspace-views", "rich-filters", "module-view", "/core/modules/"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Cycles", Any: []string{"cycles", "cycle"}},
+			{Label: "Modules", Any: []string{"module-view", "/core/modules/"}},
+			{Label: "Views", Any: []string{"workspace-views"}},
+			{Label: "Rich Filters", Any: []string{"rich-filters"}},
+		},
+	},
+	{
+		Key:   "pages-stickies-collaborative-editing",
+		Label: "Pages, Stickies & Collaborative Editing",
+		Score: 11,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"sticky", "stickies", "hocuspocus", "yjs", "collaborative", "editor", "apps/live"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Stickies", Any: []string{"sticky", "stickies"}},
+			{Label: "Editor", Any: []string{"editor"}},
+			{Label: "Live Collaboration", Any: []string{"hocuspocus", "yjs", "collaborative", "apps/live"}},
+		},
+	},
+	{
+		Key:   "intake-publishing-public-space",
+		Label: "Intake, Publishing & Public Space",
+		Score: 10,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"intake", "deploy_board", "apps/space", "public-space", "publish", "published"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Intake", Any: []string{"intake"}},
+			{Label: "Published Boards", Any: []string{"deploy_board", "publish", "published"}},
+			{Label: "Space App", Any: []string{"apps/space", "public-space"}},
+		},
+	},
+	{
+		Key:   "analytics-export-reporting",
+		Label: "Analytics, Export & Reporting",
+		Score: 9,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"analytics", "analytic", "export", "exports", "reporting", "reports"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Analytics", Any: []string{"analytics", "analytic"}},
+			{Label: "Export", Any: []string{"export", "exports"}},
+			{Label: "Reporting", Any: []string{"reporting", "reports"}},
+		},
+	},
+	{
+		Key:   "django-api-persistence-async-workers",
+		Label: "Django API, Persistence & Async Workers",
+		Score: 12,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"apps/api", "db/models", "urls.py", "bgtasks", "celery", "worker", "workers", "migrations", "django"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "API App", Any: []string{"apps/api", "django"}},
+			{Label: "Models", Any: []string{"db/models"}},
+			{Label: "Routes", Any: []string{"urls.py"}},
+			{Label: "Async Tasks", Any: []string{"bgtasks", "celery", "worker", "workers"}},
+			{Label: "Migrations", Any: []string{"migrations"}},
+		},
+	},
+	{
+		Key:   "identity-auth-workspace-tenancy",
+		Label: "Identity, Auth & Workspace Tenancy",
+		Score: 11,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"authentication", "auth", "oauth", "session", "workspace", "workspaces", "users", "members", "invitations", "permissions", "tenancy"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Authentication", Any: []string{"authentication", "auth", "oauth", "session"}},
+			{Label: "Workspaces", Any: []string{"workspace", "workspaces", "tenancy"}},
+			{Label: "Users / Members", Any: []string{"users", "members", "invitations"}},
+			{Label: "Permissions", Any: []string{"permissions"}},
+		},
+	},
+	{
+		Key:   "main-product-web-application",
+		Label: "Main Product Web Application",
+		Score: 8,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"app/(app)", "product-web", "web/app/(app)"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Web App", Any: []string{"web/app/(app)", "product-web"}},
+			{Label: "App Routes", Any: []string{"app/(app)"}},
+		},
+	},
+	{
+		Key:   "instance-administration-licensing",
+		Label: "Instance Administration & Licensing",
+		Score: 10,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"apps/admin", "god-mode", "license", "licenses", "licensing", "instances", "instance-admin"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Admin App", Any: []string{"apps/admin"}},
+			{Label: "Licensing", Any: []string{"license", "licenses", "licensing"}},
+			{Label: "Instances", Any: []string{"instances", "instance-admin"}},
+			{Label: "God Mode", Any: []string{"god-mode"}},
+		},
+	},
+	{
+		Key:   "self-host-runtime-deployments",
+		Label: "Self-Host Runtime & Deployments",
+		Score: 10,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"docker-compose", "deployments", "deployment", "helm", "kubernetes", "k8s", "swarm", "minio", "rabbitmq", "valkey", "postgres", "proxy"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Docker Compose", Any: []string{"docker-compose"}},
+			{Label: "Deployments", Any: []string{"deployments", "deployment", "helm", "kubernetes", "k8s", "swarm"}},
+			{Label: "Runtime Services", Any: []string{"minio", "rabbitmq", "valkey", "postgres", "proxy"}},
+		},
+	},
+	{
+		Key:   "multi-tenant-workspace-platform",
+		Label: "Multi-Tenant Workspace Platform",
+		Score: 12,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"workspace-datasource", "workspace-manager", "workspace-cache", "twenty-orm", "database/pg", "queue-worker", "tenant", "tenants"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Workspace Datasources", Any: []string{"workspace-datasource"}},
+			{Label: "Workspace Manager", Any: []string{"workspace-manager", "workspace-cache"}},
+			{Label: "Twenty ORM", Any: []string{"twenty-orm"}},
+			{Label: "Database", Any: []string{"database/pg"}},
+			{Label: "Queue Worker", Any: []string{"queue-worker"}},
+		},
+	},
+	{
+		Key:   "metadata-engine-data-model",
+		Label: "Metadata Engine & Data Model",
+		Score: 14,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"metadata-modules", "object-metadata", "field-metadata", "settings/data-model", "metadata-store", "twenty-standard-application", "flat-metadata", "data-model"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Object Metadata", Any: []string{"object-metadata"}},
+			{Label: "Field Metadata", Any: []string{"field-metadata"}},
+			{Label: "Data Model Settings", Any: []string{"settings/data-model", "data-model"}},
+			{Label: "Metadata Store", Any: []string{"metadata-store"}},
+			{Label: "Standard Application", Any: []string{"twenty-standard-application"}},
+		},
+	},
+	{
+		Key:   "crm-record-experience",
+		Label: "CRM Record Experience",
+		Score: 13,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"object-record", "record-table", "record-board", "record-field", "spreadsheet-import"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Object Records", Any: []string{"object-record"}},
+			{Label: "Record Table", Any: []string{"record-table"}},
+			{Label: "Record Board", Any: []string{"record-board"}},
+			{Label: "Record Fields", Any: []string{"record-field"}},
+			{Label: "Import", Any: []string{"spreadsheet-import"}},
+		},
+	},
+	{
+		Key:   "workflows-automation",
+		Label: "Workflows & Automation",
+		Score: 13,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"workflow", "workflows", "workflow-runner", "workflow-builder", "workflow-executor", "workflow-trigger"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Workflow Runner", Any: []string{"workflow-runner"}},
+			{Label: "Workflow Builder", Any: []string{"workflow-builder"}},
+			{Label: "Workflow Executor", Any: []string{"workflow-executor"}},
+			{Label: "Workflow Triggers", Any: []string{"workflow-trigger"}},
+		},
+	},
+	{
+		Key:   "connected-accounts-email-calendar-timeline",
+		Label: "Connected Accounts, Email, Calendar & Timeline",
+		Score: 12,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"messaging", "calendar", "connected-account", "timeline", "imap", "smtp", "caldav", "mail"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Connected Accounts", Any: []string{"connected-account"}},
+			{Label: "Messaging", Any: []string{"messaging", "mail", "imap", "smtp"}},
+			{Label: "Calendar", Any: []string{"calendar", "caldav"}},
+			{Label: "Timeline", Any: []string{"timeline"}},
+		},
+	},
+	{
+		Key:   "apps-developer-extension-platform",
+		Label: "Apps & Developer Extension Platform",
+		Score: 11,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"twenty-sdk", "twenty-cli", "create-twenty-app", "marketplace", "applications", "front-components", "logic-functions", "twenty-apps", "developer"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "SDK / CLI", Any: []string{"twenty-sdk", "twenty-cli", "create-twenty-app"}},
+			{Label: "Marketplace", Any: []string{"marketplace"}},
+			{Label: "Applications", Any: []string{"applications", "twenty-apps"}},
+			{Label: "Logic Functions", Any: []string{"logic-functions"}},
+			{Label: "Front Components", Any: []string{"front-components"}},
+		},
+	},
+	{
+		Key:   "ai-agents-chat-skills",
+		Label: "AI Agents, Chat & Skills",
+		Score: 11,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"/ai/", "ai-agent", "agents", "agent", "skill", "skills", "mcp", "tool-provider", "code-interpreter", "chat"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Agents", Any: []string{"agents", "agent", "ai-agent"}},
+			{Label: "Skills", Any: []string{"skill", "skills"}},
+			{Label: "MCP", Any: []string{"mcp"}},
+			{Label: "Tool Providers", Any: []string{"tool-provider", "code-interpreter"}},
+			{Label: "Chat", Any: []string{"chat"}},
+		},
+	},
+	{
+		Key:   "identity-auth-access-control",
+		Label: "Identity, Auth & Access Control",
+		Score: 11,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"auth", "sso", "two-factor", "api-key", "app-token", "user", "users", "workspace-invitation", "role", "roles", "permissions", "row-level"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Auth", Any: []string{"auth", "sso", "two-factor"}},
+			{Label: "Tokens / API Keys", Any: []string{"api-key", "app-token"}},
+			{Label: "Users", Any: []string{"user", "users", "workspace-invitation"}},
+			{Label: "Roles / Permissions", Any: []string{"role", "roles", "permissions", "row-level"}},
+		},
+	},
+	{
+		Key:   "public-api-layer",
+		Label: "Public API Layer",
+		Score: 12,
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"graphql", "rest-api", "open-api", "openapi", "subscriptions", "mcp"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "GraphQL", Any: []string{"graphql"}},
+			{Label: "REST", Any: []string{"rest-api"}},
+			{Label: "OpenAPI", Any: []string{"open-api", "openapi"}},
+			{Label: "Subscriptions", Any: []string{"subscriptions"}},
+			{Label: "MCP", Any: []string{"mcp"}},
+		},
+	},
+}
 
 func runMap(cmd *cobra.Command, opts mapOptions) error {
 	start := time.Now()
@@ -1154,6 +1584,7 @@ func buildPathBoundaryAreas(repoRoot, repoName string, files []string, commits [
 		}
 		addMapBoundaryPathCandidates(candidates, repoName, path, family)
 	}
+	applyMapBoundaryConceptualParents(candidates, repoName, files)
 	applyMapBoundaryImportEvidence(repoRoot, repoName, files, candidates)
 	applyMapBoundaryRecentCommits(candidates, repoName, commits)
 	if len(commits) > 0 {
@@ -1219,6 +1650,174 @@ func addMapBoundaryPathCandidates(candidates map[string]*mapPathBoundaryCandidat
 			}
 		}
 	}
+}
+
+func applyMapBoundaryConceptualParents(candidates map[string]*mapPathBoundaryCandidate, repoName string, files []string) {
+	needleCache := map[string]mapConceptualNeedle{}
+	for _, path := range files {
+		family := mapBoundaryPathFamily(path)
+		if family == "" {
+			continue
+		}
+		pathValue := normalizeMapPath(path)
+		if mapConceptualPathNoisy(pathValue) {
+			continue
+		}
+		pathKey := normalizeMapKey(pathValue)
+		for _, rule := range mapConceptualBoundaryRules {
+			if !mapConceptualRuleMatchesPath(rule, pathValue, pathKey, needleCache) {
+				continue
+			}
+			addMapConceptualParentCandidate(candidates, repoName, path, pathValue, pathKey, family, rule, needleCache)
+		}
+	}
+}
+
+func addMapConceptualParentCandidate(candidates map[string]*mapPathBoundaryCandidate, repoName, filePath, pathValue, pathKey, family string, rule mapConceptualBoundaryRule, needleCache map[string]mapConceptualNeedle) {
+	key := normalizeMapKey(rule.Key)
+	if key == "" || mapKeyMatchesRepoRoot(key, normalizeMapKey(repoName)) {
+		return
+	}
+	candidate := candidates[key]
+	if candidate == nil {
+		candidate = &mapPathBoundaryCandidate{
+			Key:             key,
+			Label:           firstNonEmpty(rule.Label, displayMapLabel(key)),
+			PathSet:         map[string]bool{},
+			BoundaryPaths:   map[string]bool{},
+			Subareas:        map[string]bool{},
+			EvidenceCounts:  map[string]int{},
+			EvidenceSources: map[string]bool{"path_boundary": true, "conceptual_parent": true},
+		}
+		candidate.LabelScore += rule.Score
+		candidate.Score += rule.Score
+		candidates[key] = candidate
+	}
+	if !candidate.PathSet[filePath] {
+		candidate.PathSet[filePath] = true
+		candidate.FileCount++
+		candidate.EvidenceCounts[family]++
+		candidate.Score += mapBoundaryFamilyScore(family)*1.6 + rule.Score*0.22
+		candidate.LabelScore += rule.Score * 0.08
+		if len(candidate.Artifacts) < mapBoundaryMaxArtifacts*3 {
+			candidate.Artifacts = append(candidate.Artifacts, mapArtifactForBoundaryPath(filePath, family))
+		}
+	}
+	if dir := pathpkg.Dir(normalizeMapPath(filePath)); dir != "." && dir != "" {
+		candidate.BoundaryPaths[dir] = true
+	}
+	for _, cover := range mapConceptualCoversForPath(rule, pathValue, pathKey, needleCache) {
+		if len(candidate.Subareas) < 20 {
+			candidate.Subareas[cover] = true
+		}
+	}
+}
+
+func mapConceptualRuleMatchesPath(rule mapConceptualBoundaryRule, pathValue, pathKey string, needleCache map[string]mapConceptualNeedle) bool {
+	for _, pattern := range rule.Patterns {
+		if mapConceptualPatternMatchesPath(pattern, pathValue, pathKey, needleCache) {
+			return true
+		}
+	}
+	return false
+}
+
+func mapConceptualPatternMatchesPath(pattern mapConceptualBoundaryPattern, pathValue, pathKey string, needleCache map[string]mapConceptualNeedle) bool {
+	for _, needle := range pattern.All {
+		if !mapConceptualPathContains(pathValue, pathKey, needle, needleCache) {
+			return false
+		}
+	}
+	if len(pattern.Any) == 0 {
+		return len(pattern.All) > 0
+	}
+	for _, needle := range pattern.Any {
+		if mapConceptualPathContains(pathValue, pathKey, needle, needleCache) {
+			return true
+		}
+	}
+	return false
+}
+
+func mapConceptualCoversForPath(rule mapConceptualBoundaryRule, pathValue, pathKey string, needleCache map[string]mapConceptualNeedle) []string {
+	var out []string
+	for _, cover := range rule.Covers {
+		if mapConceptualPatternMatchesPath(mapConceptualBoundaryPattern{All: cover.All, Any: cover.Any}, pathValue, pathKey, needleCache) {
+			out = appendUniqueString(out, cover.Label)
+		}
+	}
+	return firstStrings(out, 3)
+}
+
+func mapConceptualPathNoisy(pathValue string) bool {
+	pathValue = normalizeMapPath(pathValue)
+	return strings.HasPrefix(pathValue, ".github/") ||
+		strings.Contains(pathValue, "/.github/") ||
+		strings.Contains(pathValue, "/github/workflows/")
+}
+
+func mapConceptualPathContains(pathValue, pathKey, rawNeedle string, needleCache map[string]mapConceptualNeedle) bool {
+	needle := mapConceptualNeedleFor(rawNeedle, needleCache)
+	if needle.path == "" && needle.key == "" {
+		return false
+	}
+	if needle.hasSlash {
+		if needle.path == "" {
+			return false
+		}
+		if needle.segmentSeq {
+			return mapPathHasSegmentSequence(pathValue, needle.path)
+		}
+		return strings.Contains(pathValue, needle.path)
+	}
+	if needle.dotted && needle.path != "" {
+		return strings.Contains(pathValue, needle.path)
+	}
+	if needle.key == "" {
+		return false
+	}
+	if len(needle.key) <= 2 {
+		return false
+	}
+	return scoreMapKeyMatch(pathKey, needle.key) > 0
+}
+
+func mapConceptualNeedleFor(value string, cache map[string]mapConceptualNeedle) mapConceptualNeedle {
+	if cached, ok := cache[value]; ok {
+		return cached
+	}
+	raw := strings.ToLower(strings.TrimSpace(filepath.ToSlash(value)))
+	needle := mapConceptualNeedle{
+		raw:        raw,
+		path:       normalizeMapPath(raw),
+		key:        normalizeMapKey(raw),
+		hasSlash:   strings.Contains(raw, "/"),
+		segmentSeq: strings.HasPrefix(raw, "/") && strings.HasSuffix(raw, "/"),
+		dotted:     strings.Contains(raw, "."),
+	}
+	cache[value] = needle
+	return needle
+}
+
+func mapPathHasSegmentSequence(pathValue, needlePath string) bool {
+	parts := strings.Split(normalizeMapPath(pathValue), "/")
+	needleParts := strings.Split(normalizeMapPath(needlePath), "/")
+	if len(parts) == 0 || len(needleParts) == 0 || len(needleParts) > len(parts) {
+		return false
+	}
+	for i := 0; i+len(needleParts) <= len(parts); i++ {
+		matched := true
+		for j, needlePart := range needleParts {
+			if parts[i+j] != needlePart {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }
 
 func applyMapBoundaryImportEvidence(repoRoot, repoName string, files []string, candidates map[string]*mapPathBoundaryCandidate) {
@@ -1671,11 +2270,17 @@ func mapBoundarySubareasForCandidate(path, key string) []string {
 
 func mapBoundaryAreaInternal(candidate *mapPathBoundaryCandidate) *mapAreaInternal {
 	rawAnchors := mapBoundaryRawAnchors(candidate)
+	labelSource := "path_boundary"
+	caveats := []string{"path-primary boundary candidate"}
+	if candidate.EvidenceSources["conceptual_parent"] {
+		labelSource = "conceptual_parent"
+		caveats = []string{"conceptual parent over path evidence"}
+	}
 	area := &mapAreaInternal{
 		Key:             candidate.Key,
 		Label:           candidate.Label,
 		LabelScore:      candidate.LabelScore,
-		LabelSource:     "path_boundary",
+		LabelSource:     labelSource,
 		Subareas:        copyBoolMap(candidate.Subareas),
 		RawAnchors:      rawAnchors,
 		Artifacts:       dedupeMapArtifacts(candidate.Artifacts),
@@ -1685,7 +2290,7 @@ func mapBoundaryAreaInternal(candidate *mapPathBoundaryCandidate) *mapAreaIntern
 		ConfidenceSum:   mapBoundaryCandidateConfidence(candidate) * float64(maxInt(1, len(rawAnchors))),
 		EvidenceSources: copyBoolMap(candidate.EvidenceSources),
 		TraceReceipts:   firstMapTraceReceipts(candidate.TraceReceipts, mapMaxTraceReceipts),
-		Caveats:         []string{"path-primary boundary candidate"},
+		Caveats:         caveats,
 	}
 	if len(area.Artifacts) > mapBoundaryMaxArtifacts {
 		area.Artifacts = area.Artifacts[:mapBoundaryMaxArtifacts]
@@ -1713,6 +2318,9 @@ func mapBoundaryCandidateDisplayable(candidate *mapPathBoundaryCandidate) bool {
 	}
 	families := mapBoundaryFamilyCount(candidate.EvidenceCounts)
 	sourceish := candidate.EvidenceCounts["source"] + candidate.EvidenceCounts["test"]
+	if candidate.EvidenceSources["conceptual_parent"] && candidate.FileCount >= 2 && sourceish > 0 {
+		return true
+	}
 	if candidate.FileCount >= 4 && sourceish > 0 {
 		return true
 	}
@@ -1775,6 +2383,9 @@ func mapBoundaryAreaScore(area *mapAreaInternal) float64 {
 	score += float64(mapMinInt(area.EvidenceCounts["trace"], 4)) * 4
 	score += float64(mapMinInt(area.EvidenceCounts["import"], mapBoundaryImportScoreCap)) * 0.35
 	score += float64(mapMinInt(area.EvidenceCounts["test_import"], mapBoundaryTestImportScoreCap)) * 0.9
+	if area.EvidenceSources["conceptual_parent"] {
+		score += 12
+	}
 	if area.EvidenceCounts["source"] > 0 && area.EvidenceCounts["test"] > 0 {
 		score += 5
 	}
@@ -3641,10 +4252,11 @@ func mapTryCommand(label string, covers []string, receipts []mapTraceReceipt, co
 		return ""
 	}
 	query := label
-	if len(covers) > 0 {
+	conceptualLabel := mapTryLabelLooksConceptual(label)
+	if len(covers) > 0 && !conceptualLabel {
 		query = joinMapQuery(label, covers[0])
 	}
-	if len(receipts) > 0 {
+	if len(receipts) > 0 && !conceptualLabel {
 		if traceQuery := mapTraceQuery(label, covers, receipts[0].Subject); traceQuery != "" {
 			query = traceQuery
 		}
@@ -3654,6 +4266,21 @@ func mapTryCommand(label string, covers []string, receipts []mapTraceReceipt, co
 		return ""
 	}
 	return mapFindPackCommand(query)
+}
+
+func mapTryLabelLooksConceptual(label string) bool {
+	words := wordsFromMap(label)
+	if len(words) >= 3 {
+		return true
+	}
+	key := normalizeMapKey(label)
+	if strings.Contains(label, "/") || strings.Contains(label, "&") || strings.Contains(label, ",") {
+		return true
+	}
+	return mapAnyContains([]string{key},
+		"platform", "experience", "automation", "identity", "access", "data-model",
+		"developer", "api-layer", "programs", "runtime", "deployments", "collaborative",
+		"attribution", "infrastructure", "tenancy", "licensing")
 }
 
 func mapFindPackCommand(query string) string {
@@ -3859,7 +4486,7 @@ func cleanMapCovers(label string, covers []string) []string {
 		if allInLabel {
 			continue
 		}
-		if len(words) == 1 && mapGenericTerms[words[0]] {
+		if len(words) == 1 && mapGenericTerms[words[0]] && !mapBoundaryAllowedGenericAreaLabels[words[0]] {
 			continue
 		}
 		seen[key] = true
