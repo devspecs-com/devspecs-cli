@@ -41,6 +41,7 @@ const (
 	mapSchemaVersion       = "devspecs.map.v1"
 	mapRecentSchemaVersion = "devspecs.map.recent.v1"
 	mapTraceReceiptMode    = "bounded_git_path_receipts_v0"
+	mapIndexRequiredCaveat = "context packing requires an index; run ds scan before using suggested ds find --pack commands"
 	mapLowConfidence       = "low"
 	mapMediumConfidence    = "medium"
 	mapHighConfidence      = "high"
@@ -341,6 +342,26 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 		writeMapRecentText(cmd.OutOrStdout(), out, opts.Verbose)
 		return nil
 	}
+	if opts.AreaQuery == "" {
+		indexed, indexErr := mapRepoHasIndexedArtifacts(repoRoot)
+		if indexErr != nil {
+			debugLog("map index availability unavailable: %v", indexErr)
+		} else if !indexed {
+			out := buildFastMapFallbackOutput(cmd.Context(), repoRoot, opts, false)
+			success = true
+			props["confidence"] = out.Repo.Confidence
+			props["area_count_bucket"] = telemetry.CountBucket(len(out.Areas))
+			props["fast_fallback"] = true
+			props["index_ready"] = false
+			if opts.JSON {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(out)
+			}
+			writeMapText(cmd.OutOrStdout(), out, opts.Verbose)
+			return nil
+		}
+	}
 	var result *scan.Result
 	var cachedOutput *mapOutput
 	if cached, ok, cacheErr := loadMapOutputCache(repoRoot, opts.MaxAreas); cacheErr != nil {
@@ -358,7 +379,7 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 		}
 	}
 	if result == nil && cachedOutput == nil && opts.AreaQuery == "" {
-		out := buildFastMapFallbackOutput(cmd.Context(), repoRoot, opts)
+		out := buildFastMapFallbackOutput(cmd.Context(), repoRoot, opts, true)
 		success = true
 		props["confidence"] = out.Repo.Confidence
 		props["area_count_bucket"] = telemetry.CountBucket(len(out.Areas))
@@ -404,6 +425,20 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 	}
 	writeMapText(cmd.OutOrStdout(), out, opts.Verbose)
 	return nil
+}
+
+func mapRepoHasIndexedArtifacts(repoRoot string) (bool, error) {
+	db, err := openDB()
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	count, err := db.CountArtifacts(store.FilterParams{RepoRoot: repoRoot})
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func runMapScan(ctx context.Context, repoRoot string) (*scan.Result, error) {
@@ -1302,8 +1337,12 @@ func buildMapRecentOutput(ctx context.Context, repoRoot string, opts mapOptions)
 	return out
 }
 
-func buildFastMapFallbackOutput(ctx context.Context, repoRoot string, opts mapOptions) mapOutput {
+func buildFastMapFallbackOutput(ctx context.Context, repoRoot string, opts mapOptions, indexReady bool) mapOutput {
 	recent := buildMapRecentOutput(ctx, repoRoot, mapOptions{MaxAreas: opts.MaxAreas})
+	return buildFastMapFallbackOutputFromRecent(repoRoot, recent, indexReady)
+}
+
+func buildFastMapFallbackOutputFromRecent(repoRoot string, recent mapRecentOutput, indexReady bool) mapOutput {
 	out := mapOutput{
 		Schema: mapSchemaVersion,
 		Repo: mapRepo{
@@ -1327,6 +1366,9 @@ func buildFastMapFallbackOutput(ctx context.Context, repoRoot string, opts mapOp
 		out.Repo.Confidence = mapLowConfidence
 		out.Caveats = append(out.Caveats, recent.Caveats...)
 		out.Caveats = append(out.Caveats, "fast map fallback had no recent local git/path topics")
+		if !indexReady {
+			out.Caveats = append(out.Caveats, mapIndexRequiredCaveat)
+		}
 		return out
 	}
 	for _, topic := range recent.Topics {
@@ -1336,8 +1378,13 @@ func buildFastMapFallbackOutput(ctx context.Context, repoRoot string, opts mapOp
 		out.EvidenceAvailability.Test += topic.EvidenceCounts["test"]
 		out.EvidenceAvailability.Markdown += topic.EvidenceCounts["doc"]
 	}
+	if !indexReady {
+		out.Caveats = append(out.Caveats, "fast map from recent local git/path evidence; durable repo map evidence is not loaded yet")
+		out.Caveats = append(out.Caveats, mapIndexRequiredCaveat)
+	} else {
+		out.Caveats = append(out.Caveats, "fast map from recent local git/path evidence; suggested packs can use the local index")
+	}
 	out.Repo.Confidence = mapMediumConfidence
-	out.Caveats = append(out.Caveats, "fast map from recent local git/path evidence; run ds scan or ds map <area> for a deeper indexed map")
 	return out
 }
 

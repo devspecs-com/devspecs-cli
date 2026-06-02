@@ -259,6 +259,36 @@ func TestMapRecentTopicsSkipNoiseAndBuildPackHandoff(t *testing.T) {
 	}
 }
 
+func TestFastMapFallbackAddsIndexRequiredCaveatForUnindexedRepo(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "app")
+	recent := mapRecentOutput{
+		Schema: mapRecentSchemaVersion,
+		Repo:   mapRepo{Name: "app", Path: repoRoot, Confidence: mapMediumConfidence},
+		Topics: []mapRecentTopic{{
+			Label:          "Partner Commission",
+			Query:          "partner commission",
+			CommitCount:    1,
+			FileCount:      3,
+			EvidenceCounts: map[string]int{"source": 2, "test": 1},
+			KeyPaths:       []string{"apps/web/app/api/partner-profile/referrals/route.ts"},
+			Try:            `ds find --pack "partner commission"`,
+		}},
+	}
+
+	out := buildFastMapFallbackOutputFromRecent(repoRoot, recent, false)
+	if len(out.Areas) != 1 || out.Areas[0].Label != "Partner Commission" {
+		t.Fatalf("unexpected fallback areas: %#v", out.Areas)
+	}
+	if !strings.Contains(strings.Join(out.Caveats, "\n"), mapIndexRequiredCaveat) {
+		t.Fatalf("missing index-required caveat: %#v", out.Caveats)
+	}
+
+	indexed := buildFastMapFallbackOutputFromRecent(repoRoot, recent, true)
+	if strings.Contains(strings.Join(indexed.Caveats, "\n"), mapIndexRequiredCaveat) {
+		t.Fatalf("indexed fallback should not show index-required caveat: %#v", indexed.Caveats)
+	}
+}
+
 func TestMapRecentTopicsFilterByAreaQuery(t *testing.T) {
 	topics, _ := buildMapRecentTopics([]parsedFindGitCommit{
 		{
