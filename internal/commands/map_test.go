@@ -490,6 +490,27 @@ func TestPathBoundaryMapAggregatesPlaneConceptualParents(t *testing.T) {
 	}
 }
 
+func TestPathBoundaryMapDoesNotUseDjangoParentForGenericTypeScriptAPI(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "novu")
+	files := []string{
+		"apps/api/src/app/step-resolvers/utils/generate-step-resolver-worker-id.ts",
+		"apps/api/admin/connect-to-dal.ts",
+		"apps/api/admin/make-json-backup.ts",
+		"apps/api/src/app/workflows-v2/workflow.controller.ts",
+		"apps/api/src/app/workflows-v2/workflow.controller.e2e.ts",
+		"apps/api/src/migrations/20240601_create_relations.ts",
+		"apps/worker/src/app/workflow/usecases/queue-next-job/index.ts",
+	}
+	for _, file := range files {
+		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
+	}
+
+	areas, _, _ := buildPathBoundaryAreas(repoRoot, "novu", files, nil, 8)
+	if findMapTestArea(areas, "Django API, Persistence & Async Workers") != nil {
+		t.Fatalf("Django parent should require Python/Django evidence, got %#v", areas)
+	}
+}
+
 func TestPathBoundaryMapAggregatesTwentyConceptualParents(t *testing.T) {
 	repoRoot := filepath.Join(t.TempDir(), "twenty")
 	files := []string{

@@ -190,14 +190,14 @@ func TestScanIncludeCodeCommentsIndexesIntentComments(t *testing.T) {
 	}
 }
 
-func TestLiveScanRunOptions_FreshIndexOnlyForEmptyIndex(t *testing.T) {
+func TestLiveScanRunOptions_FreshIndexForEmptyOrUnindexedRepo(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "devspecs.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
 
-	opts, err := liveScanRunOptions(db)
+	opts, err := liveScanRunOptions(db, "/tmp/repo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestLiveScanRunOptions_FreshIndexOnlyForEmptyIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	opts, err = liveScanRunOptions(db)
+	opts, err = liveScanRunOptions(db, "/tmp/repo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,6 +234,20 @@ func TestLiveScanRunOptions_FreshIndexOnlyForEmptyIndex(t *testing.T) {
 	}
 	if opts.SkipAuthoredAtLookup {
 		t.Fatal("populated live index should keep canonical authored_at lookup behavior")
+	}
+
+	opts, err = liveScanRunOptions(db, "/tmp/second-repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.UseTransaction {
+		t.Fatal("new repo append should still use a transaction")
+	}
+	if !opts.FreshIndex {
+		t.Fatal("unindexed target repo should use fresh-index writer even when another repo is indexed")
+	}
+	if !opts.SkipAuthoredAtLookup {
+		t.Fatal("fresh repo append should skip per-artifact authored_at lookup")
 	}
 }
 

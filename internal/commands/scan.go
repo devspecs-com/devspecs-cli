@@ -157,7 +157,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	if verbose && !quiet {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Respecting repo-root .gitignore, .git/info/exclude, and .aiignore during configured walks\n")
 	}
-	scanOpts, err := liveScanRunOptions(db)
+	scanOpts, err := liveScanRunOptions(db, repoRoot)
 	if err != nil {
 		return fmt.Errorf("inspect index state: %w", err)
 	}
@@ -223,9 +223,9 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	return nil
 }
 
-func liveScanRunOptions(db *store.DB) (scan.RunOptions, error) {
+func liveScanRunOptions(db *store.DB, repoRoot string) (scan.RunOptions, error) {
 	opts := scan.RunOptions{UseTransaction: true}
-	hasArtifacts, err := scanIndexHasArtifacts(db)
+	hasArtifacts, err := scanTargetHasArtifacts(db, repoRoot)
 	if err != nil {
 		return opts, err
 	}
@@ -234,6 +234,17 @@ func liveScanRunOptions(db *store.DB) (scan.RunOptions, error) {
 		opts.SkipAuthoredAtLookup = true
 	}
 	return opts, nil
+}
+
+func scanTargetHasArtifacts(db *store.DB, repoRoot string) (bool, error) {
+	if strings.TrimSpace(repoRoot) != "" {
+		count, err := db.CountArtifacts(store.FilterParams{RepoRoot: repoRoot})
+		if err != nil {
+			return false, err
+		}
+		return count > 0, nil
+	}
+	return scanIndexHasArtifacts(db)
 }
 
 func scanIndexHasArtifacts(db *store.DB) (bool, error) {

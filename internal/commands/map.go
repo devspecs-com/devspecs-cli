@@ -1465,7 +1465,7 @@ func runMapScan(ctx context.Context, repoRoot string) (*scan.Result, error) {
 		&codecomment.Adapter{},
 	}
 	scanner := scan.New(db, idgen.NewFactory(), adpts)
-	scanOpts, err := liveScanRunOptions(db)
+	scanOpts, err := liveScanRunOptions(db, repoRoot)
 	if err != nil {
 		return nil, fmt.Errorf("inspect map index state: %w", err)
 	}
@@ -2255,6 +2255,9 @@ func applyMapBoundaryConceptualParents(candidates map[string]*mapPathBoundaryCan
 			if !mapConceptualRuleAllowedForShape(rule, repoShape) {
 				continue
 			}
+			if !mapConceptualRuleEvidenceAllowed(rule, pathValue, pathKey) {
+				continue
+			}
 			if !mapConceptualRuleMatchesPath(rule, pathValue, pathKey, needleCache) {
 				continue
 			}
@@ -2280,6 +2283,9 @@ func applyMapBoundaryDynamicConceptParents(candidates map[string]*mapPathBoundar
 		}
 		for _, rule := range mapDynamicConceptRules {
 			if !mapDynamicConceptRuleAllowedForShape(rule, repoShape) {
+				continue
+			}
+			if !mapConceptualRuleEvidenceAllowed(rule, pathValue, pathKey) {
 				continue
 			}
 			if !mapConceptualRuleMatchesPath(rule, pathValue, pathKey, needleCache) {
@@ -2367,6 +2373,21 @@ func mapConceptualRuleAllowedForShape(rule mapConceptualBoundaryRule, repoShape 
 	switch repoShape {
 	case mapRepoShapeTool:
 		return false
+	default:
+		return true
+	}
+}
+
+func mapConceptualRuleEvidenceAllowed(rule mapConceptualBoundaryRule, pathValue, pathKey string) bool {
+	switch normalizeMapKey(rule.Key) {
+	case "django-api-persistence-async-workers":
+		return strings.HasSuffix(pathValue, ".py") ||
+			strings.Contains(pathValue, "urls.py") ||
+			strings.Contains(pathValue, "celery") ||
+			strings.Contains(pathValue, "bgtasks") ||
+			strings.Contains(pathValue, "django") ||
+			strings.Contains(pathValue, "/db/models/") ||
+			strings.Contains(pathKey, "db-models")
 	default:
 		return true
 	}

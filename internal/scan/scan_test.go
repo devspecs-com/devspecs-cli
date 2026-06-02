@@ -965,6 +965,64 @@ func TestScan_FreshIndexProgressIncludesGranularTimings(t *testing.T) {
 	}
 }
 
+func TestScan_FreshIndexAppendSeedsExistingShortIDs(t *testing.T) {
+	root := t.TempDir()
+	repoOne := filepath.Join(root, "repo-one")
+	repoTwo := filepath.Join(root, "repo-two")
+	for _, repoRoot := range []string{repoOne, repoTwo} {
+		if err := os.MkdirAll(filepath.Join(repoRoot, "docs", "plans"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := "# Billing Plan\n\nKeep replay handling deterministic.\n"
+		if err := os.WriteFile(filepath.Join(repoRoot, "docs", "plans", "billing.md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	db, err := store.Open(filepath.Join(t.TempDir(), "devspecs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	cfg := config.WithDefaultIntentCandidateDiscovery(nil, true)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&markdown.Adapter{}})
+	for _, repoRoot := range []string{repoOne, repoTwo} {
+		if _, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, RunOptions{
+			UseTransaction:       true,
+			SkipAuthoredAtLookup: true,
+			FreshIndex:           true,
+		}); err != nil {
+			t.Fatalf("fresh append scan %s: %v", repoRoot, err)
+		}
+	}
+
+	rows, err := db.Query(`SELECT short_id FROM artifacts ORDER BY created_at, id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var shortIDs []string
+	for rows.Next() {
+		var shortID string
+		if err := rows.Scan(&shortID); err != nil {
+			t.Fatal(err)
+		}
+		shortIDs = append(shortIDs, shortID)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(shortIDs) != 2 {
+		t.Fatalf("short ID rows = %#v, want 2 rows", shortIDs)
+	}
+	base := idgen.ShortID("docs/plans/billing.md|markdown")
+	if shortIDs[0] != base || shortIDs[1] != base+"1" {
+		t.Fatalf("short IDs = %#v, want [%q %q]", shortIDs, base, base+"1")
+	}
+}
+
 func hasScanProgressEvent(events []ProgressEvent, phase, event string) bool {
 	for _, got := range events {
 		if got.Phase == phase && got.Event == event {

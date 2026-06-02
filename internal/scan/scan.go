@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -101,7 +102,10 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 
 	state := &scanRunState{}
 	if opts.FreshIndex {
-		state.shortIDs = map[string]int{}
+		state.shortIDs, err = s.seedExistingShortIDClaims()
+		if err != nil {
+			return nil, fmt.Errorf("seed fresh index short ids: %w", err)
+		}
 		state.fresh, err = newFreshInserter(s.db)
 		if err != nil {
 			return nil, fmt.Errorf("prepare fresh index inserts: %w", err)
@@ -838,6 +842,74 @@ func (s *Scanner) ensureRepo(rootPath, now string) (string, error) {
 type scanRunState struct {
 	fresh    *freshInserter
 	shortIDs map[string]int
+}
+
+func (s *Scanner) seedExistingShortIDClaims() (map[string]int, error) {
+	claims := map[string]int{}
+	rows, err := s.db.Query("SELECT COALESCE(short_id, '') FROM artifacts WHERE COALESCE(short_id, '') <> ''")
+	if err != nil {
+		return claims, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var shortID string
+		if err := rows.Scan(&shortID); err != nil {
+			return claims, err
+		}
+		base, next := shortIDClaim(shortID)
+		if base == "" {
+			continue
+		}
+		if claims[base] < next {
+			claims[base] = next
+		}
+	}
+	return claims, rows.Err()
+}
+
+func shortIDClaim(shortID string) (string, int) {
+	shortID = strings.TrimSpace(shortID)
+	if shortID == "" {
+		return "", 0
+	}
+	if len(shortID) >= 8 && isShortIDHexPrefix(shortID[:8]) {
+		base := shortID[:8]
+		suffix := shortID[8:]
+		if suffix == "" {
+			return base, 1
+		}
+		if allASCIIDigits(suffix) {
+			n, err := strconv.Atoi(suffix)
+			if err == nil {
+				return base, n + 1
+			}
+		}
+	}
+	return shortID, 1
+}
+
+func isShortIDHexPrefix(s string) bool {
+	if len(s) != 8 {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+func allASCIIDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Scanner) upsertArtifact(repoRoot, repoID, adapterName string, art adapters.Artifact, sources []adapters.Source, pr todoparse.ParseResult, now string, result *Result, opts RunOptions, state *scanRunState) error {
