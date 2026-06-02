@@ -362,6 +362,15 @@ var mapBoundarySuppressedStandaloneLabels = map[string]bool{
 	"view": true, "views": true, "workflow": true, "workflows": true,
 }
 
+var mapBoundaryFirstScreenShellLabels = map[string]bool{
+	"blackbox": true, "components-next": true, "composables": true, "desktop-client": true,
+	"examples": true, "general": true, "javascript": true, "locales": true,
+	"loot-core": true, "phrases": true, "primitives": true, "proto": true,
+	"remix": true, "router": true, "server-only": true, "settings": true,
+	"templates": true, "trpc": true, "ui-primitives": true, "universal": true,
+	"utilities": true,
+}
+
 var mapSuppressedPathSegments = map[string]bool{
 	"_ignore": true, ".git": true, "node_modules": true, "vendor": true, "dist": true,
 	"build": true, "target": true, ".next": true, "coverage": true, "fixtures": true,
@@ -827,7 +836,7 @@ var mapConceptualBoundaryRules = []mapConceptualBoundaryRule{
 		Label: "Custom Domains & Link Infrastructure",
 		Score: 12,
 		Patterns: []mapConceptualBoundaryPattern{
-			{Any: []string{"/domains/", "domain", "domains", "dns", "dynadot", "well-known", "hostname"}},
+			{Any: []string{"custom-domain", "custom-domains", "dynadot", "well-known", "hostname"}},
 		},
 		Covers: []mapConceptualCoverRule{
 			{Label: "Domains", Any: []string{"domain", "domains"}},
@@ -982,7 +991,7 @@ var mapConceptualBoundaryRules = []mapConceptualBoundaryRule{
 		Label: "Analytics, Export & Reporting",
 		Score: 9,
 		Patterns: []mapConceptualBoundaryPattern{
-			{Any: []string{"analytics", "analytic", "export", "exports", "reporting", "reports"}},
+			{Any: []string{"analytics", "analytic", "reporting", "reports", "data-export", "export-report"}},
 		},
 		Covers: []mapConceptualCoverRule{
 			{Label: "Analytics", Any: []string{"analytics", "analytic"}},
@@ -995,7 +1004,7 @@ var mapConceptualBoundaryRules = []mapConceptualBoundaryRule{
 		Label: "Django API, Persistence & Async Workers",
 		Score: 12,
 		Patterns: []mapConceptualBoundaryPattern{
-			{Any: []string{"apps/api", "db/models", "urls.py", "bgtasks", "celery", "worker", "workers", "migrations", "django"}},
+			{Any: []string{"apps/api", "db/models", "urls.py", "bgtasks", "celery", "django"}},
 		},
 		Covers: []mapConceptualCoverRule{
 			{Label: "API App", Any: []string{"apps/api", "django"}},
@@ -1229,7 +1238,7 @@ var mapDynamicConceptRules = []mapConceptualBoundaryRule{
 		Label: "Extension Surfaces",
 		Score: 12,
 		Patterns: []mapConceptualBoundaryPattern{
-			{Any: []string{"interface", "interfaces", "display", "displays", "layout", "layouts", "panel", "panels", "extension", "extensions"}},
+			{Any: []string{"display", "displays", "layout", "layouts", "panel", "panels", "extension", "extensions"}},
 		},
 		Covers: []mapConceptualCoverRule{
 			{Label: "Interfaces", Any: []string{"interface", "interfaces"}},
@@ -2128,9 +2137,9 @@ func addMapBoundaryPathCandidates(candidates map[string]*mapPathBoundaryCandidat
 			candidate.FileCount++
 			candidate.EvidenceCounts[family]++
 			candidate.Score += mapBoundaryFamilyScore(family)
-			if len(candidate.Artifacts) < mapBoundaryMaxArtifacts*3 {
-				candidate.Artifacts = append(candidate.Artifacts, mapArtifactForBoundaryPath(path, family))
-			}
+			art := mapArtifactForBoundaryPath(path, family)
+			art.Rank = mapPathBoundaryArtifactRank(labelCandidate.Key, path, family)
+			appendMapBoundaryArtifactCandidate(candidate, art, mapBoundaryMaxArtifacts*3)
 		}
 		for _, boundaryPath := range mapBoundaryContainingDirs(path, labelCandidate.Key) {
 			candidate.BoundaryPaths[boundaryPath] = true
@@ -2185,13 +2194,18 @@ func inferMapRepoShape(repoName string, files []string) string {
 		}
 		if mapAnyContains([]string{pathValue},
 			"app/controllers", "app/models", "app/jobs", "app/views", "db/migrate", "config/routes",
-			"apps/web", "apps/api", "pages", "routes", "server/controllers") {
+			"apps/web", "apps/api", "pages", "routes", "server/controllers",
+			"packages/desktop-client/src", "packages/mobile/src", "app/javascript", "app/views",
+			"packages/console/src", "packages/account/src", "web/src/components") {
 			scores[mapRepoShapeWebApp] += 2
+		}
+		if mapAnyContains([]string{pathValue}, "src/components", "src/pages", "src/routes") {
+			scores[mapRepoShapeWebApp]++
 		}
 		if mapAnyContains([]string{pathValue},
 			"packages/modules", "packages/core/framework", "packages/core/core-flows", "workflows-sdk",
 			"orchestration", "modules-sdk", "packages/medusa/src/api", "packages/admin/dashboard",
-			"packages/modules/providers") {
+			"packages/modules/providers", "packages/payload/src", "packages/ui/src/admin", "packages/richtext") {
 			scores[mapRepoShapePlatform] += 3
 		}
 		if strings.HasPrefix(pathValue, "www/") || strings.Contains(pathValue, "/docs/") || strings.HasPrefix(pathValue, "docs/") {
@@ -2490,14 +2504,16 @@ func mapConceptualArtifactRank(rule mapConceptualBoundaryRule, pathValue, pathKe
 		}
 	}
 	switch {
+	case strings.HasPrefix(pathValue, "test/") || strings.HasPrefix(pathValue, "tests/") || strings.Contains(pathValue, "/test/") || strings.Contains(pathValue, "/tests/"):
+		score -= 260
 	case strings.Contains(pathValue, "/docs/") || strings.HasPrefix(pathValue, "docs/") || strings.Contains(pathValue, "/twenty-docs/"):
 		score -= 260
+	case strings.HasPrefix(pathValue, "examples/") || strings.Contains(pathValue, "/examples/") || strings.Contains(pathValue, "/fixtures/"):
+		score -= 520
 	case strings.Contains(pathValue, "/templates/") || strings.Contains(pathValue, "/template/"):
-		score -= 180
+		score -= 280
 	case strings.Contains(pathValue, "/connector/") || strings.Contains(pathValue, "-connector/"):
 		score -= 110
-	case strings.Contains(pathValue, "/examples/") || strings.Contains(pathValue, "/fixtures/"):
-		score -= 120
 	}
 	return score
 }
@@ -3202,8 +3218,7 @@ func mapBoundaryShellLikeArea(area *mapAreaInternal) bool {
 		return false
 	}
 	key := normalizeMapKey(area.Key)
-	switch key {
-	case "remix", "trpc", "server-only", "primitives", "universal", "composables", "blackbox", "general", "ui-primitives":
+	if mapBoundaryFirstScreenShellLabels[key] {
 		return true
 	}
 	parts := mapStringSet(strings.FieldsFunc(key, func(r rune) bool { return r == '-' || r == '/' }))
@@ -3220,6 +3235,9 @@ func mapBoundaryShellLikeArea(area *mapAreaInternal) bool {
 		return true
 	}
 	if (parts["remix"] || parts["trpc"]) && len(area.ArtifactPathSet) >= 2 {
+		return true
+	}
+	if (parts["example"] || parts["examples"] || parts["template"] || parts["templates"] || parts["util"] || parts["utils"] || parts["utilities"]) && len(area.ArtifactPathSet) >= 2 {
 		return true
 	}
 	return false
@@ -3299,6 +3317,9 @@ func mapBoundaryAreaScore(area *mapAreaInternal) float64 {
 	}
 	if area.EvidenceCounts["source"] > 0 && (area.EvidenceCounts["doc"] > 0 || area.EvidenceCounts["intent"] > 0) {
 		score += 4
+	}
+	if mapBoundaryShellLikeArea(area) {
+		score -= 35
 	}
 	return score
 }
@@ -3381,6 +3402,48 @@ func mapArtifactForBoundaryPath(path, family string) mapArtifact {
 	default:
 		return mapArtifact{Title: filepath.Base(path), Kind: "source_context", Path: path}
 	}
+}
+
+func mapPathBoundaryArtifactRank(areaKey, path, family string) int {
+	pathValue := normalizeMapPath(path)
+	pathKey := normalizeMapKey(pathValue)
+	score := 0
+	switch family {
+	case "source":
+		score += 500
+	case "test":
+		score += 360
+	case "config":
+		score += 170
+	case "doc":
+		score += 140
+	default:
+		score += 60
+	}
+	if areaKey != "" && scoreMapKeyMatch(pathKey, areaKey) > 0 {
+		score += 70
+	}
+	switch {
+	case strings.HasPrefix(pathValue, "test/") || strings.HasPrefix(pathValue, "tests/") || strings.Contains(pathValue, "/test/") || strings.Contains(pathValue, "/tests/"):
+		score -= 260
+	case strings.HasPrefix(pathValue, "examples/") || strings.Contains(pathValue, "/examples/"):
+		score -= 320
+	case strings.HasPrefix(pathValue, "docs/") || strings.Contains(pathValue, "/docs/"):
+		score -= 220
+	case strings.Contains(pathValue, "/templates/") || strings.Contains(pathValue, "/template/"):
+		score -= 130
+	case strings.HasPrefix(pathValue, ".github/") || strings.Contains(pathValue, "/.github/"):
+		score -= 260
+	}
+	base := strings.ToLower(filepath.Base(pathValue))
+	switch base {
+	case "package.json", "index.html", "jest.config.ts", "babel.config.cjs", "eslint.config.js", "tsconfig.json":
+		score -= 90
+	}
+	if strings.Contains(pathKey, "generated") || strings.Contains(pathKey, "fixture") {
+		score -= 120
+	}
+	return score
 }
 
 func mapBoundaryPathEligible(path string) bool {
@@ -3644,7 +3707,8 @@ func publicMapAreas(repoRoot, repoName string, areas []*mapAreaInternal, maxArea
 		if len(traceReceipts) == 0 {
 			traceReceipts = mapTraceReceipts(repoRoot, area, covers)
 		}
-		try := mapTryCommand(label, covers, traceReceipts, confidence)
+		keyPaths := mapArtifactPaths(area.Artifacts)
+		try := mapTryCommand(label, covers, traceReceipts, confidence, keyPaths)
 		areaType := classifyMapAreaType(area, label, areaClass, isRoot, covers)
 		caveats := mapAreaCaveats(area, areaClass, isRoot)
 		if isRoot && len(covers) == 0 {
@@ -3659,7 +3723,7 @@ func publicMapAreas(repoRoot, repoName string, areas []*mapAreaInternal, maxArea
 			IsRepoRootUmbrella: isRoot,
 			Covers:             firstStrings(covers, mapMaxCoversPerArea),
 			EvidenceCounts:     mapCopyCounts(area.EvidenceCounts),
-			KeyPaths:           mapArtifactPaths(area.Artifacts),
+			KeyPaths:           keyPaths,
 			TraceReceipts:      firstMapTraceReceipts(traceReceipts, mapMaxTraceReceipts),
 			Try:                try,
 			Caveats:            caveats,
@@ -4412,7 +4476,7 @@ func refineMapAreaForDrilldownQuery(area mapArea, query string) mapArea {
 	}
 	area.KeyPaths = collapseMapLocalizedKeyPaths(area.KeyPaths, query)
 	if renamed {
-		area.Try = mapTryCommand(area.Label, area.Covers, area.TraceReceipts, area.Confidence)
+		area.Try = mapTryCommand(area.Label, area.Covers, area.TraceReceipts, area.Confidence, area.KeyPaths)
 	}
 	return area
 }
@@ -5188,13 +5252,23 @@ func firstMapCoverLead(covers []string) string {
 	return ""
 }
 
-func mapTryCommand(label string, covers []string, receipts []mapTraceReceipt, confidence string) string {
+func mapTryCommand(label string, covers []string, receipts []mapTraceReceipt, confidence string, keyPaths []string) string {
 	if confidence == mapLowConfidence && len(covers) == 0 {
 		return ""
 	}
 	query := label
 	conceptualLabel := mapTryLabelLooksConceptual(label)
-	if len(covers) > 0 && !conceptualLabel {
+	if mapTryLabelNeedsSpecificContext(label) {
+		if cover := firstMapSpecificCover(covers); cover != "" {
+			query = cover
+		} else if pathQuery := mapTrySpecificPathQuery(label, keyPaths); pathQuery != "" {
+			query = pathQuery
+		}
+	} else if mapTryBroadLabelUsesSpecificCover(label) {
+		if cover := firstMapSpecificCover(covers); cover != "" {
+			query = joinMapQuery(label, cover)
+		}
+	} else if len(covers) > 0 && !conceptualLabel {
 		query = joinMapQuery(label, covers[0])
 	}
 	if len(receipts) > 0 && !conceptualLabel {
@@ -5207,6 +5281,66 @@ func mapTryCommand(label string, covers []string, receipts []mapTraceReceipt, co
 		return ""
 	}
 	return mapFindPackCommand(query)
+}
+
+func mapTryLabelNeedsSpecificContext(label string) bool {
+	key := normalizeMapKey(label)
+	if mapBoundaryFirstScreenShellLabels[key] {
+		return true
+	}
+	return mapAnyContains([]string{key}, "javascript", "locale", "locales", "example", "examples", "template", "templates", "utility", "utilities", "router")
+}
+
+func mapTryBroadLabelUsesSpecificCover(label string) bool {
+	switch normalizeMapKey(label) {
+	case "files-assets-storage", "background-jobs-email-automation":
+		return true
+	default:
+		return false
+	}
+}
+
+func firstMapSpecificCover(covers []string) string {
+	for _, cover := range covers {
+		key := normalizeMapKey(cover)
+		if key == "" || mapBoundaryFirstScreenShellLabels[key] {
+			continue
+		}
+		words := wordsFromMap(cover)
+		specific := 0
+		for _, word := range words {
+			if !mapGenericTerms[word] && !mapTraceStopWord(word) {
+				specific++
+			}
+		}
+		if specific > 0 {
+			return cover
+		}
+	}
+	return ""
+}
+
+func mapTrySpecificPathQuery(label string, keyPaths []string) string {
+	labelWords := mapStringSet(wordsFromMap(label))
+	var words []string
+	for _, path := range firstStrings(keyPaths, 5) {
+		for _, word := range wordsFromMap(path) {
+			if labelWords[word] || mapGenericTerms[word] || mapTraceStopWord(word) {
+				continue
+			}
+			if len(word) < 4 {
+				continue
+			}
+			words = appendUniqueString(words, word)
+			if len(words) >= 3 {
+				return displayMapLabel(strings.Join(words, " "))
+			}
+		}
+	}
+	if len(words) == 0 {
+		return ""
+	}
+	return displayMapLabel(strings.Join(words, " "))
 }
 
 func mapTryLabelLooksConceptual(label string) bool {

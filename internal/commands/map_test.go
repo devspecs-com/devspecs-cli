@@ -836,6 +836,86 @@ func TestPathBoundaryMapDiscoversPlatformConceptsOverComposablesAndBlackbox(t *t
 	}
 }
 
+func TestPathBoundaryMapDemotesFreshHoldoutShellBuckets(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "support-platform")
+	files := []string{
+		"app/javascript/dashboard/App.vue",
+		"app/javascript/dashboard/api/ApiClient.js",
+		"app/javascript/dashboard/components/Accordion.vue",
+		"app/javascript/dashboard/components/AssignmentCard.vue",
+		"app/javascript/dashboard/components/ConversationList.vue",
+		"app/javascript/dashboard/components/InboxSettings.vue",
+		"app/controllers/api/v1/accounts/agents_controller.rb",
+		"app/controllers/api/v1/accounts/contact_merges_controller.rb",
+		"app/controllers/api/v1/accounts/inboxes_controller.rb",
+		"app/jobs/inboxes/fetch_imap_emails_job.rb",
+		"spec/jobs/inboxes/fetch_imap_emails_job_spec.rb",
+		"config/initializers/ai_agents.rb",
+		"app/controllers/api/v1/accounts/assignable_agents_controller.rb",
+		"db/migrate/20250820130619_add_two_factor_to_users.rb",
+		"app/controllers/platform/api/v1/users_controller.rb",
+		"app/javascript/dashboard/composables/useFileUpload.js",
+	}
+	for _, file := range files {
+		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
+	}
+
+	areas, _, _ := buildPathBoundaryAreas(repoRoot, "support-platform", files, nil, 8)
+	if findMapTestArea(areas, "Javascript") != nil {
+		t.Fatalf("javascript shell leaked into first-screen map: %#v", areas)
+	}
+	for _, label := range []string{
+		"External HTTP API v1",
+		"Background Jobs, Email & Automation",
+		"AI Agents, Chat & Skills",
+		"Identity, Auth & Access Control",
+	} {
+		if findMapTestArea(areas, label) == nil {
+			t.Fatalf("expected product/platform area %q, got %#v", label, areas)
+		}
+	}
+}
+
+func TestMapTryCommandDropsShellLabelsAndUsesSpecificCovers(t *testing.T) {
+	if got := mapTryCommand("Locales", []string{"Admin Console"}, nil, mapHighConfidence, nil); got != `ds find --pack "admin console"` {
+		t.Fatalf("locales try = %q", got)
+	}
+	if got := mapTryCommand("Javascript", []string{"Accordion"}, nil, mapHighConfidence, nil); got != `ds find --pack "accordion"` {
+		t.Fatalf("javascript try = %q", got)
+	}
+	if got := mapTryCommand("Files, Assets & Storage", []string{"Upload"}, nil, mapHighConfidence, []string{"web/src/components/MemoEditor/hooks/useFileUpload.ts"}); !strings.Contains(got, "upload") {
+		t.Fatalf("broad storage try should include upload, got %q", got)
+	}
+}
+
+func TestPathBoundaryMapPrefersImplementationKeyFilesOverTestsAndExamples(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "cms")
+	files := []string{
+		"test/fields-relationship/collections/Collection1/index.ts",
+		"test/fields-relationship/collections/Collection2/index.ts",
+		"examples/with-fields/payload.config.ts",
+		"packages/payload/src/collections/config/fields/buildFieldSchemaMap.ts",
+		"packages/payload/src/collections/config/fields/buildClientFieldSchemaMap.ts",
+		"packages/payload/src/collections/operations/find.ts",
+		"packages/payload/src/fields/config/types.ts",
+	}
+	for _, file := range files {
+		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
+	}
+
+	areas, _, _ := buildPathBoundaryAreas(repoRoot, "cms", files, nil, 8)
+	dataModel := findMapTestArea(areas, "Content/Data Model")
+	if dataModel == nil {
+		t.Fatalf("expected Content/Data Model, got %#v", areas)
+	}
+	if len(dataModel.KeyPaths) == 0 {
+		t.Fatalf("expected key paths")
+	}
+	if strings.HasPrefix(dataModel.KeyPaths[0], "test/") || strings.HasPrefix(dataModel.KeyPaths[0], "examples/") {
+		t.Fatalf("content/data model should prefer implementation key files, got %#v", dataModel.KeyPaths)
+	}
+}
+
 func TestMapAreaMatchPrefersPluralLabelOverPathOnlyMatch(t *testing.T) {
 	areas := []mapArea{
 		{Label: "Cron", KeyPaths: []string{"apps/web/app/api/cron/notify-partners/route.ts"}, Diagnostics: mapAreaDiagnostics{TraceTerms: []string{"partner"}}},
@@ -997,7 +1077,7 @@ func TestMapTryCommandAvoidsUnsupportedCommitVerb(t *testing.T) {
 	query := mapTryCommand("Release", []string{"Publish Npm"}, []mapTraceReceipt{{
 		SHA:     "abc1234",
 		Subject: "Replace `main` branch in changelog link with tags (#19054)",
-	}}, mapMediumConfidence)
+	}}, mapMediumConfidence, nil)
 	if query != `ds find --pack "release publish npm"` {
 		t.Fatalf("query = %q, want release publish npm", query)
 	}
