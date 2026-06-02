@@ -79,6 +79,12 @@ const (
 	mapTypeDocs                        = "docs_reference"
 	mapTypeRoot                        = "repo_root_umbrella"
 	mapTypeUnknown                     = "unknown_area"
+	mapRepoShapeTool                   = "tool"
+	mapRepoShapeWebApp                 = "web_app"
+	mapRepoShapePlatform               = "platform"
+	mapRepoShapeLibrary                = "library"
+	mapRepoShapeDocsSite               = "docs_site"
+	mapRepoShapeUnknown                = "unknown"
 )
 
 // NewMapCmd creates the ds map command.
@@ -295,6 +301,7 @@ type mapConceptualBoundaryRule struct {
 	Key      string
 	Label    string
 	Score    float64
+	Shapes   []string
 	Patterns []mapConceptualBoundaryPattern
 	Covers   []mapConceptualCoverRule
 }
@@ -392,6 +399,399 @@ var (
 )
 
 var mapConceptualBoundaryRules = []mapConceptualBoundaryRule{
+	{
+		Key:    "project-workspace-lifecycle",
+		Label:  "Project & Workspace Lifecycle",
+		Score:  15,
+		Shapes: []string{mapRepoShapeTool},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"workspace", "workspaces", "project", "projects", "pyproject", "lockfile", "dependency-groups"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Projects", Any: []string{"project", "projects", "pyproject"}},
+			{Label: "Workspaces", Any: []string{"workspace", "workspaces"}},
+			{Label: "Dependency Groups", Any: []string{"dependency-groups"}},
+			{Label: "Lockfile", Any: []string{"lockfile"}},
+		},
+	},
+	{
+		Key:    "dependency-resolution-lockfile",
+		Label:  "Dependency Resolution & Lockfile",
+		Score:  15,
+		Shapes: []string{mapRepoShapeTool},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"resolver", "resolution", "requirements", "lock", "lockfile", "pubgrub", "pep508", "pep440", "dependency", "dependencies"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Resolver", Any: []string{"resolver", "resolution", "pubgrub"}},
+			{Label: "Requirements", Any: []string{"requirements"}},
+			{Label: "Lockfile", Any: []string{"lock", "lockfile"}},
+			{Label: "Dependencies", Any: []string{"dependency", "dependencies", "pep508", "pep440"}},
+		},
+	},
+	{
+		Key:    "package-install-virtual-environments",
+		Label:  "Package Installation & Virtual Environments",
+		Score:  14,
+		Shapes: []string{mapRepoShapeTool},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"installer", "install", "sync", "site-packages", "virtualenv", "venv", "wheel", "editable", "uv-virtualenv"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Installer", Any: []string{"installer", "install"}},
+			{Label: "Sync", Any: []string{"sync"}},
+			{Label: "Virtualenv", Any: []string{"virtualenv", "venv", "uv-virtualenv"}},
+			{Label: "Wheels / Editable", Any: []string{"wheel", "editable"}},
+		},
+	},
+	{
+		Key:    "registry-cache-artifact-fetching",
+		Label:  "Registry, Cache & Artifact Fetching",
+		Score:  14,
+		Shapes: []string{mapRepoShapeTool},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"registry", "pypi", "index", "indexes", "simple", "cache", "distribution", "distribution-filename", "client", "http", "fetch"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Registry / Index", Any: []string{"registry", "pypi", "index", "indexes", "simple"}},
+			{Label: "Cache", Any: []string{"cache"}},
+			{Label: "Distributions", Any: []string{"distribution", "distribution-filename"}},
+			{Label: "Fetching", Any: []string{"client", "http", "fetch"}},
+		},
+	},
+	{
+		Key:    "managed-python-interpreters",
+		Label:  "Managed Python Interpreters",
+		Score:  13,
+		Shapes: []string{mapRepoShapeTool},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"uv-python", "python-install", "python-downloads", "interpreter", "interpreters", "python-list", "python-find", "python-dir", "install-python", "python-versions"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Python Runtime", Any: []string{"uv-python"}},
+			{Label: "Interpreter Discovery", Any: []string{"interpreter", "interpreters", "python-find"}},
+			{Label: "Python Install", Any: []string{"python-install", "install-python", "python-downloads"}},
+			{Label: "Python Versions", Any: []string{"python-versions", "python-list", "python-dir"}},
+		},
+	},
+	{
+		Key:    "pip-compatible-interface",
+		Label:  "pip-Compatible Interface",
+		Score:  13,
+		Shapes: []string{mapRepoShapeTool},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"uv-pip", "pip_compile", "pip-sync", "pip_install", "pip_install_scenarios", "/pip/", "docs/pip", "pip_"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "pip install", Any: []string{"pip_install", "pip-install", "pip install"}},
+			{Label: "pip compile", Any: []string{"pip_compile", "pip-compile"}},
+			{Label: "pip sync", Any: []string{"pip_sync", "pip-sync"}},
+			{Label: "pip docs", Any: []string{"docs/pip", "/pip/"}},
+		},
+	},
+	{
+		Key:    "tools-ephemeral-environments",
+		Label:  "Tools & Ephemeral Environments",
+		Score:  13,
+		Shapes: []string{mapRepoShapeTool},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"uv-tool", "tool_install", "tool_run", "tool-upgrade", "tools", "uvx", "ephemeral"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Tool Install", Any: []string{"tool_install", "tool-install", "uv-tool"}},
+			{Label: "Tool Run", Any: []string{"tool_run", "tool-run", "uvx"}},
+			{Label: "Ephemeral Environments", Any: []string{"ephemeral"}},
+		},
+	},
+	{
+		Key:    "run-scripts-inline-dependencies",
+		Label:  "Run, Scripts & Inline Dependencies",
+		Score:  12,
+		Shapes: []string{mapRepoShapeTool},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"commands/project/run", "uv-scripts", "scripts.md", "pep-723", "inline", "run.rs", "script"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Run Command", Any: []string{"commands/project/run", "run.rs"}},
+			{Label: "Scripts", Any: []string{"uv-scripts", "scripts.md", "script"}},
+			{Label: "Inline Dependencies", Any: []string{"pep-723", "inline"}},
+		},
+	},
+	{
+		Key:    "build-publish-auth-audit",
+		Label:  "Build, Publish, Auth & Audit",
+		Score:  12,
+		Shapes: []string{mapRepoShapeTool},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"build-backend", "uv-build", "publish", "uv-publish", "authentication", "uv-auth", "audit", "uv-audit", "trusted-publishing"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Build", Any: []string{"build-backend", "uv-build"}},
+			{Label: "Publish", Any: []string{"publish", "uv-publish", "trusted-publishing"}},
+			{Label: "Auth", Any: []string{"authentication", "uv-auth"}},
+			{Label: "Audit", Any: []string{"audit", "uv-audit"}},
+		},
+	},
+	{
+		Key:    "accounts-net-worth-dashboard",
+		Label:  "Accounts & Net-Worth Dashboard",
+		Score:  14,
+		Shapes: []string{mapRepoShapeWebApp},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"accounts", "accountable", "balance-sheet", "net-worth", "valuation", "valuations", "account_balances", "account-sync"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Accounts", Any: []string{"accounts", "accountable"}},
+			{Label: "Balances", Any: []string{"balance", "account_balances"}},
+			{Label: "Net Worth", Any: []string{"net-worth", "balance-sheet"}},
+			{Label: "Valuations", Any: []string{"valuation", "valuations"}},
+		},
+	},
+	{
+		Key:    "transaction-ledger-categorization-cashflow",
+		Label:  "Transaction Ledger, Categorization & Cashflow",
+		Score:  14,
+		Shapes: []string{mapRepoShapeWebApp},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"transactions", "transaction", "entries", "entry", "entryable", "category", "categories", "merchant", "cashflow"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Transactions", Any: []string{"transactions", "transaction"}},
+			{Label: "Entries", Any: []string{"entries", "entry", "entryable"}},
+			{Label: "Categories", Any: []string{"category", "categories"}},
+			{Label: "Merchants", Any: []string{"merchant"}},
+			{Label: "Cashflow", Any: []string{"cashflow"}},
+		},
+	},
+	{
+		Key:    "budgeting",
+		Label:  "Budgeting",
+		Score:  12,
+		Shapes: []string{mapRepoShapeWebApp},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"budget", "budgets", "budget_categories"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Budgets", Any: []string{"budget", "budgets"}},
+			{Label: "Budget Categories", Any: []string{"budget_categories"}},
+		},
+	},
+	{
+		Key:    "investments-holdings-securities",
+		Label:  "Investments, Holdings & Securities",
+		Score:  13,
+		Shapes: []string{mapRepoShapeWebApp},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"investment", "investments", "holding", "holdings", "security", "securities", "trade", "trades", "ticker", "positions"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Investments", Any: []string{"investment", "investments"}},
+			{Label: "Holdings", Any: []string{"holding", "holdings"}},
+			{Label: "Securities", Any: []string{"security", "securities"}},
+			{Label: "Trades", Any: []string{"trade", "trades"}},
+		},
+	},
+	{
+		Key:    "bank-connectivity-plaid-sync",
+		Label:  "Bank Connectivity & Plaid Sync",
+		Score:  13,
+		Shapes: []string{mapRepoShapeWebApp},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"plaid", "plaid_account", "plaid_item", "plaid_entry", "bank", "institution", "account-sync"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Plaid Accounts", Any: []string{"plaid_account"}},
+			{Label: "Plaid Items", Any: []string{"plaid_item"}},
+			{Label: "Plaid Entries", Any: []string{"plaid_entry"}},
+			{Label: "Institutions", Any: []string{"institution", "bank"}},
+		},
+	},
+	{
+		Key:    "csv-manual-data-import",
+		Label:  "CSV & Manual Data Import",
+		Score:  12,
+		Shapes: []string{mapRepoShapeWebApp},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"import", "imports", "csv", "mint.csv", "transaction_import", "trade_import", "upload"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Imports", Any: []string{"import", "imports"}},
+			{Label: "CSV", Any: []string{"csv", "mint.csv"}},
+			{Label: "Upload", Any: []string{"upload"}},
+			{Label: "Transaction Import", Any: []string{"transaction_import"}},
+		},
+	},
+	{
+		Key:    "billing-subscriptions-self-host",
+		Label:  "Billing, Subscriptions & Self-Host Operations",
+		Score:  12,
+		Shapes: []string{mapRepoShapeWebApp},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"billing", "billings", "subscription", "subscriptions", "hosting", "hostings", "self-host", "self_host", "stripe"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Billing", Any: []string{"billing", "billings"}},
+			{Label: "Subscriptions", Any: []string{"subscription", "subscriptions"}},
+			{Label: "Self-Host", Any: []string{"self-host", "self_host", "hosting", "hostings"}},
+			{Label: "Stripe", Any: []string{"stripe"}},
+		},
+	},
+	{
+		Key:    "external-http-api-v1",
+		Label:  "External HTTP API v1",
+		Score:  11,
+		Shapes: []string{mapRepoShapeWebApp},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"api/v1", "docs/api", "v1/accounts", "v1/transactions", "v1/chats"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "API v1", Any: []string{"api/v1"}},
+			{Label: "Accounts API", Any: []string{"v1/accounts"}},
+			{Label: "Transactions API", Any: []string{"v1/transactions"}},
+			{Label: "Chats API", Any: []string{"v1/chats"}},
+		},
+	},
+	{
+		Key:    "framework-runtime-module-platform",
+		Label:  "Framework Runtime & Module Platform",
+		Score:  15,
+		Shapes: []string{mapRepoShapePlatform},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"packages/core/framework", "modules-sdk", "packages/core/modules-sdk", "awilix", "link-modules", "packages/medusa/src/loaders", "instrumentation"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Framework", Any: []string{"packages/core/framework"}},
+			{Label: "Modules SDK", Any: []string{"modules-sdk", "packages/core/modules-sdk"}},
+			{Label: "Loaders", Any: []string{"packages/medusa/src/loaders"}},
+			{Label: "Link Modules", Any: []string{"link-modules"}},
+		},
+	},
+	{
+		Key:    "product-catalog-pricing-inventory",
+		Label:  "Product Catalog, Pricing & Inventory",
+		Score:  15,
+		Shapes: []string{mapRepoShapePlatform},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"packages/modules/product", "packages/modules/pricing", "packages/modules/inventory", "stock-location", "price-list", "product-variants", "product-categories", "collections"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Products", Any: []string{"packages/modules/product", "product-variants", "product-categories"}},
+			{Label: "Pricing", Any: []string{"packages/modules/pricing", "price-list"}},
+			{Label: "Inventory", Any: []string{"packages/modules/inventory"}},
+			{Label: "Stock Locations", Any: []string{"stock-location"}},
+			{Label: "Collections", Any: []string{"collections"}},
+		},
+	},
+	{
+		Key:    "cart-checkout-promotions",
+		Label:  "Cart, Checkout & Promotions",
+		Score:  14,
+		Shapes: []string{mapRepoShapePlatform},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"packages/modules/cart", "packages/modules/promotion", "store/carts", "campaigns", "promotions", "payment-collection", "line-item"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Cart", Any: []string{"packages/modules/cart", "store/carts"}},
+			{Label: "Promotions", Any: []string{"packages/modules/promotion", "promotions"}},
+			{Label: "Campaigns", Any: []string{"campaigns"}},
+			{Label: "Payment Collections", Any: []string{"payment-collection"}},
+			{Label: "Line Items", Any: []string{"line-item"}},
+		},
+	},
+	{
+		Key:    "orders-fulfillment-post-purchase",
+		Label:  "Orders, Fulfillment & Post-Purchase",
+		Score:  15,
+		Shapes: []string{mapRepoShapePlatform},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"packages/modules/order", "packages/modules/fulfillment", "orders", "fulfillments", "returns", "claims", "exchanges", "order-edits", "draft-order"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Orders", Any: []string{"packages/modules/order", "orders"}},
+			{Label: "Fulfillment", Any: []string{"packages/modules/fulfillment", "fulfillments"}},
+			{Label: "Returns", Any: []string{"returns"}},
+			{Label: "Claims / Exchanges", Any: []string{"claims", "exchanges"}},
+			{Label: "Draft Orders", Any: []string{"draft-order"}},
+		},
+	},
+	{
+		Key:    "payments-tax-monetary-configuration",
+		Label:  "Payments, Tax & Monetary Configuration",
+		Score:  14,
+		Shapes: []string{mapRepoShapePlatform},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"packages/modules/payment", "packages/modules/tax", "packages/modules/currency", "packages/modules/region", "payment-stripe", "tax-regions", "tax-rates", "payment-providers", "refund"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Payments", Any: []string{"packages/modules/payment", "payment-providers", "payment-stripe"}},
+			{Label: "Tax", Any: []string{"packages/modules/tax", "tax-regions", "tax-rates"}},
+			{Label: "Currency", Any: []string{"packages/modules/currency"}},
+			{Label: "Regions", Any: []string{"packages/modules/region"}},
+			{Label: "Refunds", Any: []string{"refund"}},
+		},
+	},
+	{
+		Key:    "store-configuration-sales-channels",
+		Label:  "Store Configuration & Sales Channels",
+		Score:  13,
+		Shapes: []string{mapRepoShapePlatform},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"packages/modules/store", "sales-channel", "packages/modules/settings", "translation", "locales", "stores", "sales-channels"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Stores", Any: []string{"packages/modules/store", "stores"}},
+			{Label: "Sales Channels", Any: []string{"sales-channel", "sales-channels"}},
+			{Label: "Settings", Any: []string{"packages/modules/settings"}},
+			{Label: "Translations / Locales", Any: []string{"translation", "locales"}},
+		},
+	},
+	{
+		Key:    "http-api-layer",
+		Label:  "HTTP API Layer",
+		Score:  13,
+		Shapes: []string{mapRepoShapePlatform},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"packages/medusa/src/api/admin", "packages/medusa/src/api/store", "packages/medusa/src/api/auth", "integration-tests/http", "integration-tests/api", "http-types", "openapi"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Admin API", Any: []string{"packages/medusa/src/api/admin"}},
+			{Label: "Store API", Any: []string{"packages/medusa/src/api/store"}},
+			{Label: "Auth API", Any: []string{"packages/medusa/src/api/auth"}},
+			{Label: "HTTP Tests", Any: []string{"integration-tests/http", "integration-tests/api"}},
+			{Label: "OpenAPI / HTTP Types", Any: []string{"http-types", "openapi"}},
+		},
+	},
+	{
+		Key:    "admin-dashboard",
+		Label:  "Admin Dashboard",
+		Score:  12,
+		Shapes: []string{mapRepoShapePlatform},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"packages/admin/dashboard", "admin-bundler", "admin-sdk", "admin-vite-plugin", "admin-shared"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Dashboard Routes", Any: []string{"packages/admin/dashboard"}},
+			{Label: "Admin Bundler", Any: []string{"admin-bundler"}},
+			{Label: "Admin SDK", Any: []string{"admin-sdk"}},
+			{Label: "Admin Vite Plugin", Any: []string{"admin-vite-plugin"}},
+		},
+	},
+	{
+		Key:    "provider-adapters-pluggable-infrastructure",
+		Label:  "Provider Adapters & Pluggable Infrastructure",
+		Score:  13,
+		Shapes: []string{mapRepoShapePlatform},
+		Patterns: []mapConceptualBoundaryPattern{
+			{Any: []string{"packages/modules/providers", "provider", "providers", "payment-stripe", "file-s3", "file-local", "auth-emailpass", "auth-github", "auth-google", "notification-sendgrid", "fulfillment-manual", "caching-redis", "locking-redis", "event-bus-redis"}},
+		},
+		Covers: []mapConceptualCoverRule{
+			{Label: "Providers", Any: []string{"packages/modules/providers", "provider", "providers"}},
+			{Label: "Payments", Any: []string{"payment-stripe"}},
+			{Label: "Files", Any: []string{"file-s3", "file-local"}},
+			{Label: "Auth Providers", Any: []string{"auth-emailpass", "auth-github", "auth-google"}},
+			{Label: "Infrastructure", Any: []string{"caching-redis", "locking-redis", "event-bus-redis"}},
+		},
+	},
 	{
 		Key:   "short-link-redirect-click-capture",
 		Label: "Short-Link Redirect & Click Capture",
@@ -1571,6 +1971,7 @@ func mapBoundaryRecentCommits(ctx context.Context, repoRoot string) []parsedFind
 func buildPathBoundaryAreas(repoRoot, repoName string, files []string, commits []parsedFindGitCommit, maxAreas int) ([]mapArea, mapEvidenceAvailability, int) {
 	candidates := map[string]*mapPathBoundaryCandidate{}
 	evidence := mapEvidenceAvailability{}
+	repoShape := inferMapRepoShape(repoName, files)
 	for _, path := range files {
 		family := mapBoundaryPathFamily(path)
 		if family == "" {
@@ -1588,7 +1989,7 @@ func buildPathBoundaryAreas(repoRoot, repoName string, files []string, commits [
 		}
 		addMapBoundaryPathCandidates(candidates, repoName, path, family)
 	}
-	applyMapBoundaryConceptualParents(candidates, repoName, files)
+	applyMapBoundaryConceptualParents(candidates, repoName, files, repoShape)
 	applyMapBoundaryImportEvidence(repoRoot, repoName, files, candidates)
 	applyMapBoundaryRecentCommits(candidates, repoName, commits)
 	if len(commits) > 0 {
@@ -1609,7 +2010,7 @@ func buildPathBoundaryAreas(repoRoot, repoName string, files []string, commits [
 		}
 		return left > right
 	})
-	internals = selectMapBoundaryAreas(internals, maxAreas*2)
+	internals = selectMapBoundaryAreas(internals, maxAreas*2, repoShape)
 	areas := publicMapAreas(repoRoot, repoName, internals, maxAreas)
 	return areas, evidence, len(candidates)
 }
@@ -1656,7 +2057,89 @@ func addMapBoundaryPathCandidates(candidates map[string]*mapPathBoundaryCandidat
 	}
 }
 
-func applyMapBoundaryConceptualParents(candidates map[string]*mapPathBoundaryCandidate, repoName string, files []string) {
+func inferMapRepoShape(repoName string, files []string) string {
+	scores := map[string]int{}
+	sourceCount := 0
+	docCount := 0
+	for _, raw := range files {
+		pathValue := normalizeMapPath(raw)
+		if pathValue == "" {
+			continue
+		}
+		family := mapBoundaryPathFamily(pathValue)
+		if family == "doc" {
+			docCount++
+		} else if family == "source" || family == "test" || family == "config" {
+			sourceCount++
+		}
+		key := normalizeMapKey(pathValue)
+		toolPathContext := strings.HasPrefix(pathValue, "crates/") ||
+			strings.HasPrefix(pathValue, "cmd/") ||
+			strings.Contains(pathValue, "/cmd/") ||
+			strings.Contains(pathValue, "/commands/") ||
+			strings.Contains(pathValue, "/cli/") ||
+			strings.Contains(key, "-cli-") ||
+			strings.HasSuffix(key, "-cli") ||
+			strings.Contains(pathValue, "docs/pip/") ||
+			strings.Contains(pathValue, "docs/concepts/projects/")
+		switch {
+		case strings.HasPrefix(pathValue, "crates/"):
+			scores[mapRepoShapeTool] += 2
+		case strings.HasPrefix(pathValue, "cmd/"):
+			scores[mapRepoShapeTool] += 2
+		case strings.Contains(pathValue, "/cmd/") || strings.Contains(pathValue, "/commands/"):
+			scores[mapRepoShapeTool] += 2
+		case strings.Contains(pathValue, "/cli/") || strings.Contains(key, "-cli-") || strings.HasSuffix(key, "-cli"):
+			scores[mapRepoShapeTool] += 2
+		}
+		if toolPathContext && mapAnyContains([]string{pathValue},
+			"resolver", "installer", "virtualenv", "venv", "lockfile", "uv-pip", "uv-tool",
+			"publish", "audit", "registry", "pypi", "interpreter", "tool_install", "pip_install") {
+			scores[mapRepoShapeTool] += 2
+		}
+		if mapAnyContains([]string{pathValue},
+			"app/controllers", "app/models", "app/jobs", "app/views", "db/migrate", "config/routes",
+			"apps/web", "apps/api", "pages", "routes", "server/controllers") {
+			scores[mapRepoShapeWebApp] += 2
+		}
+		if mapAnyContains([]string{pathValue},
+			"packages/modules", "packages/core/framework", "packages/core/core-flows", "workflows-sdk",
+			"orchestration", "modules-sdk", "packages/medusa/src/api", "packages/admin/dashboard",
+			"packages/modules/providers") {
+			scores[mapRepoShapePlatform] += 3
+		}
+		if strings.HasPrefix(pathValue, "www/") || strings.Contains(pathValue, "/docs/") || strings.HasPrefix(pathValue, "docs/") {
+			scores[mapRepoShapeDocsSite]++
+		}
+	}
+	if scores[mapRepoShapePlatform] >= 9 && scores[mapRepoShapePlatform] >= scores[mapRepoShapeTool] {
+		return mapRepoShapePlatform
+	}
+	if scores[mapRepoShapeWebApp] >= 8 && scores[mapRepoShapeWebApp] >= scores[mapRepoShapeTool]/2 {
+		return mapRepoShapeWebApp
+	}
+	if scores[mapRepoShapeTool] >= 8 && scores[mapRepoShapeTool] >= scores[mapRepoShapePlatform]+4 {
+		return mapRepoShapeTool
+	}
+	if scores[mapRepoShapeWebApp] >= 8 {
+		return mapRepoShapeWebApp
+	}
+	if scores[mapRepoShapePlatform] >= 6 {
+		return mapRepoShapePlatform
+	}
+	if scores[mapRepoShapeTool] >= 5 {
+		return mapRepoShapeTool
+	}
+	if docCount > 0 && docCount >= sourceCount*2 {
+		return mapRepoShapeDocsSite
+	}
+	if sourceCount > 0 {
+		return mapRepoShapeLibrary
+	}
+	return mapRepoShapeUnknown
+}
+
+func applyMapBoundaryConceptualParents(candidates map[string]*mapPathBoundaryCandidate, repoName string, files []string, repoShape string) {
 	needleCache := map[string]mapConceptualNeedle{}
 	for _, path := range mapConceptualParentFiles(files) {
 		family := mapBoundaryPathFamily(path)
@@ -1669,11 +2152,35 @@ func applyMapBoundaryConceptualParents(candidates map[string]*mapPathBoundaryCan
 		}
 		pathKey := normalizeMapKey(pathValue)
 		for _, rule := range mapConceptualBoundaryRules {
+			if !mapConceptualRuleAllowedForShape(rule, repoShape) {
+				continue
+			}
 			if !mapConceptualRuleMatchesPath(rule, pathValue, pathKey, needleCache) {
 				continue
 			}
 			addMapConceptualParentCandidate(candidates, repoName, path, pathValue, pathKey, family, rule, needleCache)
 		}
+	}
+}
+
+func mapConceptualRuleAllowedForShape(rule mapConceptualBoundaryRule, repoShape string) bool {
+	if len(rule.Shapes) > 0 {
+		for _, shape := range rule.Shapes {
+			if shape == repoShape {
+				return true
+			}
+		}
+		return false
+	}
+	switch normalizeMapKey(rule.Key) {
+	case "django-api-persistence-async-workers":
+		return repoShape == mapRepoShapeWebApp
+	}
+	switch repoShape {
+	case mapRepoShapeTool:
+		return false
+	default:
+		return true
 	}
 }
 
@@ -2449,13 +2956,14 @@ func mapBoundaryCandidateDisplayable(candidate *mapPathBoundaryCandidate) bool {
 	return false
 }
 
-func selectMapBoundaryAreas(areas []*mapAreaInternal, limit int) []*mapAreaInternal {
+func selectMapBoundaryAreas(areas []*mapAreaInternal, limit int, repoShape string) []*mapAreaInternal {
 	if limit <= 0 {
 		limit = mapDefaultMaxAreas * 2
 	}
 	var out []*mapAreaInternal
+	strongConceptualAvailable := mapBoundaryConceptualParentCount(areas) >= 3
 	for _, area := range areas {
-		if mapBoundaryWeakBroadAreaSuppressed(area, out) {
+		if mapBoundaryWeakBroadAreaSuppressed(area, out, strongConceptualAvailable, repoShape) {
 			continue
 		}
 		overlapped := false
@@ -2484,9 +2992,25 @@ func selectMapBoundaryAreas(areas []*mapAreaInternal, limit int) []*mapAreaInter
 	return out
 }
 
-func mapBoundaryWeakBroadAreaSuppressed(area *mapAreaInternal, selected []*mapAreaInternal) bool {
+func mapBoundaryWeakBroadAreaSuppressed(area *mapAreaInternal, selected []*mapAreaInternal, strongConceptualAvailable bool, repoShape string) bool {
 	if area == nil {
 		return false
+	}
+	if strongConceptualAvailable {
+		switch area.Key {
+		case "controllers", "db/migrate", "db-migrate", "migrate", "migrations", "scripts", "github", "www", "api-reference", "code-samples", "design-system", "integration-tests", "crates", "http", "shell", "steps":
+			return true
+		case "admin", "core-flows":
+			return repoShape == mapRepoShapePlatform
+		case "built-by-uv", "requirements", "uv-python":
+			return repoShape == mapRepoShapeTool
+		}
+		if repoShape == mapRepoShapeTool && strings.HasPrefix(area.Key, "crates/") {
+			return true
+		}
+		if repoShape == mapRepoShapePlatform && strings.Contains(area.Key, "code-samples") {
+			return true
+		}
 	}
 	switch area.Key {
 	case "settings":
@@ -2494,6 +3018,16 @@ func mapBoundaryWeakBroadAreaSuppressed(area *mapAreaInternal, selected []*mapAr
 	default:
 		return false
 	}
+}
+
+func mapBoundaryConceptualParentCount(areas []*mapAreaInternal) int {
+	count := 0
+	for _, area := range areas {
+		if area != nil && area.EvidenceSources["conceptual_parent"] {
+			count++
+		}
+	}
+	return count
 }
 
 func mapBoundarySelectedConceptualParentCount(areas []*mapAreaInternal) int {
@@ -4249,25 +4783,25 @@ func classifyMapAreaType(area *mapAreaInternal, label, class string, root bool, 
 func conceptualMapAreaType(key, label string) string {
 	value := normalizeMapKey(firstNonEmpty(key, label))
 	switch value {
-	case "public-api-layer", "public-http-api-developer-platform":
+	case "public-api-layer", "public-http-api-developer-platform", "external-http-api-v1", "http-api-layer":
 		return mapTypeAPI
 	case "metadata-engine-data-model":
 		return mapTypeDataModel
-	case "self-host-runtime-deployments", "background-jobs-email-automation", "django-api-persistence-async-workers":
+	case "self-host-runtime-deployments", "background-jobs-email-automation", "django-api-persistence-async-workers", "framework-runtime-module-platform":
 		return mapTypeOps
 	case "identity-auth-workspace-tenancy", "identity-auth-access-control", "workspace-identity-access-billing", "multi-tenant-workspace-platform":
 		return mapTypePlatform
-	case "third-party-integrations":
+	case "third-party-integrations", "bank-connectivity-plaid-sync", "provider-adapters-pluggable-infrastructure", "payments-tax-monetary-configuration":
 		return mapTypeExternal
-	case "apps-developer-extension-platform":
+	case "apps-developer-extension-platform", "pip-compatible-interface", "tools-ephemeral-environments", "build-publish-auth-audit", "run-scripts-inline-dependencies":
 		return mapTypeTooling
 	case "ai-agents-chat-skills":
 		return mapTypePlatform
-	case "crm-record-experience":
+	case "accounts-net-worth-dashboard", "transaction-ledger-categorization-cashflow", "budgeting", "investments-holdings-securities", "crm-record-experience", "product-catalog-pricing-inventory", "store-configuration-sales-channels":
 		return mapTypeDomainFeature
 	case "pages-stickies-collaborative-editing":
 		return mapTypeUI
-	case "work-items-project-delivery", "workflows-automation", "affiliate-partner-programs", "click-analytics-conversion-attribution", "short-link-redirect-click-capture", "planning-cycles-modules-views", "intake-publishing-public-space", "analytics-export-reporting", "partner-portal", "custom-domains-link-infrastructure":
+	case "project-workspace-lifecycle", "dependency-resolution-lockfile", "package-install-virtual-environments", "registry-cache-artifact-fetching", "managed-python-interpreters", "csv-manual-data-import", "billing-subscriptions-self-host", "cart-checkout-promotions", "orders-fulfillment-post-purchase", "work-items-project-delivery", "workflows-automation", "affiliate-partner-programs", "click-analytics-conversion-attribution", "short-link-redirect-click-capture", "planning-cycles-modules-views", "intake-publishing-public-space", "analytics-export-reporting", "partner-portal", "custom-domains-link-infrastructure":
 		return mapTypeBusinessFlow
 	default:
 		return ""

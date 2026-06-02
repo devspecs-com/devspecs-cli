@@ -587,6 +587,163 @@ func TestPathBoundaryMapDedupesIdentityConceptualParents(t *testing.T) {
 	}
 }
 
+func TestPathBoundaryMapUsesToolRepoParents(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "uv")
+	files := []string{
+		"crates/uv-workspace/src/workspace.rs",
+		"crates/uv-workspace/src/pyproject.rs",
+		"crates/uv-resolver/src/resolver/mod.rs",
+		"crates/uv-resolver/src/lock.rs",
+		"crates/uv-installer/src/installer.rs",
+		"crates/uv-virtualenv/src/virtualenv.rs",
+		"crates/uv-cache/src/lib.rs",
+		"crates/uv-cache/src/archive.rs",
+		"crates/uv-client/src/registry_client.rs",
+		"crates/uv-python/src/interpreter.rs",
+		"crates/uv-pip/src/compile.rs",
+		"crates/uv-pip/src/install.rs",
+		"crates/uv-tool/src/tool.rs",
+		"crates/uv/tests/it/tool_install.rs",
+		"crates/uv/src/commands/project/run.rs",
+		"crates/uv-publish/src/lib.rs",
+		"crates/uv-auth/src/lib.rs",
+		"crates/uv-audit/src/lib.rs",
+		"scripts/publish-crates.py",
+		".github/ISSUE_TEMPLATE/1_bug_report.yaml",
+		"test/packages/built-by-uv/assets/data.csv",
+	}
+	for _, file := range files {
+		writeMapTestFile(t, repoRoot, file, "pub fn value() {}\n")
+	}
+
+	areas, _, _ := buildPathBoundaryAreas(repoRoot, "uv", files, nil, 8)
+	for _, label := range []string{
+		"Project & Workspace Lifecycle",
+		"Dependency Resolution & Lockfile",
+		"Package Installation & Virtual Environments",
+		"Registry, Cache & Artifact Fetching",
+		"Tools & Ephemeral Environments",
+	} {
+		if findMapTestArea(areas, label) == nil {
+			t.Fatalf("expected tool parent %q, got %#v", label, areas)
+		}
+	}
+	for _, label := range []string{
+		"Crates",
+		"Scripts",
+		"Identity, Auth & Workspace Tenancy",
+		"Work Items & Project Delivery",
+		"Built By Uv",
+		"Github",
+		"Instance Administration & Licensing",
+	} {
+		if findMapTestArea(areas, label) != nil {
+			t.Fatalf("tool repo shell/product label %q leaked into map: %#v", label, areas)
+		}
+	}
+}
+
+func TestPathBoundaryMapFoldsRailsShellsIntoProductParents(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "maybe")
+	files := []string{
+		"app/controllers/accounts_controller.rb",
+		"app/models/account.rb",
+		"db/migrate/20240202015428_create_accounts.rb",
+		"app/controllers/transactions_controller.rb",
+		"app/models/transaction.rb",
+		"app/models/entry.rb",
+		"db/migrate/20240223162105_create_transactions.rb",
+		"app/controllers/budgets_controller.rb",
+		"app/models/budget.rb",
+		"app/controllers/investments_controller.rb",
+		"app/models/holding.rb",
+		"app/models/security.rb",
+		"app/models/plaid_account/importer.rb",
+		"app/models/plaid_item/importer.rb",
+		"app/models/plaid_account/transactions/processor.rb",
+		"app/models/plaid_item/accounts_snapshot.rb",
+		"app/controllers/import/uploads_controller.rb",
+		"app/models/import.rb",
+		"test/fixtures/files/imports/transactions.csv",
+		"app/controllers/settings/billings_controller.rb",
+		"app/models/subscription.rb",
+		"app/controllers/api/v1/accounts_controller.rb",
+		"app/controllers/chats_controller.rb",
+		"app/jobs/assistant_response_job.rb",
+	}
+	for _, file := range files {
+		writeMapTestFile(t, repoRoot, file, "class Value; end\n")
+	}
+
+	areas, _, _ := buildPathBoundaryAreas(repoRoot, "maybe", files, nil, 8)
+	for _, label := range []string{
+		"Accounts & Net-Worth Dashboard",
+		"Transaction Ledger, Categorization & Cashflow",
+		"Budgeting",
+		"Investments, Holdings & Securities",
+		"Bank Connectivity & Plaid Sync",
+		"CSV & Manual Data Import",
+	} {
+		if findMapTestArea(areas, label) == nil {
+			t.Fatalf("expected finance/product parent %q, got %#v", label, areas)
+		}
+	}
+	for _, label := range []string{"Controllers", "DB/Migrate"} {
+		if findMapTestArea(areas, label) != nil {
+			t.Fatalf("rails shell label %q leaked into map: %#v", label, areas)
+		}
+	}
+}
+
+func TestPathBoundaryMapFoldsPlatformShellsIntoCommerceParents(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "medusa")
+	files := []string{
+		"packages/core/framework/src/http/middlewares.ts",
+		"packages/core/modules-sdk/src/index.ts",
+		"packages/modules/product/src/services/product-module-service.ts",
+		"packages/modules/pricing/src/services/pricing-module-service.ts",
+		"packages/modules/inventory/src/services/inventory-module-service.ts",
+		"packages/modules/cart/src/services/cart-module-service.ts",
+		"packages/modules/promotion/src/services/promotion-module-service.ts",
+		"packages/modules/order/src/services/order-module-service.ts",
+		"packages/modules/fulfillment/src/services/fulfillment-module-service.ts",
+		"packages/modules/payment/src/services/payment-module-service.ts",
+		"packages/modules/tax/src/services/tax-module-service.ts",
+		"packages/modules/store/src/services/store-module-service.ts",
+		"packages/modules/sales-channel/src/services/sales-channel-module-service.ts",
+		"packages/modules/providers/payment-stripe/src/index.ts",
+		"packages/modules/providers/file-s3/src/index.ts",
+		"packages/medusa/src/api/admin/orders/route.ts",
+		"packages/medusa/src/api/store/carts/route.ts",
+		"packages/medusa/src/api/auth/session/route.ts",
+		"packages/admin/dashboard/src/routes/orders/order-list.tsx",
+		"www/apps/api-reference/app/admin/page.tsx",
+		"packages/design-system/icons/package.json",
+	}
+	for _, file := range files {
+		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
+	}
+
+	areas, _, _ := buildPathBoundaryAreas(repoRoot, "medusa", files, nil, 8)
+	for _, label := range []string{
+		"Framework Runtime & Module Platform",
+		"Product Catalog, Pricing & Inventory",
+		"Cart, Checkout & Promotions",
+		"Orders, Fulfillment & Post-Purchase",
+		"Payments, Tax & Monetary Configuration",
+		"Provider Adapters & Pluggable Infrastructure",
+	} {
+		if findMapTestArea(areas, label) == nil {
+			t.Fatalf("expected platform/commerce parent %q, got %#v", label, areas)
+		}
+	}
+	for _, label := range []string{"Www", "Design System"} {
+		if findMapTestArea(areas, label) != nil {
+			t.Fatalf("platform shell label %q leaked into map: %#v", label, areas)
+		}
+	}
+}
+
 func TestMapAreaMatchPrefersPluralLabelOverPathOnlyMatch(t *testing.T) {
 	areas := []mapArea{
 		{Label: "Cron", KeyPaths: []string{"apps/web/app/api/cron/notify-partners/route.ts"}, Diagnostics: mapAreaDiagnostics{TraceTerms: []string{"partner"}}},
