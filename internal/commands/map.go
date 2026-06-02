@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -31,40 +32,44 @@ import (
 )
 
 const (
-	mapDefaultMaxAreas     = 8
-	mapMaxArtifactsPerArea = 4
-	mapMaxCoversPerArea    = 5
-	mapMaxTraceReceipts    = 3
-	mapMaxVerboseTrace     = 4
-	mapRecentMaxCommits    = 40
-	mapRecentMaxTopics     = 5
-	mapSchemaVersion       = "devspecs.map.v1"
-	mapRecentSchemaVersion = "devspecs.map.recent.v1"
-	mapTraceReceiptMode    = "bounded_git_path_receipts_v0"
-	mapIndexRequiredCaveat = "context packing requires an index; run ds scan before using suggested ds find --pack commands"
-	mapLowConfidence       = "low"
-	mapMediumConfidence    = "medium"
-	mapHighConfidence      = "high"
-	mapClassStableArea     = "stable_area"
-	mapClassWorkstream     = "workstream"
-	mapClassDocTopic       = "doc_topic"
-	mapClassProtocol       = "protocol"
-	mapClassLowConfidence  = "low_confidence"
-	mapTypeDomainFeature   = "domain_feature"
-	mapTypeBusinessFlow    = "business_workflow"
-	mapTypeExternal        = "external_integration"
-	mapTypeAPI             = "api_surface"
-	mapTypeUI              = "ui_surface"
-	mapTypeDataModel       = "data_model"
-	mapTypeDataPipeline    = "data_pipeline"
-	mapTypePlatform        = "platform_capability"
-	mapTypeOps             = "ops_runtime"
-	mapTypeTooling         = "tooling_script"
-	mapTypeTestQuality     = "test_quality"
-	mapTypeProtocol        = "protocol_process"
-	mapTypeDocs            = "docs_reference"
-	mapTypeRoot            = "repo_root_umbrella"
-	mapTypeUnknown         = "unknown_area"
+	mapDefaultMaxAreas      = 8
+	mapMaxArtifactsPerArea  = 4
+	mapMaxCoversPerArea     = 5
+	mapMaxTraceReceipts     = 3
+	mapMaxVerboseTrace      = 4
+	mapRecentMaxCommits     = 40
+	mapRecentMaxTopics      = 5
+	mapBoundaryMaxFiles     = 30000
+	mapBoundaryMaxCommits   = 60
+	mapBoundaryMaxArtifacts = 24
+	mapBoundaryFilesTimeout = 3 * time.Second
+	mapSchemaVersion        = "devspecs.map.v1"
+	mapRecentSchemaVersion  = "devspecs.map.recent.v1"
+	mapTraceReceiptMode     = "bounded_git_path_receipts_v0"
+	mapIndexRequiredCaveat  = "context packing requires an index; run ds scan before using suggested ds find --pack commands"
+	mapLowConfidence        = "low"
+	mapMediumConfidence     = "medium"
+	mapHighConfidence       = "high"
+	mapClassStableArea      = "stable_area"
+	mapClassWorkstream      = "workstream"
+	mapClassDocTopic        = "doc_topic"
+	mapClassProtocol        = "protocol"
+	mapClassLowConfidence   = "low_confidence"
+	mapTypeDomainFeature    = "domain_feature"
+	mapTypeBusinessFlow     = "business_workflow"
+	mapTypeExternal         = "external_integration"
+	mapTypeAPI              = "api_surface"
+	mapTypeUI               = "ui_surface"
+	mapTypeDataModel        = "data_model"
+	mapTypeDataPipeline     = "data_pipeline"
+	mapTypePlatform         = "platform_capability"
+	mapTypeOps              = "ops_runtime"
+	mapTypeTooling          = "tooling_script"
+	mapTypeTestQuality      = "test_quality"
+	mapTypeProtocol         = "protocol_process"
+	mapTypeDocs             = "docs_reference"
+	mapTypeRoot             = "repo_root_umbrella"
+	mapTypeUnknown          = "unknown_area"
 )
 
 // NewMapCmd creates the ds map command.
@@ -74,6 +79,7 @@ func NewMapCmd() *cobra.Command {
 		asJSON   bool
 		verbose  bool
 		recent   bool
+		boundary bool
 		maxAreas int
 	)
 
@@ -92,6 +98,7 @@ func NewMapCmd() *cobra.Command {
 				JSON:      asJSON,
 				Verbose:   verbose,
 				Recent:    recent,
+				Boundary:  boundary,
 				MaxAreas:  maxAreas,
 			})
 		},
@@ -101,6 +108,7 @@ func NewMapCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show map diagnostics and extra evidence")
 	cmd.Flags().BoolVar(&recent, "recent", false, "Show recently active topics from local git history")
+	cmd.Flags().BoolVar(&boundary, "experimental-boundaries", false, "Build the map from path-primary system boundary candidates")
 	cmd.Flags().IntVar(&maxAreas, "max-areas", mapDefaultMaxAreas, "Maximum areas to show")
 	return cmd
 }
@@ -111,6 +119,7 @@ type mapOptions struct {
 	JSON      bool
 	Verbose   bool
 	Recent    bool
+	Boundary  bool
 	MaxAreas  int
 }
 
@@ -222,6 +231,7 @@ type mapAreaInternal struct {
 	ConfidenceSum   float64
 	EvidenceSources map[string]bool
 	ExampleCommits  []string
+	TraceReceipts   []mapTraceReceipt
 	Caveats         []string
 	GenericCount    int
 	Filtered        bool
@@ -309,6 +319,10 @@ var mapProtocolSubtypes = map[string]bool{
 	"agent_instruction": true, "skill": true, "protocol": true, "contributing": true,
 }
 
+var mapBoundaryAllowedGenericAreaLabels = map[string]bool{
+	"workflow": true, "workflows": true,
+}
+
 func runMap(cmd *cobra.Command, opts mapOptions) error {
 	start := time.Now()
 	success := false
@@ -316,6 +330,7 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 		"json":       opts.JSON,
 		"verbose":    opts.Verbose,
 		"recent":     opts.Recent,
+		"boundary":   opts.Boundary,
 		"max_areas":  opts.MaxAreas,
 		"area_query": opts.AreaQuery != "",
 	}
@@ -329,6 +344,27 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 	repoRoot, err := resolveRepoRoot(opts.Path)
 	if err != nil {
 		return err
+	}
+	if opts.Boundary {
+		out := buildPathBoundaryMapOutput(cmd.Context(), repoRoot, opts)
+		success = true
+		props["confidence"] = out.Repo.Confidence
+		props["area_count_bucket"] = telemetry.CountBucket(len(out.Areas))
+		props["path_boundary"] = true
+		if opts.JSON {
+			if opts.AreaQuery != "" {
+				out = filterMapOutputByAreaQuery(out, opts.AreaQuery)
+			}
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			return enc.Encode(out)
+		}
+		if opts.AreaQuery != "" {
+			writeMapAreaText(cmd.OutOrStdout(), out, opts.AreaQuery, opts.Verbose)
+			return nil
+		}
+		writeMapText(cmd.OutOrStdout(), out, opts.Verbose)
+		return nil
 	}
 	if opts.Recent {
 		out := buildMapRecentOutput(cmd.Context(), repoRoot, opts)
@@ -906,6 +942,685 @@ func mapWorkstreamClusters(result *scan.Result) []scan.WorkstreamClusterExample 
 	return result.WorkstreamEvidence.TopClusters
 }
 
+type mapPathBoundaryCandidate struct {
+	Key             string
+	Label           string
+	LabelScore      float64
+	Score           float64
+	FileCount       int
+	RecentCount     int
+	PathSet         map[string]bool
+	BoundaryPaths   map[string]bool
+	Subareas        map[string]bool
+	EvidenceCounts  map[string]int
+	EvidenceSources map[string]bool
+	Artifacts       []mapArtifact
+	TraceReceipts   []mapTraceReceipt
+}
+
+func buildPathBoundaryMapOutput(ctx context.Context, repoRoot string, opts mapOptions) mapOutput {
+	repoName := filepath.Base(filepath.Clean(repoRoot))
+	files, source, limited, fileErr := listMapBoundaryFiles(ctx, repoRoot)
+	recentCommits := mapBoundaryRecentCommits(ctx, repoRoot)
+	areas, evidence, rawCandidateCount := buildPathBoundaryAreas(repoRoot, repoName, files, recentCommits, opts.MaxAreas)
+	confidence := mapBoundaryOutputConfidence(areas)
+	caveats := []string{"experimental path-primary boundary map; git/docs/tests boost boundaries but do not define them"}
+	if source == "walk" {
+		caveats = append(caveats, "git file manifest unavailable; used filesystem walk")
+	}
+	if limited {
+		caveats = append(caveats, fmt.Sprintf("file manifest capped at %d tracked paths", mapBoundaryMaxFiles))
+	}
+	if fileErr != nil {
+		caveats = append(caveats, "file manifest warning: "+fileErr.Error())
+	}
+	if len(files) == 0 {
+		caveats = append(caveats, "no eligible tracked files found for path-boundary mapping")
+	}
+	if len(areas) == 0 {
+		caveats = append(caveats, "no path-primary boundaries passed the display threshold")
+	}
+	if strings.Contains(filepath.ToSlash(repoRoot), "/_ignore/") {
+		caveats = append(caveats, "repo path is under _ignore; use full checkouts for promotion claims")
+	}
+	if indexed, err := mapRepoHasIndexedArtifacts(repoRoot); err == nil && !indexed {
+		caveats = append(caveats, mapIndexRequiredCaveat)
+	} else if err != nil {
+		debugLog("map boundary index availability unavailable: %v", err)
+	}
+	return mapOutput{
+		Schema: mapSchemaVersion,
+		Repo: mapRepo{
+			Name:       repoName,
+			Path:       repoRoot,
+			Confidence: confidence,
+		},
+		EvidenceAvailability: evidence,
+		Areas:                areas,
+		Caveats:              caveats,
+		Diagnostics: mapDiagnostics{
+			RawClusterCount:       rawCandidateCount,
+			WorkstreamAnchorsSeen: len(recentCommits),
+		},
+	}
+}
+
+func listMapBoundaryFiles(ctx context.Context, repoRoot string) ([]string, string, bool, error) {
+	gitCtx, cancel := context.WithTimeout(ctx, mapBoundaryFilesTimeout)
+	defer cancel()
+	if findGitRepoAvailable(gitCtx, repoRoot) {
+		files, limited, err := listMapBoundaryGitFiles(gitCtx, repoRoot)
+		if err == nil {
+			return files, "git", limited, nil
+		}
+		walkFiles, walkLimited, walkErr := listMapBoundaryWalkFiles(ctx, repoRoot)
+		if walkErr != nil {
+			return walkFiles, "walk", walkLimited, fmt.Errorf("git ls-files failed: %v; walk failed: %w", err, walkErr)
+		}
+		return walkFiles, "walk", walkLimited, fmt.Errorf("git ls-files failed: %w", err)
+	}
+	files, limited, err := listMapBoundaryWalkFiles(ctx, repoRoot)
+	return files, "walk", limited, err
+}
+
+func listMapBoundaryGitFiles(ctx context.Context, repoRoot string) ([]string, bool, error) {
+	out, err := exec.CommandContext(ctx, "git", "-C", filepath.Clean(repoRoot), "ls-files", "-z").Output()
+	if err != nil {
+		return nil, false, err
+	}
+	var files []string
+	limited := false
+	for _, raw := range strings.Split(string(out), "\x00") {
+		path := normalizeMapPath(raw)
+		if !mapBoundaryPathEligible(path) {
+			continue
+		}
+		files = append(files, path)
+		if len(files) >= mapBoundaryMaxFiles {
+			limited = true
+			break
+		}
+	}
+	return files, limited, nil
+}
+
+func listMapBoundaryWalkFiles(ctx context.Context, repoRoot string) ([]string, bool, error) {
+	var files []string
+	limited := false
+	err := filepath.WalkDir(repoRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		name := strings.ToLower(d.Name())
+		if d.IsDir() {
+			if path != repoRoot && mapSuppressedPathSegments[name] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, relErr := filepath.Rel(repoRoot, path)
+		if relErr != nil {
+			return nil
+		}
+		normalized := normalizeMapPath(rel)
+		if !mapBoundaryPathEligible(normalized) {
+			return nil
+		}
+		files = append(files, normalized)
+		if len(files) >= mapBoundaryMaxFiles {
+			limited = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return files, limited, err
+}
+
+func mapBoundaryRecentCommits(ctx context.Context, repoRoot string) []parsedFindGitCommit {
+	gitCtx, cancel := context.WithTimeout(ctx, findGitReceiptTimeout)
+	defer cancel()
+	if !findGitRepoAvailable(gitCtx, repoRoot) {
+		return nil
+	}
+	commits, ok := findGitLogRecent(gitCtx, repoRoot, mapBoundaryMaxCommits)
+	if !ok {
+		return nil
+	}
+	var out []parsedFindGitCommit
+	for _, commit := range commits {
+		if mapRecentCommitNoisy(commit) {
+			continue
+		}
+		out = append(out, commit)
+	}
+	return out
+}
+
+func buildPathBoundaryAreas(repoRoot, repoName string, files []string, commits []parsedFindGitCommit, maxAreas int) ([]mapArea, mapEvidenceAvailability, int) {
+	candidates := map[string]*mapPathBoundaryCandidate{}
+	evidence := mapEvidenceAvailability{}
+	for _, path := range files {
+		family := mapBoundaryPathFamily(path)
+		if family == "" {
+			continue
+		}
+		switch family {
+		case "source":
+			evidence.Source++
+		case "test":
+			evidence.Test++
+		case "doc":
+			evidence.Markdown++
+		case "config":
+			evidence.Source++
+		}
+		addMapBoundaryPathCandidates(candidates, repoName, path, family)
+	}
+	applyMapBoundaryRecentCommits(candidates, repoName, commits)
+	if len(commits) > 0 {
+		evidence.Trace = true
+	}
+	var internals []*mapAreaInternal
+	for _, candidate := range candidates {
+		if !mapBoundaryCandidateDisplayable(candidate) {
+			continue
+		}
+		internals = append(internals, mapBoundaryAreaInternal(candidate))
+	}
+	sort.SliceStable(internals, func(i, j int) bool {
+		left := mapBoundaryAreaScore(internals[i])
+		right := mapBoundaryAreaScore(internals[j])
+		if left == right {
+			return internals[i].Label < internals[j].Label
+		}
+		return left > right
+	})
+	internals = selectMapBoundaryAreas(internals, maxAreas*2)
+	areas := publicMapAreas(repoRoot, repoName, internals, maxAreas)
+	return areas, evidence, len(candidates)
+}
+
+func addMapBoundaryPathCandidates(candidates map[string]*mapPathBoundaryCandidate, repoName, path, family string) {
+	seenForPath := map[string]bool{}
+	for _, labelCandidate := range mapBoundaryLabelCandidatesForPath(path, repoName) {
+		if seenForPath[labelCandidate.Key] {
+			continue
+		}
+		seenForPath[labelCandidate.Key] = true
+		candidate := candidates[labelCandidate.Key]
+		if candidate == nil {
+			candidate = &mapPathBoundaryCandidate{
+				Key:             labelCandidate.Key,
+				Label:           labelCandidate.Label,
+				PathSet:         map[string]bool{},
+				BoundaryPaths:   map[string]bool{},
+				Subareas:        map[string]bool{},
+				EvidenceCounts:  map[string]int{},
+				EvidenceSources: map[string]bool{"path_boundary": true},
+			}
+			candidates[labelCandidate.Key] = candidate
+		}
+		candidate.LabelScore += labelCandidate.Score
+		candidate.Score += labelCandidate.Score * 0.2
+		if !candidate.PathSet[path] {
+			candidate.PathSet[path] = true
+			candidate.FileCount++
+			candidate.EvidenceCounts[family]++
+			candidate.Score += mapBoundaryFamilyScore(family)
+			if len(candidate.Artifacts) < mapBoundaryMaxArtifacts*3 {
+				candidate.Artifacts = append(candidate.Artifacts, mapArtifactForBoundaryPath(path, family))
+			}
+		}
+		for _, boundaryPath := range mapBoundaryContainingDirs(path, labelCandidate.Key) {
+			candidate.BoundaryPaths[boundaryPath] = true
+		}
+		for _, subarea := range mapBoundarySubareasForCandidate(path, labelCandidate.Key) {
+			if len(candidate.Subareas) < 20 {
+				candidate.Subareas[subarea] = true
+			}
+		}
+	}
+}
+
+func applyMapBoundaryRecentCommits(candidates map[string]*mapPathBoundaryCandidate, repoName string, commits []parsedFindGitCommit) {
+	for _, commit := range commits {
+		touched := map[string]bool{}
+		for _, path := range commit.paths {
+			path = normalizeMapPath(path)
+			if !mapBoundaryPathEligible(path) {
+				continue
+			}
+			for _, labelCandidate := range mapBoundaryLabelCandidatesForPath(path, repoName) {
+				candidate := candidates[labelCandidate.Key]
+				if candidate == nil || touched[candidate.Key] {
+					continue
+				}
+				touched[candidate.Key] = true
+				candidate.RecentCount++
+				candidate.EvidenceCounts["trace"]++
+				candidate.EvidenceSources["git"] = true
+				candidate.Score += 8
+				if len(candidate.TraceReceipts) < mapMaxTraceReceipts {
+					candidate.TraceReceipts = append(candidate.TraceReceipts, mapTraceReceipt{
+						SHA:     shortFindGitSHA(commit.sha),
+						Subject: limitRunes(commit.subject, 120),
+					})
+				}
+				if query := mapRecentCommitQuery(commit); query != "" && !mapBoundaryQueryMatchesCandidate(query, candidate.Key) && len(candidate.Subareas) < 20 {
+					candidate.Subareas[displayMapLabel(query)] = true
+				}
+			}
+		}
+	}
+}
+
+func mapBoundaryLabelCandidatesForPath(path, repoName string) []mapLabelCandidate {
+	raw := mapPathLabelCandidates(path)
+	raw = append(raw, mapBoundarySegmentLabelCandidates(path)...)
+	var out []mapLabelCandidate
+	seen := map[string]bool{}
+	for _, candidate := range raw {
+		if !mapBoundaryLabelCandidateAllowed(candidate, repoName) || seen[candidate.Key] {
+			continue
+		}
+		seen[candidate.Key] = true
+		out = append(out, candidate)
+		if len(out) >= 8 {
+			break
+		}
+	}
+	return out
+}
+
+func mapBoundarySegmentLabelCandidates(path string) []mapLabelCandidate {
+	parts := strings.Split(normalizeMapPath(path), "/")
+	if len(parts) <= 1 {
+		return nil
+	}
+	dirParts := parts[:len(parts)-1]
+	var out []mapLabelCandidate
+	for i, segment := range dirParts {
+		cleaned := cleanMapPathSegmentForLabel(segment)
+		key := normalizeMapKey(cleaned)
+		if key == "" {
+			continue
+		}
+		if mapBoundaryAllowedGenericAreaLabels[key] {
+			out = append(out, mapLabelCandidate{Key: key, Label: displayMapLabel(cleaned), Score: 6.3 + float64(mapMinInt(i, 4))*0.25})
+		}
+	}
+	return out
+}
+
+func mapBoundaryLabelCandidateAllowed(candidate mapLabelCandidate, repoName string) bool {
+	rawKey := strings.ToLower(strings.TrimSpace(candidate.Key))
+	repoKey := normalizeMapKey(repoName)
+	if strings.Contains(rawKey, "/") {
+		pairParts := strings.Split(rawKey, "/")
+		if len(pairParts) > 0 && mapGenericTerms[normalizeMapKey(pairParts[0])] {
+			return false
+		}
+		for _, part := range pairParts {
+			if mapBoundaryRepoPackageKey(normalizeMapKey(part), repoKey) {
+				return false
+			}
+		}
+	}
+	key := normalizeMapKey(candidate.Key)
+	if key == "" || key != candidate.Key {
+		candidate.Key = key
+	}
+	if key == "" || (isMapGenericAnchor(key) && !mapBoundaryAllowedGenericAreaLabels[key]) || mapGenericAreaLabels[key] || mapKeyMatchesRepoRoot(key, repoKey) || mapBoundaryRepoPackageKey(key, repoKey) {
+		return false
+	}
+	switch key {
+	case "type", "types", "constant", "constants", "suite", "suites", "mock", "mocks", "fixture", "fixtures", "icon", "icons":
+		return false
+	}
+	parts := strings.FieldsFunc(key, func(r rune) bool { return r == '-' || r == '/' })
+	if len(parts) == 0 {
+		return false
+	}
+	meaningful := 0
+	for _, part := range parts {
+		switch part {
+		case "id", "ids", "uuid", "guid", "slug", "ee", "oss", "tmp", "temp", "new", "edit", "view":
+			return false
+		}
+		if len(part) >= 3 && (!mapGenericTerms[part] || mapBoundaryAllowedGenericAreaLabels[part]) {
+			meaningful++
+		}
+	}
+	return meaningful > 0
+}
+
+func mapBoundaryRepoPackageKey(key, repoKey string) bool {
+	if key == "" || repoKey == "" || !strings.HasPrefix(key, repoKey+"-") {
+		return false
+	}
+	suffix := strings.TrimPrefix(key, repoKey+"-")
+	if suffix == "" {
+		return true
+	}
+	for _, part := range strings.Split(suffix, "-") {
+		if part == "front" || part == "website" {
+			continue
+		}
+		if part != "" && !mapGenericTerms[part] {
+			return false
+		}
+	}
+	return true
+}
+
+func mapBoundaryContainingDirs(path, key string) []string {
+	parts := strings.Split(normalizeMapPath(path), "/")
+	if len(parts) <= 1 {
+		return nil
+	}
+	dirs := parts[:len(parts)-1]
+	var out []string
+	for i := range dirs {
+		segmentKey := normalizeMapKey(cleanMapPathSegmentForLabel(dirs[i]))
+		if segmentKey == key {
+			out = append(out, strings.Join(dirs[:i+1], "/"))
+		}
+	}
+	if len(out) == 0 {
+		out = append(out, strings.Join(dirs, "/"))
+	}
+	return firstStrings(out, 4)
+}
+
+func mapBoundarySubareasForCandidate(path, key string) []string {
+	parts := strings.Split(normalizeMapPath(path), "/")
+	if len(parts) <= 1 {
+		return nil
+	}
+	dirs := parts[:len(parts)-1]
+	matchIndex := -1
+	for i, segment := range dirs {
+		if normalizeMapKey(cleanMapPathSegmentForLabel(segment)) == key {
+			matchIndex = i
+			break
+		}
+	}
+	var out []string
+	if matchIndex >= 0 {
+		for _, segment := range dirs[matchIndex+1:] {
+			cleaned := cleanMapPathSegmentForLabel(segment)
+			candidate := mapLabelCandidate{Key: normalizeMapKey(cleaned), Label: displayMapLabel(cleaned)}
+			if mapBoundaryLabelCandidateAllowed(candidate, "") && candidate.Key != key {
+				out = appendUniqueString(out, candidate.Label)
+				if len(out) >= 3 {
+					return out
+				}
+			}
+		}
+	}
+	return out
+}
+
+func mapBoundaryAreaInternal(candidate *mapPathBoundaryCandidate) *mapAreaInternal {
+	rawAnchors := mapBoundaryRawAnchors(candidate)
+	area := &mapAreaInternal{
+		Key:             candidate.Key,
+		Label:           candidate.Label,
+		LabelScore:      candidate.LabelScore,
+		LabelSource:     "path_boundary",
+		Subareas:        copyBoolMap(candidate.Subareas),
+		RawAnchors:      rawAnchors,
+		Artifacts:       dedupeMapArtifacts(candidate.Artifacts),
+		ArtifactPathSet: copyBoolMap(candidate.PathSet),
+		EvidenceCounts:  mapCopyCounts(candidate.EvidenceCounts),
+		EvidenceCount:   candidate.FileCount + candidate.RecentCount,
+		ConfidenceSum:   mapBoundaryCandidateConfidence(candidate) * float64(maxInt(1, len(rawAnchors))),
+		EvidenceSources: copyBoolMap(candidate.EvidenceSources),
+		TraceReceipts:   firstMapTraceReceipts(candidate.TraceReceipts, mapMaxTraceReceipts),
+		Caveats:         []string{"path-primary boundary candidate"},
+	}
+	if len(area.Artifacts) > mapBoundaryMaxArtifacts {
+		area.Artifacts = area.Artifacts[:mapBoundaryMaxArtifacts]
+	}
+	return area
+}
+
+func mapBoundaryRawAnchors(candidate *mapPathBoundaryCandidate) []string {
+	anchors := []string{candidate.Label, candidate.Key}
+	for path := range candidate.BoundaryPaths {
+		anchors = appendUniqueString(anchors, path)
+		if len(anchors) >= 6 {
+			break
+		}
+	}
+	return anchors
+}
+
+func mapBoundaryCandidateDisplayable(candidate *mapPathBoundaryCandidate) bool {
+	if candidate == nil || candidate.FileCount == 0 {
+		return false
+	}
+	if (isMapGenericAnchor(candidate.Key) && !mapBoundaryAllowedGenericAreaLabels[candidate.Key]) || mapGenericAreaLabels[candidate.Key] {
+		return false
+	}
+	families := mapBoundaryFamilyCount(candidate.EvidenceCounts)
+	sourceish := candidate.EvidenceCounts["source"] + candidate.EvidenceCounts["test"]
+	if candidate.FileCount >= 4 && sourceish > 0 {
+		return true
+	}
+	if candidate.FileCount >= 2 && families >= 2 {
+		return true
+	}
+	if candidate.RecentCount > 0 && candidate.FileCount >= 2 {
+		return true
+	}
+	return false
+}
+
+func selectMapBoundaryAreas(areas []*mapAreaInternal, limit int) []*mapAreaInternal {
+	if limit <= 0 {
+		limit = mapDefaultMaxAreas * 2
+	}
+	var out []*mapAreaInternal
+	for _, area := range areas {
+		overlapped := false
+		for _, selected := range out {
+			if mapArtifactOverlap(selected.ArtifactPathSet, area.ArtifactPathSet) >= 0.72 {
+				overlapped = true
+				break
+			}
+			if mapBoundaryKeysRedundant(selected.Key, area.Key) {
+				overlapped = true
+				break
+			}
+		}
+		if overlapped {
+			continue
+		}
+		out = append(out, area)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func mapBoundaryKeysRedundant(a, b string) bool {
+	if a == "" || b == "" || a == b {
+		return true
+	}
+	aParts := mapStringSet(strings.FieldsFunc(a, func(r rune) bool { return r == '-' || r == '/' }))
+	bParts := mapStringSet(strings.FieldsFunc(b, func(r rune) bool { return r == '-' || r == '/' }))
+	shared := 0
+	for part := range aParts {
+		if bParts[part] && !mapGenericTerms[part] {
+			shared++
+		}
+	}
+	return shared > 0 && (len(aParts) == 1 || len(bParts) == 1)
+}
+
+func mapBoundaryAreaScore(area *mapAreaInternal) float64 {
+	score := mapAreaScore(area)
+	score += float64(mapMinInt(len(area.Subareas), 5)) * 3
+	score += float64(mapMinInt(len(area.ArtifactPathSet), 40)) * 0.25
+	score += float64(mapMinInt(area.EvidenceCounts["trace"], 4)) * 4
+	if area.EvidenceCounts["source"] > 0 && area.EvidenceCounts["test"] > 0 {
+		score += 5
+	}
+	if area.EvidenceCounts["source"] > 0 && (area.EvidenceCounts["doc"] > 0 || area.EvidenceCounts["intent"] > 0) {
+		score += 4
+	}
+	return score
+}
+
+func mapBoundaryOutputConfidence(areas []mapArea) string {
+	if len(areas) == 0 {
+		return mapLowConfidence
+	}
+	mediumOrBetter := 0
+	withHierarchy := 0
+	generic := 0
+	for _, area := range areas {
+		if area.Confidence == mapMediumConfidence || area.Confidence == mapHighConfidence {
+			mediumOrBetter++
+		}
+		if len(area.Covers) >= 2 {
+			withHierarchy++
+		}
+		if area.IsRepoRootUmbrella || (isMapGenericAnchor(area.Label) && !mapBoundaryAllowedGenericAreaLabels[normalizeMapKey(area.Label)]) {
+			generic++
+		}
+	}
+	if len(areas) >= 4 && mediumOrBetter >= 4 && withHierarchy >= 3 && generic == 0 {
+		return mapHighConfidence
+	}
+	if len(areas) >= 3 && mediumOrBetter >= 2 && generic <= 1 {
+		return mapMediumConfidence
+	}
+	return mapLowConfidence
+}
+
+func mapBoundaryCandidateConfidence(candidate *mapPathBoundaryCandidate) float64 {
+	families := mapBoundaryFamilyCount(candidate.EvidenceCounts)
+	sourceish := candidate.EvidenceCounts["source"] + candidate.EvidenceCounts["test"]
+	switch {
+	case candidate.FileCount >= 8 && families >= 2 && sourceish > 0:
+		return 0.86
+	case candidate.FileCount >= 3 && sourceish > 0:
+		return 0.74
+	case families >= 2:
+		return 0.66
+	default:
+		return 0.55
+	}
+}
+
+func mapBoundaryFamilyCount(counts map[string]int) int {
+	families := 0
+	for _, family := range []string{"source", "test", "doc", "intent", "protocol", "trace", "config"} {
+		if counts[family] > 0 {
+			families++
+		}
+	}
+	return families
+}
+
+func mapBoundaryFamilyScore(family string) float64 {
+	switch family {
+	case "test":
+		return 3.5
+	case "source":
+		return 3
+	case "doc", "intent":
+		return 2.5
+	case "config":
+		return 1.5
+	default:
+		return 1
+	}
+}
+
+func mapArtifactForBoundaryPath(path, family string) mapArtifact {
+	switch family {
+	case "test":
+		return mapArtifact{Title: filepath.Base(path), Kind: "test_case", Path: path}
+	case "doc":
+		return mapArtifact{Title: filepath.Base(path), Kind: "markdown_artifact", Path: path}
+	case "config":
+		return mapArtifact{Title: filepath.Base(path), Kind: "source_context", Subtype: "config", Path: path}
+	default:
+		return mapArtifact{Title: filepath.Base(path), Kind: "source_context", Path: path}
+	}
+}
+
+func mapBoundaryPathEligible(path string) bool {
+	path = normalizeMapPath(path)
+	if path == "" || mapPathSuppressed(path) || mapRecentPathNoisy(path) {
+		return false
+	}
+	parts := strings.Split(strings.ToLower(path), "/")
+	for _, part := range parts {
+		switch part {
+		case "generated", "__generated__", "gen", ".turbo", ".cache":
+			return false
+		}
+		if strings.HasPrefix(part, ".") && part != ".github" {
+			return false
+		}
+	}
+	return mapBoundaryPathFamily(path) != ""
+}
+
+func mapBoundaryPathFamily(path string) string {
+	lower := strings.ToLower(filepath.ToSlash(path))
+	ext := strings.ToLower(filepath.Ext(lower))
+	base := strings.ToLower(filepath.Base(lower))
+	switch ext {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".icns", ".svg", ".pdf", ".zip", ".gz", ".tgz", ".wasm", ".map", ".lock":
+		return ""
+	}
+	if strings.HasSuffix(lower, "yarn.lock") || strings.HasSuffix(lower, "package-lock.json") || strings.HasSuffix(lower, "pnpm-lock.yaml") {
+		return ""
+	}
+	switch base {
+	case "license", "copying", "notice":
+		return ""
+	case "dockerfile", "makefile", "justfile", "procfile":
+		return "config"
+	}
+	switch ext {
+	case ".md", ".mdx", ".rst", ".adoc":
+		return "doc"
+	case ".yaml", ".yml", ".json", ".toml", ".xml", ".ini", ".env", ".sql":
+		return "config"
+	}
+	return mapRecentPathFamily(path)
+}
+
+func mapBoundaryQueryMatchesCandidate(query, key string) bool {
+	queryWords := mapStringSet(wordsFromMap(query))
+	for _, word := range wordsFromMap(key) {
+		if queryWords[word] {
+			return true
+		}
+	}
+	return false
+}
+
+func copyBoolMap(in map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	for key, value := range in {
+		if value {
+			out[key] = true
+		}
+	}
+	return out
+}
+
 func prepareMapCluster(cluster scan.WorkstreamClusterExample, repoName string) *mapPreparedCluster {
 	anchor := strings.TrimSpace(cluster.Anchor)
 	if anchor == "" {
@@ -1109,7 +1824,10 @@ func publicMapAreas(repoRoot, repoName string, areas []*mapAreaInternal, maxArea
 		covers = cleanMapCovers(label, covers)
 		label = refineMapAreaLabel(label, covers)
 		covers = cleanMapCovers(label, covers)
-		traceReceipts := mapTraceReceipts(repoRoot, area, covers)
+		traceReceipts := firstMapTraceReceipts(area.TraceReceipts, mapMaxTraceReceipts)
+		if len(traceReceipts) == 0 {
+			traceReceipts = mapTraceReceipts(repoRoot, area, covers)
+		}
 		try := mapTryCommand(label, covers, traceReceipts, confidence)
 		areaType := classifyMapAreaType(area, label, areaClass, isRoot, covers)
 		caveats := mapAreaCaveats(area, areaClass, isRoot)
@@ -1912,16 +2630,20 @@ func bestMapCoverForQuery(covers []string, query string) string {
 }
 
 func scoreMapKeyMatch(key, queryKey string) int {
+	keySingular := strings.TrimSuffix(key, "s")
+	querySingular := strings.TrimSuffix(queryKey, "s")
 	switch {
 	case key == queryKey:
 		return 100
+	case len(keySingular) >= 4 && keySingular == querySingular:
+		return 96
 	case strings.HasPrefix(key, queryKey+"-") || strings.HasPrefix(key, queryKey+"/"):
 		return 82
 	case strings.Contains(key, "-"+queryKey+"-") || strings.Contains(key, "/"+queryKey+"/"):
 		return 72
 	case strings.Contains(key, queryKey) && len(queryKey) >= 4:
 		return 58
-	case strings.Contains(queryKey, key) && len(key) >= 4:
+	case len(key) >= 4 && (strings.HasPrefix(queryKey, key+"-") || strings.HasSuffix(queryKey, "-"+key) || strings.Contains(queryKey, "-"+key+"-")):
 		return 50
 	default:
 		return 0
@@ -2055,7 +2777,39 @@ func matchMapAreas(areas []mapArea, query string) []mapAreaMatch {
 
 func scoreMapAreaMatch(area mapArea, queryKey string) int {
 	best := 0
-	for _, value := range mapAreaSearchValues(area) {
+	primaryValues := []string{
+		area.Label,
+		area.Diagnostics.Key,
+		strings.TrimPrefix(area.ID, "area."),
+		strings.TrimPrefix(area.ID, "recent:"),
+	}
+	for _, value := range primaryValues {
+		key := normalizeMapKey(value)
+		if key == "" {
+			continue
+		}
+		score := scoreMapKeyMatch(key, queryKey)
+		if score > 0 {
+			score += 30
+		}
+		if score > best {
+			best = score
+		}
+	}
+	for _, value := range area.Covers {
+		key := normalizeMapKey(value)
+		if key == "" {
+			continue
+		}
+		score := scoreMapKeyMatch(key, queryKey)
+		if score > 0 {
+			score += 10
+		}
+		if score > best {
+			best = score
+		}
+	}
+	for _, value := range mapAreaSecondarySearchValues(area) {
 		key := normalizeMapKey(value)
 		if key == "" {
 			continue
@@ -2071,15 +2825,11 @@ func scoreMapAreaMatch(area mapArea, queryKey string) int {
 	return best
 }
 
-func mapAreaSearchValues(area mapArea) []string {
+func mapAreaSecondarySearchValues(area mapArea) []string {
 	values := []string{
-		area.ID,
-		area.Label,
 		area.AreaType,
 		displayMapAreaType(area.AreaType),
-		area.Diagnostics.Key,
 	}
-	values = append(values, area.Covers...)
 	values = append(values, area.KeyPaths...)
 	values = append(values, area.Diagnostics.RawAnchors...)
 	values = append(values, area.Diagnostics.TraceTerms...)
@@ -2494,7 +3244,7 @@ func displayMapAreaType(areaType string) string {
 }
 
 func mapAreaConfidence(area *mapAreaInternal, class string) string {
-	if isMapGenericAnchor(area.Key) || mapGenericAreaLabels[area.Key] {
+	if (isMapGenericAnchor(area.Key) && !mapBoundaryAllowedGenericAreaLabels[area.Key]) || mapGenericAreaLabels[area.Key] {
 		return mapLowConfidence
 	}
 	weakStandalone := mapWeakStandaloneAreaLabels[area.Key] && len(area.Subareas) < 2

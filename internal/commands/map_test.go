@@ -289,6 +289,85 @@ func TestFastMapFallbackAddsIndexRequiredCaveatForUnindexedRepo(t *testing.T) {
 	}
 }
 
+func TestPathBoundaryMapUsesStablePathLabelOverRecentWorkstream(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "dub")
+	files := []string{
+		"apps/web/modules/webhooks/components/WebhookForm.tsx",
+		"apps/web/modules/webhooks/lib/events.ts",
+		"packages/features/webhooks/lib/constants.ts",
+		"packages/features/webhooks/lib/dto/types.ts",
+		"packages/features/webhooks/lib/webhook.test.ts",
+	}
+	commits := []parsedFindGitCommit{{
+		sha:     "abc1234",
+		subject: "fix: harden webhook link OAuth (#42)",
+		paths: []string{
+			"apps/web/modules/webhooks/lib/events.ts",
+			"packages/features/webhooks/lib/constants.ts",
+		},
+	}}
+
+	areas, _, _ := buildPathBoundaryAreas(repoRoot, "dub", files, commits, 5)
+	if len(areas) == 0 {
+		t.Fatalf("expected boundary areas")
+	}
+	if areas[0].Label != "Webhooks" {
+		t.Fatalf("top label = %q, want stable path boundary Webhooks; areas=%#v", areas[0].Label, areas)
+	}
+	if strings.Contains(strings.ToLower(areas[0].Label), "harden") {
+		t.Fatalf("recent workstream leaked into boundary label: %#v", areas[0])
+	}
+	if len(areas[0].TraceReceipts) == 0 || !strings.Contains(areas[0].TraceReceipts[0].Subject, "harden webhook") {
+		t.Fatalf("expected recent commit as receipt, got %#v", areas[0].TraceReceipts)
+	}
+}
+
+func TestPathBoundaryMapBuildsSubareasFromChildPaths(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "crm")
+	files := []string{
+		"packages/twenty-server/src/modules/workflow/workflow-executor/utils/should-execute-step.util.ts",
+		"packages/twenty-server/src/modules/workflow/workflow-executor/utils/should-execute-step.util.test.ts",
+		"packages/twenty-server/src/modules/workflow/workflow-builder/workflow-builder.service.ts",
+		"packages/twenty-server/src/modules/workflow/workflow-trigger/workflow-trigger.service.ts",
+		"packages/twenty-server/src/modules/workflow/docs/workflow-runtime.md",
+	}
+
+	areas, _, _ := buildPathBoundaryAreas(repoRoot, "twenty", files, nil, 5)
+	var workflow *mapArea
+	for i := range areas {
+		if areas[i].Label == "Workflow" {
+			workflow = &areas[i]
+			break
+		}
+	}
+	if workflow == nil {
+		t.Fatalf("expected Workflow boundary, got %#v", areas)
+	}
+	covers := strings.Join(workflow.Covers, "\n")
+	for _, want := range []string{"Workflow Executor", "Workflow Builder", "Workflow Trigger"} {
+		if !strings.Contains(covers, want) {
+			t.Fatalf("workflow covers missing %q: %#v", want, workflow.Covers)
+		}
+	}
+	if workflow.EvidenceCounts["source"] == 0 || workflow.EvidenceCounts["test"] == 0 || workflow.EvidenceCounts["doc"] == 0 {
+		t.Fatalf("expected role-diverse evidence, got %#v", workflow.EvidenceCounts)
+	}
+}
+
+func TestMapAreaMatchPrefersPluralLabelOverPathOnlyMatch(t *testing.T) {
+	areas := []mapArea{
+		{Label: "Cron", KeyPaths: []string{"apps/web/app/api/cron/notify-partners/route.ts"}, Diagnostics: mapAreaDiagnostics{TraceTerms: []string{"partner"}}},
+		{Label: "Partners", KeyPaths: []string{"apps/web/app/partners/fraud/page.tsx"}},
+	}
+	matches := matchMapAreas(areas, "partner")
+	if len(matches) == 0 {
+		t.Fatalf("expected matches")
+	}
+	if matches[0].Area.Label != "Partners" {
+		t.Fatalf("top match = %q, want Partners; matches=%#v", matches[0].Area.Label, matches)
+	}
+}
+
 func TestMapRecentTopicsFilterByAreaQuery(t *testing.T) {
 	topics, _ := buildMapRecentTopics([]parsedFindGitCommit{
 		{
