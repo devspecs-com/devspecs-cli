@@ -213,6 +213,9 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode 
 	if anchorFirstRanking && !selectedOnlyAnchorFirst {
 		scoredCandidates = applyAnchorFirstRanking(scoredCandidates, candidates, query, normalizedAnchorFirstMode)
 	}
+	if anchorFirstRanking {
+		scoredCandidates = applyExactAnchorDiscipline(scoredCandidates, candidates, query, queryLower, terms, limit)
+	}
 	scoredCandidates = selectScoredCandidates(scoredCandidates, queryLower, limit)
 	scoredCandidates = enforceSupportingArtifactBudgets(scoredCandidates, queryLower, terms)
 	if evidenceBalanced {

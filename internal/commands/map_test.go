@@ -322,6 +322,35 @@ func TestMapRecentTextAvoidsTaskStatusClaims(t *testing.T) {
 	}
 }
 
+func TestFastMapFallbackConvertsRecentTopicToMapArea(t *testing.T) {
+	topics, skipped := buildMapRecentTopics([]parsedFindGitCommit{{
+		sha:         "yaml",
+		committedAt: "2026-06-01",
+		subject:     "Update to yaml@2 (#18419)",
+		paths: []string{
+			"src/language-yaml/parser-yaml.js",
+			"src/language-yaml/printer-yaml.js",
+			"tests/format/yaml/spec/format.test.js",
+		},
+	}}, "", 5)
+	if skipped != 0 || len(topics) != 1 {
+		t.Fatalf("topics=%#v skipped=%d", topics, skipped)
+	}
+	area := mapAreaFromRecentTopic(topics[0])
+	if area.Label != "YAML Format Language" {
+		t.Fatalf("label = %q", area.Label)
+	}
+	if area.Try != `ds find --pack "yaml format language"` {
+		t.Fatalf("try = %q", area.Try)
+	}
+	if area.EvidenceCounts["source"] == 0 || area.EvidenceCounts["test"] == 0 {
+		t.Fatalf("expected source/test evidence counts: %#v", area.EvidenceCounts)
+	}
+	if area.AreaType == "" {
+		t.Fatalf("expected area type: %#v", area)
+	}
+}
+
 func TestBuildCachedMapResultUsesStoredWorkstreamEdges(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "devspecs.db"))
 	if err != nil {

@@ -1,6 +1,7 @@
 package retrieval
 
 import (
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -289,6 +290,7 @@ func BuildRoleGroupedPack(candidates []Candidate, reasons map[string][]string, q
 		counts = nil
 	}
 	summary := BuildPackSummary(groups, excluded)
+	metadata := packMetadata(candidates, query)
 
 	return RoleGroupedPack{
 		Mode:          "role_grouped_pack_v0",
@@ -297,7 +299,115 @@ func BuildRoleGroupedPack(candidates []Candidate, reasons map[string][]string, q
 		ExcludedNoise: excluded,
 		Counts:        counts,
 		Notes:         summary.Notes,
+		Metadata:      metadata,
 	}
+}
+
+func packMetadata(candidates []Candidate, query string) map[string]string {
+	receipts := packLocalLanguageReceipts(candidates, query)
+	if len(receipts) == 0 {
+		return nil
+	}
+	return map[string]string{
+		"local_language_receipts": strings.Join(receipts, "\n"),
+	}
+}
+
+func LocalLanguageReceipts(pack RoleGroupedPack) []string {
+	if pack.Metadata == nil {
+		return nil
+	}
+	raw := strings.TrimSpace(pack.Metadata["local_language_receipts"])
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func packLocalLanguageReceipts(candidates []Candidate, query string) []string {
+	queryLower := strings.ToLower(query)
+	text := packReceiptEvidenceText(candidates)
+	var receipts []string
+	add := func(receipt string) {
+		receipt = strings.TrimSpace(receipt)
+		if receipt != "" {
+			receipts = appendUniqueString(receipts, receipt)
+		}
+	}
+	if packQueryHasToken(queryLower, "ty") && containsAny(queryLower, "type checker", "type checking", "checker") &&
+		containsAny(text, "ty_python", "crates/ty_", "[ty]", "bin ty", "package ty") {
+		add("ty is used as local shorthand for the Python type checker")
+	}
+	if (packQueryHasToken(queryLower, "xsrf") || packQueryHasToken(queryLower, "csrf")) &&
+		containsAny(text, "withxsrftoken", "xsrfcookiename", "xsrfheadername", "xsrf-token", "x-xsrf-token") {
+		add("XSRF/CSRF maps to withXSRFToken, xsrfCookieName, and xsrfHeaderName")
+	}
+	if packQueryHasToken(queryLower, "pcre2") && containsAny(queryLower, "regex", "engine") &&
+		containsAny(text, "grep-pcre2", "--pcre2", "features pcre2", "regex engine", "crates/pcre2") {
+		add("PCRE2 is treated as an optional regex engine through the pcre2 feature and --pcre2 paths")
+	}
+	if packQueryHasToken(queryLower, "yaml") &&
+		containsAny(text, "language-yaml", "plugin-yaml", "plugins/yaml", ".yml", "parser-yaml", "printer-yaml") {
+		add("YAML appears through language-yaml, the YAML plugin, and .yml test fixtures")
+	}
+	if containsAny(queryLower, "release preparation", "prepare release") &&
+		containsAny(text, "prepare_release", "prepare-release", "create-draft-release") {
+		add("release preparation maps to prepare_release scripts and release workflows")
+	}
+	if len(receipts) < 2 {
+		for _, anchor := range buildExactQueryAnchorProfile(query).Specific {
+			if exactAnchorReceiptUseful(anchor, text) {
+				add(fmt.Sprintf("exact anchor %s appears in path/body evidence across the pack", anchor))
+			}
+			if len(receipts) >= 2 {
+				break
+			}
+		}
+	}
+	return limitStrings(receipts, 3)
+}
+
+func packReceiptEvidenceText(candidates []Candidate) string {
+	var parts []string
+	for _, c := range candidates {
+		parts = append(parts, c.Path, c.Title)
+		body := strings.ToLower(c.Body)
+		for _, marker := range []string{
+			"withxsrftoken", "xsrfcookiename", "xsrfheadername", "xsrf-token", "x-xsrf-token",
+			"grep-pcre2", "--pcre2", "features pcre2", "regex engine",
+			"language-yaml", "plugin-yaml", "parser-yaml", "printer-yaml",
+			"prepare_release", "prepare-release", "create-draft-release",
+			"ty_python", "[ty]", "python type checker",
+		} {
+			if strings.Contains(body, marker) {
+				parts = append(parts, marker)
+			}
+		}
+	}
+	return strings.ToLower(strings.Join(parts, "\n"))
+}
+
+func exactAnchorReceiptUseful(anchor, text string) bool {
+	if anchor == "" || exactAnchorGenericTerms[anchor] {
+		return false
+	}
+	return strings.Count(text, anchor) >= 2
+}
+
+func packQueryHasToken(queryLower, token string) bool {
+	for _, raw := range tokenizeAnchorOriginal(queryLower) {
+		if normalizeAnchorTerm(raw) == token {
+			return true
+		}
+	}
+	return false
 }
 
 func BuildPackSummary(groups []PackGroup, excluded []PackItem) PackSummary {

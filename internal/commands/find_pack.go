@@ -13,6 +13,7 @@ type FindPackOutput struct {
 	Retriever        string                `json:"retriever"`
 	Mode             string                `json:"mode"`
 	Summary          retrieval.PackSummary `json:"summary,omitempty"`
+	LocalLanguage    []string              `json:"local_language,omitempty"`
 	Groups           []retrieval.PackGroup `json:"groups"`
 	ExcludedNoise    []retrieval.PackItem  `json:"excluded_noise,omitempty"`
 	Counts           map[string]int        `json:"counts,omitempty"`
@@ -28,6 +29,7 @@ func findPackOutput(query, retrieverName string, candidates []retrieval.Candidat
 		Retriever:     retrieverName,
 		Mode:          rolePack.Mode,
 		Summary:       rolePack.Summary,
+		LocalLanguage: retrieval.LocalLanguageReceipts(rolePack),
 		Groups:        rolePack.Groups,
 		ExcludedNoise: rolePack.ExcludedNoise,
 		Counts:        rolePack.Counts,
@@ -49,6 +51,7 @@ func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retr
 		fmt.Fprintln(out, "No matching artifacts found.")
 		return nil
 	}
+	writePackLocalLanguage(out, rolePack)
 
 	for _, group := range rolePack.Groups {
 		if len(group.Items) == 0 {
@@ -102,6 +105,22 @@ func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retr
 	}
 	writeGitTrustText(out, gitTrust)
 	return nil
+}
+
+func writePackLocalLanguage(out io.Writer, rolePack retrieval.RoleGroupedPack) {
+	receipts := retrieval.LocalLanguageReceipts(rolePack)
+	if len(receipts) == 0 {
+		return
+	}
+	fmt.Fprintln(out)
+	if len(receipts) == 1 {
+		fmt.Fprintf(out, "Local language: %s\n", receipts[0])
+		return
+	}
+	fmt.Fprintln(out, "Local language:")
+	for _, receipt := range firstStrings(receipts, 3) {
+		fmt.Fprintf(out, "- %s\n", receipt)
+	}
 }
 
 func writeBoundaryPrimarySummary(out io.Writer, rolePack retrieval.RoleGroupedPack) {

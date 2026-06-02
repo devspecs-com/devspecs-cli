@@ -343,21 +343,33 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 	}
 	var result *scan.Result
 	var cachedOutput *mapOutput
-	if opts.AreaQuery != "" {
-		if cached, ok, cacheErr := loadMapOutputCache(repoRoot, opts.MaxAreas); cacheErr != nil {
-			debugLog("map output cache unavailable: %v", cacheErr)
-		} else if ok {
-			cachedOutput = &cached
-			props["output_cache_hit"] = true
-		}
+	if cached, ok, cacheErr := loadMapOutputCache(repoRoot, opts.MaxAreas); cacheErr != nil {
+		debugLog("map output cache unavailable: %v", cacheErr)
+	} else if ok {
+		cachedOutput = &cached
+		props["output_cache_hit"] = true
 	}
-	if cachedOutput == nil && opts.AreaQuery != "" {
+	if cachedOutput == nil {
 		if cached, ok, cacheErr := runCachedMapScan(repoRoot); cacheErr != nil {
 			debugLog("map cache unavailable: %v", cacheErr)
 		} else if ok {
 			result = cached
 			props["cache_hit"] = true
 		}
+	}
+	if result == nil && cachedOutput == nil && opts.AreaQuery == "" {
+		out := buildFastMapFallbackOutput(cmd.Context(), repoRoot, opts)
+		success = true
+		props["confidence"] = out.Repo.Confidence
+		props["area_count_bucket"] = telemetry.CountBucket(len(out.Areas))
+		props["fast_fallback"] = true
+		if opts.JSON {
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			return enc.Encode(out)
+		}
+		writeMapText(cmd.OutOrStdout(), out, opts.Verbose)
+		return nil
 	}
 	if result == nil && cachedOutput == nil {
 		result, err = runMapScan(cmd.Context(), repoRoot)
@@ -1286,6 +1298,89 @@ func buildMapRecentOutput(ctx context.Context, repoRoot string, opts mapOptions)
 	if len(topics) == 0 {
 		out.Repo.Confidence = mapLowConfidence
 		out.Caveats = append(out.Caveats, "no non-noisy recent topics found")
+	}
+	return out
+}
+
+func buildFastMapFallbackOutput(ctx context.Context, repoRoot string, opts mapOptions) mapOutput {
+	recent := buildMapRecentOutput(ctx, repoRoot, mapOptions{MaxAreas: opts.MaxAreas})
+	out := mapOutput{
+		Schema: mapSchemaVersion,
+		Repo: mapRepo{
+			Name:       recent.Repo.Name,
+			Path:       recent.Repo.Path,
+			Confidence: recent.Repo.Confidence,
+		},
+		EvidenceAvailability: mapEvidenceAvailability{Trace: true},
+		Diagnostics: mapDiagnostics{
+			RawClusterCount:       len(recent.Topics),
+			WorkstreamAnchorsSeen: len(recent.Topics),
+		},
+	}
+	if out.Repo.Name == "" {
+		out.Repo.Name = filepath.Base(repoRoot)
+	}
+	if out.Repo.Path == "" {
+		out.Repo.Path = repoRoot
+	}
+	if len(recent.Topics) == 0 {
+		out.Repo.Confidence = mapLowConfidence
+		out.Caveats = append(out.Caveats, recent.Caveats...)
+		out.Caveats = append(out.Caveats, "fast map fallback had no recent local git/path topics")
+		return out
+	}
+	for _, topic := range recent.Topics {
+		area := mapAreaFromRecentTopic(topic)
+		out.Areas = append(out.Areas, area)
+		out.EvidenceAvailability.Source += topic.EvidenceCounts["source"]
+		out.EvidenceAvailability.Test += topic.EvidenceCounts["test"]
+		out.EvidenceAvailability.Markdown += topic.EvidenceCounts["doc"]
+	}
+	out.Repo.Confidence = mapMediumConfidence
+	out.Caveats = append(out.Caveats, "fast map from recent local git/path evidence; run ds scan or ds map <area> for a deeper indexed map")
+	return out
+}
+
+func mapAreaFromRecentTopic(topic mapRecentTopic) mapArea {
+	internal := &mapAreaInternal{
+		Key:             normalizeMapKey(topic.Query),
+		Label:           topic.Label,
+		EvidenceCounts:  copyIntMap(topic.EvidenceCounts),
+		ArtifactPathSet: map[string]bool{},
+	}
+	for _, path := range topic.KeyPaths {
+		internal.Artifacts = append(internal.Artifacts, mapArtifact{Path: path, Title: path})
+	}
+	areaType := classifyMapAreaType(internal, topic.Label, mapClassWorkstream, false, nil)
+	confidence := mapMediumConfidence
+	if topic.FileCount <= 1 || topic.CommitCount <= 0 {
+		confidence = mapLowConfidence
+	}
+	return mapArea{
+		ID:             "recent:" + normalizeMapKey(topic.Query),
+		Label:          topic.Label,
+		Class:          mapClassWorkstream,
+		AreaType:       areaType,
+		Confidence:     confidence,
+		EvidenceCounts: copyIntMap(topic.EvidenceCounts),
+		KeyPaths:       topic.KeyPaths,
+		TraceReceipts:  topic.RecentSignals,
+		Try:            topic.Try,
+		Diagnostics: mapAreaDiagnostics{
+			Key:              normalizeMapKey(topic.Query),
+			TraceTerms:       mapRecentComparableWords(topic.Query),
+			TraceReceiptMode: mapTraceReceiptMode,
+		},
+	}
+}
+
+func copyIntMap(in map[string]int) map[string]int {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(in))
+	for key, value := range in {
+		out[key] = value
 	}
 	return out
 }

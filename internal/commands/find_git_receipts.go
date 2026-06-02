@@ -221,6 +221,7 @@ func scoreFindGitReceipts(commits []parsedFindGitCommit, packedPaths []string, q
 		pathSet[path] = true
 	}
 	anchors := findGitReceiptQueryAnchors(query)
+	specificAnchors := findGitReceiptSpecificAnchors(query)
 	var scored []FindGitReceipt
 	for _, commit := range commits {
 		if findGitReceiptCommitNoisy(commit) {
@@ -236,6 +237,17 @@ func scoreFindGitReceipts(commits []parsedFindGitCommit, packedPaths []string, q
 			if strings.Contains(combined, anchor) {
 				matchedTerms = appendUniqueString(matchedTerms, anchor)
 			}
+		}
+		for _, anchor := range specificAnchors {
+			for _, path := range commit.paths {
+				if strings.Contains(strings.ToLower(filepath.ToSlash(path)), anchor) {
+					matchedTerms = appendUniqueString(matchedTerms, anchor)
+					break
+				}
+			}
+		}
+		if len(specificAnchors) > 0 && len(matchedTerms) == 0 && findGitReceiptPathOnlyNoise(commit, matchedPaths) {
+			continue
 		}
 		signals := []string{fmt.Sprintf("touched %d packed path(s)", len(matchedPaths))}
 		score := 20 + len(matchedPaths)*5
@@ -313,6 +325,40 @@ func findGitReceiptQueryAnchors(query string) []string {
 		}
 	}
 	return out
+}
+
+func findGitReceiptSpecificAnchors(query string) []string {
+	generic := map[string]bool{
+		"engine": true, "format": true, "formatting": true, "header": true, "headers": true,
+		"helper": true, "helpers": true, "parser": true, "parsers": true, "regex": true,
+		"release": true, "source": true, "test": true, "tests": true,
+	}
+	var out []string
+	for _, token := range strings.FieldsFunc(strings.ToLower(query), func(r rune) bool {
+		return !(r == '_' || r == '-' || r == '.' || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'))
+	}) {
+		token = strings.Trim(token, "_-.")
+		if token == "" || generic[token] {
+			continue
+		}
+		if len(token) <= 6 || strings.ContainsAny(token, "0123456789_-.") {
+			out = appendUniqueString(out, token)
+		}
+	}
+	return out
+}
+
+func findGitReceiptPathOnlyNoise(commit parsedFindGitCommit, matchedPaths []string) bool {
+	subject := strings.ToLower(strings.TrimSpace(commit.subject))
+	if len(matchedPaths) > 3 {
+		return true
+	}
+	return strings.Contains(subject, "prettier") ||
+		strings.Contains(subject, "format") ||
+		strings.Contains(subject, "rustfmt") ||
+		strings.Contains(subject, "migration guide") ||
+		strings.Contains(subject, "style:") ||
+		strings.Contains(subject, "changelog")
 }
 
 func commitMatchedPackPaths(paths []string, packed map[string]bool) []string {

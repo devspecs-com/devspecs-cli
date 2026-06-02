@@ -169,6 +169,63 @@ func TestAnchorFirstRankingKeepsExactTestNameFirst(t *testing.T) {
 	}
 }
 
+func TestExactAnchorDisciplinePrefersSpecificAnchorOverGenericTerm(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "regex_literal",
+			Path:  "crates/regex/src/literal.rs",
+			Kind:  "source_context",
+			Title: "crates/regex/src/literal.rs (rust)",
+			Body:  "regex literal extraction and regex engine helpers",
+		},
+		{
+			ID:    "pcre2_matcher",
+			Path:  "crates/pcre2/src/matcher.rs",
+			Kind:  "source_context",
+			Title: "crates/pcre2/src/matcher.rs (rust)",
+			Body:  "An implementation of the Matcher trait using PCRE2 as the regex engine.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true, AnchorFirstMode: DefaultAnchorFirstMode}).Retrieve(candidates, "pcre2 regex engine")
+	if len(got) < 2 {
+		t.Fatalf("got %d results, want at least 2: %#v", len(got), got)
+	}
+	if got[0].Path != "crates/pcre2/src/matcher.rs" {
+		t.Fatalf("first result = %q, want pcre2 matcher; all=%#v", got[0].Path, CandidatePaths(got))
+	}
+	if got[0].Metadata["exact_anchor_score"] == "" {
+		t.Fatalf("expected exact anchor metadata on pcre2 result: %#v", got[0].Metadata)
+	}
+}
+
+func TestExactAnchorDisciplineBackfillsBodyExactAnchor(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "header_stream",
+			Path:  "lib/helpers/ZlibHeaderTransformStream.js",
+			Kind:  "source_context",
+			Title: "lib/helpers/ZlibHeaderTransformStream.js (javascript)",
+			Body:  "header transform helper",
+		},
+		{
+			ID:    "resolve_config",
+			Path:  "lib/helpers/resolveConfig.js",
+			Kind:  "source_context",
+			Title: "lib/helpers/resolveConfig.js (javascript)",
+			Body:  "const xsrfHeaderName = own('xsrfHeaderName'); const xsrfCookieName = own('xsrfCookieName'); const withXSRFToken = own('withXSRFToken'); headers.set(xsrfHeaderName, xsrfValue);",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true, AnchorFirstMode: DefaultAnchorFirstMode}).Retrieve(candidates, "xsrf csrf cookie header")
+	if len(got) == 0 {
+		t.Fatal("expected results")
+	}
+	if got[0].Path != "lib/helpers/resolveConfig.js" {
+		t.Fatalf("first result = %q, want resolveConfig; all=%#v", got[0].Path, CandidatePaths(got))
+	}
+}
+
 func TestAnchorFirstRerankOnlyDoesNotBackfill(t *testing.T) {
 	selected := []scoredCandidate{{
 		candidate: Candidate{Path: "docs/generic.md", Title: "Generic Architecture Notes", Body: "Architecture background."},

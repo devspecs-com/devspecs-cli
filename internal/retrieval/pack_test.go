@@ -109,6 +109,34 @@ func TestBuildRoleGroupedPackIncludesAgentInstructionsWhenRequested(t *testing.T
 	assertGroupCount(t, pack, PackRoleSupportingContext, 1)
 }
 
+func TestBuildRoleGroupedPackAddsLocalLanguageReceipts(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:    "resolve",
+			Path:  "lib/helpers/resolveConfig.js",
+			Kind:  "source_context",
+			Title: "resolveConfig",
+			Body:  "withXSRFToken xsrfCookieName xsrfHeaderName X-XSRF-TOKEN",
+		},
+		{
+			ID:    "defaults",
+			Path:  "lib/defaults/index.js",
+			Kind:  "source_context",
+			Title: "defaults",
+			Body:  "xsrfCookieName xsrfHeaderName",
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "xsrf csrf cookie header")
+	receipts := LocalLanguageReceipts(pack)
+	if len(receipts) == 0 {
+		t.Fatalf("expected local language receipt: %#v", pack.Metadata)
+	}
+	if receipts[0] != "XSRF/CSRF maps to withXSRFToken, xsrfCookieName, and xsrfHeaderName" {
+		t.Fatalf("unexpected receipt: %#v", receipts)
+	}
+}
+
 func TestBuildRoleGroupedPackIncludesProjectGuidelinesWhenRequested(t *testing.T) {
 	candidates := []Candidate{
 		{
