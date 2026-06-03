@@ -234,11 +234,25 @@ type mapDiagnostics struct {
 }
 
 type mapAreaDiagnostics struct {
-	Key              string   `json:"key,omitempty"`
-	RawAnchors       []string `json:"raw_anchors,omitempty"`
-	LabelEvidence    []string `json:"label_evidence,omitempty"`
-	TraceTerms       []string `json:"trace_terms,omitempty"`
-	TraceReceiptMode string   `json:"trace_receipt_mode,omitempty"`
+	Key              string                     `json:"key,omitempty"`
+	RawAnchors       []string                   `json:"raw_anchors,omitempty"`
+	LabelEvidence    []string                   `json:"label_evidence,omitempty"`
+	TraceTerms       []string                   `json:"trace_terms,omitempty"`
+	TraceReceiptMode string                     `json:"trace_receipt_mode,omitempty"`
+	Packability      *mapPackabilityDiagnostics `json:"packability,omitempty"`
+}
+
+type mapPackabilityDiagnostics struct {
+	KeyPathCount            int      `json:"key_path_count,omitempty"`
+	IndexedKeyPathCount     int      `json:"indexed_key_path_count,omitempty"`
+	PrefixKeyPathCount      int      `json:"prefix_key_path_count,omitempty"`
+	IndexedQueryAnchorCount int      `json:"indexed_query_anchor_count,omitempty"`
+	MissingKeyExtensions    []string `json:"missing_key_extensions,omitempty"`
+	Decision                string   `json:"decision,omitempty"`
+	SelectedTrySource       string   `json:"selected_try_source,omitempty"`
+	SuppressedTry           string   `json:"suppressed_try,omitempty"`
+	SuppressedTrySource     string   `json:"suppressed_try_source,omitempty"`
+	TrySuppressed           bool     `json:"try_suppressed,omitempty"`
 }
 
 type mapAreaInternal struct {
@@ -1902,7 +1916,7 @@ func buildMapOutput(repoRoot string, result *scan.Result, opts mapOptions) mapOu
 		}
 		return mapAreaScore(accum[i]) > mapAreaScore(accum[j])
 	})
-	areas := publicMapAreas(repoRoot, repoName, accum, opts.MaxAreas, mapRepoShapeUnknown)
+	areas := publicMapAreas(repoRoot, repoName, accum, opts.MaxAreas, mapRepoShapeUnknown, nil)
 	confidence := mapOutputConfidence(result, areas)
 	caveats := mapOutputCaveats(repoRoot, result, areas, clusters, confidence)
 	if confidence == mapLowConfidence {
@@ -1957,7 +1971,11 @@ func buildPathBoundaryMapOutput(ctx context.Context, repoRoot string, opts mapOp
 	repoName := filepath.Base(filepath.Clean(repoRoot))
 	files, source, limited, fileErr := listMapBoundaryFiles(ctx, repoRoot)
 	recentCommits := mapBoundaryRecentCommits(ctx, repoRoot)
-	areas, evidence, rawCandidateCount := buildPathBoundaryAreas(repoRoot, repoName, files, recentCommits, opts.MaxAreas)
+	packability, packabilityErr := loadMapPackabilityIndex(repoRoot)
+	if packabilityErr != nil {
+		debugLog("map packability index unavailable: %v", packabilityErr)
+	}
+	areas, evidence, rawCandidateCount := buildPathBoundaryAreas(repoRoot, repoName, files, recentCommits, opts.MaxAreas, packability)
 	confidence := mapBoundaryOutputConfidence(areas)
 	caveats := []string{"experimental path-primary boundary map; git/docs/tests boost boundaries but do not define them"}
 	if source == "walk" {
@@ -2094,7 +2112,11 @@ func mapBoundaryRecentCommits(ctx context.Context, repoRoot string) []parsedFind
 	return out
 }
 
-func buildPathBoundaryAreas(repoRoot, repoName string, files []string, commits []parsedFindGitCommit, maxAreas int) ([]mapArea, mapEvidenceAvailability, int) {
+func buildPathBoundaryAreas(repoRoot, repoName string, files []string, commits []parsedFindGitCommit, maxAreas int, packabilityArg ...*mapPackabilityIndex) ([]mapArea, mapEvidenceAvailability, int) {
+	var packability *mapPackabilityIndex
+	if len(packabilityArg) > 0 {
+		packability = packabilityArg[0]
+	}
 	candidates := map[string]*mapPathBoundaryCandidate{}
 	evidence := mapEvidenceAvailability{}
 	repoShape := inferMapRepoShape(repoName, files)
@@ -2138,7 +2160,7 @@ func buildPathBoundaryAreas(repoRoot, repoName string, files []string, commits [
 		return left > right
 	})
 	internals = selectMapBoundaryAreas(internals, maxAreas*2, repoShape)
-	areas := publicMapAreas(repoRoot, repoName, internals, maxAreas, repoShape)
+	areas := publicMapAreas(repoRoot, repoName, internals, maxAreas, repoShape, packability)
 	return areas, evidence, len(candidates)
 }
 
@@ -3768,7 +3790,7 @@ func mergeDuplicateMapAreas(areas []*mapAreaInternal) []*mapAreaInternal {
 	return out
 }
 
-func publicMapAreas(repoRoot, repoName string, areas []*mapAreaInternal, maxAreas int, repoShape string) []mapArea {
+func publicMapAreas(repoRoot, repoName string, areas []*mapAreaInternal, maxAreas int, repoShape string, packability *mapPackabilityIndex) []mapArea {
 	if maxAreas <= 0 {
 		maxAreas = mapDefaultMaxAreas
 	}
@@ -3798,7 +3820,7 @@ func publicMapAreas(repoRoot, repoName string, areas []*mapAreaInternal, maxArea
 		keyPaths := mapArtifactPaths(area.Artifacts)
 		areaType := classifyMapAreaType(area, label, areaClass, isRoot, covers)
 		boundaryRole := classifyMapBoundaryRole(area, label, areaType, isRoot, covers, repoName, repoShape)
-		try := mapTryCommandForRole(label, covers, traceReceipts, confidence, keyPaths, boundaryRole)
+		try, tryPackability := mapTryCommandForRoleWithPackability(label, covers, traceReceipts, confidence, keyPaths, boundaryRole, packability)
 		caveats := mapAreaCaveats(area, areaClass, isRoot)
 		if isRoot && len(covers) == 0 {
 			caveats = appendUniqueString(caveats, "package-root signal only")
@@ -3823,6 +3845,7 @@ func publicMapAreas(repoRoot, repoName string, areas []*mapAreaInternal, maxArea
 				LabelEvidence:    mapLabelEvidence(area),
 				TraceTerms:       mapTraceTerms(traceReceipts),
 				TraceReceiptMode: mapTraceReceiptMode,
+				Packability:      tryPackability,
 			},
 		}
 		out = append(out, pub)
@@ -3871,6 +3894,9 @@ func writeMapText(out io.Writer, m mapOutput, verbose bool) {
 		}
 		if verbose {
 			fmt.Fprintf(out, "   Diagnostics: class=%s role=%s confidence=%s key=%s\n", area.Class, area.BoundaryRole, area.Confidence, area.Diagnostics.Key)
+			if area.Diagnostics.Packability != nil {
+				fmt.Fprintf(out, "   Packability: %s\n", mapPackabilityDiagnosticsText(area.Diagnostics.Packability))
+			}
 			if len(area.Diagnostics.RawAnchors) > 0 {
 				fmt.Fprintf(out, "   Raw anchors: %s\n", strings.Join(area.Diagnostics.RawAnchors, ", "))
 			}
@@ -3964,6 +3990,9 @@ func writeMapAreaText(out io.Writer, m mapOutput, query string, verbose bool) {
 	}
 	if verbose {
 		fmt.Fprintf(out, "Diagnostics: match_score=%d class=%s role=%s key=%s\n", matches[0].Score, primary.Class, primary.BoundaryRole, primary.Diagnostics.Key)
+		if primary.Diagnostics.Packability != nil {
+			fmt.Fprintf(out, "Packability: %s\n", mapPackabilityDiagnosticsText(primary.Diagnostics.Packability))
+		}
 		if len(primary.Diagnostics.RawAnchors) > 0 {
 			fmt.Fprintf(out, "Raw anchors: %s\n", strings.Join(primary.Diagnostics.RawAnchors, ", "))
 		}
@@ -4808,6 +4837,9 @@ func mapAreaSecondarySearchValues(area mapArea) []string {
 
 func mapAreaPackCommands(area mapArea) []string {
 	var commands []string
+	if area.Diagnostics.Packability != nil && area.Diagnostics.Packability.TrySuppressed {
+		return nil
+	}
 	if area.Try != "" {
 		commands = appendUniqueString(commands, area.Try)
 	}
@@ -4917,6 +4949,25 @@ func writeMapCaveats(out io.Writer, caveats []string) {
 	for _, caveat := range caveats {
 		fmt.Fprintf(out, "- %s\n", caveat)
 	}
+}
+
+func mapPackabilityDiagnosticsText(diag *mapPackabilityDiagnostics) string {
+	if diag == nil {
+		return ""
+	}
+	parts := []string{
+		fmt.Sprintf("decision=%s", firstNonEmpty(diag.Decision, "unknown")),
+		fmt.Sprintf("key=%d/%d", diag.IndexedKeyPathCount, diag.KeyPathCount),
+		fmt.Sprintf("prefix=%d", diag.PrefixKeyPathCount),
+		fmt.Sprintf("query_anchors=%d", diag.IndexedQueryAnchorCount),
+	}
+	if len(diag.MissingKeyExtensions) > 0 {
+		parts = append(parts, "missing_ext="+strings.Join(diag.MissingKeyExtensions, ","))
+	}
+	if diag.TrySuppressed && diag.SuppressedTry != "" {
+		parts = append(parts, "suppressed="+diag.SuppressedTry)
+	}
+	return strings.Join(parts, "; ")
 }
 
 func mapEvidence(result *scan.Result) mapEvidenceAvailability {
@@ -5473,6 +5524,145 @@ func firstMapCoverLead(covers []string) string {
 	return ""
 }
 
+type mapPackabilityIndex struct {
+	paths map[string]string
+	dirs  map[string]int
+	words map[string]int
+}
+
+func loadMapPackabilityIndex(repoRoot string) (*mapPackabilityIndex, error) {
+	db, err := openDB()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	meta := db.GetRepoByRoot(repoRoot)
+	if meta == nil {
+		return nil, nil
+	}
+	rows, err := db.Query("SELECT COALESCE(path,''), COALESCE(source_type,'') FROM sources WHERE repo_id = ?", meta.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	index := &mapPackabilityIndex{
+		paths: map[string]string{},
+		dirs:  map[string]int{},
+		words: map[string]int{},
+	}
+	for rows.Next() {
+		var pathValue, sourceType string
+		if err := rows.Scan(&pathValue, &sourceType); err != nil {
+			return nil, err
+		}
+		index.add(pathValue, sourceType)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return index, nil
+}
+
+func (idx *mapPackabilityIndex) add(pathValue, sourceType string) {
+	pathValue = normalizeMapPath(pathValue)
+	if pathValue == "" {
+		return
+	}
+	idx.paths[pathValue] = sourceType
+	dir := mapPackabilityDir(pathValue)
+	for dir != "" && dir != "." {
+		idx.dirs[dir]++
+		next := mapPackabilityDir(dir)
+		if next == dir || next == "." {
+			break
+		}
+		dir = next
+	}
+	for _, word := range wordsFromMap(pathValue) {
+		if mapTrySpecificWord(word) {
+			idx.words[word]++
+		}
+	}
+}
+
+func mapPackabilityDir(pathValue string) string {
+	pathValue = normalizeMapPath(pathValue)
+	if pathValue == "" {
+		return ""
+	}
+	dir := pathpkg.Dir(pathValue)
+	if dir == "." {
+		return ""
+	}
+	return dir
+}
+
+func (idx *mapPackabilityIndex) diagnostics(keyPaths []string) *mapPackabilityDiagnostics {
+	if idx == nil {
+		return nil
+	}
+	diag := &mapPackabilityDiagnostics{KeyPathCount: len(keyPaths)}
+	for _, raw := range keyPaths {
+		pathValue := normalizeMapPath(raw)
+		if pathValue == "" {
+			continue
+		}
+		if _, ok := idx.paths[pathValue]; ok {
+			diag.IndexedKeyPathCount++
+			continue
+		}
+		if idx.prefixSupported(pathValue) {
+			diag.PrefixKeyPathCount++
+			continue
+		}
+		if ext := strings.ToLower(filepath.Ext(pathValue)); ext != "" {
+			diag.MissingKeyExtensions = appendUniqueString(diag.MissingKeyExtensions, ext)
+		}
+	}
+	return diag
+}
+
+func (idx *mapPackabilityIndex) prefixSupported(pathValue string) bool {
+	if idx == nil {
+		return false
+	}
+	pathValue = normalizeMapPath(pathValue)
+	if pathValue == "" {
+		return false
+	}
+	dir := mapPackabilityDir(pathValue)
+	for depth := 0; dir != "" && depth < 3; depth++ {
+		if idx.dirs[dir] > 0 {
+			return true
+		}
+		next := mapPackabilityDir(dir)
+		if next == dir || next == "." {
+			break
+		}
+		dir = next
+	}
+	return false
+}
+
+func (idx *mapPackabilityIndex) queryAnchorSupport(query string) int {
+	if idx == nil {
+		return 0
+	}
+	count := 0
+	seen := map[string]bool{}
+	for _, word := range wordsFromMap(query) {
+		if seen[word] || !mapTrySpecificWord(word) {
+			continue
+		}
+		seen[word] = true
+		if idx.words[word] > 0 {
+			count++
+		}
+	}
+	return count
+}
+
 type mapTryCandidate struct {
 	Query  string
 	Source string
@@ -5484,18 +5674,54 @@ func mapTryCommand(label string, covers []string, receipts []mapTraceReceipt, co
 }
 
 func mapTryCommandForRole(label string, covers []string, receipts []mapTraceReceipt, confidence string, keyPaths []string, boundaryRole string) string {
+	try, _ := mapTryCommandForRoleWithPackability(label, covers, receipts, confidence, keyPaths, boundaryRole, nil)
+	return try
+}
+
+func mapTryCommandForRoleWithPackability(label string, covers []string, receipts []mapTraceReceipt, confidence string, keyPaths []string, boundaryRole string, packability *mapPackabilityIndex) (string, *mapPackabilityDiagnostics) {
 	if boundaryRole == "" {
 		boundaryRole = mapBoundaryRoleProductCapability
 	}
 	if confidence == mapLowConfidence && len(covers) == 0 && len(keyPaths) == 0 {
-		return ""
+		return "", nil
 	}
 	candidates := mapTryCandidates(label, covers, receipts, keyPaths, boundaryRole)
 	best := bestMapTryCandidate(candidates, label, covers, keyPaths, boundaryRole)
 	if best.Query == "" {
-		return ""
+		return "", nil
 	}
-	return mapFindPackCommand(best.Query)
+	if packability == nil {
+		return mapFindPackCommand(best.Query), nil
+	}
+	diag := packability.diagnostics(keyPaths)
+	if diag == nil {
+		return mapFindPackCommand(best.Query), nil
+	}
+	diag.IndexedQueryAnchorCount = packability.queryAnchorSupport(best.Query)
+	if mapTryCandidatePackable(best, diag, boundaryRole) {
+		diag.Decision = "supported"
+		diag.SelectedTrySource = best.Source
+		return mapFindPackCommand(best.Query), diag
+	}
+	for _, candidate := range rankedMapTryCandidates(candidates, label, covers, keyPaths, boundaryRole) {
+		if candidate.Query == best.Query {
+			continue
+		}
+		candidateDiag := *diag
+		candidateDiag.IndexedQueryAnchorCount = packability.queryAnchorSupport(candidate.Query)
+		if mapTryCandidatePackable(candidate, &candidateDiag, boundaryRole) {
+			candidateDiag.Decision = "replaced_with_supported_try"
+			candidateDiag.SelectedTrySource = candidate.Source
+			candidateDiag.SuppressedTry = mapFindPackCommand(best.Query)
+			candidateDiag.SuppressedTrySource = best.Source
+			return mapFindPackCommand(candidate.Query), &candidateDiag
+		}
+	}
+	diag.Decision = "suppressed_no_indexed_support"
+	diag.SuppressedTry = mapFindPackCommand(best.Query)
+	diag.SuppressedTrySource = best.Source
+	diag.TrySuppressed = true
+	return "", diag
 }
 
 func mapTryCandidates(label string, covers []string, receipts []mapTraceReceipt, keyPaths []string, boundaryRole string) []mapTryCandidate {
@@ -5534,8 +5760,16 @@ func mapTryCandidates(label string, covers []string, receipts []mapTraceReceipt,
 }
 
 func bestMapTryCandidate(candidates []mapTryCandidate, label string, covers []string, keyPaths []string, boundaryRole string) mapTryCandidate {
-	best := mapTryCandidate{}
+	ranked := rankedMapTryCandidates(candidates, label, covers, keyPaths, boundaryRole)
+	if len(ranked) == 0 {
+		return mapTryCandidate{}
+	}
+	return ranked[0]
+}
+
+func rankedMapTryCandidates(candidates []mapTryCandidate, label string, covers []string, keyPaths []string, boundaryRole string) []mapTryCandidate {
 	seen := map[string]bool{}
+	var ranked []mapTryCandidate
 	for _, candidate := range candidates {
 		key := normalizeMapKey(candidate.Query)
 		if key == "" || seen[key] {
@@ -5546,18 +5780,47 @@ func bestMapTryCandidate(candidates []mapTryCandidate, label string, covers []st
 		if candidate.Score <= 0 {
 			continue
 		}
-		if best.Query == "" || candidate.Score > best.Score || (candidate.Score == best.Score && len(candidate.Query) < len(best.Query)) {
-			best = candidate
-		}
+		ranked = append(ranked, candidate)
 	}
 	threshold := 10
 	if mapTryRoleNeedsSpecificContext(boundaryRole) || mapTryLabelNeedsSpecificContext(label) {
 		threshold = 16
 	}
-	if best.Score < threshold {
-		return mapTryCandidate{}
+	filtered := ranked[:0]
+	for _, candidate := range ranked {
+		if candidate.Score >= threshold {
+			filtered = append(filtered, candidate)
+		}
 	}
-	return best
+	sort.SliceStable(filtered, func(i, j int) bool {
+		if filtered[i].Score == filtered[j].Score {
+			return len(filtered[i].Query) < len(filtered[j].Query)
+		}
+		return filtered[i].Score > filtered[j].Score
+	})
+	return filtered
+}
+
+func mapTryCandidatePackable(candidate mapTryCandidate, diag *mapPackabilityDiagnostics, boundaryRole string) bool {
+	if diag == nil {
+		return true
+	}
+	if diag.KeyPathCount == 0 {
+		return diag.IndexedQueryAnchorCount >= 1
+	}
+	if diag.IndexedKeyPathCount > 0 {
+		return true
+	}
+	if diag.PrefixKeyPathCount >= 2 {
+		return true
+	}
+	if diag.PrefixKeyPathCount > 0 && !mapTryRoleNeedsSpecificContext(boundaryRole) {
+		return true
+	}
+	if mapTryRoleNeedsSpecificContext(boundaryRole) || boundaryRole == mapBoundaryRoleExtensionEcosystem {
+		return false
+	}
+	return diag.IndexedQueryAnchorCount >= 2
 }
 
 func mapTryCandidateScore(candidate mapTryCandidate, label string, covers []string, keyPaths []string, boundaryRole string) int {

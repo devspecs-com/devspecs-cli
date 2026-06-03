@@ -949,6 +949,91 @@ func TestMapTryCommandPrefersSpecificExtensionCover(t *testing.T) {
 	}
 }
 
+func TestMapTryCommandSuppressesUnpackableBoundaryHandoff(t *testing.T) {
+	idx := newMapTestPackabilityIndex("cmd/actions.go")
+	got, diag := mapTryCommandForRoleWithPackability(
+		"Plugins",
+		[]string{"Acl", "Acme", "Ai Prompt Guard"},
+		nil,
+		mapHighConfidence,
+		[]string{
+			"kong/plugins/ai-prompt-guard/filters/guard-prompt.lua",
+			"kong/plugins/ai-prompt-guard/handler.lua",
+			"kong/plugins/ai-prompt-guard/schema.lua",
+		},
+		mapBoundaryRoleExtensionEcosystem,
+		idx,
+	)
+	if got != "" {
+		t.Fatalf("unpackable try = %q, want suppressed", got)
+	}
+	if diag == nil || !diag.TrySuppressed {
+		t.Fatalf("expected suppression diagnostics, got %#v", diag)
+	}
+	if diag.Decision != "suppressed_no_indexed_support" {
+		t.Fatalf("decision = %q", diag.Decision)
+	}
+	if len(diag.MissingKeyExtensions) != 1 || diag.MissingKeyExtensions[0] != ".lua" {
+		t.Fatalf("missing extensions = %#v", diag.MissingKeyExtensions)
+	}
+}
+
+func TestMapTryCommandKeepsSupportedBoundaryHandoff(t *testing.T) {
+	idx := newMapTestPackabilityIndex(
+		"extensions/displays/list.ts",
+		"extensions/displays/panel.ts",
+	)
+	got, diag := mapTryCommandForRoleWithPackability(
+		"Extension Surfaces",
+		[]string{"Types Extensions Displays"},
+		nil,
+		mapHighConfidence,
+		[]string{
+			"extensions/displays/list.ts",
+			"extensions/displays/panel.ts",
+		},
+		mapBoundaryRoleExtensionEcosystem,
+		idx,
+	)
+	if got == "" {
+		t.Fatal("supported boundary handoff was suppressed")
+	}
+	if diag == nil || diag.Decision != "supported" {
+		t.Fatalf("expected supported diagnostics, got %#v", diag)
+	}
+	if diag.IndexedKeyPathCount != 2 {
+		t.Fatalf("indexed key paths = %d, want 2", diag.IndexedKeyPathCount)
+	}
+}
+
+func TestMapAreaPackCommandsRespectsSuppressedTry(t *testing.T) {
+	area := mapArea{
+		Label:        "Plugins",
+		Confidence:   mapHighConfidence,
+		Covers:       []string{"Ai Prompt Guard"},
+		KeyPaths:     []string{"kong/plugins/ai-prompt-guard/handler.lua"},
+		BoundaryRole: mapBoundaryRoleExtensionEcosystem,
+		Diagnostics: mapAreaDiagnostics{
+			Packability: &mapPackabilityDiagnostics{TrySuppressed: true},
+		},
+	}
+	if got := mapAreaPackCommands(area); len(got) != 0 {
+		t.Fatalf("suppressed area pack commands = %#v", got)
+	}
+}
+
+func newMapTestPackabilityIndex(paths ...string) *mapPackabilityIndex {
+	idx := &mapPackabilityIndex{
+		paths: map[string]string{},
+		dirs:  map[string]int{},
+		words: map[string]int{},
+	}
+	for _, path := range paths {
+		idx.add(path, "source_context")
+	}
+	return idx
+}
+
 func TestMapBoundaryRoleClassifiesUnsafeParents(t *testing.T) {
 	platform := &mapAreaInternal{Key: "platform", Label: "Platform", EvidenceCounts: map[string]int{"source": 4}}
 	if got := classifyMapBoundaryRole(platform, "Platform", mapTypePlatform, false, []string{"Advisor Reports"}, "appwrite", mapRepoShapePlatform); got != mapBoundaryRoleGenericParent {
