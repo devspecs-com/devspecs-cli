@@ -544,8 +544,8 @@ func TestPathBoundaryMapAggregatesTwentyConceptualParents(t *testing.T) {
 	if api == nil {
 		t.Fatalf("expected public API parent, got %#v", areas)
 	}
-	if !strings.Contains(api.Try, "public api layer") {
-		t.Fatalf("conceptual API try command should use parent label, got %q", api.Try)
+	if strings.Contains(api.Try, "public api layer") || !(strings.Contains(api.Try, "graphql") || strings.Contains(api.Try, "rest")) {
+		t.Fatalf("conceptual API try command should use constrained API child/path query, got %q", api.Try)
 	}
 }
 
@@ -906,6 +906,82 @@ func TestMapTryCommandDropsShellLabelsAndUsesSpecificCovers(t *testing.T) {
 	}
 	if got := mapTryCommand("Files, Assets & Storage", []string{"Upload"}, nil, mapHighConfidence, []string{"web/src/components/MemoEditor/hooks/useFileUpload.ts"}); !strings.Contains(got, "upload") {
 		t.Fatalf("broad storage try should include upload, got %q", got)
+	}
+}
+
+func TestMapTryCommandConstrainsBroadBoundaryRoles(t *testing.T) {
+	api := mapTryCommandForRole(
+		"Public API Layer",
+		[]string{"GraphQL", "Subscriptions"},
+		nil,
+		mapHighConfidence,
+		[]string{"saleor/graphql/subscriptions/resolver.py"},
+		mapBoundaryRoleGenericParent,
+	)
+	if api == "" || strings.Contains(api, "public api layer") || !strings.Contains(api, "subscriptions") {
+		t.Fatalf("broad API parent should hand off to specific child/path evidence, got %q", api)
+	}
+
+	platform := mapTryCommandForRole(
+		"Platform",
+		[]string{"Advisor Reports"},
+		nil,
+		mapHighConfidence,
+		[]string{"src/Appwrite/Platform/Modules/Advisor/Reports/Report.php"},
+		mapBoundaryRoleGenericParent,
+	)
+	if platform == "" || strings.Contains(platform, `"platform"`) || !strings.Contains(platform, "advisor") {
+		t.Fatalf("generic platform parent should avoid standalone platform query, got %q", platform)
+	}
+}
+
+func TestMapTryCommandPrefersSpecificExtensionCover(t *testing.T) {
+	got := mapTryCommandForRole(
+		"Plugins",
+		[]string{"Acl", "Acme", "Ai Prompt Guard"},
+		nil,
+		mapHighConfidence,
+		[]string{"kong/plugins/ai-prompt-guard/handler.lua"},
+		mapBoundaryRoleExtensionEcosystem,
+	)
+	if got == "" || !strings.Contains(got, "ai prompt guard") || strings.Contains(got, "plugins ai") {
+		t.Fatalf("extension ecosystem try should prefer specific plugin cover, got %q", got)
+	}
+}
+
+func TestMapBoundaryRoleClassifiesUnsafeParents(t *testing.T) {
+	platform := &mapAreaInternal{Key: "platform", Label: "Platform", EvidenceCounts: map[string]int{"source": 4}}
+	if got := classifyMapBoundaryRole(platform, "Platform", mapTypePlatform, false, []string{"Advisor Reports"}, "appwrite", mapRepoShapePlatform); got != mapBoundaryRoleGenericParent {
+		t.Fatalf("platform role = %q", got)
+	}
+
+	playground := &mapAreaInternal{Key: "playground", Label: "Playground", EvidenceCounts: map[string]int{"source": 4}}
+	if got := classifyMapBoundaryRole(playground, "Playground", mapTypeTooling, false, nil, "vite", mapRepoShapeTool); got != mapBoundaryRoleFixtureOrTestbed {
+		t.Fatalf("playground role = %q", got)
+	}
+
+	namespace := &mapAreaInternal{Key: "gitea-repositories-meta", Label: "Gitea Repositories Meta", EvidenceCounts: map[string]int{"source": 4}}
+	if got := classifyMapBoundaryRole(namespace, "Gitea Repositories Meta", mapTypeDomainFeature, false, nil, "gitea", mapRepoShapePlatform); got != mapBoundaryRoleRepoNamespace {
+		t.Fatalf("repo namespace role = %q", got)
+	}
+
+	plugins := &mapAreaInternal{
+		Key:            "plugins",
+		Label:          "Plugins",
+		EvidenceCounts: map[string]int{"source": 4},
+		Artifacts: []mapArtifact{{
+			Path: "tests/fixtures/plugins/ai-prompt-guard/index.ts",
+		}},
+	}
+	if got := classifyMapBoundaryRole(plugins, "Plugins", mapTypePlatform, false, []string{"Ai Prompt Guard"}, "kong", mapRepoShapePlatform); got != mapBoundaryRoleExtensionEcosystem {
+		t.Fatalf("plugin role should not become fixture from support path, got %q", got)
+	}
+}
+
+func TestMapBoundaryPathEligibleSkipsEmbeddedGitFixtures(t *testing.T) {
+	path := "tests/gitea-repositories-meta/limited_org/private_repo_on_limited_org.git/objects/74/8bf557dfc9c6457998b5118a6c8b2129f56c30"
+	if mapBoundaryPathEligible(path) {
+		t.Fatalf("embedded git fixture path should be ineligible")
 	}
 }
 

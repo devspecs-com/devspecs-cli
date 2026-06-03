@@ -79,6 +79,14 @@ const (
 	mapTypeDocs                        = "docs_reference"
 	mapTypeRoot                        = "repo_root_umbrella"
 	mapTypeUnknown                     = "unknown_area"
+	mapBoundaryRoleProductCapability   = "product_capability"
+	mapBoundaryRoleHorizontalLayer     = "horizontal_layer"
+	mapBoundaryRoleExtensionEcosystem  = "extension_ecosystem"
+	mapBoundaryRoleFixtureOrTestbed    = "fixture_or_testbed"
+	mapBoundaryRoleRepoNamespace       = "repo_namespace"
+	mapBoundaryRoleGenericParent       = "generic_parent"
+	mapBoundaryRoleDocsReference       = "docs_reference"
+	mapBoundaryRoleHandoffUnsafe       = "handoff_unsafe"
 	mapRepoShapeTool                   = "tool"
 	mapRepoShapeWebApp                 = "web_app"
 	mapRepoShapePlatform               = "platform"
@@ -198,6 +206,7 @@ type mapArea struct {
 	Label              string             `json:"label"`
 	Class              string             `json:"class"`
 	AreaType           string             `json:"area_type"`
+	BoundaryRole       string             `json:"boundary_role,omitempty"`
 	Confidence         string             `json:"confidence"`
 	IsRepoRootUmbrella bool               `json:"is_repo_root_umbrella,omitempty"`
 	Covers             []string           `json:"covers,omitempty"`
@@ -369,6 +378,15 @@ var mapBoundaryFirstScreenShellLabels = map[string]bool{
 	"remix": true, "router": true, "server-only": true, "settings": true,
 	"templates": true, "trpc": true, "ui-primitives": true, "universal": true,
 	"utilities": true,
+}
+
+var mapBoundaryHandoffBroadTerms = map[string]bool{
+	"api": true, "apis": true, "core": true, "engine": true, "framework": true,
+	"generic": true, "layer": true, "meta": true, "namespace": true, "objects": true,
+	"platform": true, "plugin": true, "plugins": true, "public": true, "registry": true,
+	"repo": true, "repos": true, "repositories": true, "repository": true, "router": true,
+	"routers": true, "runtime": true, "shell": true, "style": true, "styles": true,
+	"system": true, "systems": true, "unified": true,
 }
 
 var mapSuppressedPathSegments = map[string]bool{
@@ -1884,7 +1902,7 @@ func buildMapOutput(repoRoot string, result *scan.Result, opts mapOptions) mapOu
 		}
 		return mapAreaScore(accum[i]) > mapAreaScore(accum[j])
 	})
-	areas := publicMapAreas(repoRoot, repoName, accum, opts.MaxAreas)
+	areas := publicMapAreas(repoRoot, repoName, accum, opts.MaxAreas, mapRepoShapeUnknown)
 	confidence := mapOutputConfidence(result, areas)
 	caveats := mapOutputCaveats(repoRoot, result, areas, clusters, confidence)
 	if confidence == mapLowConfidence {
@@ -2112,15 +2130,15 @@ func buildPathBoundaryAreas(repoRoot, repoName string, files []string, commits [
 		internals = append(internals, mapBoundaryAreaInternal(candidate))
 	}
 	sort.SliceStable(internals, func(i, j int) bool {
-		left := mapBoundaryAreaScore(internals[i])
-		right := mapBoundaryAreaScore(internals[j])
+		left := mapBoundaryAreaScore(internals[i], repoName, repoShape)
+		right := mapBoundaryAreaScore(internals[j], repoName, repoShape)
 		if left == right {
 			return internals[i].Label < internals[j].Label
 		}
 		return left > right
 	})
 	internals = selectMapBoundaryAreas(internals, maxAreas*2, repoShape)
-	areas := publicMapAreas(repoRoot, repoName, internals, maxAreas)
+	areas := publicMapAreas(repoRoot, repoName, internals, maxAreas, repoShape)
 	return areas, evidence, len(candidates)
 }
 
@@ -3337,7 +3355,7 @@ func mapBoundaryKeysRedundant(a, b string) bool {
 	return shared > 0 && (len(aParts) == 1 || len(bParts) == 1)
 }
 
-func mapBoundaryAreaScore(area *mapAreaInternal) float64 {
+func mapBoundaryAreaScore(area *mapAreaInternal, repoName, repoShape string) float64 {
 	score := mapAreaScore(area)
 	score += float64(mapMinInt(len(area.Subareas), 5)) * 3
 	score += float64(mapMinInt(len(area.ArtifactPathSet), 40)) * 0.25
@@ -3346,6 +3364,9 @@ func mapBoundaryAreaScore(area *mapAreaInternal) float64 {
 	score += float64(mapMinInt(area.EvidenceCounts["test_import"], mapBoundaryTestImportScoreCap)) * 0.9
 	if area.EvidenceSources["conceptual_parent"] {
 		score += 12
+		if area.Key == "framework-runtime-module-platform" {
+			score += 10
+		}
 	}
 	if area.EvidenceCounts["source"] > 0 && area.EvidenceCounts["test"] > 0 {
 		score += 5
@@ -3356,7 +3377,36 @@ func mapBoundaryAreaScore(area *mapAreaInternal) float64 {
 	if mapBoundaryShellLikeArea(area) {
 		score -= 35
 	}
+	role := classifyMapBoundaryRole(area, area.Label, "", mapAreaIsRepoRoot(area, repoName), sortedMapSet(area.Subareas), repoName, repoShape)
+	roleAdjustment := mapBoundaryRoleScoreAdjustment(role)
+	if area.EvidenceSources["conceptual_parent"] && roleAdjustment < 0 {
+		roleAdjustment *= 0.35
+	}
+	score += roleAdjustment
 	return score
+}
+
+func mapBoundaryRoleScoreAdjustment(role string) float64 {
+	switch role {
+	case mapBoundaryRoleProductCapability:
+		return 6
+	case mapBoundaryRoleExtensionEcosystem:
+		return 1
+	case mapBoundaryRoleDocsReference:
+		return -4
+	case mapBoundaryRoleHorizontalLayer:
+		return -14
+	case mapBoundaryRoleGenericParent:
+		return -18
+	case mapBoundaryRoleFixtureOrTestbed:
+		return -24
+	case mapBoundaryRoleRepoNamespace:
+		return -32
+	case mapBoundaryRoleHandoffUnsafe:
+		return -28
+	default:
+		return 0
+	}
 }
 
 func mapBoundaryOutputConfidence(areas []mapArea) string {
@@ -3488,6 +3538,9 @@ func mapBoundaryPathEligible(path string) bool {
 	}
 	parts := strings.Split(strings.ToLower(path), "/")
 	for _, part := range parts {
+		if strings.HasSuffix(part, ".git") {
+			return false
+		}
 		switch part {
 		case "generated", "__generated__", "gen", ".turbo", ".cache":
 			return false
@@ -3715,7 +3768,7 @@ func mergeDuplicateMapAreas(areas []*mapAreaInternal) []*mapAreaInternal {
 	return out
 }
 
-func publicMapAreas(repoRoot, repoName string, areas []*mapAreaInternal, maxAreas int) []mapArea {
+func publicMapAreas(repoRoot, repoName string, areas []*mapAreaInternal, maxAreas int, repoShape string) []mapArea {
 	if maxAreas <= 0 {
 		maxAreas = mapDefaultMaxAreas
 	}
@@ -3743,8 +3796,9 @@ func publicMapAreas(repoRoot, repoName string, areas []*mapAreaInternal, maxArea
 			traceReceipts = mapTraceReceipts(repoRoot, area, covers)
 		}
 		keyPaths := mapArtifactPaths(area.Artifacts)
-		try := mapTryCommand(label, covers, traceReceipts, confidence, keyPaths)
 		areaType := classifyMapAreaType(area, label, areaClass, isRoot, covers)
+		boundaryRole := classifyMapBoundaryRole(area, label, areaType, isRoot, covers, repoName, repoShape)
+		try := mapTryCommandForRole(label, covers, traceReceipts, confidence, keyPaths, boundaryRole)
 		caveats := mapAreaCaveats(area, areaClass, isRoot)
 		if isRoot && len(covers) == 0 {
 			caveats = appendUniqueString(caveats, "package-root signal only")
@@ -3754,6 +3808,7 @@ func publicMapAreas(repoRoot, repoName string, areas []*mapAreaInternal, maxArea
 			Label:              label,
 			Class:              areaClass,
 			AreaType:           areaType,
+			BoundaryRole:       boundaryRole,
 			Confidence:         confidence,
 			IsRepoRootUmbrella: isRoot,
 			Covers:             firstStrings(covers, mapMaxCoversPerArea),
@@ -3815,7 +3870,7 @@ func writeMapText(out io.Writer, m mapOutput, verbose bool) {
 			fmt.Fprintf(out, "   Try: %s\n", area.Try)
 		}
 		if verbose {
-			fmt.Fprintf(out, "   Diagnostics: class=%s confidence=%s key=%s\n", area.Class, area.Confidence, area.Diagnostics.Key)
+			fmt.Fprintf(out, "   Diagnostics: class=%s role=%s confidence=%s key=%s\n", area.Class, area.BoundaryRole, area.Confidence, area.Diagnostics.Key)
 			if len(area.Diagnostics.RawAnchors) > 0 {
 				fmt.Fprintf(out, "   Raw anchors: %s\n", strings.Join(area.Diagnostics.RawAnchors, ", "))
 			}
@@ -3908,7 +3963,7 @@ func writeMapAreaText(out io.Writer, m mapOutput, query string, verbose bool) {
 		fmt.Fprintln(out)
 	}
 	if verbose {
-		fmt.Fprintf(out, "Diagnostics: match_score=%d class=%s key=%s\n", matches[0].Score, primary.Class, primary.Diagnostics.Key)
+		fmt.Fprintf(out, "Diagnostics: match_score=%d class=%s role=%s key=%s\n", matches[0].Score, primary.Class, primary.BoundaryRole, primary.Diagnostics.Key)
 		if len(primary.Diagnostics.RawAnchors) > 0 {
 			fmt.Fprintf(out, "Raw anchors: %s\n", strings.Join(primary.Diagnostics.RawAnchors, ", "))
 		}
@@ -4511,7 +4566,7 @@ func refineMapAreaForDrilldownQuery(area mapArea, query string) mapArea {
 	}
 	area.KeyPaths = collapseMapLocalizedKeyPaths(area.KeyPaths, query)
 	if renamed {
-		area.Try = mapTryCommand(area.Label, area.Covers, area.TraceReceipts, area.Confidence, area.KeyPaths)
+		area.Try = mapTryCommandForRole(area.Label, area.Covers, area.TraceReceipts, area.Confidence, area.KeyPaths, area.BoundaryRole)
 	}
 	return area
 }
@@ -4757,17 +4812,19 @@ func mapAreaPackCommands(area mapArea) []string {
 		commands = appendUniqueString(commands, area.Try)
 	}
 	for _, cover := range firstStrings(area.Covers, 4) {
-		if query := joinMapQuery(area.Label, cover); query != "" {
-			commands = appendUniqueString(commands, mapFindPackCommand(query))
+		if cmd := mapTryCommandForRole(area.Label, []string{cover}, nil, area.Confidence, area.KeyPaths, area.BoundaryRole); cmd != "" {
+			commands = appendUniqueString(commands, cmd)
 		}
 	}
 	for _, receipt := range firstMapTraceReceipts(area.TraceReceipts, 2) {
-		if query := mapTraceQuery(area.Label, area.Covers, receipt.Subject); query != "" {
-			commands = appendUniqueString(commands, mapFindPackCommand(query))
+		if cmd := mapTryCommandForRole(area.Label, area.Covers, []mapTraceReceipt{receipt}, area.Confidence, area.KeyPaths, area.BoundaryRole); cmd != "" {
+			commands = appendUniqueString(commands, cmd)
 		}
 	}
 	if len(commands) == 0 && area.Label != "" {
-		commands = append(commands, mapFindPackCommand(area.Label))
+		if cmd := mapTryCommandForRole(area.Label, area.Covers, area.TraceReceipts, area.Confidence, area.KeyPaths, area.BoundaryRole); cmd != "" {
+			commands = append(commands, cmd)
+		}
 	}
 	return firstStrings(commands, 4)
 }
@@ -5090,6 +5147,135 @@ func classifyMapAreaType(area *mapAreaInternal, label, class string, root bool, 
 	return mapTypeUnknown
 }
 
+func classifyMapBoundaryRole(area *mapAreaInternal, label, areaType string, root bool, covers []string, repoName, repoShape string) string {
+	if area == nil {
+		return mapBoundaryRoleHandoffUnsafe
+	}
+	key := normalizeMapKey(firstNonEmpty(label, area.Key))
+	values := mapBoundaryRoleValues(area, label, covers)
+	if root || mapBoundaryRepoNamespaceLike(key, repoName) {
+		return mapBoundaryRoleRepoNamespace
+	}
+	if areaType == mapTypeDocs || (!mapBoundaryRoleHasSource(area) && (area.EvidenceCounts["doc"] > 0 || area.EvidenceCounts["intent"] > 0)) {
+		return mapBoundaryRoleDocsReference
+	}
+	if mapBoundaryFixtureOrTestbedLike(key, values) {
+		return mapBoundaryRoleFixtureOrTestbed
+	}
+	if mapBoundaryExtensionEcosystemLike(key, values) {
+		return mapBoundaryRoleExtensionEcosystem
+	}
+	if mapBoundaryGenericParentLike(key, values, repoShape) {
+		return mapBoundaryRoleGenericParent
+	}
+	if mapBoundaryHorizontalLayerLike(key, values) {
+		return mapBoundaryRoleHorizontalLayer
+	}
+	if mapTryLabelNeedsSpecificContext(label) || mapBoundaryHandoffUnsafeKey(key) {
+		return mapBoundaryRoleHandoffUnsafe
+	}
+	return mapBoundaryRoleProductCapability
+}
+
+func mapBoundaryRoleValues(area *mapAreaInternal, label string, covers []string) []string {
+	values := []string{label}
+	if area != nil {
+		values = append(values, area.Key)
+		values = append(values, area.RawAnchors...)
+		for _, art := range area.Artifacts {
+			values = append(values, art.Path, art.Title, art.Subtype)
+		}
+	}
+	values = append(values, covers...)
+	return values
+}
+
+func mapBoundaryRoleHasSource(area *mapAreaInternal) bool {
+	if area == nil {
+		return false
+	}
+	return area.EvidenceCounts["source"] > 0 || area.EvidenceCounts["test"] > 0 || area.EvidenceCounts["config"] > 0
+}
+
+func mapBoundaryRepoNamespaceLike(key, repoName string) bool {
+	repoKey := normalizeMapKey(repoName)
+	if repoKey == "" || key == "" {
+		return false
+	}
+	if key == repoKey {
+		return true
+	}
+	repoLead := repoKey
+	if parts := strings.Split(repoKey, "-"); len(parts) > 0 {
+		repoLead = parts[0]
+	}
+	if strings.HasPrefix(key, repoKey+"-") || (repoLead != "" && strings.HasPrefix(key, repoLead+"-")) {
+		return mapAnyContains([]string{key}, "repository", "repositories", "repo", "repos", "meta", "objects", "platform", "namespace")
+	}
+	return false
+}
+
+func mapBoundaryFixtureOrTestbedLike(key string, values []string) bool {
+	if mapAnyContains([]string{key}, "example", "examples", "fixture", "fixtures", "playground", "sample", "samples", "testbed", "testdata", "template", "templates") {
+		return true
+	}
+	return mapAnyContains(firstStrings(values, 2), "example", "examples", "fixture", "fixtures", "galata", "mock", "mocks", "playground", "sample", "samples", "sandbox", "storybook", "testbed", "testdata", "template", "templates")
+}
+
+func mapBoundaryExtensionEcosystemLike(key string, values []string) bool {
+	if mapAnyContains([]string{key}, "plugin", "plugins", "extension", "extensions", "provider", "providers", "adapter", "adapters", "connector", "connectors") {
+		return true
+	}
+	return mapAnyContains(firstStrings(values, 2), "plugin", "plugins", "extension", "extensions", "provider", "providers", "adapter", "adapters", "connector", "connectors", "marketplace", "pdk")
+}
+
+func mapBoundaryGenericParentLike(key string, values []string, repoShape string) bool {
+	switch key {
+	case "api", "api-layer", "api-platform", "core", "engine", "framework", "http-api-layer", "objects", "platform", "public-api-layer", "public-http-api-developer-platform", "registry", "unified":
+		return true
+	case "command", "commands":
+		return repoShape != mapRepoShapeTool
+	}
+	if mapAnyContains([]string{key}, "public-api-layer", "api-platform", "platform", "repo-namespace") {
+		return true
+	}
+	if mapBoundaryMostlyBroadKey(key) && len(wordsFromMap(key)) <= 3 {
+		return true
+	}
+	if mapAnyContains(values, "repo namespace", "umbrella", "generic parent") {
+		return true
+	}
+	return false
+}
+
+func mapBoundaryHorizontalLayerLike(key string, values []string) bool {
+	if mapAnyContains([]string{key}, "router", "routers", "route", "routes", "object", "objects", "locale", "locales", "style", "styles", "theme", "themes", "component", "components", "design-system") {
+		return true
+	}
+	return mapAnyContains(firstStrings(values, 2), "router", "routers", "route", "routes", "locale", "locales", "style", "styles", "theme", "themes", "design-system", "ui primitive", "ui primitives")
+}
+
+func mapBoundaryHandoffUnsafeKey(key string) bool {
+	if key == "" || mapBoundaryFirstScreenShellLabels[key] {
+		return true
+	}
+	return mapAnyContains([]string{key}, "javascript", "locale", "locales", "example", "examples", "template", "templates", "utility", "utilities", "router")
+}
+
+func mapBoundaryMostlyBroadKey(key string) bool {
+	words := wordsFromMap(key)
+	if len(words) == 0 {
+		return false
+	}
+	broad := 0
+	for _, word := range words {
+		if mapGenericTerms[word] || mapBoundaryHandoffBroadTerms[word] {
+			broad++
+		}
+	}
+	return broad == len(words)
+}
+
 func conceptualMapAreaType(key, label string) string {
 	value := normalizeMapKey(firstNonEmpty(key, label))
 	switch value {
@@ -5287,35 +5473,214 @@ func firstMapCoverLead(covers []string) string {
 	return ""
 }
 
+type mapTryCandidate struct {
+	Query  string
+	Source string
+	Score  int
+}
+
 func mapTryCommand(label string, covers []string, receipts []mapTraceReceipt, confidence string, keyPaths []string) string {
-	if confidence == mapLowConfidence && len(covers) == 0 {
+	return mapTryCommandForRole(label, covers, receipts, confidence, keyPaths, mapBoundaryRoleProductCapability)
+}
+
+func mapTryCommandForRole(label string, covers []string, receipts []mapTraceReceipt, confidence string, keyPaths []string, boundaryRole string) string {
+	if boundaryRole == "" {
+		boundaryRole = mapBoundaryRoleProductCapability
+	}
+	if confidence == mapLowConfidence && len(covers) == 0 && len(keyPaths) == 0 {
 		return ""
 	}
-	query := label
+	candidates := mapTryCandidates(label, covers, receipts, keyPaths, boundaryRole)
+	best := bestMapTryCandidate(candidates, label, covers, keyPaths, boundaryRole)
+	if best.Query == "" {
+		return ""
+	}
+	return mapFindPackCommand(best.Query)
+}
+
+func mapTryCandidates(label string, covers []string, receipts []mapTraceReceipt, keyPaths []string, boundaryRole string) []mapTryCandidate {
+	var candidates []mapTryCandidate
+	add := func(query, source string) {
+		query = strings.ToLower(strings.TrimSpace(query))
+		if query == "" {
+			return
+		}
+		candidates = append(candidates, mapTryCandidate{Query: query, Source: source})
+	}
 	conceptualLabel := mapTryLabelLooksConceptual(label)
-	if mapTryLabelNeedsSpecificContext(label) {
-		if cover := firstMapSpecificCover(covers); cover != "" {
-			query = cover
-		} else if pathQuery := mapTrySpecificPathQuery(label, keyPaths); pathQuery != "" {
-			query = pathQuery
+	if !mapTryRoleNeedsSpecificContext(boundaryRole) && !mapTryLabelNeedsSpecificContext(label) {
+		add(label, "label")
+	}
+	if pathQuery := mapTrySpecificPathQuery(label, keyPaths); pathQuery != "" {
+		add(pathQuery, "path")
+	}
+	for _, cover := range firstStrings(covers, mapMaxCoversPerArea) {
+		if firstMapSpecificCover([]string{cover}) == "" {
+			continue
 		}
-	} else if mapTryBroadLabelUsesSpecificCover(label) {
-		if cover := firstMapSpecificCover(covers); cover != "" {
-			query = joinMapQuery(label, cover)
+		add(cover, "cover")
+		if !mapTryRoleNeedsSpecificContext(boundaryRole) && !mapTryLabelNeedsSpecificContext(label) && !mapTryLabelLooksConceptual(label) {
+			add(joinMapQuery(label, cover), "label_cover")
+		} else if mapTryBroadLabelUsesSpecificCover(label) || boundaryRole == mapBoundaryRoleExtensionEcosystem {
+			add(joinMapQuery(label, cover), "label_cover")
 		}
-	} else if len(covers) > 0 && !conceptualLabel {
-		query = joinMapQuery(label, covers[0])
 	}
 	if len(receipts) > 0 && !conceptualLabel {
 		if traceQuery := mapTraceQuery(label, covers, receipts[0].Subject); traceQuery != "" {
-			query = traceQuery
+			add(traceQuery, "trace")
 		}
 	}
-	query = strings.ToLower(strings.TrimSpace(query))
-	if query == "" {
-		return ""
+	return candidates
+}
+
+func bestMapTryCandidate(candidates []mapTryCandidate, label string, covers []string, keyPaths []string, boundaryRole string) mapTryCandidate {
+	best := mapTryCandidate{}
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		key := normalizeMapKey(candidate.Query)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		candidate.Score = mapTryCandidateScore(candidate, label, covers, keyPaths, boundaryRole)
+		if candidate.Score <= 0 {
+			continue
+		}
+		if best.Query == "" || candidate.Score > best.Score || (candidate.Score == best.Score && len(candidate.Query) < len(best.Query)) {
+			best = candidate
+		}
 	}
-	return mapFindPackCommand(query)
+	threshold := 10
+	if mapTryRoleNeedsSpecificContext(boundaryRole) || mapTryLabelNeedsSpecificContext(label) {
+		threshold = 16
+	}
+	if best.Score < threshold {
+		return mapTryCandidate{}
+	}
+	return best
+}
+
+func mapTryCandidateScore(candidate mapTryCandidate, label string, covers []string, keyPaths []string, boundaryRole string) int {
+	if boundaryRole == "" {
+		boundaryRole = mapBoundaryRoleProductCapability
+	}
+	queryKey := normalizeMapKey(candidate.Query)
+	labelKey := normalizeMapKey(label)
+	if queryKey == "" {
+		return -1000
+	}
+	if queryKey == labelKey && (mapTryRoleNeedsSpecificContext(boundaryRole) || mapTryLabelNeedsSpecificContext(label) || mapBoundaryMostlyBroadKey(labelKey)) {
+		return -1000
+	}
+	words := wordsFromMap(candidate.Query)
+	if len(words) == 0 {
+		return -1000
+	}
+	pathWords := mapTryWordSet(keyPaths)
+	coverWords := mapTryWordSet(covers)
+	specific, broad, pathSupport, coverSupport := 0, 0, 0, 0
+	for _, word := range words {
+		if mapTrySpecificWord(word) {
+			specific++
+		}
+		if mapGenericTerms[word] || mapBoundaryHandoffBroadTerms[word] || mapTraceStopWord(word) {
+			broad++
+		}
+		if pathWords[word] {
+			pathSupport++
+		}
+		if coverWords[word] {
+			coverSupport++
+		}
+	}
+	if specific == 0 {
+		return -1000
+	}
+	if mapTryRoleNeedsSpecificContext(boundaryRole) && pathSupport == 0 && coverSupport == 0 {
+		return -1000
+	}
+	if boundaryRole == mapBoundaryRoleExtensionEcosystem && specific < 2 && pathSupport < 2 && coverSupport < 2 {
+		return -1000
+	}
+	score := specific*12 + pathSupport*8 + coverSupport*6 - broad*5
+	switch candidate.Source {
+	case "path":
+		score += 8
+		if mapTryBroadLabelUsesSpecificCover(label) && firstMapSpecificCover(covers) != "" {
+			score -= 50
+		}
+	case "cover":
+		score += 6
+		if mapTryBroadLabelUsesSpecificCover(label) {
+			score += 45
+		}
+		if boundaryRole == mapBoundaryRoleExtensionEcosystem {
+			score += 18
+		}
+	case "trace":
+		score += 4
+	case "label_cover":
+		score += 2
+		if mapTryBroadLabelUsesSpecificCover(label) {
+			score += 45
+		}
+	case "label":
+		score += 16
+		if boundaryRole == mapBoundaryRoleProductCapability && mapTryLabelLooksConceptual(label) {
+			score += 20
+		}
+	}
+	switch boundaryRole {
+	case mapBoundaryRoleProductCapability:
+		score += 4
+	case mapBoundaryRoleExtensionEcosystem:
+		score += 2
+	case mapBoundaryRoleGenericParent, mapBoundaryRoleHorizontalLayer, mapBoundaryRoleRepoNamespace, mapBoundaryRoleFixtureOrTestbed, mapBoundaryRoleHandoffUnsafe:
+		if candidate.Source == "label" {
+			score -= 30
+		}
+		if broad >= specific {
+			score -= 10
+		}
+	}
+	if len(words) > 6 {
+		score -= len(words) - 6
+	}
+	return score
+}
+
+func mapTryRoleNeedsSpecificContext(role string) bool {
+	switch role {
+	case mapBoundaryRoleGenericParent, mapBoundaryRoleHorizontalLayer, mapBoundaryRoleRepoNamespace, mapBoundaryRoleFixtureOrTestbed, mapBoundaryRoleHandoffUnsafe:
+		return true
+	default:
+		return false
+	}
+}
+
+func mapTryWordSet(values []string) map[string]bool {
+	out := map[string]bool{}
+	for _, value := range values {
+		for _, word := range wordsFromMap(value) {
+			out[word] = true
+		}
+	}
+	return out
+}
+
+func mapTrySpecificWord(word string) bool {
+	if word == "" || mapGenericTerms[word] || mapBoundaryHandoffBroadTerms[word] || mapTraceStopWord(word) {
+		return false
+	}
+	if len(word) >= 4 {
+		return true
+	}
+	switch word {
+	case "og", "seo", "mcp", "tls", "jwt", "sso":
+		return true
+	default:
+		return false
+	}
 }
 
 func mapTryLabelNeedsSpecificContext(label string) bool {
@@ -5323,7 +5688,7 @@ func mapTryLabelNeedsSpecificContext(label string) bool {
 	if mapBoundaryFirstScreenShellLabels[key] {
 		return true
 	}
-	return mapAnyContains([]string{key}, "javascript", "locale", "locales", "example", "examples", "template", "templates", "utility", "utilities", "router")
+	return mapBoundaryHandoffUnsafeKey(key)
 }
 
 func mapTryBroadLabelUsesSpecificCover(label string) bool {
@@ -5344,7 +5709,7 @@ func firstMapSpecificCover(covers []string) string {
 		words := wordsFromMap(cover)
 		specific := 0
 		for _, word := range words {
-			if !mapGenericTerms[word] && !mapTraceStopWord(word) {
+			if mapTrySpecificWord(word) {
 				specific++
 			}
 		}
@@ -5360,7 +5725,7 @@ func mapTrySpecificPathQuery(label string, keyPaths []string) string {
 	var words []string
 	for _, path := range firstStrings(keyPaths, 5) {
 		for _, word := range wordsFromMap(path) {
-			if labelWords[word] || mapGenericTerms[word] || mapTraceStopWord(word) {
+			if labelWords[word] || mapGenericTerms[word] || mapBoundaryHandoffBroadTerms[word] || mapTraceStopWord(word) {
 				continue
 			}
 			if len(word) < 4 {
