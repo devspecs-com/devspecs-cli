@@ -396,11 +396,12 @@ var mapBoundaryFirstScreenShellLabels = map[string]bool{
 
 var mapBoundaryHandoffBroadTerms = map[string]bool{
 	"api": true, "apis": true, "core": true, "engine": true, "framework": true,
-	"generic": true, "layer": true, "meta": true, "namespace": true, "objects": true,
+	"base": true, "code": true, "com": true, "dev": true, "generic": true, "layer": true, "meta": true, "namespace": true, "objects": true,
+	"org":      true,
 	"platform": true, "plugin": true, "plugins": true, "public": true, "registry": true,
-	"repo": true, "repos": true, "repositories": true, "repository": true, "router": true,
-	"routers": true, "runtime": true, "shell": true, "style": true, "styles": true,
-	"system": true, "systems": true, "unified": true,
+	"repo": true, "repos": true, "repositories": true, "repository": true, "resources": true,
+	"router": true, "routers": true, "runtime": true, "shell": true, "static": true,
+	"style": true, "styles": true, "system": true, "systems": true, "unified": true,
 }
 
 var mapSuppressedPathSegments = map[string]bool{
@@ -437,6 +438,10 @@ var (
 	mapBoundaryRustUseRegex          = regexp.MustCompile(`(?m)^\s*use\s+([^;]+);`)
 	mapBoundaryRustModRegex          = regexp.MustCompile(`(?m)^\s*mod\s+([A-Za-z_]\w*)\s*;`)
 	mapBoundaryJavaLikeImportRegex   = regexp.MustCompile(`(?m)^\s*import\s+(?:static\s+)?([A-Za-z_][\w.]*)(?:\.\*)?\s*;`)
+	mapTryGeneratedNumberSuffixRegex = regexp.MustCompile(`^(?:bug|case|test|spec|fixture)\d+$`)
+	mapTryGeneratedNumericLeadRegex  = regexp.MustCompile(`^\d+[a-z]+\d*$`)
+	mapTryGeneratedShortCodeRegex    = regexp.MustCompile(`^[a-z]{1,3}\d+[a-z0-9]*$`)
+	mapTryGeneratedExtraRegex        = regexp.MustCompile(`^[a-z]+extra$`)
 )
 
 var mapConceptualBoundaryRules = []mapConceptualBoundaryRule{
@@ -5222,10 +5227,20 @@ func classifyMapBoundaryRole(area *mapAreaInternal, label, areaType string, root
 	if mapBoundaryHorizontalLayerLike(key, values) {
 		return mapBoundaryRoleHorizontalLayer
 	}
-	if mapTryLabelNeedsSpecificContext(label) || mapBoundaryHandoffUnsafeKey(key) {
+	if mapBoundaryLabelNeedsSafeHandoff(key) {
 		return mapBoundaryRoleHandoffUnsafe
 	}
 	return mapBoundaryRoleProductCapability
+}
+
+func mapBoundaryLabelNeedsSafeHandoff(key string) bool {
+	if mapBoundaryFirstScreenShellLabels[key] {
+		return true
+	}
+	if mapTryConceptualLabelNeedsSpecificContext(key) {
+		return true
+	}
+	return mapBoundaryHandoffUnsafeKey(key)
 }
 
 func mapBoundaryRoleValues(area *mapAreaInternal, label string, covers []string) []string {
@@ -5727,6 +5742,7 @@ func mapTryCommandForRoleWithPackability(label string, covers []string, receipts
 func mapTryCandidates(label string, covers []string, receipts []mapTraceReceipt, keyPaths []string, boundaryRole string) []mapTryCandidate {
 	var candidates []mapTryCandidate
 	add := func(query, source string) {
+		query = mapTryCleanHandoffQuery(query, source)
 		query = strings.ToLower(strings.TrimSpace(query))
 		if query == "" {
 			return
@@ -5745,9 +5761,7 @@ func mapTryCandidates(label string, covers []string, receipts []mapTraceReceipt,
 			continue
 		}
 		add(cover, "cover")
-		if !mapTryRoleNeedsSpecificContext(boundaryRole) && !mapTryLabelNeedsSpecificContext(label) && !mapTryLabelLooksConceptual(label) {
-			add(joinMapQuery(label, cover), "label_cover")
-		} else if mapTryBroadLabelUsesSpecificCover(label) || boundaryRole == mapBoundaryRoleExtensionEcosystem {
+		if boundaryRole == mapBoundaryRoleProductCapability && !mapTryLabelNeedsSpecificContext(label) && !mapTryLabelLooksConceptual(label) {
 			add(joinMapQuery(label, cover), "label_cover")
 		}
 	}
@@ -5839,15 +5853,24 @@ func mapTryCandidateScore(candidate mapTryCandidate, label string, covers []stri
 	if len(words) == 0 {
 		return -1000
 	}
+	if mapTryBroadLabelUsesSpecificCover(label) && candidate.Source == "label" {
+		return -1000
+	}
 	pathWords := mapTryWordSet(keyPaths)
 	coverWords := mapTryWordSet(covers)
-	specific, broad, pathSupport, coverSupport := 0, 0, 0, 0
+	specific, broad, pathSupport, coverSupport, lowValue, generatedLeaf := 0, 0, 0, 0, 0, 0
 	for _, word := range words {
 		if mapTrySpecificWord(word) {
 			specific++
 		}
 		if mapGenericTerms[word] || mapBoundaryHandoffBroadTerms[word] || mapTraceStopWord(word) {
 			broad++
+		}
+		if mapTryLowValueHandoffWord(word) {
+			lowValue++
+		}
+		if mapTryGeneratedLeafWord(word) {
+			generatedLeaf++
 		}
 		if pathWords[word] {
 			pathSupport++
@@ -5865,17 +5888,22 @@ func mapTryCandidateScore(candidate mapTryCandidate, label string, covers []stri
 	if boundaryRole == mapBoundaryRoleExtensionEcosystem && specific < 2 && pathSupport < 2 && coverSupport < 2 {
 		return -1000
 	}
+	if candidate.Source == "path" && mapTryPathCandidateTooLeafy(words, lowValue, generatedLeaf) {
+		return -1000
+	}
 	score := specific*12 + pathSupport*8 + coverSupport*6 - broad*5
+	score -= lowValue * 10
+	score -= generatedLeaf * 28
 	switch candidate.Source {
 	case "path":
-		score += 8
+		score -= 4
 		if mapTryBroadLabelUsesSpecificCover(label) && firstMapSpecificCover(covers) != "" {
 			score -= 50
 		}
 	case "cover":
 		score += 6
 		if mapTryBroadLabelUsesSpecificCover(label) {
-			score += 45
+			score += 60
 		}
 		if boundaryRole == mapBoundaryRoleExtensionEcosystem {
 			score += 18
@@ -5883,12 +5911,15 @@ func mapTryCandidateScore(candidate mapTryCandidate, label string, covers []stri
 	case "trace":
 		score += 4
 	case "label_cover":
-		score += 2
+		score += 22
 		if mapTryBroadLabelUsesSpecificCover(label) {
-			score += 45
+			score += 20
 		}
 	case "label":
-		score += 16
+		score += 26
+		if firstMapSpecificCover(covers) != "" && !mapTryLabelLooksConceptual(label) {
+			score -= 8
+		}
 		if boundaryRole == mapBoundaryRoleProductCapability && mapTryLabelLooksConceptual(label) {
 			score += 20
 		}
@@ -5931,8 +5962,36 @@ func mapTryWordSet(values []string) map[string]bool {
 	return out
 }
 
+func mapTryCleanHandoffQuery(query, source string) string {
+	if source == "label" {
+		return query
+	}
+	words := wordsFromMap(query)
+	for len(words) > 0 && mapTryTerminalShellWord(words[0]) {
+		words = words[1:]
+	}
+	for len(words) > 0 && mapTryTerminalShellWord(words[len(words)-1]) {
+		words = words[:len(words)-1]
+	}
+	if len(words) == 0 {
+		return query
+	}
+	return displayMapLabel(strings.Join(words, " "))
+}
+
+func mapTryTerminalShellWord(word string) bool {
+	switch word {
+	case "component", "components", "controller", "controllers", "dashboard", "dashboards",
+		"initializer", "initializers", "page", "pages", "route", "routes", "screen", "screens",
+		"view", "views":
+		return true
+	default:
+		return false
+	}
+}
+
 func mapTrySpecificWord(word string) bool {
-	if word == "" || mapGenericTerms[word] || mapBoundaryHandoffBroadTerms[word] || mapTraceStopWord(word) {
+	if word == "" || mapGenericTerms[word] || mapBoundaryHandoffBroadTerms[word] || mapTraceStopWord(word) || mapTryLowValueHandoffWord(word) || mapTryGeneratedLeafWord(word) {
 		return false
 	}
 	if len(word) >= 4 {
@@ -5946,12 +6005,100 @@ func mapTrySpecificWord(word string) bool {
 	}
 }
 
+func mapTryLowValueHandoffWord(word string) bool {
+	switch word {
+	case "addlicense", "cname", "compat", "config", "configs", "configuration", "csproj",
+		"dockerfile", "dockerignore", "eslint", "fixture", "fixtures", "impl", "implementation",
+		"license", "manifest", "postcss", "prettier", "template", "templates", "version":
+		return true
+	default:
+		return false
+	}
+}
+
+func mapTryGeneratedLeafWord(word string) bool {
+	if word == "" {
+		return false
+	}
+	if mapTryKnownShortCodeWord(word) {
+		return false
+	}
+	if mapTryGeneratedNumberSuffixRegex.MatchString(word) {
+		return true
+	}
+	if mapTryGeneratedNumericLeadRegex.MatchString(word) {
+		return true
+	}
+	if mapTryGeneratedShortCodeRegex.MatchString(word) {
+		return true
+	}
+	if mapTryGeneratedExtraRegex.MatchString(word) {
+		return true
+	}
+	return false
+}
+
+func mapTryKnownShortCodeWord(word string) bool {
+	switch word {
+	case "a11y", "amd64", "arm64", "i18n", "r2", "s3", "x64", "x86":
+		return true
+	default:
+		return false
+	}
+}
+
+func mapTryPathCandidateTooLeafy(words []string, lowValue, generatedLeaf int) bool {
+	if len(words) == 0 {
+		return true
+	}
+	if generatedLeaf > 0 {
+		return true
+	}
+	if lowValue >= 2 {
+		return true
+	}
+	if lowValue > 0 && len(words) <= 2 {
+		return true
+	}
+	specific := 0
+	for _, word := range words {
+		if mapTrySpecificWord(word) {
+			specific++
+		}
+	}
+	return specific == 0
+}
+
 func mapTryLabelNeedsSpecificContext(label string) bool {
 	key := normalizeMapKey(label)
 	if mapBoundaryFirstScreenShellLabels[key] {
 		return true
 	}
+	if mapTryLabelLooksConceptual(label) {
+		return true
+	}
+	if mapTryConceptualLabelNeedsSpecificContext(key) {
+		return true
+	}
 	return mapBoundaryHandoffUnsafeKey(key)
+}
+
+func mapTryConceptualLabelNeedsSpecificContext(key string) bool {
+	switch key {
+	case "background-jobs-email-automation",
+		"build-publish-auth-audit",
+		"dependency-resolution-lockfile",
+		"extension-surfaces",
+		"files-assets-storage",
+		"flows-automation",
+		"package-installation-virtual-environments",
+		"registry-cache-artifact-fetching",
+		"run-scripts-inline-dependencies",
+		"work-items-project-delivery":
+		return true
+	default:
+		return false
+	}
 }
 
 func mapTryBroadLabelUsesSpecificCover(label string) bool {
@@ -5988,7 +6135,7 @@ func mapTrySpecificPathQuery(label string, keyPaths []string) string {
 	var words []string
 	for _, path := range firstStrings(keyPaths, 5) {
 		for _, word := range wordsFromMap(path) {
-			if labelWords[word] || mapGenericTerms[word] || mapBoundaryHandoffBroadTerms[word] || mapTraceStopWord(word) {
+			if labelWords[word] || mapGenericTerms[word] || mapBoundaryHandoffBroadTerms[word] || mapTraceStopWord(word) || mapTryLowValueHandoffWord(word) || mapTryGeneratedLeafWord(word) {
 				continue
 			}
 			if len(word) < 4 {
@@ -6003,7 +6150,25 @@ func mapTrySpecificPathQuery(label string, keyPaths []string) string {
 	if len(words) == 0 {
 		return ""
 	}
-	return displayMapLabel(strings.Join(words, " "))
+	words = append(mapTryPathQueryLabelPrefix(label), words...)
+	return displayMapLabel(strings.Join(firstStrings(words, 4), " "))
+}
+
+func mapTryPathQueryLabelPrefix(label string) []string {
+	if mapTryBroadLabelUsesSpecificCover(label) || mapTryConceptualLabelNeedsSpecificContext(normalizeMapKey(label)) {
+		return nil
+	}
+	var out []string
+	for _, word := range wordsFromMap(label) {
+		if len(word) < 4 || mapGenericTerms[word] || mapBoundaryHandoffBroadTerms[word] || mapTraceStopWord(word) || mapTryLowValueHandoffWord(word) || mapTryGeneratedLeafWord(word) {
+			continue
+		}
+		out = appendUniqueString(out, word)
+		if len(out) >= 2 {
+			break
+		}
+	}
+	return out
 }
 
 func mapTryLabelLooksConceptual(label string) bool {

@@ -441,8 +441,8 @@ func TestPathBoundaryMapAggregatesDubConceptualParents(t *testing.T) {
 	if redirect == nil {
 		t.Fatalf("expected Short-Link Redirect & Click Capture, got %#v", areas)
 	}
-	if !strings.Contains(redirect.Try, "short-link redirect") {
-		t.Fatalf("conceptual try command should use parent label, got %q", redirect.Try)
+	if !strings.Contains(redirect.Try, "click events") {
+		t.Fatalf("conceptual try command should use concrete click substrate, got %q", redirect.Try)
 	}
 	if findMapTestArea(areas, "Program") != nil || findMapTestArea(areas, "Programs") != nil {
 		t.Fatalf("child program labels should be folded behind parent: %#v", areas)
@@ -887,7 +887,7 @@ func TestPathBoundaryMapDemotesFreshHoldoutShellBuckets(t *testing.T) {
 	}
 	for _, label := range []string{
 		"External HTTP API v1",
-		"Background Jobs, Email & Automation",
+		"Connected Accounts, Email, Calendar & Timeline",
 		"AI Agents, Chat & Skills",
 		"Identity, Auth & Access Control",
 	} {
@@ -904,8 +904,69 @@ func TestMapTryCommandDropsShellLabelsAndUsesSpecificCovers(t *testing.T) {
 	if got := mapTryCommand("Javascript", []string{"Accordion"}, nil, mapHighConfidence, nil); got != `ds find --pack "accordion"` {
 		t.Fatalf("javascript try = %q", got)
 	}
-	if got := mapTryCommand("Files, Assets & Storage", []string{"Upload"}, nil, mapHighConfidence, []string{"web/src/components/MemoEditor/hooks/useFileUpload.ts"}); !strings.Contains(got, "upload") {
-		t.Fatalf("broad storage try should include upload, got %q", got)
+	if got := mapTryCommand("Files, Assets & Storage", []string{"Upload"}, nil, mapHighConfidence, []string{"web/src/components/MemoEditor/hooks/useFileUpload.ts"}); got != `ds find --pack "upload"` {
+		t.Fatalf("broad storage try should prefer the specific cover, got %q", got)
+	}
+}
+
+func TestMapTryCommandPrefersSpecificCoverForParentLabel(t *testing.T) {
+	got := mapTryCommand(
+		"Submission",
+		[]string{"Redaction"},
+		nil,
+		mapHighConfidence,
+		[]string{"apps/api/internal/submission/redaction.go"},
+	)
+	if got != `ds find --pack "submission redaction"` {
+		t.Fatalf("parent label try = %q", got)
+	}
+}
+
+func TestMapTryCommandAvoidsLowValuePathLeafQueries(t *testing.T) {
+	got := mapTryCommandForRole(
+		"Operator",
+		[]string{"Charts", "Crds"},
+		nil,
+		mapHighConfidence,
+		[]string{
+			"operator/Dockerfile.dockerignore",
+			"operator/VERSION",
+			"operator/api/core/v1alpha1/crds/grove.io_clustertopologybindings.yaml",
+		},
+		mapBoundaryRoleProductCapability,
+	)
+	if got == "" {
+		t.Fatal("expected a handoff query")
+	}
+	if strings.Contains(got, "dockerfile") || strings.Contains(got, "dockerignore") || strings.Contains(got, "version") {
+		t.Fatalf("low-value path leaf leaked into handoff: %q", got)
+	}
+	if !strings.Contains(got, "operator") && !strings.Contains(got, "charts") && !strings.Contains(got, "crds") {
+		t.Fatalf("handoff lost useful area terms: %q", got)
+	}
+}
+
+func TestMapTryCommandAvoidsGeneratedFixtureLeafQueries(t *testing.T) {
+	got := mapTryCommandForRole(
+		"Fixedbugs",
+		[]string{"Arm64 Bitfield Overlap"},
+		nil,
+		mapHighConfidence,
+		[]string{
+			"test/fixedbugs/arm64bitfieldoverlap.go",
+			"test/fixedbugs/bug000.go",
+			"test/fixedbugs/bug002.go",
+		},
+		mapBoundaryRoleProductCapability,
+	)
+	if got == "" {
+		t.Fatal("expected a handoff query")
+	}
+	if strings.Contains(got, "bug000") || strings.Contains(got, "bug002") {
+		t.Fatalf("generated fixture leaf leaked into handoff: %q", got)
+	}
+	if !strings.Contains(got, "arm64") && !strings.Contains(got, "fixedbugs") {
+		t.Fatalf("handoff lost useful fixture-family terms: %q", got)
 	}
 }
 
