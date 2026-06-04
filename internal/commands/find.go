@@ -128,6 +128,13 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	if len(matches) == 0 {
 		matches = retrieval.QueryBaseline(candidates, query)
 	}
+	initialMatchCount := len(matches)
+	if pack {
+		matches = addFindPackCompanionCandidates(cmd.Context(), fp.RepoRoot, query, matches, candidates)
+		if added := len(matches) - initialMatchCount; added > 0 {
+			props["pack_companion_count_bucket"] = telemetry.CountBucket(added)
+		}
+	}
 	reasons := reasonsByPath(retrieval.ExplainCandidates(matches, query))
 	var graphDiagnostics FindGraphDiagnostics
 	if graphDiag {

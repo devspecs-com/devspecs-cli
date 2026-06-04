@@ -515,11 +515,48 @@ func classifyExcludedNoise(c Candidate, role, queryLower string) (bool, string) 
 		return true, "agent instruction artifact; query does not ask for repo agent rules"
 	case role == "protocol" && !skillLike && !queryRequestsProtocol(queryLower):
 		return true, "process or protocol artifact; query does not ask for procedures or policies"
+	case isFixtureSampleCandidate(c) && !queryRequestsFixtureSample(queryLower):
+		return true, "fixture, sample, or testdata artifact; query does not ask for fixture data"
 	case isGeneratedOrVendorCandidate(c) && !queryRequestsGeneratedOrVendor(queryLower):
 		return true, "generated, vendor, or dependency artifact; query does not ask for generated/vendor context"
 	default:
 		return false, ""
 	}
+}
+
+func isFixtureSampleCandidate(c Candidate) bool {
+	if isTestCaseCandidate(c) || isRawTestSourceCandidate(c) {
+		return false
+	}
+	path := strings.ToLower(filepath.ToSlash(c.Path))
+	if path == "" {
+		path = strings.ToLower(filepath.ToSlash(c.Source))
+	}
+	if path == "" {
+		return false
+	}
+	for _, segment := range strings.Split(strings.Trim(path, "/"), "/") {
+		switch segment {
+		case "fixture", "fixtures", "sample", "samples", "testdata":
+			return true
+		}
+	}
+	base := filepath.Base(path)
+	return strings.HasPrefix(base, "sample.") ||
+		strings.HasPrefix(base, "example.") ||
+		strings.HasSuffix(base, ".sample.md")
+}
+
+func queryRequestsFixtureSample(queryLower string) bool {
+	if containsAny(queryLower, "test data", "golden file", "golden files") {
+		return true
+	}
+	for _, word := range []string{"fixture", "fixtures", "sample", "samples", "testdata", "golden", "snapshot", "snapshots", "example", "examples"} {
+		if hasQueryWord(queryLower, word) {
+			return true
+		}
+	}
+	return false
 }
 
 func queryRequestsCurrentPackArtifact(c Candidate, role, queryLower string, skillLike, agentInstructionLike bool) bool {

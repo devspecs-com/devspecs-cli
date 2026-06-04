@@ -184,6 +184,26 @@ func writeGitTrustText(out io.Writer, gitTrust *FindGitTrustContext) {
 			fmt.Fprintf(out, "      signals: %s\n", strings.Join(firstStrings(receipt.Signals, 3), "; "))
 		}
 	}
+	if related := relatedFindGitReceiptPaths(gitTrust.Receipts, 8); len(related) > 0 {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Related files from matching commits, not admitted to pack:")
+		for _, path := range related {
+			fmt.Fprintf(out, "  - %s\n", path)
+		}
+	}
+}
+
+func relatedFindGitReceiptPaths(receipts []FindGitReceipt, limit int) []string {
+	var out []string
+	for _, receipt := range receipts {
+		for _, path := range receipt.RelatedPaths {
+			out = appendUniqueString(out, path)
+			if limit > 0 && len(out) >= limit {
+				return out
+			}
+		}
+	}
+	return out
 }
 
 func writePackSummary(out io.Writer, summary retrieval.PackSummary) {

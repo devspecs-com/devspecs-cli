@@ -17,6 +17,7 @@ const (
 	findGitReceiptMaxPaths   = 8
 	findGitReceiptMaxCommits = 80
 	findGitReceiptMaxDisplay = 3
+	findGitReceiptMaxRelated = 5
 	findGitReceiptTimeout    = 2 * time.Second
 	findGitCommitMarker      = "__DEV_SPECS_GIT_RECEIPT_COMMIT__"
 	findGitBodyMarker        = "__DEV_SPECS_GIT_RECEIPT_BODY__"
@@ -39,6 +40,7 @@ type FindGitReceipt struct {
 	Subject      string   `json:"subject"`
 	Detail       string   `json:"detail,omitempty"`
 	MatchedPaths []string `json:"matched_paths,omitempty"`
+	RelatedPaths []string `json:"related_paths,omitempty"`
 	MatchedTerms []string `json:"matched_terms,omitempty"`
 	Signals      []string `json:"signals,omitempty"`
 	Score        int      `json:"score,omitempty"`
@@ -218,7 +220,10 @@ func parseFindGitLog(raw string) []parsedFindGitCommit {
 func scoreFindGitReceipts(commits []parsedFindGitCommit, packedPaths []string, query string) []FindGitReceipt {
 	pathSet := map[string]bool{}
 	for _, path := range packedPaths {
-		pathSet[path] = true
+		path = normalizeFindGitReceiptPath(path)
+		if path != "" {
+			pathSet[path] = true
+		}
 	}
 	anchors := findGitReceiptQueryAnchors(query)
 	specificAnchors := findGitReceiptSpecificAnchors(query)
@@ -231,6 +236,7 @@ func scoreFindGitReceipts(commits []parsedFindGitCommit, packedPaths []string, q
 		if len(matchedPaths) == 0 {
 			continue
 		}
+		relatedPaths := relatedFindGitCommitPaths(commit.paths, pathSet)
 		combined := strings.ToLower(commit.subject + "\n" + commit.body)
 		var matchedTerms []string
 		for _, anchor := range anchors {
@@ -263,6 +269,10 @@ func scoreFindGitReceipts(commits []parsedFindGitCommit, packedPaths []string, q
 			score += 2
 			signals = append(signals, "cross-file change")
 		}
+		if len(relatedPaths) > 0 {
+			score += 2
+			signals = append(signals, "related touched files")
+		}
 		if commit.order < 5 {
 			score += 5 - commit.order
 		}
@@ -273,6 +283,7 @@ func scoreFindGitReceipts(commits []parsedFindGitCommit, packedPaths []string, q
 			Subject:      limitRunes(commit.subject, 120),
 			Detail:       limitRunes(firstNonEmptyGitBodyLine(commit.body), 120),
 			MatchedPaths: firstStrings(matchedPaths, 3),
+			RelatedPaths: relatedPaths,
 			MatchedTerms: firstStrings(matchedTerms, 5),
 			Signals:      signals,
 			Score:        score,
@@ -288,6 +299,72 @@ func scoreFindGitReceipts(commits []parsedFindGitCommit, packedPaths []string, q
 		scored = scored[:findGitReceiptMaxDisplay]
 	}
 	return scored
+}
+
+func relatedFindGitCommitPaths(paths []string, packed map[string]bool) []string {
+	var tests []string
+	var source []string
+	var config []string
+	for _, path := range paths {
+		path = normalizeFindGitReceiptPath(path)
+		if path == "" || packed[path] || findGitReceiptRelatedPathNoise(path) {
+			continue
+		}
+		switch {
+		case findPackLooksTestPath(path):
+			tests = appendUniqueString(tests, path)
+		case findPackLooksSourcePath(path):
+			source = appendUniqueString(source, path)
+		case findGitReceiptLooksConfigRelatedPath(path):
+			config = appendUniqueString(config, path)
+		}
+	}
+	var out []string
+	for _, family := range [][]string{tests, source, config} {
+		sort.Strings(family)
+		for _, path := range family {
+			out = appendUniqueString(out, path)
+			if len(out) >= findGitReceiptMaxRelated {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+func findGitReceiptRelatedPathNoise(path string) bool {
+	lower := strings.ToLower(normalizeFindGitReceiptPath(path))
+	if lower == "" {
+		return true
+	}
+	if strings.Contains(lower, "/vendor/") ||
+		strings.Contains(lower, "/node_modules/") ||
+		strings.Contains(lower, "/dist/") ||
+		strings.Contains(lower, "/build/") ||
+		strings.Contains(lower, "/coverage/") ||
+		strings.Contains(lower, "/.next/") ||
+		strings.Contains(lower, "/.turbo/") ||
+		strings.Contains(lower, "/third_party/") ||
+		strings.Contains(lower, "/generated/") {
+		return true
+	}
+	base := strings.ToLower(filepath.Base(lower))
+	return strings.HasSuffix(base, ".lock") ||
+		base == "package-lock.json" ||
+		base == "pnpm-lock.yaml" ||
+		base == "yarn.lock"
+}
+
+func findGitReceiptLooksConfigRelatedPath(path string) bool {
+	lower := strings.ToLower(normalizeFindGitReceiptPath(path))
+	base := filepath.Base(lower)
+	switch filepath.Ext(base) {
+	case ".json", ".yaml", ".yml", ".toml", ".xml", ".proto", ".graphql", ".sql":
+		return true
+	}
+	return base == "dockerfile" ||
+		base == "makefile" ||
+		strings.HasSuffix(base, ".dockerfile")
 }
 
 func findGitReceiptCommitNoisy(commit parsedFindGitCommit) bool {

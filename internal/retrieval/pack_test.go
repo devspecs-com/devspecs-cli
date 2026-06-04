@@ -691,6 +691,50 @@ func TestBuildRoleGroupedPackSuppressesConflictingStaleCueForActiveArtifact(t *t
 	}
 }
 
+func TestBuildRoleGroupedPackDampensUnrequestedFixtureSampleArtifacts(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:      "sample",
+			Path:    "testdata/samples/webhook-payload.md",
+			Kind:    "markdown_artifact",
+			Subtype: "documentation",
+			Title:   "Webhook Payload Sample",
+			Body:    "webhook replay payload fixture",
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "implement webhook replay handling")
+
+	if len(pack.ExcludedNoise) != 1 {
+		t.Fatalf("expected unrequested fixture/sample to be excluded, got %#v", pack)
+	}
+	if pack.ExcludedNoise[0].RoleReason == "" {
+		t.Fatalf("expected fixture/sample exclusion reason, got %#v", pack.ExcludedNoise[0])
+	}
+}
+
+func TestBuildRoleGroupedPackKeepsExplicitlyRequestedFixtureSampleArtifacts(t *testing.T) {
+	candidates := []Candidate{
+		{
+			ID:      "sample",
+			Path:    "testdata/samples/webhook-payload.md",
+			Kind:    "markdown_artifact",
+			Subtype: "documentation",
+			Title:   "Webhook Payload Sample",
+			Body:    "webhook replay payload fixture",
+		},
+	}
+
+	pack := BuildRoleGroupedPack(candidates, nil, "inspect webhook replay testdata sample")
+
+	if len(pack.ExcludedNoise) != 0 {
+		t.Fatalf("expected requested fixture/sample to stay available, got %#v", pack.ExcludedNoise)
+	}
+	if includedPackItemCount(pack) != 1 {
+		t.Fatalf("expected requested fixture/sample to be included, got %#v", pack)
+	}
+}
+
 func assertGroupCount(t *testing.T, pack RoleGroupedPack, role string, want int) {
 	t.Helper()
 	for _, group := range pack.Groups {
