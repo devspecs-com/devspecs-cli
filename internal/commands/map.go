@@ -5753,6 +5753,11 @@ func mapTryCandidates(label string, covers []string, receipts []mapTraceReceipt,
 	if !mapTryRoleNeedsSpecificContext(boundaryRole) && !mapTryLabelNeedsSpecificContext(label) {
 		add(label, "label")
 	}
+	for _, receipt := range firstMapTraceReceipts(receipts, 2) {
+		if traceTaskQuery := mapTraceTaskQuery(receipt.Subject); traceTaskQuery != "" {
+			add(traceTaskQuery, "trace_task")
+		}
+	}
 	if pathQuery := mapTrySpecificPathQuery(label, keyPaths); pathQuery != "" {
 		add(pathQuery, "path")
 	}
@@ -5891,6 +5896,9 @@ func mapTryCandidateScore(candidate mapTryCandidate, label string, covers []stri
 	if candidate.Source == "path" && mapTryPathCandidateTooLeafy(words, lowValue, generatedLeaf) {
 		return -1000
 	}
+	if candidate.Source == "trace_task" && firstMapSpecificCover(covers) != "" && coverSupport == 0 {
+		return -1000
+	}
 	score := specific*12 + pathSupport*8 + coverSupport*6 - broad*5
 	score -= lowValue * 10
 	score -= generatedLeaf * 28
@@ -5910,6 +5918,8 @@ func mapTryCandidateScore(candidate mapTryCandidate, label string, covers []stri
 		}
 	case "trace":
 		score += 4
+	case "trace_task":
+		score += 30
 	case "label_cover":
 		score += 22
 		if mapTryBroadLabelUsesSpecificCover(label) {
@@ -6218,6 +6228,122 @@ func mapTraceQuery(label string, covers []string, subject string) string {
 		return ""
 	}
 	return displayMapLabel(strings.Join(append(wordsFromMap(label), extra...), " "))
+}
+
+func mapTraceTaskQuery(subject string) string {
+	if mapTraceTaskRejectedPrefix(subject) {
+		return ""
+	}
+	subject = stripMapCommitPrefixes(subject)
+	if !mapTraceTaskSubjectAllowed(subject) {
+		return ""
+	}
+	var words []string
+	for _, word := range wordsFromMap(subject) {
+		if mapTraceTaskSkipWord(word) {
+			continue
+		}
+		words = appendUniqueString(words, word)
+		if len(words) >= 5 {
+			break
+		}
+	}
+	if len(words) < 2 {
+		return ""
+	}
+	return displayMapLabel(strings.Join(words, " "))
+}
+
+func mapTraceTaskRejectedPrefix(subject string) bool {
+	subject = strings.TrimSpace(strings.ToLower(subject))
+	if idx := strings.Index(subject, ":"); idx > 0 && idx <= 16 {
+		switch strings.TrimSpace(subject[:idx]) {
+		case "build", "chore", "ci", "doc", "docs", "style", "test", "tests":
+			return true
+		}
+	}
+	return false
+}
+
+func stripMapCommitPrefixes(subject string) string {
+	subject = strings.TrimSpace(subject)
+	for i := 0; i < 3; i++ {
+		next := stripMapCommitPrefix(subject)
+		if next == subject {
+			return strings.TrimSpace(subject)
+		}
+		subject = strings.TrimSpace(next)
+	}
+	return subject
+}
+
+func mapTraceTaskSubjectAllowed(subject string) bool {
+	lower := strings.ToLower(strings.TrimSpace(subject))
+	if lower == "" {
+		return false
+	}
+	if strings.Contains(lower, "dependabot") || strings.Contains(lower, "renovate") {
+		return false
+	}
+	words := wordsFromMap(lower)
+	for len(words) > 0 && mapTraceTaskConventionalPrefixWord(words[0]) {
+		words = words[1:]
+	}
+	if len(words) == 0 {
+		return false
+	}
+	leading := words[0]
+	if mapTraceTaskUnsupportedLeadingWord(leading) {
+		return false
+	}
+	if mapTraceTaskAllowedLeadingWord(leading) {
+		return true
+	}
+	return mapTrySpecificWord(leading)
+}
+
+func mapTraceTaskConventionalPrefixWord(word string) bool {
+	switch word {
+	case "ci", "chore", "doc", "docs", "feat", "feature", "perf", "style", "test", "tests", "wip":
+		return true
+	default:
+		return false
+	}
+}
+
+func mapTraceTaskAllowedLeadingWord(word string) bool {
+	switch word {
+	case "add", "adds", "added", "allow", "allows", "enable", "enables", "fix", "fixes",
+		"gate", "gates", "implement", "implements", "improve", "improves", "repair",
+		"repairs", "support", "supports":
+		return true
+	default:
+		return false
+	}
+}
+
+func mapTraceTaskUnsupportedLeadingWord(word string) bool {
+	switch word {
+	case "bump", "bumps", "clean", "cleanup", "merge", "merged", "move", "moves",
+		"record", "records", "release", "remove", "removes", "rename", "renames",
+		"replace", "replaces", "revert", "reverts", "update", "updates", "upgrade", "upgrades":
+		return true
+	default:
+		return false
+	}
+}
+
+func mapTraceTaskSkipWord(word string) bool {
+	if word == "" || mapTraceTaskConventionalPrefixWord(word) || mapTraceStopWord(word) || mapTryLowValueHandoffWord(word) || mapTryGeneratedLeafWord(word) {
+		return true
+	}
+	switch word {
+	case "auto", "gate", "gates", "gated", "implement", "implements", "implemented",
+		"in", "repair", "repairs", "repaired", "speed", "speeds", "speeding":
+		return true
+	default:
+		return false
+	}
 }
 
 func joinMapQuery(label, cover string) string {

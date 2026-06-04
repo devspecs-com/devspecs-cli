@@ -922,6 +922,65 @@ func TestMapTryCommandPrefersSpecificCoverForParentLabel(t *testing.T) {
 	}
 }
 
+func TestMapTryCommandPrefersHighQualityTraceTaskOverPathTokens(t *testing.T) {
+	got := mapTryCommandForRole(
+		"Commands",
+		nil,
+		[]mapTraceReceipt{{
+			SHA:     "abc1234",
+			Subject: "feat: improve map handoff query quality",
+		}},
+		mapHighConfidence,
+		[]string{
+			"internal/commands/capture.go",
+			"internal/commands/context.go",
+			"internal/commands/criteria.go",
+		},
+		mapBoundaryRoleProductCapability,
+	)
+	if got != `ds find --pack "map handoff query quality"` {
+		t.Fatalf("trace task handoff = %q", got)
+	}
+}
+
+func TestMapTryCommandKeepsSpecificCoverAboveUnrelatedTraceTask(t *testing.T) {
+	got := mapTryCommandForRole(
+		"Submission",
+		[]string{"Redaction"},
+		[]mapTraceReceipt{{
+			SHA:     "abc1234",
+			Subject: "feat: improve auth session timeout",
+		}},
+		mapHighConfidence,
+		[]string{"apps/api/internal/submission/redaction.go"},
+		mapBoundaryRoleProductCapability,
+	)
+	if got != `ds find --pack "submission redaction"` {
+		t.Fatalf("specific cover should beat unrelated trace task, got %q", got)
+	}
+}
+
+func TestMapTryCommandRejectsTestPrefixTraceTask(t *testing.T) {
+	got := mapTryCommandForRole(
+		"Initflow",
+		nil,
+		[]mapTraceReceipt{{
+			SHA:     "abc1234",
+			Subject: "test: raise aggregate coverage above CI 80% floor",
+		}},
+		mapHighConfidence,
+		[]string{
+			"internal/initflow/initflow.go",
+			"internal/initflow/merge.go",
+			"internal/initflow/patterns.go",
+		},
+		mapBoundaryRoleProductCapability,
+	)
+	if strings.Contains(got, "raise aggregate coverage") {
+		t.Fatalf("test prefix trace task leaked into handoff: %q", got)
+	}
+}
+
 func TestMapTryCommandAvoidsLowValuePathLeafQueries(t *testing.T) {
 	got := mapTryCommandForRole(
 		"Operator",
