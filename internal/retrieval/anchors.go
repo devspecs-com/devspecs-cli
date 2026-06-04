@@ -32,13 +32,14 @@ type AnchorProfile struct {
 }
 
 const (
-	AnchorFirstModeV1           = "v1"
-	AnchorFirstModeRerankOnly   = "rerank_only"
-	AnchorFirstModeSelectedOnly = "selected_only"
-	AnchorFirstModeStrongField  = "strong_field"
-	AnchorFirstModeStrict       = "strict"
-	AnchorFirstModeCodeTask     = "code_task"
-	DefaultAnchorFirstMode      = AnchorFirstModeSelectedOnly
+	AnchorFirstModeV1             = "v1"
+	AnchorFirstModeRerankOnly     = "rerank_only"
+	AnchorFirstModeSelectedOnly   = "selected_only"
+	AnchorFirstModeStrongField    = "strong_field"
+	AnchorFirstModeStrict         = "strict"
+	AnchorFirstModeCodeTask       = "code_task"
+	AnchorFirstModeCodeTaskFamily = "code_task_family"
+	DefaultAnchorFirstMode        = AnchorFirstModeSelectedOnly
 )
 
 func NormalizeAnchorFirstMode(mode string) string {
@@ -57,13 +58,20 @@ func NormalizeAnchorFirstMode(mode string) string {
 		return AnchorFirstModeStrict
 	case "code-task", AnchorFirstModeCodeTask:
 		return AnchorFirstModeCodeTask
+	case "code-task-family", AnchorFirstModeCodeTaskFamily:
+		return AnchorFirstModeCodeTaskFamily
 	default:
 		return ""
 	}
 }
 
 func ValidAnchorFirstModes() []string {
-	return []string{AnchorFirstModeV1, AnchorFirstModeRerankOnly, AnchorFirstModeSelectedOnly, AnchorFirstModeStrongField, AnchorFirstModeStrict, AnchorFirstModeCodeTask}
+	return []string{AnchorFirstModeV1, AnchorFirstModeRerankOnly, AnchorFirstModeSelectedOnly, AnchorFirstModeStrongField, AnchorFirstModeStrict, AnchorFirstModeCodeTask, AnchorFirstModeCodeTaskFamily}
+}
+
+func AnchorFirstModeUsesCodeTaskWeights(mode string) bool {
+	mode = NormalizeAnchorFirstMode(mode)
+	return mode == AnchorFirstModeCodeTask || mode == AnchorFirstModeCodeTaskFamily
 }
 
 type RepoVocabulary struct {
@@ -323,7 +331,7 @@ func anchorFirstPrimaryBoostAllowed(c Candidate, result anchorScoreResult, profi
 	if result.strongSpecific {
 		return true
 	}
-	if mode == AnchorFirstModeCodeTask {
+	if AnchorFirstModeUsesCodeTaskWeights(mode) {
 		return result.score >= 4.0 &&
 			result.maxIDF >= 1.25 &&
 			resultHasAnyAnchorField(result, "path", "title", "symbol", "heading") &&
@@ -361,7 +369,7 @@ func scoreAnchorFirstCandidate(c Candidate, profile AnchorProfile, vocab RepoVoc
 			continue
 		}
 		stats := vocab.Terms[anchor.Term]
-		if mode == AnchorFirstModeCodeTask {
+		if AnchorFirstModeUsesCodeTaskWeights(mode) {
 			stats = codeTaskBestAnchorStats(vocab, anchor.Term, stats)
 		}
 		idf := stats.IDF
@@ -452,7 +460,7 @@ func fieldWeightedTF(term string, fields anchorFieldTerms, kind AnchorKind, mode
 		roleWeight = 0
 		bodyWeight = 0
 	}
-	if mode == AnchorFirstModeCodeTask {
+	if AnchorFirstModeUsesCodeTaskWeights(mode) {
 		roleWeight = 0.05
 		bodyWeight = 0.05
 	}
@@ -481,7 +489,7 @@ func phraseFieldWeightedTF(phrase string, fields anchorFieldTerms, mode string) 
 	add("heading", fields.heading, 3.0)
 	if mode == AnchorFirstModeV1 || mode == AnchorFirstModeRerankOnly || mode == AnchorFirstModeSelectedOnly {
 		add("body", fields.body, 0.45)
-	} else if mode == AnchorFirstModeCodeTask {
+	} else if AnchorFirstModeUsesCodeTaskWeights(mode) {
 		add("body", fields.body, 0.08)
 	}
 	return score, matched
@@ -579,7 +587,7 @@ func anchorDictionaryModifier(anchor AnchorTerm, hasSpecific bool, mode string) 
 	case AnchorGenericTaskWord:
 		return 0
 	case AnchorArtifactRoleTerm:
-		if mode == AnchorFirstModeCodeTask {
+		if AnchorFirstModeUsesCodeTaskWeights(mode) {
 			return 0
 		}
 		if mode == AnchorFirstModeStrict {
@@ -599,25 +607,25 @@ func anchorDictionaryModifier(anchor AnchorTerm, hasSpecific bool, mode string) 
 		}
 		return 0.18
 	case AnchorCompactIdentifier:
-		if mode == AnchorFirstModeCodeTask {
+		if AnchorFirstModeUsesCodeTaskWeights(mode) {
 			return 2.0
 		}
 		return 1.8
 	case AnchorPathLike:
-		if mode == AnchorFirstModeCodeTask {
+		if AnchorFirstModeUsesCodeTaskWeights(mode) {
 			return 1.5
 		}
 		return 1.35
 	case AnchorQuotedPhrase:
-		if mode == AnchorFirstModeCodeTask {
+		if AnchorFirstModeUsesCodeTaskWeights(mode) {
 			return 1.5
 		}
 		return 1.4
 	case AnchorProperOrRare:
-		if mode == AnchorFirstModeCodeTask && codeTaskGenericAnchorTerm(anchor.Term) {
+		if AnchorFirstModeUsesCodeTaskWeights(mode) && codeTaskGenericAnchorTerm(anchor.Term) {
 			return 0
 		}
-		if mode == AnchorFirstModeCodeTask {
+		if AnchorFirstModeUsesCodeTaskWeights(mode) {
 			return 1.2
 		}
 		if mode == AnchorFirstModeStrict {
@@ -662,7 +670,7 @@ func anchorFirstBackfillAllowed(result anchorScoreResult, mode string) bool {
 		return result.score >= 12.0 && result.maxIDF >= 1.8 && resultHasAnyAnchorField(result, "path", "title", "test_name")
 	case AnchorFirstModeStrict:
 		return result.score >= 14.0 && result.maxIDF >= 1.8 && resultHasAnyAnchorField(result, "path", "title", "test_name") && resultHasAnyAnchorKind(result, string(AnchorCompactIdentifier), string(AnchorPathLike), string(AnchorQuotedPhrase))
-	case AnchorFirstModeCodeTask:
+	case AnchorFirstModeCodeTask, AnchorFirstModeCodeTaskFamily:
 		return result.score >= 8.0 && result.maxIDF >= 1.25 && resultHasAnyAnchorField(result, "path", "title", "symbol", "heading")
 	default:
 		return false
@@ -673,7 +681,7 @@ func anchorFirstBackfillLimit(mode string) int {
 	switch mode {
 	case AnchorFirstModeV1:
 		return 0
-	case AnchorFirstModeCodeTask:
+	case AnchorFirstModeCodeTask, AnchorFirstModeCodeTaskFamily:
 		return 3
 	default:
 		return 1
@@ -864,7 +872,7 @@ func codeTaskGenericAnchorTerm(term string) bool {
 
 func anchorFieldTermCount(term string, terms map[string]int, mode string) int {
 	count := terms[term]
-	if count > 0 || mode != AnchorFirstModeCodeTask {
+	if count > 0 || !AnchorFirstModeUsesCodeTaskWeights(mode) {
 		return count
 	}
 	for _, alt := range codeTaskAnchorAlternates(term) {

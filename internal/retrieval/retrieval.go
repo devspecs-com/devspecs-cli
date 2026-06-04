@@ -216,11 +216,18 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode 
 	if anchorFirstRanking {
 		scoredCandidates = applyExactAnchorDiscipline(scoredCandidates, candidates, query, queryLower, terms, limit)
 	}
-	if anchorFirstRanking && normalizedAnchorFirstMode == AnchorFirstModeCodeTask {
-		scoredCandidates = applyCodeTaskRankingDiscipline(scoredCandidates, candidates, query, queryLower)
+	if anchorFirstRanking && AnchorFirstModeUsesCodeTaskWeights(normalizedAnchorFirstMode) {
+		scoredCandidates = applyCodeTaskRankingDiscipline(scoredCandidates, candidates, query, queryLower, normalizedAnchorFirstMode)
+	}
+	if anchorFirstRanking && normalizedAnchorFirstMode == AnchorFirstModeCodeTaskFamily {
+		scoredCandidates = applyCodeTaskFamilyRankingDiscipline(scoredCandidates, query, queryLower, normalizedAnchorFirstMode)
 	}
 	scoredCandidates = selectScoredCandidates(scoredCandidates, queryLower, limit)
+	preBudgetScoredCandidates := append([]scoredCandidate(nil), scoredCandidates...)
 	scoredCandidates = enforceSupportingArtifactBudgets(scoredCandidates, queryLower, terms)
+	if anchorFirstRanking && normalizedAnchorFirstMode == AnchorFirstModeCodeTaskFamily {
+		scoredCandidates = reattachCodeTaskFamilyCompanions(preBudgetScoredCandidates, scoredCandidates, limit)
+	}
 	if evidenceBalanced {
 		scoredCandidates = applyBalancedEvidence(scoredCandidates, queryLower, terms)
 		sort.Slice(scoredCandidates, func(i, j int) bool {
@@ -1247,7 +1254,7 @@ type codeTaskRankingResult struct {
 	reasons []string
 }
 
-func applyCodeTaskRankingDiscipline(candidates []scoredCandidate, universe []Candidate, query, queryLower string) []scoredCandidate {
+func applyCodeTaskRankingDiscipline(candidates []scoredCandidate, universe []Candidate, query, queryLower, mode string) []scoredCandidate {
 	if len(candidates) == 0 || !hasCodeTaskRankingIntent(queryLower) {
 		return candidates
 	}
@@ -1258,12 +1265,12 @@ func applyCodeTaskRankingDiscipline(candidates []scoredCandidate, universe []Can
 	vocab := BuildRepoVocabulary(universe)
 	changed := false
 	for i := range candidates {
-		result := codeTaskRankingForCandidate(candidates[i], profile, vocab, queryLower)
+		result := codeTaskRankingForCandidate(candidates[i], profile, vocab, queryLower, mode)
 		if result.score == 0 {
 			continue
 		}
 		candidates[i].score += result.score
-		candidates[i].candidate = withCodeTaskRankingMetadata(candidates[i].candidate, result)
+		candidates[i].candidate = withCodeTaskRankingMetadata(candidates[i].candidate, result, mode)
 		changed = true
 	}
 	if changed {
@@ -1277,7 +1284,7 @@ func applyCodeTaskRankingDiscipline(candidates []scoredCandidate, universe []Can
 	return candidates
 }
 
-func codeTaskRankingForCandidate(candidate scoredCandidate, profile AnchorProfile, vocab RepoVocabulary, queryLower string) codeTaskRankingResult {
+func codeTaskRankingForCandidate(candidate scoredCandidate, profile AnchorProfile, vocab RepoVocabulary, queryLower, mode string) codeTaskRankingResult {
 	c := candidate.candidate
 	pathLower := strings.ToLower(filepath.ToSlash(c.Path))
 	result := codeTaskRankingResult{}
@@ -1291,7 +1298,7 @@ func codeTaskRankingForCandidate(candidate scoredCandidate, profile AnchorProfil
 		}
 	}
 
-	anchor := scoreAnchorFirstCandidate(c, profile, vocab, AnchorFirstModeCodeTask)
+	anchor := scoreAnchorFirstCandidate(c, profile, vocab, mode)
 	hasSpecificField := resultHasAnyAnchorField(anchor, "path", "title", "symbol", "heading", "test_name")
 	hasBodyOnly := resultHasAnyAnchorField(anchor, "body") && !hasSpecificField
 	hasUsableAnchor := anchor.score > 0 && (hasSpecificField || anchor.maxIDF >= 1.8)
@@ -1375,16 +1382,632 @@ func hasCodeTaskRankingIntent(queryLower string) bool {
 	return false
 }
 
-func withCodeTaskRankingMetadata(c Candidate, result codeTaskRankingResult) Candidate {
+func withCodeTaskRankingMetadata(c Candidate, result codeTaskRankingResult, mode string) Candidate {
 	if c.Metadata == nil {
 		c.Metadata = map[string]string{}
 	} else {
 		c.Metadata = copyMetadata(c.Metadata)
 	}
-	c.Metadata["source_query_ranking_mode"] = AnchorFirstModeCodeTask
+	c.Metadata["source_query_ranking_mode"] = mode
 	c.Metadata["source_query_score"] = fmt.Sprintf("%.3f", result.score)
 	c.Metadata["source_query_reasons"] = strings.Join(result.reasons, "\n")
 	return c
+}
+
+type codeTaskFamilyMember struct {
+	index         int
+	role          string
+	anchor        anchorScoreResult
+	specificField bool
+	exactDominant bool
+}
+
+type codeTaskFamilyProfile struct {
+	id             string
+	members        []codeTaskFamilyMember
+	roleCounts     map[string]int
+	traits         []string
+	riskFlags      []string
+	primaryRole    string
+	score          float64
+	reasons        []string
+	rareMembers    int
+	implementation int
+	tests          int
+	docsTutorial   int
+	generated      int
+	apiClientModel int
+	broadMixed     bool
+	exactDominant  bool
+	queryRelaxed   bool
+}
+
+type codeTaskFamilyCandidateResult struct {
+	score   float64
+	reasons []string
+}
+
+func applyCodeTaskFamilyRankingDiscipline(candidates []scoredCandidate, query, queryLower, mode string) []scoredCandidate {
+	if len(candidates) == 0 || !hasCodeTaskRankingIntent(queryLower) {
+		return candidates
+	}
+	profile := BuildAnchorProfile(query)
+	if !profile.HasSpecific {
+		return candidates
+	}
+	vocab := BuildRepoVocabulary(scoredCandidateCandidates(candidates))
+	families := buildCodeTaskFamilyProfiles(candidates, profile, vocab, mode, queryLower)
+	if len(families) == 0 {
+		return candidates
+	}
+	changed := false
+	for _, family := range families {
+		for _, member := range family.members {
+			result := codeTaskFamilyRankingForMember(family, member, candidates[member.index], queryLower)
+			if result.score == 0 {
+				continue
+			}
+			candidates[member.index].score += result.score
+			candidates[member.index].candidate = withCodeTaskFamilyMetadata(candidates[member.index].candidate, family, member, result)
+			changed = true
+		}
+	}
+	if changed {
+		sort.Slice(candidates, func(i, j int) bool {
+			if candidates[i].score == candidates[j].score {
+				return candidates[i].candidate.Path < candidates[j].candidate.Path
+			}
+			return candidates[i].score > candidates[j].score
+		})
+	}
+	return candidates
+}
+
+func scoredCandidateCandidates(candidates []scoredCandidate) []Candidate {
+	out := make([]Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		out = append(out, candidate.candidate)
+	}
+	return out
+}
+
+func buildCodeTaskFamilyProfiles(candidates []scoredCandidate, profile AnchorProfile, vocab RepoVocabulary, mode, queryLower string) map[string]*codeTaskFamilyProfile {
+	families := map[string]*codeTaskFamilyProfile{}
+	for i := range candidates {
+		c := candidates[i].candidate
+		familyID := codeTaskSourceFamilyID(c.Path)
+		if familyID == "" {
+			continue
+		}
+		role := codeTaskFamilyMemberRole(c, queryLower)
+		anchor := scoreAnchorFirstCandidate(c, profile, vocab, mode)
+		hasSpecificField := resultHasAnyAnchorField(anchor, "path", "title", "symbol", "heading", "test_name")
+		if anchor.score <= 0 && !codeTaskFamilyRoleParticipates(role) {
+			continue
+		}
+		family := families[familyID]
+		if family == nil {
+			family = &codeTaskFamilyProfile{
+				id:         familyID,
+				roleCounts: map[string]int{},
+				broadMixed: codeTaskFamilyIDLooksBroad(familyID),
+			}
+			families[familyID] = family
+		}
+		member := codeTaskFamilyMember{
+			index:         i,
+			role:          role,
+			anchor:        anchor,
+			specificField: hasSpecificField,
+			exactDominant: codeTaskFamilyExactDominant(anchor),
+		}
+		family.members = append(family.members, member)
+		family.roleCounts[role]++
+		if hasSpecificField && anchor.maxIDF >= 1.25 {
+			family.rareMembers++
+		}
+		if member.exactDominant {
+			family.exactDominant = true
+		}
+		switch role {
+		case "core_runtime", "route_controller", "service_logic", "cli_command":
+			family.implementation++
+		case "test_family":
+			family.tests++
+		case "docs_tutorial", "docs_reference":
+			family.docsTutorial++
+		case "generated_or_derived":
+			family.generated++
+		case "api_client_model":
+			family.apiClientModel++
+		}
+	}
+	for id, family := range families {
+		if len(family.members) == 0 {
+			delete(families, id)
+			continue
+		}
+		profileCodeTaskFamily(family, queryLower)
+	}
+	return families
+}
+
+func profileCodeTaskFamily(family *codeTaskFamilyProfile, queryLower string) {
+	family.primaryRole = codeTaskFamilyPrimaryRole(family.roleCounts)
+	addTrait := func(trait string) {
+		family.traits = append(family.traits, trait)
+	}
+	addRisk := func(flag string) {
+		family.riskFlags = append(family.riskFlags, flag)
+	}
+	addReason := func(delta float64, reason string) {
+		if delta != 0 {
+			family.score += delta
+		}
+		if reason != "" {
+			family.reasons = append(family.reasons, reason)
+		}
+	}
+
+	if family.implementation > 0 {
+		addTrait("has_implementation")
+		addReason(4.0+math.Min(4.0, float64(family.implementation)), "family profile: implementation members")
+	}
+	if family.tests > 0 {
+		addTrait("has_tests")
+		addReason(1.5, "family profile: colocated tests")
+	}
+	if family.rareMembers > 0 {
+		addTrait("rare_anchor_members")
+		addReason(math.Min(7.0, float64(family.rareMembers)*2.2), "family profile: rare anchors across members")
+	}
+	if family.exactDominant {
+		addTrait("exact_anchor_dominant")
+		addReason(2.5, "family profile: exact anchor dominance")
+	}
+	if family.docsTutorial > 0 {
+		addTrait("has_docs_or_examples")
+	}
+	if family.generated > 0 || family.apiClientModel > 0 {
+		addTrait("has_generated_or_type_surface")
+	}
+	if family.broadMixed {
+		addRisk("broad_mixed_family")
+		if family.rareMembers < 2 {
+			addReason(-7.0, "family profile: broad family requires repeated rare anchors")
+		}
+	}
+
+	dominatedByDocs := family.docsTutorial > 0 && family.docsTutorial >= family.implementation+family.tests
+	dominatedByGenerated := family.generated+family.apiClientModel > 0 && family.generated+family.apiClientModel >= family.implementation+family.tests
+	if dominatedByDocs {
+		addRisk("docs_tutorial_dominated")
+		if codeTaskQueryRequestsDocsExample(queryLower) {
+			family.queryRelaxed = true
+			addTrait("demotion_relaxed_by_query")
+			addReason(1.0, "family profile: docs/examples requested")
+		} else if family.exactDominant {
+			addReason(-3.5, "family profile: docs/tutorial kept supporting despite exact anchor")
+		} else {
+			addReason(-10.0, "family profile: docs/tutorial dominated")
+		}
+	}
+	if dominatedByGenerated {
+		addRisk("generated_or_type_dominated")
+		if codeTaskQueryRequestsReference(queryLower) {
+			family.queryRelaxed = true
+			addTrait("demotion_relaxed_by_query")
+			addReason(1.0, "family profile: reference/model requested")
+		} else if family.exactDominant {
+			addReason(-3.0, "family profile: generated/type kept supporting despite exact anchor")
+		} else {
+			addReason(-9.0, "family profile: generated/type dominated")
+		}
+	}
+	if family.implementation == 0 && family.rareMembers == 0 {
+		addReason(-8.0, "family profile: no implementation or rare anchor support")
+	}
+	family.traits = uniqueStrings(family.traits)
+	family.riskFlags = uniqueStrings(family.riskFlags)
+	family.reasons = uniqueStrings(family.reasons)
+	if len(family.reasons) > 5 {
+		family.reasons = family.reasons[:5]
+	}
+	family.score = clampFloat(family.score, -18.0, 18.0)
+}
+
+func codeTaskFamilyRankingForMember(family *codeTaskFamilyProfile, member codeTaskFamilyMember, candidate scoredCandidate, queryLower string) codeTaskFamilyCandidateResult {
+	if family.score == 0 {
+		return codeTaskFamilyCandidateResult{}
+	}
+	roleWeight := codeTaskFamilyMemberRoleWeight(member.role)
+	score := family.score * roleWeight
+	var reasons []string
+	if family.score > 0 {
+		reasons = append(reasons, "source-family ranking: "+family.primaryRole)
+	} else {
+		reasons = append(reasons, "source-family ranking: "+strings.Join(limitStrings(family.riskFlags, 2), ", "))
+	}
+
+	if member.role == "docs_tutorial" && !codeTaskQueryRequestsDocsExample(queryLower) && !member.exactDominant {
+		score -= 5.0
+		reasons = append(reasons, "source-family ranking: tutorial/support source demoted")
+	}
+	if (member.role == "generated_or_derived" || member.role == "api_client_model") && !codeTaskQueryRequestsReference(queryLower) && !member.exactDominant {
+		score -= 4.5
+		reasons = append(reasons, "source-family ranking: generated/type surface demoted")
+	}
+	if member.role == "test_family" && family.implementation > 0 && member.specificField {
+		score += 2.0
+		reasons = append(reasons, "source-family ranking: test after implementation family")
+	}
+	if member.role == "docs_reference" && family.implementation > 0 && !codeTaskQueryRequestsDocsExample(queryLower) {
+		score = math.Min(score, 1.5)
+		reasons = append(reasons, "source-family ranking: local docs kept supporting")
+	}
+	if family.broadMixed && family.rareMembers < 2 && !member.exactDominant {
+		score = math.Min(score, 0)
+	}
+	if score == 0 {
+		return codeTaskFamilyCandidateResult{}
+	}
+	score = clampFloat(score, -14.0, 16.0)
+	return codeTaskFamilyCandidateResult{score: score, reasons: uniqueStrings(reasons)}
+}
+
+func withCodeTaskFamilyMetadata(c Candidate, family *codeTaskFamilyProfile, member codeTaskFamilyMember, result codeTaskFamilyCandidateResult) Candidate {
+	if c.Metadata == nil {
+		c.Metadata = map[string]string{}
+	} else {
+		c.Metadata = copyMetadata(c.Metadata)
+	}
+	c.Metadata["source_family_mode"] = AnchorFirstModeCodeTaskFamily
+	c.Metadata["source_family_id"] = family.id
+	c.Metadata["source_family_primary_role"] = family.primaryRole
+	c.Metadata["source_family_member_role"] = member.role
+	c.Metadata["source_family_member_roles_json"] = jsonStringList(codeTaskFamilyRoleCountsList(family.roleCounts))
+	c.Metadata["source_family_traits_json"] = jsonStringList(family.traits)
+	c.Metadata["source_family_risk_flags_json"] = jsonStringList(family.riskFlags)
+	c.Metadata["source_family_score"] = fmt.Sprintf("%.3f", result.score)
+	c.Metadata["source_family_reasons"] = strings.Join(append(limitStrings(result.reasons, 3), limitStrings(family.reasons, 3)...), "\n")
+	if family.queryRelaxed {
+		c.Metadata["source_family_query_exception"] = "demotion_relaxed_by_query"
+	}
+	return c
+}
+
+func reattachCodeTaskFamilyCompanions(preBudget, selected []scoredCandidate, limit int) []scoredCandidate {
+	if len(preBudget) == 0 || len(selected) == 0 {
+		return selected
+	}
+	selectedImplementationFamilies := map[string]bool{}
+	seen := map[string]bool{}
+	for _, candidate := range selected {
+		seen[candidateIdentity(candidate.candidate)] = true
+		if candidate.candidate.Path != "" {
+			seen[normalizeCodeTaskFamilyPath(candidate.candidate.Path)] = true
+		}
+		familyID := strings.TrimSpace(candidate.candidate.Metadata["source_family_id"])
+		memberRole := strings.TrimSpace(candidate.candidate.Metadata["source_family_member_role"])
+		if familyID != "" && codeTaskFamilyRoleIsImplementation(memberRole) {
+			selectedImplementationFamilies[familyID] = true
+		}
+	}
+	if len(selectedImplementationFamilies) == 0 {
+		return selected
+	}
+
+	additionsByFamily := map[string][]scoredCandidate{}
+	additionCount := 0
+	perFamilyCount := map[string]int{}
+	for _, candidate := range preBudget {
+		if additionCount >= 3 {
+			break
+		}
+		familyID := strings.TrimSpace(candidate.candidate.Metadata["source_family_id"])
+		memberRole := strings.TrimSpace(candidate.candidate.Metadata["source_family_member_role"])
+		if familyID == "" || !selectedImplementationFamilies[familyID] || !codeTaskFamilyRoleCanReattach(memberRole) {
+			continue
+		}
+		identity := candidateIdentity(candidate.candidate)
+		pathIdentity := normalizeCodeTaskFamilyPath(candidate.candidate.Path)
+		if seen[identity] || seen[pathIdentity] || perFamilyCount[familyID] >= 2 {
+			continue
+		}
+		candidate.candidate = withCodeTaskFamilyCompanionMetadata(candidate.candidate, memberRole)
+		additionsByFamily[familyID] = append(additionsByFamily[familyID], candidate)
+		seen[identity] = true
+		seen[pathIdentity] = true
+		perFamilyCount[familyID]++
+		additionCount++
+	}
+	if additionCount == 0 {
+		return selected
+	}
+
+	out := make([]scoredCandidate, 0, len(selected)+additionCount)
+	insertedFamily := map[string]bool{}
+	for _, candidate := range selected {
+		out = append(out, candidate)
+		familyID := strings.TrimSpace(candidate.candidate.Metadata["source_family_id"])
+		memberRole := strings.TrimSpace(candidate.candidate.Metadata["source_family_member_role"])
+		if familyID == "" || insertedFamily[familyID] || !codeTaskFamilyRoleIsImplementation(memberRole) {
+			continue
+		}
+		out = append(out, additionsByFamily[familyID]...)
+		insertedFamily[familyID] = true
+	}
+	if limit > 0 && len(out) > limit+3 {
+		return out[:limit+3]
+	}
+	return out
+}
+
+func withCodeTaskFamilyCompanionMetadata(c Candidate, memberRole string) Candidate {
+	if c.Metadata == nil {
+		c.Metadata = map[string]string{}
+	} else {
+		c.Metadata = copyMetadata(c.Metadata)
+	}
+	c.Metadata["retrieval_expansion_reason"] = "source_family_companion"
+	if c.Metadata["pack_tier"] == "" {
+		c.Metadata["pack_tier"] = PackTierRelated
+		switch memberRole {
+		case "test_family":
+			c.Metadata["pack_tier_reason"] = "same source-family test companion"
+		case "docs_reference":
+			c.Metadata["pack_tier_reason"] = "same source-family local docs"
+		default:
+			c.Metadata["pack_tier_reason"] = "same source-family companion"
+		}
+	}
+	return c
+}
+
+func codeTaskFamilyRoleIsImplementation(role string) bool {
+	switch role {
+	case "core_runtime", "route_controller", "service_logic", "cli_command":
+		return true
+	default:
+		return false
+	}
+}
+
+func codeTaskFamilyRoleCanReattach(role string) bool {
+	switch role {
+	case "test_family", "config_schema", "docs_reference":
+		return true
+	default:
+		return false
+	}
+}
+
+func codeTaskFamilyRoleCountsList(counts map[string]int) []string {
+	if len(counts) == 0 {
+		return nil
+	}
+	var keys []string
+	for key := range counts {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, fmt.Sprintf("%s:%d", key, counts[key]))
+	}
+	return out
+}
+
+func codeTaskFamilyMemberRoleWeight(role string) float64 {
+	switch role {
+	case "core_runtime", "route_controller", "service_logic", "cli_command":
+		return 0.85
+	case "config_schema":
+		return 0.55
+	case "test_family":
+		return 0.45
+	case "docs_reference":
+		return 0.2
+	case "docs_tutorial", "generated_or_derived", "api_client_model", "protocol_or_template":
+		return 0.35
+	default:
+		return 0.4
+	}
+}
+
+func codeTaskFamilyPrimaryRole(counts map[string]int) string {
+	if len(counts) == 0 {
+		return "unknown_source"
+	}
+	preferred := []string{
+		"service_logic",
+		"route_controller",
+		"core_runtime",
+		"cli_command",
+		"config_schema",
+		"test_family",
+		"api_client_model",
+		"generated_or_derived",
+		"docs_tutorial",
+		"docs_reference",
+		"protocol_or_template",
+		"unknown_source",
+	}
+	best := "unknown_source"
+	bestCount := -1
+	bestPriority := len(preferred)
+	for role, count := range counts {
+		priority := len(preferred)
+		for i, preferredRole := range preferred {
+			if role == preferredRole {
+				priority = i
+				break
+			}
+		}
+		if count > bestCount || (count == bestCount && priority < bestPriority) {
+			best = role
+			bestCount = count
+			bestPriority = priority
+		}
+	}
+	return best
+}
+
+func codeTaskFamilyRoleParticipates(role string) bool {
+	switch role {
+	case "core_runtime", "route_controller", "service_logic", "cli_command", "config_schema", "test_family", "docs_reference", "docs_tutorial", "generated_or_derived", "api_client_model":
+		return true
+	default:
+		return false
+	}
+}
+
+func codeTaskFamilyExactDominant(anchor anchorScoreResult) bool {
+	return anchor.score > 0 && anchor.maxIDF >= 1.8 && resultHasAnyAnchorField(anchor, "path", "title", "symbol", "test_name")
+}
+
+func codeTaskSourceFamilyID(path string) string {
+	path = normalizeCodeTaskFamilyPath(path)
+	if path == "" {
+		return ""
+	}
+	dir := filepath.ToSlash(filepath.Dir(path))
+	if dir == "." || dir == "" {
+		return ""
+	}
+	segments := codeTaskPathSegments(dir)
+	if len(segments) == 0 {
+		return ""
+	}
+	first := segments[0]
+	switch first {
+	case "docs_src", "examples", "example", "samples", "sample", "tutorial", "tutorials":
+		return joinFirstPathSegments(segments, minInt(len(segments), 2))
+	case "pkg":
+		if len(segments) >= 3 && segments[1] == "cmd" {
+			return joinFirstPathSegments(segments, 3)
+		}
+		return joinFirstPathSegments(segments, minInt(len(segments), 2))
+	case "routers", "routes", "controllers":
+		return joinFirstPathSegments(segments, minInt(len(segments), 3))
+	case "services", "service", "cmd", "internal", "fastapi":
+		return joinFirstPathSegments(segments, minInt(len(segments), 2))
+	case "src", "lib", "app", "apps", "packages":
+		return joinFirstPathSegments(segments, minInt(len(segments), 3))
+	default:
+		if len(segments) >= 2 {
+			return joinFirstPathSegments(segments, 2)
+		}
+		return first
+	}
+}
+
+func normalizeCodeTaskFamilyPath(path string) string {
+	path = strings.TrimSpace(path)
+	if idx := strings.Index(path, "#L"); idx >= 0 {
+		path = path[:idx]
+	}
+	path = filepath.ToSlash(path)
+	path = strings.TrimPrefix(path, "./")
+	path = strings.Trim(path, "/")
+	return path
+}
+
+func codeTaskPathSegments(path string) []string {
+	path = strings.Trim(filepath.ToSlash(path), "/")
+	if path == "" || path == "." {
+		return nil
+	}
+	raw := strings.Split(path, "/")
+	out := make([]string, 0, len(raw))
+	for _, segment := range raw {
+		segment = strings.ToLower(strings.TrimSpace(segment))
+		if segment != "" && segment != "." {
+			out = append(out, segment)
+		}
+	}
+	return out
+}
+
+func joinFirstPathSegments(segments []string, count int) string {
+	if count <= 0 || len(segments) == 0 {
+		return ""
+	}
+	if count > len(segments) {
+		count = len(segments)
+	}
+	return strings.Join(segments[:count], "/")
+}
+
+func codeTaskFamilyIDLooksBroad(familyID string) bool {
+	segments := codeTaskPathSegments(familyID)
+	if len(segments) <= 1 {
+		return true
+	}
+	return len(segments) == 2 && stringSliceContains([]string{"src", "lib", "internal", "pkg", "app", "apps", "packages", "common", "utils", "utilities"}, segments[0])
+}
+
+func codeTaskFamilyMemberRole(c Candidate, queryLower string) string {
+	pathLower := strings.ToLower(normalizeCodeTaskFamilyPath(c.Path))
+	if isTestCaseCandidate(c) || codeTaskFamilyLooksTestPath(pathLower) {
+		return "test_family"
+	}
+	if isCodeCommentCandidate(c) {
+		return "core_runtime"
+	}
+	if nonIntentCandidateMode(c) != "" {
+		return "protocol_or_template"
+	}
+	if codeTaskLooksDocsExamplePath(pathLower) {
+		return "docs_tutorial"
+	}
+	if isMarkdownCandidatePath(pathLower) {
+		return "docs_reference"
+	}
+	if codeTaskLooksGeneratedOrReferencePath(pathLower) {
+		return "generated_or_derived"
+	}
+	if codeTaskLooksTypeOnlyPath(pathLower) {
+		return "api_client_model"
+	}
+	if codeTaskFamilyLooksConfigSchemaPath(pathLower) {
+		return "config_schema"
+	}
+	if hasPathSegment(pathLower, "cmd") || hasPathSegment(pathLower, "cli") || strings.Contains(pathLower, "/commands/") {
+		return "cli_command"
+	}
+	if hasPathSegment(pathLower, "router") || hasPathSegment(pathLower, "routers") || hasPathSegment(pathLower, "route") || hasPathSegment(pathLower, "routes") || hasPathSegment(pathLower, "controller") || hasPathSegment(pathLower, "controllers") || hasPathSegment(pathLower, "http") {
+		return "route_controller"
+	}
+	if hasPathSegment(pathLower, "service") || hasPathSegment(pathLower, "services") || hasPathSegment(pathLower, "operator") || hasPathSegment(pathLower, "rules") || hasPathSegment(pathLower, "reconciler") || hasPathSegment(pathLower, "manager") || hasPathSegment(pathLower, "context") {
+		return "service_logic"
+	}
+	if IsSourceContextCandidate(c) || hasExplicitSourceIntent(queryLower) {
+		return "core_runtime"
+	}
+	return "unknown_source"
+}
+
+func codeTaskFamilyLooksTestPath(pathLower string) bool {
+	base := strings.ToLower(filepath.Base(pathLower))
+	return hasPathSegment(pathLower, "test") ||
+		hasPathSegment(pathLower, "tests") ||
+		hasPathSegment(pathLower, "__tests__") ||
+		strings.HasSuffix(base, "_test.go") ||
+		strings.Contains(base, ".test.") ||
+		strings.Contains(base, ".spec.") ||
+		strings.HasPrefix(base, "test_")
+}
+
+func codeTaskFamilyLooksConfigSchemaPath(pathLower string) bool {
+	return hasPathSegment(pathLower, "config") ||
+		hasPathSegment(pathLower, "configs") ||
+		hasPathSegment(pathLower, "schema") ||
+		hasPathSegment(pathLower, "schemas") ||
+		hasPathSegment(pathLower, "crd") ||
+		hasPathSegment(pathLower, "crds") ||
+		strings.HasSuffix(pathLower, ".proto") ||
+		strings.HasSuffix(pathLower, ".graphql")
 }
 
 func codeTaskLooksGeneratedOrReferencePath(pathLower string) bool {
@@ -4378,9 +5001,24 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 			reasons = append(reasons, "balanced evidence: "+strings.ReplaceAll(evidenceReasons, "\n", "; "))
 		}
 	}
-	if c.Metadata != nil && c.Metadata["source_query_ranking_mode"] == AnchorFirstModeCodeTask {
+	if c.Metadata != nil && AnchorFirstModeUsesCodeTaskWeights(c.Metadata["source_query_ranking_mode"]) {
 		if sourceReasons := strings.TrimSpace(c.Metadata["source_query_reasons"]); sourceReasons != "" {
 			reasons = append(reasons, "source query ranking: "+strings.ReplaceAll(sourceReasons, "\n", "; "))
+		}
+	}
+	if c.Metadata != nil && c.Metadata["source_family_mode"] == AnchorFirstModeCodeTaskFamily {
+		var parts []string
+		if familyID := strings.TrimSpace(c.Metadata["source_family_id"]); familyID != "" {
+			parts = append(parts, familyID)
+		}
+		if role := strings.TrimSpace(c.Metadata["source_family_primary_role"]); role != "" {
+			parts = append(parts, role)
+		}
+		if familyReasons := strings.TrimSpace(c.Metadata["source_family_reasons"]); familyReasons != "" {
+			parts = append(parts, strings.ReplaceAll(familyReasons, "\n", "; "))
+		}
+		if len(parts) > 0 {
+			reasons = append(reasons, "source family ranking: "+strings.Join(parts, "; "))
 		}
 	}
 	if c.Metadata != nil && c.Metadata["anchor_first_score"] != "" {

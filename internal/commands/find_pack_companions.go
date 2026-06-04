@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -11,9 +12,10 @@ import (
 )
 
 const (
-	findPackCompanionMaxTotal      = 8
-	findPackCompanionMaxCochanged  = 4
-	findPackCompanionGitMaxCommits = 24
+	findPackCompanionMaxTotal       = 8
+	findPackCompanionMaxCochanged   = 4
+	findPackCompanionMaxExactCommit = 2
+	findPackCompanionGitMaxCommits  = 24
 
 	findPackCompanionModeOff        = "off"
 	findPackCompanionModeGeneric    = "generic"
@@ -127,6 +129,11 @@ func addFindPackCompanionCandidates(ctx context.Context, repoRoot, query string,
 	if findPackCompanionModeIncludesGit(mode) {
 		for _, companion := range findPackCochangedTestCompanionPaths(ctx, repoRoot, query, matches, byPath, seen) {
 			add(companion, "git_cochanged_test_companion")
+		}
+		if findPackMatchesUseCodeTaskFamily(matches) {
+			for _, companion := range findPackExactCommitTouchedCompanionPaths(ctx, repoRoot, query, matches, seen) {
+				add(companion, "exact_commit_touched_companion")
+			}
 		}
 	}
 	if len(additions) == 0 {
@@ -428,6 +435,187 @@ func findPackCochangedTestCompanionPaths(ctx context.Context, repoRoot, query st
 			out = appendUniqueString(out, path)
 			if len(out) >= findPackCompanionMaxCochanged {
 				return out
+			}
+		}
+	}
+	return out
+}
+
+func findPackMatchesUseCodeTaskFamily(matches []retrieval.Candidate) bool {
+	for _, match := range matches {
+		if match.Metadata != nil && match.Metadata["source_family_mode"] == retrieval.AnchorFirstModeCodeTaskFamily {
+			return true
+		}
+	}
+	return false
+}
+
+func findPackExactCommitTouchedCompanionPaths(ctx context.Context, repoRoot, query string, matches []retrieval.Candidate, seen map[string]bool) []string {
+	if repoRoot == "" {
+		return nil
+	}
+	paths := findPackCandidatePaths(matches, 8)
+	if len(paths) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, findGitReceiptTimeout)
+	defer cancel()
+	if !findGitRepoAvailable(ctx, repoRoot) {
+		return nil
+	}
+	commits, ok := findGitLogForPaths(ctx, repoRoot, paths)
+	if !ok || len(commits) == 0 {
+		return nil
+	}
+	pathSet := map[string]bool{}
+	for _, path := range paths {
+		pathSet[path] = true
+	}
+	anchors := findGitReceiptQueryAnchors(query)
+	selectedFamilies := findPackBroadPathFamilies(paths)
+	var out []string
+	for _, commit := range firstParsedFindGitCommits(commits, findPackCompanionGitMaxCommits) {
+		if len(out) >= findPackCompanionMaxExactCommit {
+			return out
+		}
+		if findGitReceiptCommitNoisy(commit) || len(commitMatchedPackPaths(commit.paths, pathSet)) == 0 {
+			continue
+		}
+		if !findPackCommitMentionsAnyAnchor(commit, anchors) {
+			continue
+		}
+		allTouched := findGitShowCommitFiles(ctx, repoRoot, commit.sha)
+		if len(allTouched) == 0 || len(allTouched) > 80 {
+			continue
+		}
+		scoredPaths := scoreFindPackExactCommitTouchedPaths(allTouched, anchors, selectedFamilies, seen)
+		for _, scored := range scoredPaths {
+			path := scored.path
+			path = normalizeFindGitReceiptPath(path)
+			out = appendUniqueString(out, path)
+			if len(out) >= findPackCompanionMaxExactCommit {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+type findPackScoredTouchedPath struct {
+	path  string
+	score int
+}
+
+func scoreFindPackExactCommitTouchedPaths(paths []string, anchors []string, selectedFamilies map[string]bool, seen map[string]bool) []findPackScoredTouchedPath {
+	var scored []findPackScoredTouchedPath
+	for _, path := range paths {
+		path = normalizeFindGitReceiptPath(path)
+		if path == "" || seen[path] || findGitReceiptRelatedPathNoise(path) {
+			continue
+		}
+		if !findPackLooksSourcePath(path) && !findPackLooksTestPath(path) {
+			continue
+		}
+		score := findPackExactCommitTouchedPathScore(path, anchors, selectedFamilies)
+		if score < 5 {
+			continue
+		}
+		scored = append(scored, findPackScoredTouchedPath{path: path, score: score})
+	}
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
+		}
+		return scored[i].path < scored[j].path
+	})
+	return scored
+}
+
+func findGitShowCommitFiles(ctx context.Context, repoRoot, sha string) []string {
+	sha = strings.TrimSpace(sha)
+	if sha == "" {
+		return nil
+	}
+	out, err := runFindGitShowNameOnly(ctx, repoRoot, sha)
+	if err != nil {
+		return nil
+	}
+	var paths []string
+	for _, line := range strings.Split(out, "\n") {
+		path := normalizeFindGitReceiptPath(line)
+		if path != "" {
+			paths = appendUniqueString(paths, path)
+		}
+	}
+	return paths
+}
+
+func runFindGitShowNameOnly(ctx context.Context, repoRoot, sha string) (string, error) {
+	args := []string{
+		"-C", filepath.Clean(repoRoot),
+		"show",
+		"--pretty=format:",
+		"--name-only",
+		"--no-renames",
+		sha,
+	}
+	out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput()
+	return string(out), err
+}
+
+func findPackExactCommitTouchedPathScore(path string, anchors []string, selectedFamilies map[string]bool) int {
+	lower := strings.ToLower(normalizeFindGitReceiptPath(path))
+	if lower == "" {
+		return 0
+	}
+	score := 0
+	if findPackLooksTestPath(lower) {
+		score += 7
+	} else if findPackLooksSourcePath(lower) {
+		score += 3
+	}
+	for _, anchor := range anchors {
+		if len(anchor) >= 4 && strings.Contains(lower, strings.ToLower(anchor)) {
+			score += 5
+			break
+		}
+	}
+	for family := range selectedFamilies {
+		if family != "" && (strings.HasPrefix(lower, family+"/") || lower == family) {
+			score += 2
+			break
+		}
+	}
+	base := strings.ToLower(filepath.Base(lower))
+	if base == "__init__.py" || base == "index.ts" || base == "index.tsx" || base == "index.js" || base == "index.jsx" {
+		score -= 3
+	}
+	return score
+}
+
+func findPackBroadPathFamilies(paths []string) map[string]bool {
+	out := map[string]bool{}
+	for _, path := range paths {
+		path = strings.ToLower(normalizeFindGitReceiptPath(path))
+		if path == "" {
+			continue
+		}
+		dir := filepath.ToSlash(filepath.Dir(path))
+		segments := strings.Split(strings.Trim(dir, "/"), "/")
+		if len(segments) == 0 || segments[0] == "" || segments[0] == "." {
+			continue
+		}
+		switch segments[0] {
+		case "pkg", "src", "lib", "app", "apps", "packages", "internal", "fastapi":
+			out[segments[0]] = true
+			if len(segments) >= 2 {
+				out[segments[0]+"/"+segments[1]] = true
+			}
+		default:
+			if len(segments) >= 2 {
+				out[segments[0]+"/"+segments[1]] = true
+			} else {
+				out[segments[0]] = true
 			}
 		}
 	}

@@ -843,6 +843,131 @@ func TestWeightedFilesRetrieverV0_CodeTaskModeDemotesAgentInstructionsForProduct
 	}
 }
 
+func TestWeightedFilesRetrieverV0_CodeTaskFamilyPrefersCoreSourceFamilyOverDocsSrcTutorials(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "docs_src/pydantic_v1_in_v2/tutorial001.py",
+			Kind:  "source_context",
+			Title: "Pydantic v1 in v2 tutorial",
+			Body:  "Update pydantic v2 code examples and deprecations tutorial.",
+		},
+		{
+			Path:  "docs_src/pydantic_v1_in_v2/tutorial002.py",
+			Kind:  "source_context",
+			Title: "Pydantic v2 migration tutorial",
+			Body:  "Pydantic v2 deprecations tutorial sample code.",
+		},
+		{
+			Path:  "fastapi/encoders.py",
+			Kind:  "source_context",
+			Title: "jsonable encoder pydantic v2 compatibility",
+			Body:  "Pydantic v2 deprecations model_dump serialization encoder implementation.",
+		},
+		{
+			Path:  "fastapi/_compat.py",
+			Kind:  "source_context",
+			Title: "Pydantic compatibility helpers",
+			Body:  "Pydantic v2 deprecations compatibility implementation.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true, AnchorFirstMode: AnchorFirstModeCodeTaskFamily}).Retrieve(candidates, "Update Pydantic v2 code to address deprecations")
+	if len(got) < 2 {
+		t.Fatalf("expected results, got %#v", CandidatePaths(got))
+	}
+	top := CandidatePaths(got[:2])
+	if !containsCandidatePath(got[:2], "fastapi/encoders.py") || !containsCandidatePath(got[:2], "fastapi/_compat.py") {
+		t.Fatalf("core source family should beat docs_src tutorials, got top=%#v all=%#v", top, CandidatePaths(got))
+	}
+	if got[0].Metadata["source_family_primary_role"] != "core_runtime" {
+		t.Fatalf("expected core runtime family metadata, got %#v", got[0].Metadata)
+	}
+}
+
+func TestWeightedFilesRetrieverV0_CodeTaskFamilyProfilesMixedSourceTestDocsWithoutFlattening(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "services/context/permission.go",
+			Kind:  "source_context",
+			Title: "Token scope permission service",
+			Body:  "enforce token scopes permission service context downloads attachments.",
+		},
+		{
+			Path:    "services/context/permission_test.go",
+			Kind:    "source_context",
+			Subtype: "test_case",
+			Title:   "enforces token scopes for attachments",
+			Body:    "test token scopes permission context attachment download.",
+		},
+		{
+			Path:  "services/context/README.md",
+			Kind:  "markdown_artifact",
+			Title: "Context permissions",
+			Body:  "Local reference for token scopes and permissions.",
+		},
+		{
+			Path:  "docs/tutorial/token_scopes.md",
+			Kind:  "markdown_artifact",
+			Title: "Token scopes tutorial",
+			Body:  "Tutorial for token scopes.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true, AnchorFirstMode: AnchorFirstModeCodeTaskFamily}).Retrieve(candidates, "enforce token scopes on attachment downloads")
+	if len(got) < 2 {
+		t.Fatalf("expected mixed family results, got %#v", CandidatePaths(got))
+	}
+	if got[0].Path != "services/context/permission.go" {
+		t.Fatalf("implementation member should lead mixed family, got %#v", CandidatePaths(got))
+	}
+	testIdx := candidatePathIndex(got, "services/context/permission_test.go")
+	if testIdx < 0 {
+		t.Fatalf("missing colocated test family member: %#v", CandidatePaths(got))
+	}
+	if got[testIdx].Metadata["source_family_member_role"] != "test_family" {
+		t.Fatalf("test member role was flattened: %#v", got[testIdx].Metadata)
+	}
+	if !strings.Contains(got[testIdx].Metadata["source_family_member_roles_json"], "service_logic") ||
+		!strings.Contains(got[testIdx].Metadata["source_family_member_roles_json"], "test_family") {
+		t.Fatalf("family profile should preserve mixed member roles: %#v", got[testIdx].Metadata)
+	}
+}
+
+func TestWeightedFilesRetrieverV0_CodeTaskFamilyDemotesGeneratedClientSurfaceForRuntimeTask(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "pkg/client/applyconfiguration/monitoring/v1/prometheusrule.go",
+			Kind:  "source_context",
+			Title: "PrometheusRule apply configuration type",
+			Body:  "prometheus rule operator generated client apply configuration type.",
+		},
+		{
+			Path:  "pkg/operator/rules/rules.go",
+			Kind:  "source_context",
+			Title: "Prometheus operator rules reconciliation",
+			Body:  "operator rules runtime validates prometheus rule groups and alert rules.",
+		},
+		{
+			Path:    "pkg/operator/rules/rules_test.go",
+			Kind:    "source_context",
+			Subtype: "test_case",
+			Title:   "validates prometheus rule groups",
+			Body:    "test operator rules validation behavior.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true, AnchorFirstMode: AnchorFirstModeCodeTaskFamily}).Retrieve(candidates, "support Prometheus operator rule validation")
+	if len(got) < 2 {
+		t.Fatalf("expected operator rule results, got %#v", CandidatePaths(got))
+	}
+	if got[0].Path != "pkg/operator/rules/rules.go" {
+		t.Fatalf("runtime operator source should beat generated client surface: %#v", CandidatePaths(got))
+	}
+	if containsCandidatePath(got[:minInt(len(got), 2)], "pkg/client/applyconfiguration/monitoring/v1/prometheusrule.go") {
+		t.Fatalf("generated client surface should not be in top two for runtime task: %#v", CandidatePaths(got))
+	}
+}
+
 func TestWeightedFilesRetrieverV0_UsesCodeCommentsForRationaleQueries(t *testing.T) {
 	candidates := []Candidate{
 		{
@@ -1741,12 +1866,16 @@ func reasonContainsPrefix(reasons []string, want string) bool {
 }
 
 func containsCandidatePath(candidates []Candidate, path string) bool {
-	for _, c := range candidates {
+	return candidatePathIndex(candidates, path) >= 0
+}
+
+func candidatePathIndex(candidates []Candidate, path string) int {
+	for i, c := range candidates {
 		if c.Path == path {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
 func containsString(items []string, want string) bool {
