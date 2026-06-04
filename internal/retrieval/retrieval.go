@@ -209,7 +209,7 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode 
 	})
 	limit := retrievalLimit(queryLower, terms)
 	scoredCandidates = collapseVariantCandidates(scoredCandidates, queryLower)
-	scoredCandidates = suppressRawTestSourceCandidates(scoredCandidates, queryLower)
+	scoredCandidates = suppressRawTestSourceCandidates(scoredCandidates, queryLower, normalizedAnchorFirstMode)
 	if anchorFirstRanking && !selectedOnlyAnchorFirst {
 		scoredCandidates = applyAnchorFirstRanking(scoredCandidates, candidates, query, normalizedAnchorFirstMode)
 	}
@@ -219,14 +219,17 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode 
 	if anchorFirstRanking && AnchorFirstModeUsesCodeTaskWeights(normalizedAnchorFirstMode) {
 		scoredCandidates = applyCodeTaskRankingDiscipline(scoredCandidates, candidates, query, queryLower, normalizedAnchorFirstMode)
 	}
-	if anchorFirstRanking && normalizedAnchorFirstMode == AnchorFirstModeCodeTaskFamily {
+	if anchorFirstRanking && AnchorFirstModeUsesCodeTaskFamilyRanking(normalizedAnchorFirstMode) {
 		scoredCandidates = applyCodeTaskFamilyRankingDiscipline(scoredCandidates, query, queryLower, normalizedAnchorFirstMode)
+	}
+	if anchorFirstRanking && AnchorFirstModeUsesCodeTaskFamilyV2(normalizedAnchorFirstMode) {
+		scoredCandidates = applyCodeTaskFamilyV2QueryHygieneDiscipline(scoredCandidates, candidates, query, queryLower, normalizedAnchorFirstMode)
 	}
 	scoredCandidates = selectScoredCandidates(scoredCandidates, queryLower, limit)
 	preBudgetScoredCandidates := append([]scoredCandidate(nil), scoredCandidates...)
 	scoredCandidates = enforceSupportingArtifactBudgets(scoredCandidates, queryLower, terms)
-	if anchorFirstRanking && normalizedAnchorFirstMode == AnchorFirstModeCodeTaskFamily {
-		scoredCandidates = reattachCodeTaskFamilyCompanions(preBudgetScoredCandidates, scoredCandidates, limit)
+	if anchorFirstRanking && AnchorFirstModeUsesCodeTaskFamilyRanking(normalizedAnchorFirstMode) {
+		scoredCandidates = reattachCodeTaskFamilyCompanions(preBudgetScoredCandidates, scoredCandidates, limit, normalizedAnchorFirstMode)
 	}
 	if evidenceBalanced {
 		scoredCandidates = applyBalancedEvidence(scoredCandidates, queryLower, terms)
@@ -1255,7 +1258,10 @@ type codeTaskRankingResult struct {
 }
 
 func applyCodeTaskRankingDiscipline(candidates []scoredCandidate, universe []Candidate, query, queryLower, mode string) []scoredCandidate {
-	if len(candidates) == 0 || !hasCodeTaskRankingIntent(queryLower) {
+	if len(candidates) == 0 {
+		return candidates
+	}
+	if !hasCodeTaskRankingIntent(queryLower) && !(AnchorFirstModeUsesCodeTaskFamilyV2(mode) && codeTaskFamilyV2SourceActionIntent(candidates, queryLower)) {
 		return candidates
 	}
 	profile := BuildAnchorProfile(query)
@@ -1302,6 +1308,11 @@ func codeTaskRankingForCandidate(candidate scoredCandidate, profile AnchorProfil
 	hasSpecificField := resultHasAnyAnchorField(anchor, "path", "title", "symbol", "heading", "test_name")
 	hasBodyOnly := resultHasAnyAnchorField(anchor, "body") && !hasSpecificField
 	hasUsableAnchor := anchor.score > 0 && (hasSpecificField || anchor.maxIDF >= 1.8)
+	if AnchorFirstModeUsesCodeTaskFamilyV2(mode) && !anchorFirstV2BackfillHasLeadAnchor(anchor) {
+		hasSpecificField = false
+		hasBodyOnly = false
+		hasUsableAnchor = false
+	}
 	if candidate.sourceFile {
 		switch {
 		case hasSpecificField:
@@ -1382,6 +1393,25 @@ func hasCodeTaskRankingIntent(queryLower string) bool {
 	return false
 }
 
+func codeTaskFamilyV2SourceActionIntent(candidates []scoredCandidate, queryLower string) bool {
+	if !containsAny(queryLower,
+		"add", "adjust", "change", "delete", "extend", "fix", "improve", "modify",
+		"ensure", "match", "refactor", "remove", "rename", "tune", "update",
+	) {
+		return false
+	}
+	sourceLike := 0
+	for _, candidate := range candidates {
+		if IsSourceContextCandidate(candidate.candidate) || isTestCaseCandidate(candidate.candidate) {
+			sourceLike++
+			if sourceLike >= 2 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func withCodeTaskRankingMetadata(c Candidate, result codeTaskRankingResult, mode string) Candidate {
 	if c.Metadata == nil {
 		c.Metadata = map[string]string{}
@@ -1428,7 +1458,10 @@ type codeTaskFamilyCandidateResult struct {
 }
 
 func applyCodeTaskFamilyRankingDiscipline(candidates []scoredCandidate, query, queryLower, mode string) []scoredCandidate {
-	if len(candidates) == 0 || !hasCodeTaskRankingIntent(queryLower) {
+	if len(candidates) == 0 {
+		return candidates
+	}
+	if !hasCodeTaskRankingIntent(queryLower) && !(AnchorFirstModeUsesCodeTaskFamilyV2(mode) && codeTaskFamilyV2SourceActionIntent(candidates, queryLower)) {
 		return candidates
 	}
 	profile := BuildAnchorProfile(query)
@@ -1448,7 +1481,7 @@ func applyCodeTaskFamilyRankingDiscipline(candidates []scoredCandidate, query, q
 				continue
 			}
 			candidates[member.index].score += result.score
-			candidates[member.index].candidate = withCodeTaskFamilyMetadata(candidates[member.index].candidate, family, member, result)
+			candidates[member.index].candidate = withCodeTaskFamilyMetadata(candidates[member.index].candidate, family, member, result, mode)
 			changed = true
 		}
 	}
@@ -1463,6 +1496,335 @@ func applyCodeTaskFamilyRankingDiscipline(candidates []scoredCandidate, query, q
 	return candidates
 }
 
+type codeTaskFamilyV2AnchorClass struct {
+	term  string
+	class string
+}
+
+type codeTaskFamilyV2AnchorCandidate struct {
+	term        string
+	kind        AnchorKind
+	stats       TermStats
+	familyCount int
+	supportBase bool
+	specificity float64
+}
+
+type codeTaskFamilyV2AnchorMatch struct {
+	dominantSpecific bool
+	dominantAny      bool
+	mediumSpecific   bool
+	supportAny       bool
+	matchedDominant  []string
+	matchedSupport   []string
+	classes          []string
+}
+
+func applyCodeTaskFamilyV2QueryHygieneDiscipline(candidates []scoredCandidate, universe []Candidate, query, queryLower, mode string) []scoredCandidate {
+	if len(candidates) == 0 || !AnchorFirstModeUsesCodeTaskFamilyV2(mode) {
+		return candidates
+	}
+	if !hasCodeTaskRankingIntent(queryLower) && !codeTaskFamilyV2SourceActionIntent(candidates, queryLower) {
+		return candidates
+	}
+	profile := BuildAnchorProfile(query)
+	if !profile.HasSpecific {
+		return candidates
+	}
+	vocab := BuildRepoVocabulary(universe)
+	classes := codeTaskFamilyV2AnchorClasses(profile, vocab, scoredCandidatesFromCandidates(universe), mode)
+	hasDominantAnchor := codeTaskFamilyV2HasDominantAnchor(classes)
+	if !hasDominantAnchor && !codeTaskFamilyV2HasLowPrioritySupportCandidates(candidates, queryLower) {
+		return candidates
+	}
+	changed := false
+	for i := range candidates {
+		match := codeTaskFamilyV2CandidateAnchorMatch(candidates[i].candidate, classes, mode)
+		delta := 0.0
+		var reasons []string
+		if hasDominantAnchor {
+			switch {
+			case match.dominantSpecific:
+				delta += 8.0
+				reasons = append(reasons, "query hygiene: rare path/identifier anchor")
+			case match.dominantAny:
+				delta += 4.0
+				reasons = append(reasons, "query hygiene: rare body/support anchor")
+			case match.mediumSpecific:
+				delta -= 4.0
+				reasons = append(reasons, "query hygiene: secondary anchor without dominant anchor")
+			case match.supportAny:
+				delta -= 9.0
+				reasons = append(reasons, "query hygiene: support/generic anchor only")
+			}
+		}
+		if hasDominantAnchor && isTestCaseCandidate(candidates[i].candidate) && match.dominantSpecific && !codeTaskFamilyV2LowPrioritySupportPath(candidates[i].candidate.Path) {
+			delta += 3.0
+			reasons = append(reasons, "query hygiene: specific behavior test")
+		}
+		if codeTaskFamilyV2LowPrioritySupportPath(candidates[i].candidate.Path) && !codeTaskQueryRequestsDocsExample(queryLower) {
+			delta -= 14.0
+			reasons = append(reasons, "query hygiene: playground/example/fixture kept supporting")
+		}
+		if match.supportAny && (match.dominantSpecific || match.dominantAny) {
+			delta -= 1.0
+			reasons = append(reasons, "query hygiene: generic anchor kept supporting")
+		}
+		if delta == 0 {
+			continue
+		}
+		delta = clampFloat(delta, -20.0, 12.0)
+		candidates[i].score += delta
+		candidates[i].candidate = withCodeTaskFamilyV2QueryHygieneMetadata(candidates[i].candidate, delta, match, reasons)
+		changed = true
+	}
+	if changed {
+		sort.Slice(candidates, func(i, j int) bool {
+			if candidates[i].score == candidates[j].score {
+				return candidates[i].candidate.Path < candidates[j].candidate.Path
+			}
+			return candidates[i].score > candidates[j].score
+		})
+	}
+	return candidates
+}
+
+func codeTaskFamilyV2AnchorClasses(profile AnchorProfile, vocab RepoVocabulary, scoredCandidates []scoredCandidate, mode string) []codeTaskFamilyV2AnchorClass {
+	var anchorCandidates []codeTaskFamilyV2AnchorCandidate
+	seen := map[string]bool{}
+	familyCounts := codeTaskFamilyV2AnchorFamilyCounts(scoredCandidates, profile, mode)
+	for _, anchor := range profile.Anchors {
+		term := normalizeAnchorTerm(anchor.Term)
+		if term == "" || seen[term] {
+			continue
+		}
+		seen[term] = true
+		stats := codeTaskBestAnchorStats(vocab, term, vocab.Terms[term])
+		familyCount := familyCounts[term]
+		supportBase := anchor.Kind == AnchorGenericTaskWord || anchor.Kind == AnchorArtifactRoleTerm || codeTaskFamilyV2SupportOnlyAnchor(term) || codeTaskGenericAnchorTerm(term)
+		anchorCandidates = append(anchorCandidates, codeTaskFamilyV2AnchorCandidate{
+			term:        term,
+			kind:        anchor.Kind,
+			stats:       stats,
+			familyCount: familyCount,
+			supportBase: supportBase,
+			specificity: codeTaskFamilyV2AnchorSpecificity(anchor, stats, vocab, familyCount),
+		})
+	}
+	maxSpecificity := 0.0
+	for _, candidate := range anchorCandidates {
+		if candidate.supportBase {
+			continue
+		}
+		if candidate.specificity > maxSpecificity {
+			maxSpecificity = candidate.specificity
+		}
+	}
+	var classes []codeTaskFamilyV2AnchorClass
+	for _, candidate := range anchorCandidates {
+		class := "support"
+		switch candidate.kind {
+		case AnchorGenericTaskWord, AnchorArtifactRoleTerm:
+			class = "support"
+		default:
+			strongShape := candidate.kind == AnchorCompactIdentifier || candidate.kind == AnchorPathLike || candidate.kind == AnchorQuotedPhrase
+			concentrated := candidate.familyCount == 0 || candidate.familyCount <= 2
+			switch {
+			case candidate.supportBase:
+				class = "support"
+			case strongShape && concentrated && (candidate.specificity >= maxSpecificity-0.45 || candidate.stats.IDF >= 1.8):
+				class = "dominant"
+			case concentrated && candidate.specificity >= maxSpecificity-0.20 && codeTaskFamilyV2AnchorHasSpecificEvidence(candidate.stats):
+				class = "dominant"
+			case candidate.stats.IDF >= 2.2:
+				class = "dominant"
+			case candidate.specificity >= maxSpecificity-1.0 || candidate.stats.IDF >= 1.6:
+				class = "medium"
+			default:
+				class = "support"
+			}
+		}
+		classes = append(classes, codeTaskFamilyV2AnchorClass{term: candidate.term, class: class})
+	}
+	return classes
+}
+
+func codeTaskFamilyV2AnchorSpecificity(anchor AnchorTerm, stats TermStats, vocab RepoVocabulary, familyCount int) float64 {
+	score := stats.IDF
+	if score <= 0 {
+		score = 1.0
+	}
+	if stats.PathCount > 0 {
+		score += 0.8
+	}
+	if stats.TitleCount > 0 || stats.TestNameCount > 0 || stats.SymbolCount > 0 {
+		score += 0.5
+	}
+	if stats.DocumentCount > 0 && stats.DocumentCount <= maxInt(4, vocab.DocumentCount/50) {
+		score += 0.7
+	}
+	if stats.PathCount > maxInt(8, vocab.DocumentCount/20) {
+		score -= 0.8
+	}
+	switch {
+	case familyCount == 1:
+		score += 0.8
+	case familyCount == 2:
+		score += 0.2
+	case familyCount >= 3:
+		score -= math.Min(1.4, float64(familyCount-2)*0.45)
+	}
+	switch anchor.Kind {
+	case AnchorCompactIdentifier, AnchorPathLike, AnchorQuotedPhrase:
+		score += 0.8
+	}
+	if len(anchor.Term) < 5 {
+		score -= 0.25
+	}
+	return score
+}
+
+func codeTaskFamilyV2AnchorFamilyCounts(candidates []scoredCandidate, profile AnchorProfile, mode string) map[string]int {
+	terms := map[string]bool{}
+	for _, anchor := range profile.Anchors {
+		term := normalizeAnchorTerm(anchor.Term)
+		if term != "" {
+			terms[term] = true
+		}
+	}
+	familiesByTerm := map[string]map[string]bool{}
+	for _, scored := range candidates {
+		familyID := codeTaskSourceFamilyIDForMode(scored.candidate.Path, mode)
+		if familyID == "" {
+			continue
+		}
+		fields := metadataAnchorFieldTerms(scored.candidate, false)
+		for term := range terms {
+			if !codeTaskFamilyV2AnchorInSpecificField(term, fields, mode) {
+				continue
+			}
+			if familiesByTerm[term] == nil {
+				familiesByTerm[term] = map[string]bool{}
+			}
+			familiesByTerm[term][familyID] = true
+		}
+	}
+	counts := map[string]int{}
+	for term, families := range familiesByTerm {
+		counts[term] = len(families)
+	}
+	return counts
+}
+
+func codeTaskFamilyV2AnchorHasSpecificEvidence(stats TermStats) bool {
+	return stats.PathCount > 0 || stats.TitleCount > 0 || stats.TestNameCount > 0 || stats.SymbolCount > 0 || stats.HeadingCount > 0
+}
+
+func codeTaskFamilyV2HasDominantAnchor(classes []codeTaskFamilyV2AnchorClass) bool {
+	for _, class := range classes {
+		if class.class == "dominant" {
+			return true
+		}
+	}
+	return false
+}
+
+func codeTaskFamilyV2CandidateAnchorMatch(c Candidate, classes []codeTaskFamilyV2AnchorClass, mode string) codeTaskFamilyV2AnchorMatch {
+	fields := metadataAnchorFieldTerms(c, true)
+	match := codeTaskFamilyV2AnchorMatch{}
+	for _, class := range classes {
+		specific := codeTaskFamilyV2AnchorInSpecificField(class.term, fields, mode)
+		any := specific || anchorFieldTermCount(class.term, fields.body, mode) > 0 || anchorFieldTermCount(class.term, fields.role, mode) > 0
+		if !any {
+			continue
+		}
+		match.classes = append(match.classes, class.term+":"+class.class)
+		switch class.class {
+		case "dominant":
+			match.dominantAny = true
+			match.matchedDominant = append(match.matchedDominant, class.term)
+			if specific {
+				match.dominantSpecific = true
+			}
+		case "medium":
+			if specific {
+				match.mediumSpecific = true
+				match.matchedDominant = append(match.matchedDominant, class.term)
+			} else {
+				match.supportAny = true
+				match.matchedSupport = append(match.matchedSupport, class.term)
+			}
+		default:
+			match.supportAny = true
+			match.matchedSupport = append(match.matchedSupport, class.term)
+		}
+	}
+	match.matchedDominant = uniqueStrings(match.matchedDominant)
+	match.matchedSupport = uniqueStrings(match.matchedSupport)
+	match.classes = uniqueStrings(match.classes)
+	return match
+}
+
+func codeTaskFamilyV2AnchorInSpecificField(term string, fields anchorFieldTerms, mode string) bool {
+	return anchorFieldTermCount(term, fields.path, mode) > 0 ||
+		anchorFieldTermCount(term, fields.title, mode) > 0 ||
+		anchorFieldTermCount(term, fields.heading, mode) > 0 ||
+		anchorFieldTermCount(term, fields.symbol, mode) > 0 ||
+		anchorFieldTermCount(term, fields.testName, mode) > 0
+}
+
+func withCodeTaskFamilyV2QueryHygieneMetadata(c Candidate, delta float64, match codeTaskFamilyV2AnchorMatch, reasons []string) Candidate {
+	if c.Metadata == nil {
+		c.Metadata = map[string]string{}
+	} else {
+		c.Metadata = copyMetadata(c.Metadata)
+	}
+	c.Metadata["query_hygiene_mode"] = AnchorFirstModeCodeTaskFamilyV2
+	c.Metadata["query_hygiene_score"] = fmt.Sprintf("%.3f", delta)
+	c.Metadata["query_anchor_class"] = jsonStringList(match.classes)
+	if len(match.matchedDominant) > 0 {
+		c.Metadata["rare_anchor_boost"] = strings.Join(match.matchedDominant, ", ")
+	}
+	if len(match.matchedSupport) > 0 {
+		c.Metadata["generic_anchor_dampening"] = strings.Join(match.matchedSupport, ", ")
+	}
+	c.Metadata["query_hygiene_reasons"] = strings.Join(uniqueStrings(reasons), "\n")
+	return c
+}
+
+func codeTaskFamilyV2SupportOnlyAnchor(term string) bool {
+	switch strings.ToLower(strings.TrimSpace(term)) {
+	case "action", "actions", "base", "common", "correctly", "exists", "handle", "handling", "multiple", "state", "states", "status", "statuses":
+		return true
+	default:
+		return false
+	}
+}
+
+func codeTaskFamilyV2LowPrioritySupportPath(path string) bool {
+	path = strings.ToLower(filepath.ToSlash(path))
+	segments := strings.Split(path, "/")
+	for _, segment := range segments {
+		switch segment {
+		case "fixture", "fixtures", "testdata", "example", "examples", "playground":
+			return true
+		}
+	}
+	return false
+}
+
+func codeTaskFamilyV2HasLowPrioritySupportCandidates(candidates []scoredCandidate, queryLower string) bool {
+	if codeTaskQueryRequestsDocsExample(queryLower) {
+		return false
+	}
+	for _, candidate := range candidates {
+		if codeTaskFamilyV2LowPrioritySupportPath(candidate.candidate.Path) {
+			return true
+		}
+	}
+	return false
+}
+
 func scoredCandidateCandidates(candidates []scoredCandidate) []Candidate {
 	out := make([]Candidate, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -1471,11 +1833,19 @@ func scoredCandidateCandidates(candidates []scoredCandidate) []Candidate {
 	return out
 }
 
+func scoredCandidatesFromCandidates(candidates []Candidate) []scoredCandidate {
+	out := make([]scoredCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		out = append(out, scoredCandidate{candidate: candidate, role: candidateRole(candidate), sourceFile: IsSourceContextCandidate(candidate)})
+	}
+	return out
+}
+
 func buildCodeTaskFamilyProfiles(candidates []scoredCandidate, profile AnchorProfile, vocab RepoVocabulary, mode, queryLower string) map[string]*codeTaskFamilyProfile {
 	families := map[string]*codeTaskFamilyProfile{}
 	for i := range candidates {
 		c := candidates[i].candidate
-		familyID := codeTaskSourceFamilyID(c.Path)
+		familyID := codeTaskSourceFamilyIDForMode(c.Path, mode)
 		if familyID == "" {
 			continue
 		}
@@ -1655,13 +2025,13 @@ func codeTaskFamilyRankingForMember(family *codeTaskFamilyProfile, member codeTa
 	return codeTaskFamilyCandidateResult{score: score, reasons: uniqueStrings(reasons)}
 }
 
-func withCodeTaskFamilyMetadata(c Candidate, family *codeTaskFamilyProfile, member codeTaskFamilyMember, result codeTaskFamilyCandidateResult) Candidate {
+func withCodeTaskFamilyMetadata(c Candidate, family *codeTaskFamilyProfile, member codeTaskFamilyMember, result codeTaskFamilyCandidateResult, mode string) Candidate {
 	if c.Metadata == nil {
 		c.Metadata = map[string]string{}
 	} else {
 		c.Metadata = copyMetadata(c.Metadata)
 	}
-	c.Metadata["source_family_mode"] = AnchorFirstModeCodeTaskFamily
+	c.Metadata["source_family_mode"] = mode
 	c.Metadata["source_family_id"] = family.id
 	c.Metadata["source_family_primary_role"] = family.primaryRole
 	c.Metadata["source_family_member_role"] = member.role
@@ -1676,7 +2046,7 @@ func withCodeTaskFamilyMetadata(c Candidate, family *codeTaskFamilyProfile, memb
 	return c
 }
 
-func reattachCodeTaskFamilyCompanions(preBudget, selected []scoredCandidate, limit int) []scoredCandidate {
+func reattachCodeTaskFamilyCompanions(preBudget, selected []scoredCandidate, limit int, mode string) []scoredCandidate {
 	if len(preBudget) == 0 || len(selected) == 0 {
 		return selected
 	}
@@ -1723,6 +2093,18 @@ func reattachCodeTaskFamilyCompanions(preBudget, selected []scoredCandidate, lim
 	}
 	if additionCount == 0 {
 		return selected
+	}
+	if AnchorFirstModeUsesCodeTaskFamilyV2(mode) {
+		for familyID := range additionsByFamily {
+			sort.SliceStable(additionsByFamily[familyID], func(i, j int) bool {
+				left := codeTaskFamilyV2TestAffinityScore(additionsByFamily[familyID][i].candidate)
+				right := codeTaskFamilyV2TestAffinityScore(additionsByFamily[familyID][j].candidate)
+				if left == right {
+					return additionsByFamily[familyID][i].candidate.Path < additionsByFamily[familyID][j].candidate.Path
+				}
+				return left > right
+			})
+		}
 	}
 
 	out := make([]scoredCandidate, 0, len(selected)+additionCount)
@@ -1780,6 +2162,31 @@ func codeTaskFamilyRoleCanReattach(role string) bool {
 	default:
 		return false
 	}
+}
+
+func codeTaskFamilyV2TestAffinityScore(c Candidate) int {
+	path := strings.ToLower(normalizeCodeTaskFamilyPath(c.Path))
+	if path == "" {
+		return 0
+	}
+	score := 0
+	if codeTaskFamilyLooksTestPath(path) || isTestCaseCandidate(c) {
+		score += 8
+	}
+	base := filepath.Base(path)
+	if strings.Contains(base, "_test.") || strings.Contains(base, ".test.") || strings.Contains(base, ".spec.") || strings.HasPrefix(base, "test_") {
+		score += 4
+	}
+	if strings.Contains(path, "/__tests__/") || strings.Contains(path, "/tests/") {
+		score += 2
+	}
+	if strings.Contains(path, "/playground/") || strings.Contains(path, "/examples/") || strings.Contains(path, "/fixtures/") {
+		score -= 3
+	}
+	if metadataLower(c, "retrieval_expansion_reason") == "source_family_companion" {
+		score += 1
+	}
+	return score
 }
 
 func codeTaskFamilyRoleCountsList(counts map[string]int) []string {
@@ -1866,6 +2273,15 @@ func codeTaskFamilyExactDominant(anchor anchorScoreResult) bool {
 	return anchor.score > 0 && anchor.maxIDF >= 1.8 && resultHasAnyAnchorField(anchor, "path", "title", "symbol", "test_name")
 }
 
+func codeTaskSourceFamilyIDForMode(path, mode string) string {
+	if AnchorFirstModeUsesCodeTaskFamilyV2(mode) {
+		if familyID := codeTaskSourceFamilyIDV2(path); familyID != "" {
+			return familyID
+		}
+	}
+	return codeTaskSourceFamilyID(path)
+}
+
 func codeTaskSourceFamilyID(path string) string {
 	path = normalizeCodeTaskFamilyPath(path)
 	if path == "" {
@@ -1900,6 +2316,84 @@ func codeTaskSourceFamilyID(path string) string {
 		}
 		return first
 	}
+}
+
+func codeTaskSourceFamilyIDV2(path string) string {
+	path = normalizeCodeTaskFamilyPath(path)
+	if path == "" {
+		return ""
+	}
+	dir := filepath.ToSlash(filepath.Dir(path))
+	if dir == "." || dir == "" {
+		return ""
+	}
+	segments := codeTaskPathSegments(dir)
+	segments = codeTaskFamilyV2WithoutTestContainers(segments)
+	if len(segments) == 0 {
+		return ""
+	}
+	if idx := indexString(segments, "src"); idx >= 0 {
+		count := minInt(len(segments), idx+3)
+		if idx+1 < len(segments) && codeTaskFamilyV2ContainerSegment(segments[idx+1]) {
+			count = minInt(len(segments), idx+4)
+		}
+		if idx+2 < len(segments) && codeTaskFamilyV2ContainerSegment(segments[idx+2]) {
+			count = minInt(len(segments), idx+4)
+		}
+		return joinFirstPathSegments(segments, count)
+	}
+	first := segments[0]
+	switch first {
+	case "app", "apps", "packages":
+		return joinFirstPathSegments(segments, minInt(len(segments), 4))
+	case "api":
+		return joinFirstPathSegments(segments, minInt(len(segments), 4))
+	case "docs_src", "examples", "example", "samples", "sample", "tutorial", "tutorials":
+		return joinFirstPathSegments(segments, minInt(len(segments), 2))
+	case "pkg":
+		if len(segments) >= 3 && segments[1] == "cmd" {
+			return joinFirstPathSegments(segments, 3)
+		}
+		return joinFirstPathSegments(segments, minInt(len(segments), 3))
+	case "routers", "routes", "controllers", "services", "service", "cmd", "internal":
+		return joinFirstPathSegments(segments, minInt(len(segments), 3))
+	default:
+		if len(segments) >= 2 {
+			return joinFirstPathSegments(segments, 2)
+		}
+		return first
+	}
+}
+
+func codeTaskFamilyV2WithoutTestContainers(segments []string) []string {
+	out := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		switch segment {
+		case "test", "tests", "__tests__", "spec", "specs", "__test__", "__specs__":
+			continue
+		default:
+			out = append(out, segment)
+		}
+	}
+	return out
+}
+
+func codeTaskFamilyV2ContainerSegment(segment string) bool {
+	switch segment {
+	case "modules", "module", "services", "service", "components", "component", "hooks", "routes", "route", "views", "view", "interfaces", "interface", "plugins", "plugin", "middlewares", "middleware", "controllers", "controller":
+		return true
+	default:
+		return false
+	}
+}
+
+func indexString(items []string, want string) int {
+	for i, item := range items {
+		if item == want {
+			return i
+		}
+	}
+	return -1
 }
 
 func normalizeCodeTaskFamilyPath(path string) string {
@@ -3294,7 +3788,7 @@ func enforceSupportingArtifactBudgets(candidates []scoredCandidate, queryLower s
 	return out
 }
 
-func suppressRawTestSourceCandidates(candidates []scoredCandidate, queryLower string) []scoredCandidate {
+func suppressRawTestSourceCandidates(candidates []scoredCandidate, queryLower, mode string) []scoredCandidate {
 	if len(candidates) == 0 {
 		return candidates
 	}
@@ -3316,7 +3810,7 @@ func suppressRawTestSourceCandidates(candidates []scoredCandidate, queryLower st
 			out = append(out, candidate)
 			continue
 		}
-		if !hasTestBehaviorIntent(queryLower) && !hasExplicitSourceIntent(queryLower) {
+		if !hasTestBehaviorIntent(queryLower) && !hasExplicitSourceIntent(queryLower) && !(AnchorFirstModeUsesCodeTaskFamilyV2(mode) && codeTaskFamilyV2SourceActionIntent(candidates, queryLower)) {
 			continue
 		}
 		if len(testUnitKeys) > 0 && !variantHasExactQueryAnchor(candidate.candidate, queryLower) {
@@ -5006,7 +5500,7 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 			reasons = append(reasons, "source query ranking: "+strings.ReplaceAll(sourceReasons, "\n", "; "))
 		}
 	}
-	if c.Metadata != nil && c.Metadata["source_family_mode"] == AnchorFirstModeCodeTaskFamily {
+	if c.Metadata != nil && AnchorFirstModeUsesCodeTaskFamilyRanking(c.Metadata["source_family_mode"]) {
 		var parts []string
 		if familyID := strings.TrimSpace(c.Metadata["source_family_id"]); familyID != "" {
 			parts = append(parts, familyID)
@@ -5019,6 +5513,21 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 		}
 		if len(parts) > 0 {
 			reasons = append(reasons, "source family ranking: "+strings.Join(parts, "; "))
+		}
+	}
+	if c.Metadata != nil && c.Metadata["query_hygiene_mode"] == AnchorFirstModeCodeTaskFamilyV2 {
+		var parts []string
+		if boost := strings.TrimSpace(c.Metadata["rare_anchor_boost"]); boost != "" {
+			parts = append(parts, "rare "+boost)
+		}
+		if dampen := strings.TrimSpace(c.Metadata["generic_anchor_dampening"]); dampen != "" {
+			parts = append(parts, "support "+dampen)
+		}
+		if hygieneReasons := strings.TrimSpace(c.Metadata["query_hygiene_reasons"]); hygieneReasons != "" {
+			parts = append(parts, strings.ReplaceAll(hygieneReasons, "\n", "; "))
+		}
+		if len(parts) > 0 {
+			reasons = append(reasons, "query hygiene: "+strings.Join(parts, "; "))
 		}
 	}
 	if c.Metadata != nil && c.Metadata["anchor_first_score"] != "" {

@@ -65,7 +65,7 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&graphDiag, "graph-diagnostics", false, "Attach opt-in typed-edge graph diagnostics without changing ranked results")
 	cmd.Flags().BoolVar(&gitReceipts, "git-receipts", true, "Attach bounded local git commit receipts to pack output when available")
 	cmd.Flags().BoolVar(&anchorFirst, "experimental-anchor-first-ranking", true, "Use repo-local TF-IDF anchor-first ordering; pass false to disable")
-	cmd.Flags().StringVar(&anchorMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, selected_only, strong_field, strict, code_task, or code_task_family")
+	cmd.Flags().StringVar(&anchorMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, selected_only, strong_field, strict, code_task, code_task_family, or code_task_family_v2")
 	cmd.Flags().BoolVar(&boundaryPrimary, "experimental-boundary-primary", false, "Tier pack output into a source-safe primary working set plus related context summary")
 	cmd.Flags().StringVar(&packCompanions, "pack-companion-mode", findPackCompanionModeAll, "Hidden scout flag: off, generic, generic_git, or all")
 	_ = cmd.Flags().MarkHidden("pack-companion-mode")

@@ -443,7 +443,7 @@ func findPackCochangedTestCompanionPaths(ctx context.Context, repoRoot, query st
 
 func findPackMatchesUseCodeTaskFamily(matches []retrieval.Candidate) bool {
 	for _, match := range matches {
-		if match.Metadata != nil && match.Metadata["source_family_mode"] == retrieval.AnchorFirstModeCodeTaskFamily {
+		if match.Metadata != nil && retrieval.AnchorFirstModeUsesCodeTaskFamilyRanking(match.Metadata["source_family_mode"]) {
 			return true
 		}
 	}

@@ -214,7 +214,7 @@ func NewEvalCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&experimentalGlossaryConcepts, "experimental-glossary-concepts", false, "Gate experimental concept backfill through repo-local glossary evidence during retrieval evals")
 	cmd.Flags().BoolVar(&experimentalTieredConceptOutput, "experimental-tiered-concept-output", false, "Demote lower-confidence concept backfill artifacts to a separate related tier during retrieval evals")
 	cmd.Flags().BoolVar(&experimentalAnchorFirstRanking, "experimental-anchor-first-ranking", true, "Use repo-local TF-IDF anchor-first ordering during retrieval evals; pass false to disable")
-	cmd.Flags().StringVar(&experimentalAnchorFirstMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, selected_only, strong_field, strict, code_task, or code_task_family")
+	cmd.Flags().StringVar(&experimentalAnchorFirstMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, selected_only, strong_field, strict, code_task, code_task_family, or code_task_family_v2")
 	cmd.Flags().BoolVar(&experimentalSupportDocs, "experimental-support-docs", false, "Index bounded support docs as diagnostic context during indexed evals")
 	cmd.Flags().BoolVar(&packDiagnostics, "pack-diagnostics", false, "Record role-grouped pack diagnostics in per-case eval JSON without changing scoring")
 	cmd.Flags().BoolVar(&graphDiagnostics, "graph-diagnostics", false, "Record opt-in find graph context diagnostics in live command eval JSON without changing scoring")

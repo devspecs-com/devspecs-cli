@@ -968,6 +968,116 @@ func TestWeightedFilesRetrieverV0_CodeTaskFamilyDemotesGeneratedClientSurfaceFor
 	}
 }
 
+func TestWeightedFilesRetrieverV0_CodeTaskFamilyV2LetsRareAnchorBeatGenericFlow(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "api/src/ai/tools/trigger-flow/index.ts",
+			Kind:  "source_context",
+			Title: "Trigger flow tool",
+			Body:  "Improve automation flow execution and construct flow tree.",
+		},
+		{
+			Path:  "api/src/utils/construct-flow-tree.ts",
+			Kind:  "source_context",
+			Title: "Construct flow tree",
+			Body:  "Flow tree utility for automation flows.",
+		},
+		{
+			Path:  "app/src/modules/settings/routes/flows/flow.vue",
+			Kind:  "source_context",
+			Title: "Flow settings route",
+			Body:  "Flow route for settings and manual flow selection.",
+		},
+		{
+			Path:  "app/src/modules/content/components/bookmark-add.vue",
+			Kind:  "source_context",
+			Title: "Bookmark add component",
+			Body:  "Improve bookmark flow by adding bookmark handling.",
+		},
+		{
+			Path:  "app/src/modules/content/components/bookmark-delete.vue",
+			Kind:  "source_context",
+			Title: "Bookmark delete component",
+			Body:  "Improve bookmark deletion flow.",
+		},
+		{
+			Path:  "app/src/modules/content/composables/use-delete-bookmark.ts",
+			Kind:  "source_context",
+			Title: "Use delete bookmark composable",
+			Body:  "Bookmark flow delete implementation.",
+		},
+		{
+			Path:    "app/src/modules/content/composables/use-delete-bookmark.test.ts",
+			Kind:    "source_context",
+			Subtype: "test_case",
+			Title:   "delete bookmark flow",
+			Body:    "test bookmark delete behavior.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true, AnchorFirstMode: AnchorFirstModeCodeTaskFamilyV2}).Retrieve(candidates, "Improve bookmark flow")
+	if len(got) < 3 {
+		t.Fatalf("expected bookmark results, got %#v", CandidatePaths(got))
+	}
+	topGroup := got[:minInt(len(got), 4)]
+	top := CandidatePaths(topGroup)
+	if !containsCandidatePath(topGroup, "app/src/modules/content/components/bookmark-add.vue") ||
+		!containsCandidatePath(topGroup, "app/src/modules/content/components/bookmark-delete.vue") ||
+		!containsCandidatePath(topGroup, "app/src/modules/content/composables/use-delete-bookmark.ts") ||
+		!containsCandidatePath(topGroup, "app/src/modules/content/composables/use-delete-bookmark.test.ts") {
+		t.Fatalf("rare bookmark anchor should beat generic flow family, top=%#v all=%#v", top, CandidatePaths(got))
+	}
+	if containsCandidatePath(topGroup, "api/src/ai/tools/trigger-flow/index.ts") {
+		t.Fatalf("generic flow family should not lead bookmark query: %#v", CandidatePaths(got))
+	}
+	reasons := ExplainCandidates(got, "Improve bookmark flow")
+	if len(reasons) == 0 || !reasonContainsPrefix(reasons[0].Reasons, "query hygiene:") {
+		t.Fatalf("missing query hygiene reason: %#v", reasons)
+	}
+}
+
+func TestWeightedFilesRetrieverV0_CodeTaskFamilyV2PrefersSpecificPluginTestOverPlayground(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "packages/vite/src/node/plugins/importMetaGlob.ts",
+			Kind:  "source_context",
+			Title: "Import glob plugin",
+			Body:  "match import glob common base by path segment correctly.",
+		},
+		{
+			Path:    "packages/vite/src/node/__tests__/plugins/importGlob/utils.spec.ts",
+			Kind:    "source_context",
+			Subtype: "test_case",
+			Title:   "match import glob common base by path segment",
+			Body:    "tests import glob common base path segment behavior.",
+		},
+		{
+			Path:    "playground/glob-import/__tests__/glob-import.spec.ts",
+			Kind:    "source_context",
+			Subtype: "test_case",
+			Title:   "glob import playground",
+			Body:    "playground import glob common base behavior.",
+		},
+		{
+			Path:  "playground/glob-import/root/array-common-base/pattern1/a.js",
+			Kind:  "source_context",
+			Title: "Glob import common base fixture",
+			Body:  "import glob common base fixture.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true, AnchorFirstMode: AnchorFirstModeCodeTaskFamilyV2}).Retrieve(candidates, "Match import glob common base by path segment correctly")
+	if len(got) < 2 {
+		t.Fatalf("expected import glob results, got %#v", CandidatePaths(got))
+	}
+	if got[0].Path != "packages/vite/src/node/plugins/importMetaGlob.ts" {
+		t.Fatalf("plugin source should lead import glob query: %#v", CandidatePaths(got))
+	}
+	if strings.HasPrefix(got[0].Path, "playground/") {
+		t.Fatalf("playground fixtures should not lead implementation query: %#v", CandidatePaths(got))
+	}
+}
+
 func TestWeightedFilesRetrieverV0_UsesCodeCommentsForRationaleQueries(t *testing.T) {
 	candidates := []Candidate{
 		{

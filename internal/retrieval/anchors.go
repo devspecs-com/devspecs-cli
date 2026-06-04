@@ -32,14 +32,15 @@ type AnchorProfile struct {
 }
 
 const (
-	AnchorFirstModeV1             = "v1"
-	AnchorFirstModeRerankOnly     = "rerank_only"
-	AnchorFirstModeSelectedOnly   = "selected_only"
-	AnchorFirstModeStrongField    = "strong_field"
-	AnchorFirstModeStrict         = "strict"
-	AnchorFirstModeCodeTask       = "code_task"
-	AnchorFirstModeCodeTaskFamily = "code_task_family"
-	DefaultAnchorFirstMode        = AnchorFirstModeSelectedOnly
+	AnchorFirstModeV1               = "v1"
+	AnchorFirstModeRerankOnly       = "rerank_only"
+	AnchorFirstModeSelectedOnly     = "selected_only"
+	AnchorFirstModeStrongField      = "strong_field"
+	AnchorFirstModeStrict           = "strict"
+	AnchorFirstModeCodeTask         = "code_task"
+	AnchorFirstModeCodeTaskFamily   = "code_task_family"
+	AnchorFirstModeCodeTaskFamilyV2 = "code_task_family_v2"
+	DefaultAnchorFirstMode          = AnchorFirstModeSelectedOnly
 )
 
 func NormalizeAnchorFirstMode(mode string) string {
@@ -60,18 +61,29 @@ func NormalizeAnchorFirstMode(mode string) string {
 		return AnchorFirstModeCodeTask
 	case "code-task-family", AnchorFirstModeCodeTaskFamily:
 		return AnchorFirstModeCodeTaskFamily
+	case "code-task-family-v2", AnchorFirstModeCodeTaskFamilyV2:
+		return AnchorFirstModeCodeTaskFamilyV2
 	default:
 		return ""
 	}
 }
 
 func ValidAnchorFirstModes() []string {
-	return []string{AnchorFirstModeV1, AnchorFirstModeRerankOnly, AnchorFirstModeSelectedOnly, AnchorFirstModeStrongField, AnchorFirstModeStrict, AnchorFirstModeCodeTask, AnchorFirstModeCodeTaskFamily}
+	return []string{AnchorFirstModeV1, AnchorFirstModeRerankOnly, AnchorFirstModeSelectedOnly, AnchorFirstModeStrongField, AnchorFirstModeStrict, AnchorFirstModeCodeTask, AnchorFirstModeCodeTaskFamily, AnchorFirstModeCodeTaskFamilyV2}
 }
 
 func AnchorFirstModeUsesCodeTaskWeights(mode string) bool {
 	mode = NormalizeAnchorFirstMode(mode)
-	return mode == AnchorFirstModeCodeTask || mode == AnchorFirstModeCodeTaskFamily
+	return mode == AnchorFirstModeCodeTask || mode == AnchorFirstModeCodeTaskFamily || mode == AnchorFirstModeCodeTaskFamilyV2
+}
+
+func AnchorFirstModeUsesCodeTaskFamilyRanking(mode string) bool {
+	mode = NormalizeAnchorFirstMode(mode)
+	return mode == AnchorFirstModeCodeTaskFamily || mode == AnchorFirstModeCodeTaskFamilyV2
+}
+
+func AnchorFirstModeUsesCodeTaskFamilyV2(mode string) bool {
+	return NormalizeAnchorFirstMode(mode) == AnchorFirstModeCodeTaskFamilyV2
 }
 
 type RepoVocabulary struct {
@@ -241,7 +253,69 @@ func applyAnchorFirstRanking(candidates []scoredCandidate, universe []Candidate,
 		}
 		return candidates
 	}
-	backfilled := 0
+	if mode == AnchorFirstModeCodeTaskFamilyV2 {
+		backfills := collectAnchorFirstBackfills(universe, seen, profile, vocab, query, mode)
+		limit := anchorFirstBackfillLimit(mode)
+		if limit > 0 {
+			backfills = diversifyAnchorFirstV2Backfills(backfills, limit)
+		}
+		if limit > 0 && len(backfills) > limit {
+			backfills = backfills[:limit]
+		}
+		for _, backfill := range backfills {
+			candidates = append(candidates, backfill)
+			seen[candidateIdentity(backfill.candidate)] = true
+			changed = true
+		}
+	} else {
+		backfilled := 0
+		for _, c := range universe {
+			if seen[candidateIdentity(c)] {
+				continue
+			}
+			if !anchorFirstCandidateEligible(c, profile) {
+				continue
+			}
+			result := scoreAnchorFirstCandidate(c, profile, vocab, mode)
+			if !anchorFirstBackfillAllowed(result, mode) {
+				continue
+			}
+			role := candidateRole(c)
+			prior := authorityPrior(c, role, strings.ToLower(query))
+			delta := clampFloat(result.score, 0, 24)
+			c = withAnchorFirstMetadata(c, delta, result, mode)
+			c.Metadata["anchor_first_backfill"] = "true"
+			candidates = append(candidates, scoredCandidate{
+				candidate:  c,
+				score:      delta + prior.score,
+				baseScore:  0,
+				authority:  prior,
+				profile:    candidateMatchProfile(c, strings.ToLower(query)),
+				role:       role,
+				sourceFile: IsSourceContextCandidate(c),
+			})
+			seen[candidateIdentity(c)] = true
+			changed = true
+			backfilled++
+			if limit := anchorFirstBackfillLimit(mode); limit > 0 && backfilled >= limit {
+				break
+			}
+		}
+	}
+	if changed {
+		sort.Slice(candidates, func(i, j int) bool {
+			if candidates[i].score == candidates[j].score {
+				return candidates[i].candidate.Path < candidates[j].candidate.Path
+			}
+			return candidates[i].score > candidates[j].score
+		})
+	}
+	return candidates
+}
+
+func collectAnchorFirstBackfills(universe []Candidate, seen map[string]bool, profile AnchorProfile, vocab RepoVocabulary, query, mode string) []scoredCandidate {
+	queryLower := strings.ToLower(query)
+	var out []scoredCandidate
 	for _, c := range universe {
 		if seen[candidateIdentity(c)] {
 			continue
@@ -254,35 +328,77 @@ func applyAnchorFirstRanking(candidates []scoredCandidate, universe []Candidate,
 			continue
 		}
 		role := candidateRole(c)
-		prior := authorityPrior(c, role, strings.ToLower(query))
+		prior := authorityPrior(c, role, queryLower)
 		delta := clampFloat(result.score, 0, 24)
 		c = withAnchorFirstMetadata(c, delta, result, mode)
 		c.Metadata["anchor_first_backfill"] = "true"
-		candidates = append(candidates, scoredCandidate{
+		out = append(out, scoredCandidate{
 			candidate:  c,
 			score:      delta + prior.score,
 			baseScore:  0,
 			authority:  prior,
-			profile:    candidateMatchProfile(c, strings.ToLower(query)),
+			profile:    candidateMatchProfile(c, queryLower),
 			role:       role,
 			sourceFile: IsSourceContextCandidate(c),
 		})
-		seen[candidateIdentity(c)] = true
-		changed = true
-		backfilled++
-		if limit := anchorFirstBackfillLimit(mode); limit > 0 && backfilled >= limit {
-			break
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].score == out[j].score {
+			return out[i].candidate.Path < out[j].candidate.Path
+		}
+		return out[i].score > out[j].score
+	})
+	return out
+}
+
+func diversifyAnchorFirstV2Backfills(backfills []scoredCandidate, limit int) []scoredCandidate {
+	if len(backfills) <= 1 || limit <= 0 {
+		return backfills
+	}
+	const perLeadAnchor = 3
+	selected := make([]scoredCandidate, 0, minInt(len(backfills), limit))
+	selectedIDs := map[string]bool{}
+	countsByAnchor := map[string]int{}
+	for _, backfill := range backfills {
+		lead := anchorFirstV2BackfillLeadAnchor(backfill.candidate)
+		if lead == "" {
+			continue
+		}
+		if countsByAnchor[lead] >= perLeadAnchor {
+			continue
+		}
+		selected = append(selected, backfill)
+		selectedIDs[candidateIdentity(backfill.candidate)] = true
+		countsByAnchor[lead]++
+		if len(selected) == limit {
+			return selected
 		}
 	}
-	if changed {
-		sort.Slice(candidates, func(i, j int) bool {
-			if candidates[i].score == candidates[j].score {
-				return candidates[i].candidate.Path < candidates[j].candidate.Path
-			}
-			return candidates[i].score > candidates[j].score
-		})
+	for _, backfill := range backfills {
+		id := candidateIdentity(backfill.candidate)
+		if selectedIDs[id] {
+			continue
+		}
+		selected = append(selected, backfill)
+		if len(selected) == limit {
+			return selected
+		}
 	}
-	return candidates
+	return selected
+}
+
+func anchorFirstV2BackfillLeadAnchor(c Candidate) string {
+	for _, term := range metadataJSONList(c, "anchor_matches_json") {
+		term = normalizeAnchorTerm(term)
+		if term == "" {
+			continue
+		}
+		if codeTaskFamilyV2SupportOnlyAnchor(term) || codeTaskGenericAnchorTerm(term) {
+			continue
+		}
+		return term
+	}
+	return ""
 }
 
 func anchorFirstCandidateEligible(c Candidate, profile AnchorProfile) bool {
@@ -329,9 +445,15 @@ func anchorFirstPrimaryBoostAllowed(c Candidate, result anchorScoreResult, profi
 		return false
 	}
 	if result.strongSpecific {
+		if mode == AnchorFirstModeCodeTaskFamilyV2 {
+			return anchorFirstV2BackfillHasLeadAnchor(result)
+		}
 		return true
 	}
 	if AnchorFirstModeUsesCodeTaskWeights(mode) {
+		if mode == AnchorFirstModeCodeTaskFamilyV2 && !anchorFirstV2BackfillHasLeadAnchor(result) {
+			return false
+		}
 		return result.score >= 4.0 &&
 			result.maxIDF >= 1.25 &&
 			resultHasAnyAnchorField(result, "path", "title", "symbol", "heading") &&
@@ -670,6 +792,11 @@ func anchorFirstBackfillAllowed(result anchorScoreResult, mode string) bool {
 		return result.score >= 12.0 && result.maxIDF >= 1.8 && resultHasAnyAnchorField(result, "path", "title", "test_name")
 	case AnchorFirstModeStrict:
 		return result.score >= 14.0 && result.maxIDF >= 1.8 && resultHasAnyAnchorField(result, "path", "title", "test_name") && resultHasAnyAnchorKind(result, string(AnchorCompactIdentifier), string(AnchorPathLike), string(AnchorQuotedPhrase))
+	case AnchorFirstModeCodeTaskFamilyV2:
+		return result.score >= 10.0 &&
+			result.maxIDF >= 1.8 &&
+			resultHasAnyAnchorField(result, "path", "title", "symbol", "heading", "test_name") &&
+			anchorFirstV2BackfillHasLeadAnchor(result)
 	case AnchorFirstModeCodeTask, AnchorFirstModeCodeTaskFamily:
 		return result.score >= 8.0 && result.maxIDF >= 1.25 && resultHasAnyAnchorField(result, "path", "title", "symbol", "heading")
 	default:
@@ -677,10 +804,29 @@ func anchorFirstBackfillAllowed(result anchorScoreResult, mode string) bool {
 	}
 }
 
+func anchorFirstV2BackfillHasLeadAnchor(result anchorScoreResult) bool {
+	for i, term := range result.matches {
+		kind := ""
+		if i < len(result.kinds) {
+			kind = result.kinds[i]
+		}
+		if kind == string(AnchorGenericTaskWord) || kind == string(AnchorArtifactRoleTerm) {
+			continue
+		}
+		if codeTaskFamilyV2SupportOnlyAnchor(term) || codeTaskGenericAnchorTerm(term) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 func anchorFirstBackfillLimit(mode string) int {
 	switch mode {
 	case AnchorFirstModeV1:
 		return 0
+	case AnchorFirstModeCodeTaskFamilyV2:
+		return 8
 	case AnchorFirstModeCodeTask, AnchorFirstModeCodeTaskFamily:
 		return 3
 	default:
