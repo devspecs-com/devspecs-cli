@@ -44,6 +44,7 @@ func NewScanCmd() *cobra.Command {
 		experimentalWorkstreamEvidence bool
 		experimentalRichTypedIndex     bool
 		experimentalSupportDocs        bool
+		experimentalRecentSource       bool
 		includeTests                   bool
 		includeCodeComments            bool
 	)
@@ -52,7 +53,7 @@ func NewScanCmd() *cobra.Command {
 		Use:   "scan",
 		Short: "Scan repository for specs, plans, and ADRs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, includeTests, includeCodeComments)
+			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, includeTests, includeCodeComments)
 		},
 	}
 
@@ -67,14 +68,16 @@ func NewScanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&experimentalWorkstreamEvidence, "experimental-workstream-evidence", false, "Index bounded local workstream anchors as diagnostic evidence (implies --experimental-git-evidence)")
 	cmd.Flags().BoolVar(&experimentalRichTypedIndex, "experimental-rich-typed-index", false, "Index bounded richer source/test/symbol graph evidence as diagnostic substrate")
 	cmd.Flags().BoolVar(&experimentalSupportDocs, "experimental-support-docs", false, "Index bounded support docs as diagnostic context")
+	cmd.Flags().BoolVar(&experimentalRecentSource, "experimental-recent-source-context", false, "Index bounded recently changed source files as experimental implementation context")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Index executable test cases as behavioral intent artifacts")
 	cmd.Flags().BoolVar(&includeTests, "experimental-test-cases", false, "Deprecated alias for --include-tests")
 	cmd.Flags().BoolVar(&includeCodeComments, "include-code-comments", false, "Index high-signal code comments as implementation intent artifacts")
 	_ = cmd.Flags().MarkDeprecated("experimental-test-cases", "use --include-tests")
+	_ = cmd.Flags().MarkHidden("experimental-recent-source-context")
 	return cmd
 }
 
-func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, includeTests, includeCodeComments bool) error {
+func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, includeTests, includeCodeComments bool) error {
 	start := time.Now()
 	success := false
 	props := map[string]any{
@@ -84,6 +87,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 		"experimental_workstream_evidence": experimentalWorkstreamEvidence,
 		"experimental_rich_typed_index":    experimentalRichTypedIndex,
 		"experimental_support_docs":        experimentalSupportDocs,
+		"experimental_recent_source":       experimentalRecentSource,
 		"if_changed":                       ifChanged,
 		"rebuild":                          rebuild,
 		"json":                             asJSON,
@@ -167,6 +171,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	scanOpts.IncludeGitEvidence = experimentalGitEvidence || experimentalWorkstreamEvidence
 	scanOpts.IncludeWorkstreamEvidence = experimentalWorkstreamEvidence
 	scanOpts.RichTypedIndex = experimentalRichTypedIndex
+	scanOpts.RecentSourceContext = experimentalRecentSource
 	if verbose && !quiet && scanOpts.FreshIndex {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Using fresh-index scan path for empty/rebuilt index\n")
 	}

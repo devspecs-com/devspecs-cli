@@ -48,6 +48,7 @@ type RunOptions struct {
 	IncludeGitEvidence        bool
 	IncludeWorkstreamEvidence bool
 	RichTypedIndex            bool
+	RecentSourceContext       bool
 	GitMaxCommits             int
 	GitMaxFilesPerCommit      int
 	Progress                  func(ProgressEvent)
@@ -126,6 +127,12 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 	if diagnostics, companions := buildTestSourceCompanionCandidates(ctx, repoRoot, sharedCandidates["test_case"], sharedCandidates["source_context"]); diagnostics != nil {
 		result.SourceCompanions = diagnostics
 		if len(companions) > 0 {
+			sharedCandidates["source_context"] = append(sharedCandidates["source_context"], companions...)
+			sortCandidates(sharedCandidates["source_context"])
+		}
+	}
+	if opts.RecentSourceContext {
+		if companions := buildRecentGitSourceContextCandidates(ctx, repoRoot, sharedCandidates["source_context"], opts); len(companions) > 0 {
 			sharedCandidates["source_context"] = append(sharedCandidates["source_context"], companions...)
 			sortCandidates(sharedCandidates["source_context"])
 		}
