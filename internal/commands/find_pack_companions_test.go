@@ -23,7 +23,7 @@ func TestAddFindPackCompanionCandidatesAddsDirectTestFile(t *testing.T) {
 		Title: "map command tests",
 	})
 
-	got := addFindPackCompanionCandidates(context.Background(), "", "map command output", matches, all)
+	got := addFindPackCompanionCandidates(context.Background(), "", "map command output", matches, all, findPackCompanionModeGeneric)
 
 	if !findPackTestHasPath(got, "internal/commands/map_test.go") {
 		t.Fatalf("expected direct test companion, got %#v", findPackTestPaths(got))
@@ -44,7 +44,7 @@ func TestAddFindPackCompanionCandidatesAddsFilesystemTestCompanion(t *testing.T)
 		{ID: "map", Path: "internal/commands/map.go", Kind: "source_context", Title: "map command"},
 	}
 
-	got := addFindPackCompanionCandidates(context.Background(), repoRoot, "map command output", matches, matches)
+	got := addFindPackCompanionCandidates(context.Background(), repoRoot, "map command output", matches, matches, findPackCompanionModeGeneric)
 
 	companion := findPackTestCandidate(got, "internal/commands/map_test.go")
 	if companion.Path == "" {
@@ -74,7 +74,7 @@ func TestAddFindPackCompanionCandidatesAddsCommandFamilyFiles(t *testing.T) {
 		all = append(all, retrieval.Candidate{ID: path, Path: path, Kind: "source_context", Title: path})
 	}
 
-	got := addFindPackCompanionCandidates(context.Background(), "", "auto scan map and find first use output cache", matches, all)
+	got := addFindPackCompanionCandidates(context.Background(), "", "auto scan map and find first use output cache", matches, all, findPackCompanionModeAll)
 
 	for _, want := range []string{
 		"internal/commands/map_test.go",
@@ -157,7 +157,7 @@ func TestAddFindPackCompanionCandidatesAddsParentCommandForHelperFile(t *testing
 		all = append(all, retrieval.Candidate{ID: path, Path: path, Kind: "source_context", Title: path})
 	}
 
-	got := addFindPackCompanionCandidates(context.Background(), "", "boundary primary packs", matches, all)
+	got := addFindPackCompanionCandidates(context.Background(), "", "boundary primary packs", matches, all, findPackCompanionModeAll)
 
 	for _, want := range []string{
 		"internal/commands/find.go",
@@ -166,6 +166,69 @@ func TestAddFindPackCompanionCandidatesAddsParentCommandForHelperFile(t *testing
 	} {
 		if !findPackTestHasPath(got, want) {
 			t.Fatalf("expected helper command family path %s, got %#v", want, findPackTestPaths(got))
+		}
+	}
+}
+
+func TestAddFindPackCompanionCandidatesModeOffAddsNothing(t *testing.T) {
+	matches := []retrieval.Candidate{
+		{ID: "map", Path: "internal/commands/map.go", Kind: "source_context", Title: "map command"},
+	}
+	all := append([]retrieval.Candidate{}, matches...)
+	all = append(all, retrieval.Candidate{
+		ID:    "map-test",
+		Path:  "internal/commands/map_test.go",
+		Kind:  "source_context",
+		Title: "map command tests",
+	})
+
+	got := addFindPackCompanionCandidates(context.Background(), "", "map command output", matches, all, findPackCompanionModeOff)
+
+	if len(got) != len(matches) {
+		t.Fatalf("expected no companions in off mode, got %#v", findPackTestPaths(got))
+	}
+}
+
+func TestAddFindPackCompanionCandidatesGenericModeSkipsCommandFamily(t *testing.T) {
+	matches := []retrieval.Candidate{
+		{ID: "map", Path: "internal/commands/map.go", Kind: "source_context", Title: "map command"},
+	}
+	all := append([]retrieval.Candidate{}, matches...)
+	for _, path := range []string{
+		"internal/commands/find.go",
+		"internal/commands/map_test.go",
+		"internal/commands/read_commands_test.go",
+	} {
+		all = append(all, retrieval.Candidate{ID: path, Path: path, Kind: "source_context", Title: path})
+	}
+
+	got := addFindPackCompanionCandidates(context.Background(), "", "map output cache", matches, all, findPackCompanionModeGeneric)
+
+	if !findPackTestHasPath(got, "internal/commands/map_test.go") {
+		t.Fatalf("expected generic direct test companion, got %#v", findPackTestPaths(got))
+	}
+	for _, notWant := range []string{"internal/commands/find.go", "internal/commands/read_commands_test.go"} {
+		if findPackTestHasPath(got, notWant) {
+			t.Fatalf("generic mode should not include command-family path %s: %#v", notWant, findPackTestPaths(got))
+		}
+	}
+}
+
+func TestNormalizeFindPackCompanionMode(t *testing.T) {
+	tests := map[string]string{
+		"":            findPackCompanionModeAll,
+		"all":         findPackCompanionModeAll,
+		"off":         findPackCompanionModeOff,
+		"none":        findPackCompanionModeOff,
+		"generic":     findPackCompanionModeGeneric,
+		"generic-git": findPackCompanionModeGenericGit,
+		"generic_git": findPackCompanionModeGenericGit,
+		"generic+git": findPackCompanionModeGenericGit,
+		"nonsense":    "",
+	}
+	for input, want := range tests {
+		if got := normalizeFindPackCompanionMode(input); got != want {
+			t.Fatalf("normalizeFindPackCompanionMode(%q) = %q, want %q", input, got, want)
 		}
 	}
 }

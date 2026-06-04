@@ -35,6 +35,7 @@ func NewFindCmd() *cobra.Command {
 		anchorFirst     = true
 		anchorMode      string
 		boundaryPrimary bool
+		packCompanions  string
 	)
 
 	cmd := &cobra.Command{
@@ -46,7 +47,7 @@ func NewFindCmd() *cobra.Command {
 			if cmd.Flags().Changed("experimental-anchor-first-mode") && !cmd.Flags().Changed("experimental-anchor-first-ranking") {
 				anchorFirst = true
 			}
-			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst, anchorMode, boundaryPrimary)
+			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst, anchorMode, boundaryPrimary, packCompanions)
 		},
 	}
 
@@ -66,15 +67,26 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&anchorFirst, "experimental-anchor-first-ranking", true, "Use repo-local TF-IDF anchor-first ordering; pass false to disable")
 	cmd.Flags().StringVar(&anchorMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, selected_only, strong_field, or strict")
 	cmd.Flags().BoolVar(&boundaryPrimary, "experimental-boundary-primary", false, "Tier pack output into a source-safe primary working set plus related context summary")
+	cmd.Flags().StringVar(&packCompanions, "pack-companion-mode", findPackCompanionModeAll, "Hidden scout flag: off, generic, generic_git, or all")
+	_ = cmd.Flags().MarkHidden("pack-companion-mode")
 	return cmd
 }
 
-func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst bool, anchorMode string, boundaryPrimary bool) error {
+func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst bool, anchorMode string, boundaryPrimary bool, packCompanions string) error {
 	start := time.Now()
 	success := false
 	anchorMode = retrieval.NormalizeAnchorFirstMode(anchorMode)
 	if anchorMode == "" {
 		return fmt.Errorf("unknown --experimental-anchor-first-mode; valid values: %s", strings.Join(retrieval.ValidAnchorFirstModes(), ", "))
+	}
+	if !cmd.Flags().Changed("pack-companion-mode") {
+		if env := strings.TrimSpace(os.Getenv("DEVSPECS_PACK_COMPANION_MODE")); env != "" {
+			packCompanions = env
+		}
+	}
+	packCompanions = normalizeFindPackCompanionMode(packCompanions)
+	if packCompanions == "" {
+		return fmt.Errorf("unknown --pack-companion-mode; valid values: %s", strings.Join(validFindPackCompanionModes(), ", "))
 	}
 	props := map[string]any{
 		"query_length_bucket": telemetry.QueryLengthBucket(query),
@@ -86,6 +98,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 		"anchor_first":        anchorFirst,
 		"anchor_first_mode":   anchorMode,
 		"boundary_primary":    boundaryPrimary,
+		"pack_companions":     packCompanions,
 	}
 	defer func() {
 		telemetry.RecordCommand("find", success, time.Since(start), props)
@@ -130,7 +143,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	}
 	initialMatchCount := len(matches)
 	if pack {
-		matches = addFindPackCompanionCandidates(cmd.Context(), fp.RepoRoot, query, matches, candidates)
+		matches = addFindPackCompanionCandidates(cmd.Context(), fp.RepoRoot, query, matches, candidates, packCompanions)
 		if added := len(matches) - initialMatchCount; added > 0 {
 			props["pack_companion_count_bucket"] = telemetry.CountBucket(added)
 		}

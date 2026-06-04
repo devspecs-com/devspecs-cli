@@ -14,10 +14,56 @@ const (
 	findPackCompanionMaxTotal      = 8
 	findPackCompanionMaxCochanged  = 4
 	findPackCompanionGitMaxCommits = 24
+
+	findPackCompanionModeOff        = "off"
+	findPackCompanionModeGeneric    = "generic"
+	findPackCompanionModeGenericGit = "generic_git"
+	findPackCompanionModeAll        = "all"
 )
 
-func addFindPackCompanionCandidates(ctx context.Context, repoRoot, query string, matches, all []retrieval.Candidate) []retrieval.Candidate {
-	if len(matches) == 0 || len(all) == 0 {
+func normalizeFindPackCompanionMode(mode string) string {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	mode = strings.ReplaceAll(mode, "-", "_")
+	switch mode {
+	case "", findPackCompanionModeAll:
+		return findPackCompanionModeAll
+	case "none", "disabled", "disable", findPackCompanionModeOff:
+		return findPackCompanionModeOff
+	case findPackCompanionModeGeneric:
+		return findPackCompanionModeGeneric
+	case "git", "generic+git", "generic_git", "genericgit":
+		return findPackCompanionModeGenericGit
+	default:
+		return ""
+	}
+}
+
+func validFindPackCompanionModes() []string {
+	return []string{
+		findPackCompanionModeOff,
+		findPackCompanionModeGeneric,
+		findPackCompanionModeGenericGit,
+		findPackCompanionModeAll,
+	}
+}
+
+func findPackCompanionModeIncludesGeneric(mode string) bool {
+	mode = normalizeFindPackCompanionMode(mode)
+	return mode == findPackCompanionModeGeneric || mode == findPackCompanionModeGenericGit || mode == findPackCompanionModeAll
+}
+
+func findPackCompanionModeIncludesGit(mode string) bool {
+	mode = normalizeFindPackCompanionMode(mode)
+	return mode == findPackCompanionModeGenericGit || mode == findPackCompanionModeAll
+}
+
+func findPackCompanionModeIncludesCommandFamily(mode string) bool {
+	return normalizeFindPackCompanionMode(mode) == findPackCompanionModeAll
+}
+
+func addFindPackCompanionCandidates(ctx context.Context, repoRoot, query string, matches, all []retrieval.Candidate, mode string) []retrieval.Candidate {
+	mode = normalizeFindPackCompanionMode(mode)
+	if mode == "" || mode == findPackCompanionModeOff || len(matches) == 0 || len(all) == 0 {
 		return matches
 	}
 	byPath := findPackCandidatePathIndex(all)
@@ -56,24 +102,32 @@ func addFindPackCompanionCandidates(ctx context.Context, repoRoot, query string,
 		if path == "" {
 			continue
 		}
-		for _, companion := range findPackDirectTestCompanionPaths(path, byPath) {
-			add(companion, "test_companion")
+		if findPackCompanionModeIncludesGeneric(mode) {
+			for _, companion := range findPackDirectTestCompanionPaths(path, byPath) {
+				add(companion, "test_companion")
+			}
+			for _, companion := range findPackSameDirectoryTestCompanionPaths(path, byPath) {
+				add(companion, "same_directory_test_companion")
+			}
+			for _, companion := range findPackFilesystemSameDirectoryTestCompanionPaths(repoRoot, path) {
+				add(companion, "same_directory_test_companion")
+			}
 		}
-		for _, companion := range findPackSameDirectoryTestCompanionPaths(path, byPath) {
-			add(companion, "same_directory_test_companion")
-		}
-		for _, companion := range findPackFilesystemSameDirectoryTestCompanionPaths(repoRoot, path) {
-			add(companion, "same_directory_test_companion")
-		}
-		for _, companion := range findPackCommandFamilyCompanionPaths(path, query, byPath) {
-			add(companion, "command_family_companion")
+		if findPackCompanionModeIncludesCommandFamily(mode) {
+			for _, companion := range findPackCommandFamilyCompanionPaths(path, query, byPath) {
+				add(companion, "command_family_companion")
+			}
 		}
 	}
-	for _, companion := range findPackQueryCommandCompanionPaths(query, byPath) {
-		add(companion, "query_command_family_companion")
+	if findPackCompanionModeIncludesCommandFamily(mode) {
+		for _, companion := range findPackQueryCommandCompanionPaths(query, byPath) {
+			add(companion, "query_command_family_companion")
+		}
 	}
-	for _, companion := range findPackCochangedTestCompanionPaths(ctx, repoRoot, query, matches, byPath, seen) {
-		add(companion, "git_cochanged_test_companion")
+	if findPackCompanionModeIncludesGit(mode) {
+		for _, companion := range findPackCochangedTestCompanionPaths(ctx, repoRoot, query, matches, byPath, seen) {
+			add(companion, "git_cochanged_test_companion")
+		}
 	}
 	if len(additions) == 0 {
 		return matches
