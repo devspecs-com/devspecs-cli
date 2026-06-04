@@ -762,6 +762,87 @@ func TestWeightedFilesRetrieverV0_DomainWordsDoNotRequestTests(t *testing.T) {
 	}
 }
 
+func TestWeightedFilesRetrieverV0_CodeTaskModePrefersSpecificEmbeddingSourceOverGenericModels(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "src/Appwrite/Utopia/Response/Model/User.php",
+			Kind:  "source_context",
+			Title: "User response model",
+			Body:  "model endpoint update use project user response.",
+		},
+		{
+			Path:  "src/Appwrite/Utopia/Response/Model/UsageUsers.php",
+			Kind:  "source_context",
+			Title: "Usage users response model",
+			Body:  "model endpoint update use usage response.",
+		},
+		{
+			Path:  "src/Appwrite/Utopia/Response/Model/Embedding.php",
+			Kind:  "source_context",
+			Title: "Embedding response model",
+			Body:  "appwrite-embedding nomic embedding response model.",
+		},
+		{
+			Path:  "src/Appwrite/Platform/Modules/Databases/Http/VectorsDB/Embeddings/Text/Create.php",
+			Kind:  "source_context",
+			Title: "Create embedding text endpoint",
+			Body:  "nomic appwrite-embedding embedding endpoint.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true, AnchorFirstMode: AnchorFirstModeCodeTask}).Retrieve(candidates, "refactor: update embedding model and endpoint to use 'nomic' and 'appwrite-embedding'")
+	if len(got) < 2 {
+		t.Fatalf("expected embedding results, got %#v", CandidatePaths(got))
+	}
+	if got[0].Path != "src/Appwrite/Platform/Modules/Databases/Http/VectorsDB/Embeddings/Text/Create.php" &&
+		got[0].Path != "src/Appwrite/Utopia/Response/Model/Embedding.php" {
+		t.Fatalf("generic model won code-task ranking: %#v", CandidatePaths(got))
+	}
+	if !containsCandidatePath(got[:2], "src/Appwrite/Utopia/Response/Model/Embedding.php") &&
+		!containsCandidatePath(got[:2], "src/Appwrite/Platform/Modules/Databases/Http/VectorsDB/Embeddings/Text/Create.php") {
+		t.Fatalf("specific embedding sources should be in top two: %#v", CandidatePaths(got))
+	}
+	reasons := ExplainCandidates(got, "refactor: update embedding model and endpoint to use 'nomic' and 'appwrite-embedding'")
+	if len(reasons) == 0 || !reasonContainsPrefix(reasons[0].Reasons, "source query ranking:") {
+		t.Fatalf("missing source query ranking reason: %#v", reasons)
+	}
+}
+
+func TestWeightedFilesRetrieverV0_CodeTaskModeDemotesAgentInstructionsForProductAgentTerm(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:    "AGENTS.md",
+			Kind:    "markdown_artifact",
+			Subtype: "agent_instruction",
+			Title:   "Repository agent instructions",
+			Body:    "Agents may use applications and secrets during command examples.",
+		},
+		{
+			Path:  "pkg/cmd/secret/set/set.go",
+			Kind:  "source_context",
+			Title: "set secrets command",
+			Body:  "Allow agents as application for secrets.",
+		},
+		{
+			Path:  "pkg/cmd/secret/list/list.go",
+			Kind:  "source_context",
+			Title: "list secrets command",
+			Body:  "List application secrets for agents.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true, AnchorFirstMode: AnchorFirstModeCodeTask}).Retrieve(candidates, "Allow agents as application for secrets")
+	if len(got) == 0 {
+		t.Fatal("expected results")
+	}
+	if got[0].Path == "AGENTS.md" {
+		t.Fatalf("agent instruction won product-agent code task: %#v", CandidatePaths(got))
+	}
+	if !containsCandidatePath(got[:minInt(len(got), 2)], "pkg/cmd/secret/set/set.go") {
+		t.Fatalf("missing secret command source near top: %#v", CandidatePaths(got))
+	}
+}
+
 func TestWeightedFilesRetrieverV0_UsesCodeCommentsForRationaleQueries(t *testing.T) {
 	candidates := []Candidate{
 		{
@@ -1644,6 +1725,15 @@ func TestPackCandidateSectionsFallsBackForShortFiles(t *testing.T) {
 func reasonContains(reasons []string, want string) bool {
 	for _, reason := range reasons {
 		if reason == want {
+			return true
+		}
+	}
+	return false
+}
+
+func reasonContainsPrefix(reasons []string, want string) bool {
+	for _, reason := range reasons {
+		if strings.HasPrefix(reason, want) {
 			return true
 		}
 	}

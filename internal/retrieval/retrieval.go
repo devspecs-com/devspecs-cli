@@ -216,6 +216,9 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode 
 	if anchorFirstRanking {
 		scoredCandidates = applyExactAnchorDiscipline(scoredCandidates, candidates, query, queryLower, terms, limit)
 	}
+	if anchorFirstRanking && normalizedAnchorFirstMode == AnchorFirstModeCodeTask {
+		scoredCandidates = applyCodeTaskRankingDiscipline(scoredCandidates, candidates, query, queryLower)
+	}
 	scoredCandidates = selectScoredCandidates(scoredCandidates, queryLower, limit)
 	scoredCandidates = enforceSupportingArtifactBudgets(scoredCandidates, queryLower, terms)
 	if evidenceBalanced {
@@ -1237,6 +1240,210 @@ func clampFloat(value, min, max float64) float64 {
 		return max
 	}
 	return value
+}
+
+type codeTaskRankingResult struct {
+	score   float64
+	reasons []string
+}
+
+func applyCodeTaskRankingDiscipline(candidates []scoredCandidate, universe []Candidate, query, queryLower string) []scoredCandidate {
+	if len(candidates) == 0 || !hasCodeTaskRankingIntent(queryLower) {
+		return candidates
+	}
+	profile := BuildAnchorProfile(query)
+	if !profile.HasSpecific {
+		return candidates
+	}
+	vocab := BuildRepoVocabulary(universe)
+	changed := false
+	for i := range candidates {
+		result := codeTaskRankingForCandidate(candidates[i], profile, vocab, queryLower)
+		if result.score == 0 {
+			continue
+		}
+		candidates[i].score += result.score
+		candidates[i].candidate = withCodeTaskRankingMetadata(candidates[i].candidate, result)
+		changed = true
+	}
+	if changed {
+		sort.Slice(candidates, func(i, j int) bool {
+			if candidates[i].score == candidates[j].score {
+				return candidates[i].candidate.Path < candidates[j].candidate.Path
+			}
+			return candidates[i].score > candidates[j].score
+		})
+	}
+	return candidates
+}
+
+func codeTaskRankingForCandidate(candidate scoredCandidate, profile AnchorProfile, vocab RepoVocabulary, queryLower string) codeTaskRankingResult {
+	c := candidate.candidate
+	pathLower := strings.ToLower(filepath.ToSlash(c.Path))
+	result := codeTaskRankingResult{}
+	add := func(delta float64, reason string) {
+		if delta == 0 {
+			return
+		}
+		result.score += delta
+		if reason != "" {
+			result.reasons = append(result.reasons, reason)
+		}
+	}
+
+	anchor := scoreAnchorFirstCandidate(c, profile, vocab, AnchorFirstModeCodeTask)
+	hasSpecificField := resultHasAnyAnchorField(anchor, "path", "title", "symbol", "heading", "test_name")
+	hasBodyOnly := resultHasAnyAnchorField(anchor, "body") && !hasSpecificField
+	hasUsableAnchor := anchor.score > 0 && (hasSpecificField || anchor.maxIDF >= 1.8)
+	if candidate.sourceFile {
+		switch {
+		case hasSpecificField:
+			add(clampFloat(anchor.score*0.65+3.0, 3.0, 18.0), "code-task ranking: rare source anchor")
+		case hasBodyOnly && anchor.maxIDF >= 1.8:
+			add(clampFloat(anchor.score*0.18, 0.5, 4.0), "code-task ranking: rare body anchor")
+		default:
+			add(-8.0, "code-task ranking: weak source anchor")
+		}
+		if metadataLower(c, "admission_reason") == "recent_git_source_context" && hasUsableAnchor {
+			add(1.0, "code-task ranking: recent source admission")
+		}
+		if codeTaskLooksGeneratedOrReferencePath(pathLower) && !codeTaskQueryRequestsReference(queryLower) {
+			if hasUsableAnchor {
+				add(-6.0, "code-task ranking: generated/reference dampening")
+			} else {
+				add(-12.0, "code-task ranking: generated/reference dampening")
+			}
+		}
+		if codeTaskLooksDocsExamplePath(pathLower) && !codeTaskQueryRequestsDocsExample(queryLower) {
+			if hasUsableAnchor {
+				add(-7.0, "code-task ranking: docs/tutorial dampening")
+			} else {
+				add(-12.0, "code-task ranking: docs/tutorial dampening")
+			}
+		}
+		if codeTaskLooksTypeOnlyPath(pathLower) && !hasUsableAnchor {
+			add(-8.0, "code-task ranking: type/model-only dampening")
+		}
+	} else {
+		if mode := nonIntentCandidateMode(c); mode != "" && !codeTaskQueryExplicitlyRequestsNonIntent(queryLower, mode) {
+			add(-30.0, "code-task ranking: unrequested non-intent lane")
+		}
+		if codeTaskLooksDocsExamplePath(pathLower) && !codeTaskQueryRequestsDocsExample(queryLower) {
+			if hasUsableAnchor {
+				add(-6.0, "code-task ranking: docs/tutorial dampening")
+			} else {
+				add(-10.0, "code-task ranking: docs/tutorial dampening")
+			}
+		}
+		if codeTaskLooksGeneratedOrReferencePath(pathLower) && !codeTaskQueryRequestsReference(queryLower) {
+			if hasUsableAnchor {
+				add(-5.0, "code-task ranking: generated/reference dampening")
+			} else {
+				add(-8.0, "code-task ranking: generated/reference dampening")
+			}
+		}
+	}
+	result.score = clampFloat(result.score, -24.0, 24.0)
+	result.reasons = uniqueStrings(result.reasons)
+	if len(result.reasons) > 4 {
+		result.reasons = result.reasons[:4]
+	}
+	return result
+}
+
+func hasCodeTaskRankingIntent(queryLower string) bool {
+	if hasProductBackgroundIntent(queryLower) || hasRFCIntent(queryLower) || hasPlanIntent(queryLower) {
+		if !containsAny(queryLower, "source", "code", "implementation", "implement", "fix", "bug", "refactor") {
+			return false
+		}
+	}
+	if containsAny(queryLower, "readme", "documentation", "docs", "tutorial") &&
+		!containsAny(queryLower, "source", "code", "implementation", "implement", "fix", "bug", "refactor") {
+		return false
+	}
+	if hasImplementationTaskIntent(queryLower) || hasExplicitSourceIntent(queryLower) || hasTestBehaviorIntent(queryLower) {
+		return true
+	}
+	for _, word := range []string{
+		"allow", "enforce", "validate", "support", "supports", "supported",
+		"attribute", "accept", "reject", "prevent", "preserve", "handle",
+	} {
+		if hasQueryWord(queryLower, word) {
+			return true
+		}
+	}
+	return false
+}
+
+func withCodeTaskRankingMetadata(c Candidate, result codeTaskRankingResult) Candidate {
+	if c.Metadata == nil {
+		c.Metadata = map[string]string{}
+	} else {
+		c.Metadata = copyMetadata(c.Metadata)
+	}
+	c.Metadata["source_query_ranking_mode"] = AnchorFirstModeCodeTask
+	c.Metadata["source_query_score"] = fmt.Sprintf("%.3f", result.score)
+	c.Metadata["source_query_reasons"] = strings.Join(result.reasons, "\n")
+	return c
+}
+
+func codeTaskLooksGeneratedOrReferencePath(pathLower string) bool {
+	return hasGeneratedPath(pathLower) ||
+		hasPathSegment(pathLower, "sdk") ||
+		hasPathSegment(pathLower, "client") ||
+		hasPathSegment(pathLower, "clients") ||
+		hasPathSegment(pathLower, "applyconfiguration")
+}
+
+func codeTaskLooksDocsExamplePath(pathLower string) bool {
+	return hasExamplePath(pathLower) ||
+		hasPathSegment(pathLower, "docs_src") ||
+		hasPathSegment(pathLower, "tutorial") ||
+		hasPathSegment(pathLower, "tutorials")
+}
+
+func codeTaskLooksTypeOnlyPath(pathLower string) bool {
+	return hasPathSegment(pathLower, "model") ||
+		hasPathSegment(pathLower, "models") ||
+		hasPathSegment(pathLower, "types") ||
+		hasPathSegment(pathLower, "type") ||
+		hasPathSegment(pathLower, "schema") ||
+		hasPathSegment(pathLower, "schemas")
+}
+
+func codeTaskQueryRequestsReference(queryLower string) bool {
+	return containsAny(queryLower, "generated", "reference", "sdk", "client", "openapi", "schema", "model type", "models")
+}
+
+func codeTaskQueryRequestsDocsExample(queryLower string) bool {
+	return containsAny(queryLower, "docs", "documentation", "tutorial", "example", "sample", "readme")
+}
+
+func codeTaskQueryExplicitlyRequestsNonIntent(queryLower, mode string) bool {
+	switch mode {
+	case "protocol":
+		return containsAny(queryLower,
+			"instruction", "instructions", "rule", "rules", "policy", "policies",
+			"procedure", "procedures", "runbook", "runbooks", "skill", "skills",
+			"standard", "standards", "guideline", "guidelines", "contributing",
+			"codeowners", "maintainer", "maintainers", "claude", "codex",
+		)
+	case "model":
+		return containsAny(queryLower,
+			"schema", "schemas", "contract", "contracts", "openapi", "swagger",
+			"graphql", "manifest", "workflow", "terraform", "docker", "compose",
+			"model file", "model class", "model type",
+		)
+	case "template":
+		return containsAny(queryLower,
+			"template", "templates", "scaffold", "scaffolding", "boilerplate",
+			"issue template", "pull request template", "prompt template",
+		)
+	case "trace":
+		return containsAny(queryLower, "trace", "commit", "pull request", "issue", "transcript", "log")
+	default:
+		return false
+	}
 }
 
 type authorityPriorResult struct {
@@ -4169,6 +4376,11 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 	if c.Metadata != nil && c.Metadata["retrieval_evidence_mode"] == EvidenceModeBalanced {
 		if evidenceReasons := strings.TrimSpace(c.Metadata["retrieval_evidence_reasons"]); evidenceReasons != "" {
 			reasons = append(reasons, "balanced evidence: "+strings.ReplaceAll(evidenceReasons, "\n", "; "))
+		}
+	}
+	if c.Metadata != nil && c.Metadata["source_query_ranking_mode"] == AnchorFirstModeCodeTask {
+		if sourceReasons := strings.TrimSpace(c.Metadata["source_query_reasons"]); sourceReasons != "" {
+			reasons = append(reasons, "source query ranking: "+strings.ReplaceAll(sourceReasons, "\n", "; "))
 		}
 	}
 	if c.Metadata != nil && c.Metadata["anchor_first_score"] != "" {
