@@ -19,24 +19,25 @@ import (
 // NewFindCmd creates the ds find command.
 func NewFindCmd() *cobra.Command {
 	var (
-		kind                     string
-		subtype                  string
-		tag                      string
-		branch                   string
-		user                     string
-		repoName                 string
-		allRepos                 bool
-		asJSON                   bool
-		noRefresh                bool
-		pack                     bool
-		verbose                  bool
-		graphDiag                bool
-		gitReceipts              = true
-		anchorFirst              = true
-		anchorMode               string
-		boundaryPrimary          bool
-		packCompanions           string
-		sourceManifestCandidates string
+		kind                      string
+		subtype                   string
+		tag                       string
+		branch                    string
+		user                      string
+		repoName                  string
+		allRepos                  bool
+		asJSON                    bool
+		noRefresh                 bool
+		pack                      bool
+		verbose                   bool
+		graphDiag                 bool
+		gitReceipts               = true
+		anchorFirst               = true
+		anchorMode                string
+		boundaryPrimary           bool
+		packCompanions            string
+		sourceManifestCandidates  string
+		sourceManifestConsumption bool
 	)
 
 	cmd := &cobra.Command{
@@ -48,7 +49,7 @@ func NewFindCmd() *cobra.Command {
 			if cmd.Flags().Changed("experimental-anchor-first-mode") && !cmd.Flags().Changed("experimental-anchor-first-ranking") {
 				anchorFirst = true
 			}
-			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst, anchorMode, boundaryPrimary, packCompanions, sourceManifestCandidates)
+			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst, anchorMode, boundaryPrimary, packCompanions, sourceManifestCandidates, sourceManifestConsumption)
 		},
 	}
 
@@ -70,12 +71,14 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&boundaryPrimary, "experimental-boundary-primary", false, "Tier pack output into a source-safe primary working set plus related context summary")
 	cmd.Flags().StringVar(&packCompanions, "pack-companion-mode", findPackCompanionModeAll, "Hidden scout flag: off, generic, generic_git, or all")
 	cmd.Flags().StringVar(&sourceManifestCandidates, "source-manifest-candidates", "off", "Hidden scout flag: off, metadata, or window")
+	cmd.Flags().BoolVar(&sourceManifestConsumption, "source-manifest-consumption", false, "Hidden scout flag: reserve/replace source manifest candidates in pack mode")
 	_ = cmd.Flags().MarkHidden("pack-companion-mode")
 	_ = cmd.Flags().MarkHidden("source-manifest-candidates")
+	_ = cmd.Flags().MarkHidden("source-manifest-consumption")
 	return cmd
 }
 
-func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst bool, anchorMode string, boundaryPrimary bool, packCompanions string, sourceManifestCandidates string) error {
+func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst bool, anchorMode string, boundaryPrimary bool, packCompanions string, sourceManifestCandidates string, sourceManifestConsumption bool) error {
 	start := time.Now()
 	success := false
 	anchorMode = retrieval.NormalizeAnchorFirstMode(anchorMode)
@@ -100,18 +103,24 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	if err != nil {
 		return err
 	}
+	if !cmd.Flags().Changed("source-manifest-consumption") {
+		if env := strings.TrimSpace(os.Getenv("DEVSPECS_SOURCE_MANIFEST_CONSUMPTION")); env != "" {
+			sourceManifestConsumption = env == "1" || strings.EqualFold(env, "true") || strings.EqualFold(env, "pack")
+		}
+	}
 	props := map[string]any{
-		"query_length_bucket":        telemetry.QueryLengthBucket(query),
-		"json":                       asJSON,
-		"pack":                       pack,
-		"verbose":                    verbose,
-		"graph_diagnostics":          graphDiag,
-		"git_receipts":               gitReceipts,
-		"anchor_first":               anchorFirst,
-		"anchor_first_mode":          anchorMode,
-		"boundary_primary":           boundaryPrimary,
-		"pack_companions":            packCompanions,
-		"source_manifest_candidates": string(sourceManifestMode),
+		"query_length_bucket":         telemetry.QueryLengthBucket(query),
+		"json":                        asJSON,
+		"pack":                        pack,
+		"verbose":                     verbose,
+		"graph_diagnostics":           graphDiag,
+		"git_receipts":                gitReceipts,
+		"anchor_first":                anchorFirst,
+		"anchor_first_mode":           anchorMode,
+		"boundary_primary":            boundaryPrimary,
+		"pack_companions":             packCompanions,
+		"source_manifest_candidates":  string(sourceManifestMode),
+		"source_manifest_consumption": sourceManifestConsumption,
 	}
 	defer func() {
 		telemetry.RecordCommand("find", success, time.Since(start), props)
@@ -169,6 +178,9 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	}
 	initialMatchCount := len(matches)
 	if pack {
+		if sourceManifestConsumption && sourceManifestMode != indexquery.SourceManifestCandidateModeOff {
+			matches = applyFindSourceManifestConsumptionScout(query, matches, candidates)
+		}
 		matches = addFindPackCompanionCandidates(cmd.Context(), fp.RepoRoot, query, matches, candidates, packCompanions)
 		if added := len(matches) - initialMatchCount; added > 0 {
 			props["pack_companion_count_bucket"] = telemetry.CountBucket(added)
