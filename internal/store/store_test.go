@@ -59,6 +59,56 @@ func TestMigrate_Idempotent(t *testing.T) {
 	db.Close()
 }
 
+func TestMigrate_V12ToV13DropsSourceManifestCompactionIndexes(t *testing.T) {
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "devspecs.db")
+
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stmts := []string{
+		`CREATE INDEX IF NOT EXISTS idx_source_manifest_repo_path ON source_manifest(repo_id, path)`,
+		`CREATE INDEX IF NOT EXISTS idx_source_manifest_repo_root ON source_manifest(repo_id, source_root)`,
+		`CREATE INDEX IF NOT EXISTS idx_source_manifest_repo_role ON source_manifest(repo_id, source_role)`,
+		`CREATE INDEX IF NOT EXISTS idx_source_manifest_symbols_file ON source_manifest_symbols(file_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_source_manifest_tests_file ON source_manifest_tests(file_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_source_manifest_imports_file ON source_manifest_imports(file_id)`,
+		`UPDATE schema_migrations SET version = 12`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+
+	db, err = Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, name := range []string{
+		"idx_source_manifest_repo_path",
+		"idx_source_manifest_repo_root",
+		"idx_source_manifest_repo_role",
+		"idx_source_manifest_symbols_file",
+		"idx_source_manifest_tests_file",
+		"idx_source_manifest_imports_file",
+	} {
+		if indexExists(t, db, name) {
+			t.Fatalf("expected migration to drop %s", name)
+		}
+	}
+	var version int
+	if err := db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != SchemaVersion {
+		t.Fatalf("expected schema version %d, got %d", SchemaVersion, version)
+	}
+}
+
 func TestMigrate_FromV3ToV4(t *testing.T) {
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "legacy.db")
@@ -141,4 +191,13 @@ func TestOpen_CreatesParentDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Close()
+}
+
+func indexExists(t *testing.T, db *DB, name string) bool {
+	t.Helper()
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?", name).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count > 0
 }

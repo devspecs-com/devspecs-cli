@@ -17,7 +17,7 @@ import (
 var schemaDDL string
 
 // SchemaVersion is the current schema version. Bump when schema.sql changes.
-const SchemaVersion = 12
+const SchemaVersion = 13
 
 // DB wraps *sql.DB with DevSpecs-specific operations.
 type DB struct {
@@ -111,6 +111,11 @@ func (db *DB) migrate() error {
 				return err
 			}
 			maxVersion = 12
+		case 12:
+			if err := db.migrate12To13(now); err != nil {
+				return err
+			}
+			maxVersion = 13
 		default:
 			return fmt.Errorf(
 				"index was created with schema v%d but this CLI requires v%d. Run 'ds scan --rebuild' or delete ~/.devspecs/devspecs.db and run 'ds scan' to rebuild",
@@ -340,5 +345,23 @@ func (db *DB) migrate10To11(now string) error {
 
 func (db *DB) migrate11To12(now string) error {
 	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 12, now)
+	return err
+}
+
+func (db *DB) migrate12To13(now string) error {
+	stmts := []string{
+		`DROP INDEX IF EXISTS idx_source_manifest_repo_path`,
+		`DROP INDEX IF EXISTS idx_source_manifest_repo_root`,
+		`DROP INDEX IF EXISTS idx_source_manifest_repo_role`,
+		`DROP INDEX IF EXISTS idx_source_manifest_symbols_file`,
+		`DROP INDEX IF EXISTS idx_source_manifest_tests_file`,
+		`DROP INDEX IF EXISTS idx_source_manifest_imports_file`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate v12->v13 source manifest index compaction: %w", err)
+		}
+	}
+	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 13, now)
 	return err
 }

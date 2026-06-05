@@ -27,6 +27,18 @@ var sourceManifestImportPatterns = []*regexp.Regexp{
 
 const sourceManifestMaxImportsPerFile = 8
 
+var (
+	sourceManifestMaxFTSSymbolsPerFile      = 16
+	sourceManifestMaxModuleRootFilesPerRepo = 1500
+)
+
+type sourceManifestCandidate struct {
+	file fileInventoryEntry
+	rel  string
+	root firstPartySourceRoot
+	role string
+}
+
 func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, now string) (*SourceManifestDiagnostics, error) {
 	diagnostics := &SourceManifestDiagnostics{
 		Enabled:         true,
@@ -41,6 +53,8 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 	}
 	diagnostics.InventoryFiles = len(inventory)
 	roots := detectFirstPartySourceRoots(inventory)
+	var candidates []sourceManifestCandidate
+	var moduleRootCandidates []sourceManifestCandidate
 	var files []store.SourceManifestFileInput
 	var symbols []store.SourceManifestSymbolInput
 	var tests []store.SourceManifestTestInput
@@ -81,39 +95,56 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 			diagnostics.IgnoredByReason["documentation_example"]++
 			continue
 		}
-		body, err := os.ReadFile(file.primaryPath)
+		candidate := sourceManifestCandidate{file: file, rel: rel, root: root, role: role}
+		if root.kind == "module_root" {
+			moduleRootCandidates = append(moduleRootCandidates, candidate)
+			continue
+		}
+		candidates = append(candidates, candidate)
+	}
+	selectedModuleRootCandidates, skippedModuleRootCandidates := capSourceManifestModuleRootCandidates(moduleRootCandidates, sourceManifestMaxModuleRootFilesPerRepo)
+	if skippedModuleRootCandidates > 0 {
+		diagnostics.IgnoredByReason["module_root_cap"] += skippedModuleRootCandidates
+	}
+	candidates = append(candidates, selectedModuleRootCandidates...)
+	sortSourceManifestCandidates(candidates)
+
+	for _, candidate := range candidates {
+		if err := ctx.Err(); err != nil {
+			return diagnostics, err
+		}
+		body, err := os.ReadFile(candidate.file.primaryPath)
 		if err != nil {
 			diagnostics.IgnoredByReason["read_error"]++
 			continue
 		}
-		fileID := sourceManifestFileID(repoID, rel)
-		language := sourcecontext.LanguageForPath(rel)
+		fileID := sourceManifestFileID(repoID, candidate.rel)
+		language := sourcecontext.LanguageForPath(candidate.rel)
 		if language == "" {
-			language = strings.TrimPrefix(strings.ToLower(filepath.Ext(filepath.Base(rel))), ".")
+			language = strings.TrimPrefix(strings.ToLower(filepath.Ext(filepath.Base(candidate.rel))), ".")
 		}
 		if language == "" {
 			language = "unknown"
 		}
-		hash := sha256.Sum256(body)
 		files = append(files, store.SourceManifestFileInput{
 			FileID:          fileID,
 			RepoID:          repoID,
-			Path:            rel,
-			ContentHash:     hex.EncodeToString(hash[:]),
-			SizeBytes:       file.size,
+			Path:            candidate.rel,
+			ContentHash:     sourceManifestContentHash(body),
+			SizeBytes:       candidate.file.size,
 			Language:        language,
-			SourceRoot:      root.path,
-			SourceRootKind:  root.kind,
-			SourceRole:      role,
-			FirstPartyScore: firstPartySourceDiscoveryScore(role, root.kind),
+			SourceRoot:      candidate.root.path,
+			SourceRootKind:  candidate.root.kind,
+			SourceRole:      candidate.role,
+			FirstPartyScore: firstPartySourceDiscoveryScore(candidate.role, candidate.root.kind),
 		})
 		diagnostics.IndexedFiles++
-		if role == "test" || role == "test_doc_example" {
+		if candidate.role == "test" || candidate.role == "test_doc_example" {
 			diagnostics.IndexedTests++
 		}
-		diagnostics.RowsByRoot[root.path]++
+		diagnostics.RowsByRoot[candidate.root.path]++
 		diagnostics.RowsByLanguage[language]++
-		diagnostics.RowsByRole[role]++
+		diagnostics.RowsByRole[candidate.role]++
 
 		symbolValues := sourcecontext.ExtractSymbols(string(body))
 		for _, symbol := range symbolValues {
@@ -129,12 +160,12 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 		}
 		ftsRows = append(ftsRows, store.SourceManifestFTSInput{
 			FileID:     fileID,
-			Path:       rel,
-			PathTerms:  sourceManifestPathTerms(rel),
-			SourceRoot: root.path,
+			Path:       candidate.rel,
+			PathTerms:  sourceManifestPathTerms(candidate.rel),
+			SourceRoot: candidate.root.path,
 			Language:   language,
-			SourceRole: role,
-			Symbols:    strings.Join(symbolValues, "\n"),
+			SourceRole: candidate.role,
+			Symbols:    strings.Join(compactSourceManifestFTSSymbols(symbolValues), "\n"),
 			TestNames:  strings.Join(testValues, "\n"),
 			Imports:    strings.Join(importValues, "\n"),
 		})
@@ -155,6 +186,96 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 func sourceManifestFileID(repoID, rel string) string {
 	sum := sha256.Sum256([]byte(repoID + "\x00" + filepath.ToSlash(rel)))
 	return "srcm_" + hex.EncodeToString(sum[:])[:24]
+}
+
+func sourceManifestContentHash(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])[:24]
+}
+
+func capSourceManifestModuleRootCandidates(candidates []sourceManifestCandidate, limit int) ([]sourceManifestCandidate, int) {
+	if limit <= 0 {
+		return nil, len(candidates)
+	}
+	if len(candidates) <= limit {
+		sortSourceManifestCandidates(candidates)
+		return candidates, 0
+	}
+	groups := map[string][]sourceManifestCandidate{}
+	for _, candidate := range candidates {
+		role := candidate.role
+		if role == "" {
+			role = "implementation"
+		}
+		groups[role] = append(groups[role], candidate)
+	}
+	for role := range groups {
+		sortSourceManifestCandidatesByPriority(groups[role])
+	}
+	quotas := []struct {
+		role    string
+		percent int
+		min     int
+	}{
+		{role: "test", percent: 35, min: 1},
+		{role: "implementation", percent: 60, min: 1},
+		{role: "test_doc_example", percent: 3, min: 0},
+		{role: "fixture", percent: 2, min: 0},
+	}
+	var selected []sourceManifestCandidate
+	used := map[string]int{}
+	for _, quota := range quotas {
+		if len(selected) >= limit {
+			break
+		}
+		rows := groups[quota.role]
+		if len(rows) == 0 {
+			continue
+		}
+		n := (limit * quota.percent) / 100
+		if n < quota.min {
+			n = quota.min
+		}
+		if remaining := limit - len(selected); n > remaining {
+			n = remaining
+		}
+		if n > len(rows) {
+			n = len(rows)
+		}
+		selected = append(selected, rows[:n]...)
+		used[quota.role] = n
+	}
+	if len(selected) < limit {
+		var overflow []sourceManifestCandidate
+		for role, rows := range groups {
+			overflow = append(overflow, rows[used[role]:]...)
+		}
+		sortSourceManifestCandidatesByPriority(overflow)
+		remaining := limit - len(selected)
+		if remaining > len(overflow) {
+			remaining = len(overflow)
+		}
+		selected = append(selected, overflow[:remaining]...)
+	}
+	sortSourceManifestCandidates(selected)
+	return selected, len(candidates) - len(selected)
+}
+
+func sortSourceManifestCandidates(candidates []sourceManifestCandidate) {
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].rel < candidates[j].rel
+	})
+}
+
+func sortSourceManifestCandidatesByPriority(candidates []sourceManifestCandidate) {
+	sort.Slice(candidates, func(i, j int) bool {
+		left := firstPartySourceDiscoveryScore(candidates[i].role, candidates[i].root.kind)
+		right := firstPartySourceDiscoveryScore(candidates[j].role, candidates[j].root.kind)
+		if left == right {
+			return candidates[i].rel < candidates[j].rel
+		}
+		return left > right
+	})
 }
 
 func sourceManifestPathTerms(rel string) string {
@@ -189,6 +310,16 @@ func sourceManifestPathTerms(rel string) string {
 	add(base)
 	sort.Strings(terms)
 	return strings.Join(terms, " ")
+}
+
+func compactSourceManifestFTSSymbols(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	if sourceManifestMaxFTSSymbolsPerFile <= 0 || len(values) <= sourceManifestMaxFTSSymbolsPerFile {
+		return values
+	}
+	return values[:sourceManifestMaxFTSSymbolsPerFile]
 }
 
 func extractSourceManifestImports(body string) []string {

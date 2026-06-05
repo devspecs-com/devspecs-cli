@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
@@ -39,8 +40,12 @@ func TestScan_SourceManifestHiddenByDefault(t *testing.T) {
 }
 
 func TestScan_SourceManifestPopulatesCompactRowsWithoutArtifacts(t *testing.T) {
+	oldFTSSymbolCap := sourceManifestMaxFTSSymbolsPerFile
+	sourceManifestMaxFTSSymbolsPerFile = 1
+	t.Cleanup(func() { sourceManifestMaxFTSSymbolsPerFile = oldFTSSymbolCap })
+
 	repoRoot := t.TempDir()
-	writeScanTestFile(t, repoRoot, "plugins/auth.lua", "local function login() return true end\nrequire('kong.plugins.base')\n")
+	writeScanTestFile(t, repoRoot, "plugins/auth.lua", "local function login() return true end\nlocal function logout() return true end\nrequire('kong.plugins.base')\n")
 	writeScanTestFile(t, repoRoot, "tests/auth.lua", "describe('auth plugin', function() it('logs in', function() end) end)\n")
 
 	db := openScanManifestTestDB(t)
@@ -75,12 +80,59 @@ func TestScan_SourceManifestPopulatesCompactRowsWithoutArtifacts(t *testing.T) {
 	if counts.Symbols == 0 || counts.Tests == 0 || counts.Imports == 0 {
 		t.Fatalf("expected compact symbols/tests/imports, got %#v", counts)
 	}
+	var ftsSymbols string
+	if err := db.QueryRow("SELECT symbols FROM source_manifest_fts WHERE path = ?", "plugins/auth.lua").Scan(&ftsSymbols); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(ftsSymbols, "logout") {
+		t.Fatalf("expected FTS symbols to be capped while structured symbols remain, got %q", ftsSymbols)
+	}
 	var artifactCount int
 	if err := db.QueryRow("SELECT COUNT(*) FROM artifacts WHERE repo_id = ?", repo.ID).Scan(&artifactCount); err != nil {
 		t.Fatal(err)
 	}
 	if artifactCount != 0 {
 		t.Fatalf("source manifest should not inflate artifacts, got %d", artifactCount)
+	}
+}
+
+func TestScan_SourceManifestCapsNestedModuleRootRows(t *testing.T) {
+	oldCap := sourceManifestMaxModuleRootFilesPerRepo
+	sourceManifestMaxModuleRootFilesPerRepo = 2
+	t.Cleanup(func() { sourceManifestMaxModuleRootFilesPerRepo = oldCap })
+
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, "sdk/storage/blob/go.mod", "module example.com/sdk/storage/blob\n")
+	writeScanTestFile(t, repoRoot, "sdk/storage/blob/client.go", "package blob\nfunc Client() {}\n")
+	writeScanTestFile(t, repoRoot, "sdk/storage/blob/server.go", "package blob\nfunc Server() {}\n")
+	writeScanTestFile(t, repoRoot, "sdk/storage/blob/client_test.go", "package blob\nfunc TestClient(t *testing.T) {}\n")
+	writeScanTestFile(t, repoRoot, "sdk/storage/blob/server_test.go", "package blob\nfunc TestServer(t *testing.T) {}\n")
+
+	db := openScanManifestTestDB(t)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
+	result, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{
+		UseTransaction: true,
+		SourceManifest: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SourceManifest == nil {
+		t.Fatal("expected source manifest diagnostics")
+	}
+	if result.SourceManifest.IndexedFiles != 2 || result.SourceManifest.IndexedTests != 1 {
+		t.Fatalf("expected role-balanced module-root cap, got %#v", result.SourceManifest)
+	}
+	if got := result.SourceManifest.IgnoredByReason["module_root_cap"]; got != 2 {
+		t.Fatalf("expected 2 module_root_cap skips, got %d in %#v", got, result.SourceManifest.IgnoredByReason)
+	}
+	repo := db.GetRepoByRoot(repoRoot)
+	counts, err := db.CountSourceManifest(repo.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.Files != 2 {
+		t.Fatalf("expected capped manifest rows, got %#v", counts)
 	}
 }
 

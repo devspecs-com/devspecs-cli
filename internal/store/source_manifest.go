@@ -76,6 +76,15 @@ func (db *DB) ReplaceRepoSourceManifest(repoID string, files []SourceManifestFil
 	if _, err := db.Exec("DELETE FROM source_manifest_fts WHERE file_id IN (SELECT file_id FROM source_manifest WHERE repo_id = ?)", repoID); err != nil {
 		return rollback(err)
 	}
+	if _, err := db.Exec("DELETE FROM source_manifest_symbols WHERE file_id IN (SELECT file_id FROM source_manifest WHERE repo_id = ?)", repoID); err != nil {
+		return rollback(err)
+	}
+	if _, err := db.Exec("DELETE FROM source_manifest_tests WHERE file_id IN (SELECT file_id FROM source_manifest WHERE repo_id = ?)", repoID); err != nil {
+		return rollback(err)
+	}
+	if _, err := db.Exec("DELETE FROM source_manifest_imports WHERE file_id IN (SELECT file_id FROM source_manifest WHERE repo_id = ?)", repoID); err != nil {
+		return rollback(err)
+	}
 	if _, err := db.Exec("DELETE FROM source_manifest WHERE repo_id = ?", repoID); err != nil {
 		return rollback(err)
 	}
@@ -158,6 +167,15 @@ func (db *DB) ReplaceRepoSourceManifest(repoID string, files []SourceManifestFil
 // DeleteRepoSourceManifest removes compact source manifest rows for a repo.
 func (db *DB) DeleteRepoSourceManifest(repoID string) error {
 	if _, err := db.Exec("DELETE FROM source_manifest_fts WHERE file_id IN (SELECT file_id FROM source_manifest WHERE repo_id = ?)", repoID); err != nil {
+		return err
+	}
+	if _, err := db.Exec("DELETE FROM source_manifest_symbols WHERE file_id IN (SELECT file_id FROM source_manifest WHERE repo_id = ?)", repoID); err != nil {
+		return err
+	}
+	if _, err := db.Exec("DELETE FROM source_manifest_tests WHERE file_id IN (SELECT file_id FROM source_manifest WHERE repo_id = ?)", repoID); err != nil {
+		return err
+	}
+	if _, err := db.Exec("DELETE FROM source_manifest_imports WHERE file_id IN (SELECT file_id FROM source_manifest WHERE repo_id = ?)", repoID); err != nil {
 		return err
 	}
 	_, err := db.Exec("DELETE FROM source_manifest WHERE repo_id = ?", repoID)
