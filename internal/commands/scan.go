@@ -45,6 +45,7 @@ func NewScanCmd() *cobra.Command {
 		experimentalRichTypedIndex     bool
 		experimentalSupportDocs        bool
 		experimentalRecentSource       bool
+		experimentalFirstPartySource   bool
 		includeTests                   bool
 		includeCodeComments            bool
 	)
@@ -53,7 +54,7 @@ func NewScanCmd() *cobra.Command {
 		Use:   "scan",
 		Short: "Scan repository for specs, plans, and ADRs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, includeTests, includeCodeComments)
+			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, includeTests, includeCodeComments)
 		},
 	}
 
@@ -69,15 +70,17 @@ func NewScanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&experimentalRichTypedIndex, "experimental-rich-typed-index", false, "Index bounded richer source/test/symbol graph evidence as diagnostic substrate")
 	cmd.Flags().BoolVar(&experimentalSupportDocs, "experimental-support-docs", false, "Index bounded support docs as diagnostic context")
 	cmd.Flags().BoolVar(&experimentalRecentSource, "experimental-recent-source-context", false, "Index bounded recently changed source files as experimental implementation context")
+	cmd.Flags().BoolVar(&experimentalFirstPartySource, "experimental-first-party-source-context", false, "Index broad first-party source/test files as experimental implementation context")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Index executable test cases as behavioral intent artifacts")
 	cmd.Flags().BoolVar(&includeTests, "experimental-test-cases", false, "Deprecated alias for --include-tests")
 	cmd.Flags().BoolVar(&includeCodeComments, "include-code-comments", false, "Index high-signal code comments as implementation intent artifacts")
 	_ = cmd.Flags().MarkDeprecated("experimental-test-cases", "use --include-tests")
 	_ = cmd.Flags().MarkHidden("experimental-recent-source-context")
+	_ = cmd.Flags().MarkHidden("experimental-first-party-source-context")
 	return cmd
 }
 
-func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, includeTests, includeCodeComments bool) error {
+func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, includeTests, includeCodeComments bool) error {
 	start := time.Now()
 	success := false
 	props := map[string]any{
@@ -88,6 +91,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 		"experimental_rich_typed_index":    experimentalRichTypedIndex,
 		"experimental_support_docs":        experimentalSupportDocs,
 		"experimental_recent_source":       experimentalRecentSource,
+		"experimental_first_party_source":  experimentalFirstPartySource,
 		"if_changed":                       ifChanged,
 		"rebuild":                          rebuild,
 		"json":                             asJSON,
@@ -172,6 +176,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	scanOpts.IncludeWorkstreamEvidence = experimentalWorkstreamEvidence
 	scanOpts.RichTypedIndex = experimentalRichTypedIndex
 	scanOpts.RecentSourceContext = experimentalRecentSource
+	scanOpts.FirstPartySourceContext = experimentalFirstPartySource
 	if verbose && !quiet && scanOpts.FreshIndex {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Using fresh-index scan path for empty/rebuilt index\n")
 	}

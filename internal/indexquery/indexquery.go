@@ -231,6 +231,13 @@ func artifactExtractedCandidateMetadata(extractedJSON string) map[string]string 
 		"framework",
 		"source_line_range",
 		"test_name",
+		"symbols",
+		"source_symbols",
+		"source_role",
+		"source_root",
+		"source_root_kind",
+		"source_path",
+		"admission_reason",
 		"parent_title",
 		"comment_role",
 	}

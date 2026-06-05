@@ -49,6 +49,7 @@ type RunOptions struct {
 	IncludeWorkstreamEvidence bool
 	RichTypedIndex            bool
 	RecentSourceContext       bool
+	FirstPartySourceContext   bool
 	GitMaxCommits             int
 	GitMaxFilesPerCommit      int
 	Progress                  func(ProgressEvent)
@@ -134,6 +135,12 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 	if opts.RecentSourceContext {
 		if companions := buildRecentGitSourceContextCandidates(ctx, repoRoot, sharedCandidates["source_context"], opts); len(companions) > 0 {
 			sharedCandidates["source_context"] = append(sharedCandidates["source_context"], companions...)
+			sortCandidates(sharedCandidates["source_context"])
+		}
+	}
+	if opts.FirstPartySourceContext {
+		if candidates := buildFirstPartySourceContextCandidates(ctx, repoRoot, sharedCandidates["source_context"]); len(candidates) > 0 {
+			sharedCandidates["source_context"] = append(sharedCandidates["source_context"], candidates...)
 			sortCandidates(sharedCandidates["source_context"])
 		}
 	}

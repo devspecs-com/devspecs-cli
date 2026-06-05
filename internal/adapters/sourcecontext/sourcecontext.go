@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -19,6 +20,26 @@ import (
 const (
 	sourceType   = "source_context"
 	maxFileBytes = 256 * 1024
+)
+
+var (
+	sourceContextTestNamePatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?m)\bfunc\s+(Test[A-Za-z0-9_]+)\s*\(`),
+		regexp.MustCompile(`(?m)\bdef\s+(test_[A-Za-z0-9_]+)\s*\(`),
+		regexp.MustCompile(`(?m)\bfn\s+(test_[A-Za-z0-9_]+)\s*\(`),
+		regexp.MustCompile(`(?m)\b(?:describe|it|test)\s*\(\s*['"` + "`" + `]([^'"` + "`" + `]{3,120})['"` + "`" + `]`),
+	}
+	sourceContextSymbolPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?m)\bfunc\s+(?:\([^)]+\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(`),
+		regexp.MustCompile(`(?m)\btype\s+([A-Za-z_][A-Za-z0-9_]*)\b`),
+		regexp.MustCompile(`(?m)\b(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)\s*[\(:]`),
+		regexp.MustCompile(`(?m)\b(?:function|class|interface|type|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b`),
+		regexp.MustCompile(`(?m)\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*[=:]`),
+		regexp.MustCompile(`(?m)\b(?:fn|struct|enum|trait|impl)\s+([A-Za-z_][A-Za-z0-9_]*)\b`),
+		regexp.MustCompile(`(?m)\b(?:public|private|protected)?\s*(?:class|interface|enum)\s+([A-Za-z_][A-Za-z0-9_]*)\b`),
+		regexp.MustCompile(`(?m)\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(`),
+		regexp.MustCompile(`(?m)\blocal\s+function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(`),
+	}
 )
 
 // Adapter discovers source files that are useful as query-focused AI context.
@@ -179,9 +200,30 @@ func (a *Adapter) Parse(ctx context.Context, c adapters.Candidate) (adapters.Art
 			extracted[key] = value
 		}
 	}
+	role := sourceContextExtractedString(extracted["source_role"])
+	if role == "" && sourceContextLooksTestPath(c.RelPath) {
+		role = "test"
+		extracted["source_role"] = role
+	}
+	testNames := extractSourceContextTestNames(body)
+	if len(testNames) > 0 {
+		extracted["test_name"] = strings.Join(testNames, "\n")
+	}
+	symbols := extractSourceContextSymbols(body)
+	if len(symbols) > 0 {
+		extracted["source_symbols"] = strings.Join(symbols, "\n")
+	}
+	subtype := ""
+	switch role {
+	case "test", "test_doc_example":
+		subtype = "test_case"
+	case "fixture":
+		subtype = "fixture"
+	}
 	art := adapters.Artifact{
 		SourceIdentity: c.RelPath + "|" + sourceType,
 		Kind:           config.KindSourceContext,
+		Subtype:        subtype,
 		Title:          title,
 		Status:         "unknown",
 		PrimaryPath:    c.PrimaryPath,
@@ -461,7 +503,107 @@ func sourceLanguage(rel string) string {
 		return "toml"
 	case ".sql":
 		return "sql"
+	case ".lua":
+		return "lua"
+	case ".dart":
+		return "dart"
+	case ".swift":
+		return "swift"
+	case ".scala":
+		return "scala"
+	case ".clj", ".cljs":
+		return "clojure"
+	case ".ex", ".exs":
+		return "elixir"
+	case ".erl", ".hrl":
+		return "erlang"
+	case ".zig":
+		return "zig"
+	case ".nim":
+		return "nim"
+	case ".jl":
+		return "julia"
+	case ".r":
+		return "r"
+	case ".sh", ".bash", ".zsh":
+		return "shell"
+	case ".ps1":
+		return "powershell"
+	case ".proto":
+		return "protobuf"
+	case ".graphql", ".gql":
+		return "graphql"
 	default:
 		return ""
+	}
+}
+
+func extractSourceContextTestNames(body string) []string {
+	return extractSourceContextPatternValues(body, sourceContextTestNamePatterns, 80)
+}
+
+func extractSourceContextSymbols(body string) []string {
+	return extractSourceContextPatternValues(body, sourceContextSymbolPatterns, 120)
+}
+
+func extractSourceContextPatternValues(body string, patterns []*regexp.Regexp, limit int) []string {
+	if len(body) > 160*1024 {
+		body = body[:160*1024]
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, pattern := range patterns {
+		for _, match := range pattern.FindAllStringSubmatch(body, limit) {
+			if len(match) < 2 {
+				continue
+			}
+			value := strings.TrimSpace(match[1])
+			if value == "" || len(value) > 160 || seen[value] {
+				continue
+			}
+			seen[value] = true
+			out = append(out, value)
+			if len(out) >= limit {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+func sourceContextLooksTestPath(rel string) bool {
+	rel = strings.ToLower(filepath.ToSlash(rel))
+	base := filepath.Base(rel)
+	ext := strings.ToLower(filepath.Ext(base))
+	name := strings.TrimSuffix(base, ext)
+	for _, part := range strings.Split(rel, "/") {
+		switch part {
+		case "test", "tests", "__tests__", "spec", "e2e", "e2e-tests":
+			return true
+		}
+	}
+	switch {
+	case ext == ".go" && strings.HasSuffix(base, "_test.go"):
+		return true
+	case ext == ".py" && (strings.HasPrefix(base, "test_") || strings.HasSuffix(name, "_test")):
+		return true
+	case ext == ".rb" && strings.HasSuffix(base, "_spec.rb"):
+		return true
+	case (ext == ".js" || ext == ".jsx" || ext == ".ts" || ext == ".tsx" || ext == ".mjs" || ext == ".cjs") &&
+		(strings.HasSuffix(name, ".test") || strings.HasSuffix(name, ".spec")):
+		return true
+	default:
+		return false
+	}
+}
+
+func sourceContextExtractedString(value any) string {
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case nil:
+		return ""
+	default:
+		return strings.TrimSpace(fmt.Sprint(v))
 	}
 }

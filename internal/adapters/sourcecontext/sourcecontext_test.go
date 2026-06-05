@@ -113,6 +113,76 @@ func TestParseSourceContextArtifact(t *testing.T) {
 	}
 }
 
+func TestParseSourceContextExtractsSymbolsAndTestNames(t *testing.T) {
+	root := t.TempDir()
+	testPath := filepath.Join(root, "tests", "test_upload_file.py")
+	mustWrite(t, testPath, "class UploadFileTests:\n    pass\n\ndef test_password_protected_cert_cli_arg():\n    pass\n")
+	testArt, _, _, err := (&Adapter{}).Parse(context.Background(), adapters.Candidate{
+		PrimaryPath: testPath,
+		RelPath:     "tests/test_upload_file.py",
+		AdapterName: sourceType,
+		Metadata: map[string]any{
+			"admission_reason": "first_party_source_context",
+			"source_role":      "test",
+			"source_root":      "tests",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if testArt.Subtype != "test_case" {
+		t.Fatalf("subtype got %q", testArt.Subtype)
+	}
+	if got := testArt.Extracted["test_name"]; got == nil || got == "" {
+		t.Fatalf("missing test names: %#v", testArt.Extracted)
+	}
+	if got := testArt.Extracted["source_symbols"]; got == nil || got == "" {
+		t.Fatalf("missing source symbols: %#v", testArt.Extracted)
+	}
+
+	implPath := filepath.Join(root, "fastapi", "datastructures.py")
+	mustWrite(t, implPath, "class UploadFile:\n    pass\n\ndef create_upload_file():\n    pass\n")
+	implArt, _, _, err := (&Adapter{}).Parse(context.Background(), adapters.Candidate{
+		PrimaryPath: implPath,
+		RelPath:     "fastapi/datastructures.py",
+		AdapterName: sourceType,
+		Metadata: map[string]any{
+			"admission_reason": "first_party_source_context",
+			"source_role":      "implementation",
+			"source_root":      "fastapi",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if implArt.Subtype != "" {
+		t.Fatalf("implementation subtype got %q", implArt.Subtype)
+	}
+	if got := implArt.Extracted["source_symbols"]; got == nil || got == "" {
+		t.Fatalf("missing source symbols: %#v", implArt.Extracted)
+	}
+}
+
+func TestParseSourceContextInfersTestSubtypeFromPathWithoutMetadata(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "tests", "tests.rs")
+	mustWrite(t, path, "#[test]\nfn print0_exec_uses_nulls() {}\n")
+	art, _, _, err := (&Adapter{}).Parse(context.Background(), adapters.Candidate{
+		PrimaryPath: path,
+		RelPath:     "tests/tests.rs",
+		AdapterName: sourceType,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if art.Subtype != "test_case" {
+		t.Fatalf("subtype got %q", art.Subtype)
+	}
+	if art.Extracted["source_role"] != "test" {
+		t.Fatalf("source_role got %#v", art.Extracted["source_role"])
+	}
+}
+
 func TestSourceLanguageCoversIntentTreatmentExtensions(t *testing.T) {
 	cases := map[string]string{
 		"src/behavior.py":                       "python",
