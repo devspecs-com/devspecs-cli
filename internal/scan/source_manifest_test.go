@@ -124,6 +124,45 @@ use crate::session::Token
 	}
 }
 
+func TestSourceManifestImportCompactionPrefersLocalAndCaps(t *testing.T) {
+	got := compactSourceManifestImports([]string{
+		"fmt",
+		"net/http",
+		"internal/auth",
+		"pkg/config",
+		"sdk/storage/blob",
+		"crate::session::token",
+		"./local",
+		"react",
+		"services/billing",
+		"org.example.External",
+		"apps/admin",
+		"components/button",
+	})
+	if len(got) != sourceManifestMaxImportsPerFile {
+		t.Fatalf("expected cap %d, got %d: %#v", sourceManifestMaxImportsPerFile, len(got), got)
+	}
+	for _, want := range []string{"./local", "internal/auth", "pkg/config", "sdk/storage/blob"} {
+		found := false
+		for _, value := range got {
+			if value == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("missing preferred local import %q in %#v", want, got)
+		}
+	}
+	for _, unexpected := range []string{"fmt", "net/http", "react"} {
+		for _, value := range got {
+			if value == unexpected {
+				t.Fatalf("low-signal import %q should be displaced by local imports: %#v", unexpected, got)
+			}
+		}
+	}
+}
+
 func writeScanTestFile(t *testing.T, root, rel, body string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))

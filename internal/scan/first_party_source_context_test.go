@@ -80,6 +80,37 @@ func TestFirstPartySourceContextAdmitsLongTailLanguageInFirstPartyRoot(t *testin
 	}
 }
 
+func TestFirstPartySourceContextDetectsNestedModuleRoots(t *testing.T) {
+	root := t.TempDir()
+	writeFirstPartySourceTestFile(t, root, "sdk/storage/blob/go.mod", "module example.com/sdk/storage/blob\n")
+	writeFirstPartySourceTestFile(t, root, "sdk/storage/blob/client.go", "package blob\n")
+	writeFirstPartySourceTestFile(t, root, "sdk/storage/blob/client_test.go", "package blob\n")
+	writeFirstPartySourceTestFile(t, root, "sdk/storage/queue/go.mod", "module example.com/sdk/storage/queue\n")
+	writeFirstPartySourceTestFile(t, root, "sdk/storage/queue/client.go", "package queue\n")
+	writeFirstPartySourceTestFile(t, root, "vendor/example.com/other/go.mod", "module example.com/other\n")
+	writeFirstPartySourceTestFile(t, root, "vendor/example.com/other/ignored.go", "package ignored\n")
+
+	got := buildFirstPartySourceContextCandidates(context.Background(), root, nil)
+	paths := firstPartySourceCandidatePaths(got)
+	for _, want := range []string{
+		"sdk/storage/blob/client.go",
+		"sdk/storage/blob/client_test.go",
+		"sdk/storage/queue/client.go",
+	} {
+		if !paths[want] {
+			t.Fatalf("missing nested module source %s in %#v", want, paths)
+		}
+	}
+	if paths["vendor/example.com/other/ignored.go"] {
+		t.Fatalf("vendor module should stay out: %#v", paths)
+	}
+	for _, candidate := range got {
+		if candidate.RelPath == "sdk/storage/blob/client.go" && candidate.Metadata["source_root_kind"] != "module_root" {
+			t.Fatalf("nested module root metadata = %#v", candidate.Metadata)
+		}
+	}
+}
+
 func firstPartySourceCandidatePaths(candidates []adapters.Candidate) map[string]bool {
 	out := map[string]bool{}
 	for _, candidate := range candidates {

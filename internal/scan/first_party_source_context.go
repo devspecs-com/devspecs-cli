@@ -97,6 +97,8 @@ func detectFirstPartySourceRoots(inventory []fileInventoryEntry) []firstPartySou
 
 	pyCounts := map[string]int{}
 	initDirs := map[string]bool{}
+	sourceCountsByDir := map[string]int{}
+	moduleMarkerDirs := map[string]bool{}
 	rootSourceCount := 0
 	rootMarkers := map[string]bool{}
 	for _, file := range inventory {
@@ -112,6 +114,17 @@ func detectFirstPartySourceRoots(inventory []fileInventoryEntry) []firstPartySou
 			}
 			if firstPartySourceLooksSourcePath(rel) {
 				rootSourceCount++
+			}
+		}
+		if isFirstPartyRepoRootMarker(base) && !firstPartySourceLooksNoisePath(rel) {
+			dir := normalizeFirstPartySourceRoot(filepath.ToSlash(filepath.Dir(rel)))
+			if dir != "" {
+				moduleMarkerDirs[dir] = true
+			}
+		}
+		if firstPartySourceLooksSourcePath(rel) && !firstPartySourceLooksNoisePath(rel) {
+			for _, dir := range firstPartyAncestorDirs(rel) {
+				sourceCountsByDir[dir]++
 			}
 		}
 		if strings.ToLower(filepath.Ext(base)) == ".py" {
@@ -152,6 +165,14 @@ func detectFirstPartySourceRoots(inventory []fileInventoryEntry) []firstPartySou
 	}
 	if len(rootMarkers) > 0 && rootSourceCount >= 2 {
 		add(".", "repo_root")
+	}
+	for dir := range moduleMarkerDirs {
+		if dir == "." {
+			continue
+		}
+		if sourceCountsByDir[dir] >= 1 {
+			add(dir, "module_root")
+		}
 	}
 
 	out := make([]firstPartySourceRoot, 0, len(roots))
@@ -349,7 +370,7 @@ func firstPartySourceDiscoveryScore(role, rootKind string) float64 {
 		score = 0.48
 	}
 	switch rootKind {
-	case "python_package_root", "src_root":
+	case "python_package_root", "src_root", "module_root":
 		score += 0.04
 	case "test_root":
 		score += 0.02
@@ -382,7 +403,7 @@ func firstPartyAncestorDirs(rel string) []string {
 func isFirstPartyRepoRootMarker(base string) bool {
 	switch strings.ToLower(base) {
 	case "go.mod", "package.json", "pyproject.toml", "setup.py", "setup.cfg",
-		"cargo.toml", "pom.xml", "build.gradle", "build.gradle.kts", "mix.exs",
+		"go.work", "cargo.toml", "pom.xml", "build.gradle", "build.gradle.kts", "mix.exs",
 		"composer.json", "gemfile":
 		return true
 	default:
@@ -412,7 +433,7 @@ func isFirstPartyTestRoot(part string) bool {
 
 func firstPartySourceRootRank(kind string) int {
 	switch kind {
-	case "python_package_root", "src_root":
+	case "python_package_root", "src_root", "module_root":
 		return 4
 	case "test_root":
 		return 3

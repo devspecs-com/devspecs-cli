@@ -25,6 +25,8 @@ var sourceManifestImportPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?m)^\s*#include\s+[<"]([^>"]+)[>"]`),
 }
 
+const sourceManifestMaxImportsPerFile = 8
+
 func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, now string) (*SourceManifestDiagnostics, error) {
 	diagnostics := &SourceManifestDiagnostics{
 		Enabled:         true,
@@ -121,7 +123,7 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 		for _, testName := range testValues {
 			tests = append(tests, store.SourceManifestTestInput{FileID: fileID, TestName: testName})
 		}
-		importValues := extractSourceManifestImports(string(body))
+		importValues := compactSourceManifestImports(extractSourceManifestImports(string(body)))
 		for _, importRef := range importValues {
 			imports = append(imports, store.SourceManifestImportInput{FileID: fileID, ImportRef: importRef})
 		}
@@ -213,4 +215,69 @@ func extractSourceManifestImports(body string) []string {
 		}
 	}
 	return out
+}
+
+func compactSourceManifestImports(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var local []string
+	var other []string
+	for _, value := range values {
+		value = normalizeSourceManifestImportRef(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		if sourceManifestLooksLocalImport(value) {
+			local = append(local, value)
+		} else {
+			other = append(other, value)
+		}
+	}
+	sort.Strings(local)
+	sort.Strings(other)
+	out := append(local, other...)
+	if len(out) > sourceManifestMaxImportsPerFile {
+		out = out[:sourceManifestMaxImportsPerFile]
+	}
+	return out
+}
+
+func normalizeSourceManifestImportRef(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, "\"'`;")
+	if value == "" || len(value) > 180 || strings.ContainsAny(value, " \t\r\n") {
+		return ""
+	}
+	return value
+}
+
+func sourceManifestLooksLocalImport(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	switch {
+	case strings.HasPrefix(value, "."):
+		return true
+	case strings.HasPrefix(value, "crate::"), strings.HasPrefix(value, "self::"), strings.HasPrefix(value, "super::"):
+		return true
+	}
+	first := value
+	for _, sep := range []string{"/", ".", "::"} {
+		if idx := strings.Index(first, sep); idx >= 0 {
+			first = first[:idx]
+		}
+	}
+	switch strings.ToLower(first) {
+	case "app", "apps", "backend", "client", "cmd", "components", "core", "crates",
+		"frontend", "internal", "lib", "modules", "packages", "pkg", "plugin",
+		"plugins", "script", "scripts", "sdk", "sdks", "service", "services", "src",
+		"test", "tests", "ui", "web":
+		return true
+	default:
+		return false
+	}
 }
