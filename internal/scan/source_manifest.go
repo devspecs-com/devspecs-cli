@@ -25,11 +25,15 @@ var sourceManifestImportPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?m)^\s*#include\s+[<"]([^>"]+)[>"]`),
 }
 
-const sourceManifestMaxImportsPerFile = 8
+const sourceManifestMaxImportsPerFile = 6
 
 var (
-	sourceManifestMaxFTSSymbolsPerFile      = 16
-	sourceManifestMaxModuleRootFilesPerRepo = 1500
+	sourceManifestMaxFTSSymbolsPerFile       = 16
+	sourceManifestModuleRootSoftFullFiles    = 5000
+	sourceManifestMinModuleRootFilesPerRepo  = 1500
+	sourceManifestMaxModuleRootFilesPerRepo  = 8000
+	sourceManifestModuleRootBudgetPercent    = 50
+	sourceManifestModuleRootSeedFilesPerRoot = 2
 )
 
 type sourceManifestCandidate struct {
@@ -102,7 +106,8 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 		}
 		candidates = append(candidates, candidate)
 	}
-	selectedModuleRootCandidates, skippedModuleRootCandidates := capSourceManifestModuleRootCandidates(moduleRootCandidates, sourceManifestMaxModuleRootFilesPerRepo)
+	moduleRootLimit := sourceManifestModuleRootCandidateLimit(len(moduleRootCandidates))
+	selectedModuleRootCandidates, skippedModuleRootCandidates := capSourceManifestModuleRootCandidates(moduleRootCandidates, moduleRootLimit)
 	if skippedModuleRootCandidates > 0 {
 		diagnostics.IgnoredByReason["module_root_cap"] += skippedModuleRootCandidates
 	}
@@ -193,6 +198,26 @@ func sourceManifestContentHash(body []byte) string {
 	return hex.EncodeToString(sum[:])[:24]
 }
 
+func sourceManifestModuleRootCandidateLimit(count int) int {
+	if count <= 0 {
+		return 0
+	}
+	if sourceManifestModuleRootSoftFullFiles > 0 && count <= sourceManifestModuleRootSoftFullFiles {
+		return count
+	}
+	limit := (count * sourceManifestModuleRootBudgetPercent) / 100
+	if limit < sourceManifestMinModuleRootFilesPerRepo {
+		limit = sourceManifestMinModuleRootFilesPerRepo
+	}
+	if sourceManifestMaxModuleRootFilesPerRepo > 0 && limit > sourceManifestMaxModuleRootFilesPerRepo {
+		limit = sourceManifestMaxModuleRootFilesPerRepo
+	}
+	if limit > count {
+		limit = count
+	}
+	return limit
+}
+
 func capSourceManifestModuleRootCandidates(candidates []sourceManifestCandidate, limit int) ([]sourceManifestCandidate, int) {
 	if limit <= 0 {
 		return nil, len(candidates)
@@ -200,6 +225,93 @@ func capSourceManifestModuleRootCandidates(candidates []sourceManifestCandidate,
 	if len(candidates) <= limit {
 		sortSourceManifestCandidates(candidates)
 		return candidates, 0
+	}
+	selected, selectedByRel := seedSourceManifestModuleRoots(candidates, limit)
+	if len(selected) >= limit {
+		sortSourceManifestCandidates(selected)
+		return selected, len(candidates) - len(selected)
+	}
+	remainingCandidates := make([]sourceManifestCandidate, 0, len(candidates)-len(selected))
+	for _, candidate := range candidates {
+		if !selectedByRel[candidate.rel] {
+			remainingCandidates = append(remainingCandidates, candidate)
+		}
+	}
+	selected = append(selected, selectSourceManifestCandidatesByRoleBudget(remainingCandidates, limit-len(selected))...)
+	sortSourceManifestCandidates(selected)
+	return selected, len(candidates) - len(selected)
+}
+
+func seedSourceManifestModuleRoots(candidates []sourceManifestCandidate, limit int) ([]sourceManifestCandidate, map[string]bool) {
+	selectedByRel := map[string]bool{}
+	if limit <= 0 || sourceManifestModuleRootSeedFilesPerRoot <= 0 {
+		return nil, selectedByRel
+	}
+	byRoot := map[string][]sourceManifestCandidate{}
+	for _, candidate := range candidates {
+		root := candidate.root.path
+		if root == "" {
+			root = "."
+		}
+		byRoot[root] = append(byRoot[root], candidate)
+	}
+	roots := make([]string, 0, len(byRoot))
+	for root := range byRoot {
+		roots = append(roots, root)
+		sortSourceManifestCandidatesByPriority(byRoot[root])
+	}
+	sort.Strings(roots)
+	var selected []sourceManifestCandidate
+	for _, root := range roots {
+		if len(selected) >= limit {
+			break
+		}
+		rows := byRoot[root]
+		takenForRoot := 0
+		for _, role := range []string{"implementation", "test", "test_doc_example", "fixture"} {
+			if len(selected) >= limit || takenForRoot >= sourceManifestModuleRootSeedFilesPerRoot {
+				break
+			}
+			candidate, ok := firstSourceManifestCandidateForRole(rows, role, selectedByRel)
+			if !ok {
+				continue
+			}
+			selected = append(selected, candidate)
+			selectedByRel[candidate.rel] = true
+			takenForRoot++
+		}
+		for _, candidate := range rows {
+			if len(selected) >= limit || takenForRoot >= sourceManifestModuleRootSeedFilesPerRoot {
+				break
+			}
+			if selectedByRel[candidate.rel] {
+				continue
+			}
+			selected = append(selected, candidate)
+			selectedByRel[candidate.rel] = true
+			takenForRoot++
+		}
+	}
+	return selected, selectedByRel
+}
+
+func firstSourceManifestCandidateForRole(candidates []sourceManifestCandidate, role string, selectedByRel map[string]bool) (sourceManifestCandidate, bool) {
+	for _, candidate := range candidates {
+		if selectedByRel[candidate.rel] || candidate.role != role {
+			continue
+		}
+		return candidate, true
+	}
+	return sourceManifestCandidate{}, false
+}
+
+func selectSourceManifestCandidatesByRoleBudget(candidates []sourceManifestCandidate, limit int) []sourceManifestCandidate {
+	if limit <= 0 || len(candidates) == 0 {
+		return nil
+	}
+	if len(candidates) <= limit {
+		sortSourceManifestCandidates(candidates)
+		return candidates
 	}
 	groups := map[string][]sourceManifestCandidate{}
 	for _, candidate := range candidates {
@@ -258,7 +370,7 @@ func capSourceManifestModuleRootCandidates(candidates []sourceManifestCandidate,
 		selected = append(selected, overflow[:remaining]...)
 	}
 	sortSourceManifestCandidates(selected)
-	return selected, len(candidates) - len(selected)
+	return selected
 }
 
 func sortSourceManifestCandidates(candidates []sourceManifestCandidate) {

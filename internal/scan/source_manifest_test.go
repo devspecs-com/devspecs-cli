@@ -97,9 +97,23 @@ func TestScan_SourceManifestPopulatesCompactRowsWithoutArtifacts(t *testing.T) {
 }
 
 func TestScan_SourceManifestCapsNestedModuleRootRows(t *testing.T) {
-	oldCap := sourceManifestMaxModuleRootFilesPerRepo
+	oldSoftFull := sourceManifestModuleRootSoftFullFiles
+	oldMin := sourceManifestMinModuleRootFilesPerRepo
+	oldMax := sourceManifestMaxModuleRootFilesPerRepo
+	oldPercent := sourceManifestModuleRootBudgetPercent
+	oldSeed := sourceManifestModuleRootSeedFilesPerRoot
+	sourceManifestModuleRootSoftFullFiles = 0
+	sourceManifestMinModuleRootFilesPerRepo = 2
 	sourceManifestMaxModuleRootFilesPerRepo = 2
-	t.Cleanup(func() { sourceManifestMaxModuleRootFilesPerRepo = oldCap })
+	sourceManifestModuleRootBudgetPercent = 100
+	sourceManifestModuleRootSeedFilesPerRoot = 2
+	t.Cleanup(func() {
+		sourceManifestModuleRootSoftFullFiles = oldSoftFull
+		sourceManifestMinModuleRootFilesPerRepo = oldMin
+		sourceManifestMaxModuleRootFilesPerRepo = oldMax
+		sourceManifestModuleRootBudgetPercent = oldPercent
+		sourceManifestModuleRootSeedFilesPerRoot = oldSeed
+	})
 
 	repoRoot := t.TempDir()
 	writeScanTestFile(t, repoRoot, "sdk/storage/blob/go.mod", "module example.com/sdk/storage/blob\n")
@@ -133,6 +147,58 @@ func TestScan_SourceManifestCapsNestedModuleRootRows(t *testing.T) {
 	}
 	if counts.Files != 2 {
 		t.Fatalf("expected capped manifest rows, got %#v", counts)
+	}
+}
+
+func TestSourceManifestModuleRootLimitIndexesSmallRootsFully(t *testing.T) {
+	oldSoftFull := sourceManifestModuleRootSoftFullFiles
+	sourceManifestModuleRootSoftFullFiles = 5
+	t.Cleanup(func() { sourceManifestModuleRootSoftFullFiles = oldSoftFull })
+
+	if got := sourceManifestModuleRootCandidateLimit(5); got != 5 {
+		t.Fatalf("small module roots should be fully indexed, got limit %d", got)
+	}
+}
+
+func TestSourceManifestModuleRootCapSeedsMultipleRoots(t *testing.T) {
+	oldSoftFull := sourceManifestModuleRootSoftFullFiles
+	oldMin := sourceManifestMinModuleRootFilesPerRepo
+	oldMax := sourceManifestMaxModuleRootFilesPerRepo
+	oldPercent := sourceManifestModuleRootBudgetPercent
+	oldSeed := sourceManifestModuleRootSeedFilesPerRoot
+	sourceManifestModuleRootSoftFullFiles = 0
+	sourceManifestMinModuleRootFilesPerRepo = 4
+	sourceManifestMaxModuleRootFilesPerRepo = 4
+	sourceManifestModuleRootBudgetPercent = 100
+	sourceManifestModuleRootSeedFilesPerRoot = 1
+	t.Cleanup(func() {
+		sourceManifestModuleRootSoftFullFiles = oldSoftFull
+		sourceManifestMinModuleRootFilesPerRepo = oldMin
+		sourceManifestMaxModuleRootFilesPerRepo = oldMax
+		sourceManifestModuleRootBudgetPercent = oldPercent
+		sourceManifestModuleRootSeedFilesPerRoot = oldSeed
+	})
+
+	candidates := []sourceManifestCandidate{
+		{rel: "sdk/a/client.go", root: firstPartySourceRoot{path: "sdk/a", kind: "module_root"}, role: "implementation"},
+		{rel: "sdk/a/server.go", root: firstPartySourceRoot{path: "sdk/a", kind: "module_root"}, role: "implementation"},
+		{rel: "sdk/b/client.go", root: firstPartySourceRoot{path: "sdk/b", kind: "module_root"}, role: "implementation"},
+		{rel: "sdk/b/server.go", root: firstPartySourceRoot{path: "sdk/b", kind: "module_root"}, role: "implementation"},
+		{rel: "sdk/c/client.go", root: firstPartySourceRoot{path: "sdk/c", kind: "module_root"}, role: "implementation"},
+		{rel: "sdk/c/server.go", root: firstPartySourceRoot{path: "sdk/c", kind: "module_root"}, role: "implementation"},
+	}
+	selected, skipped := capSourceManifestModuleRootCandidates(candidates, sourceManifestModuleRootCandidateLimit(len(candidates)))
+	if skipped != 2 || len(selected) != 4 {
+		t.Fatalf("unexpected selected/skipped: selected=%#v skipped=%d", selected, skipped)
+	}
+	roots := map[string]bool{}
+	for _, candidate := range selected {
+		roots[candidate.root.path] = true
+	}
+	for _, want := range []string{"sdk/a", "sdk/b", "sdk/c"} {
+		if !roots[want] {
+			t.Fatalf("expected capped selection to seed root %s, got %#v", want, selected)
+		}
 	}
 }
 
@@ -194,7 +260,7 @@ func TestSourceManifestImportCompactionPrefersLocalAndCaps(t *testing.T) {
 	if len(got) != sourceManifestMaxImportsPerFile {
 		t.Fatalf("expected cap %d, got %d: %#v", sourceManifestMaxImportsPerFile, len(got), got)
 	}
-	for _, want := range []string{"./local", "internal/auth", "pkg/config", "sdk/storage/blob"} {
+	for _, want := range []string{"./local", "internal/auth", "pkg/config"} {
 		found := false
 		for _, value := range got {
 			if value == want {
