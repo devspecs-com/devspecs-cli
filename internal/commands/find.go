@@ -19,23 +19,24 @@ import (
 // NewFindCmd creates the ds find command.
 func NewFindCmd() *cobra.Command {
 	var (
-		kind            string
-		subtype         string
-		tag             string
-		branch          string
-		user            string
-		repoName        string
-		allRepos        bool
-		asJSON          bool
-		noRefresh       bool
-		pack            bool
-		verbose         bool
-		graphDiag       bool
-		gitReceipts     = true
-		anchorFirst     = true
-		anchorMode      string
-		boundaryPrimary bool
-		packCompanions  string
+		kind                     string
+		subtype                  string
+		tag                      string
+		branch                   string
+		user                     string
+		repoName                 string
+		allRepos                 bool
+		asJSON                   bool
+		noRefresh                bool
+		pack                     bool
+		verbose                  bool
+		graphDiag                bool
+		gitReceipts              = true
+		anchorFirst              = true
+		anchorMode               string
+		boundaryPrimary          bool
+		packCompanions           string
+		sourceManifestCandidates string
 	)
 
 	cmd := &cobra.Command{
@@ -47,7 +48,7 @@ func NewFindCmd() *cobra.Command {
 			if cmd.Flags().Changed("experimental-anchor-first-mode") && !cmd.Flags().Changed("experimental-anchor-first-ranking") {
 				anchorFirst = true
 			}
-			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst, anchorMode, boundaryPrimary, packCompanions)
+			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst, anchorMode, boundaryPrimary, packCompanions, sourceManifestCandidates)
 		},
 	}
 
@@ -68,11 +69,13 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().StringVar(&anchorMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, selected_only, strong_field, strict, code_task, code_task_family, or code_task_family_v2")
 	cmd.Flags().BoolVar(&boundaryPrimary, "experimental-boundary-primary", false, "Tier pack output into a source-safe primary working set plus related context summary")
 	cmd.Flags().StringVar(&packCompanions, "pack-companion-mode", findPackCompanionModeAll, "Hidden scout flag: off, generic, generic_git, or all")
+	cmd.Flags().StringVar(&sourceManifestCandidates, "source-manifest-candidates", "off", "Hidden scout flag: off, metadata, or window")
 	_ = cmd.Flags().MarkHidden("pack-companion-mode")
+	_ = cmd.Flags().MarkHidden("source-manifest-candidates")
 	return cmd
 }
 
-func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst bool, anchorMode string, boundaryPrimary bool, packCompanions string) error {
+func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst bool, anchorMode string, boundaryPrimary bool, packCompanions string, sourceManifestCandidates string) error {
 	start := time.Now()
 	success := false
 	anchorMode = retrieval.NormalizeAnchorFirstMode(anchorMode)
@@ -88,17 +91,27 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	if packCompanions == "" {
 		return fmt.Errorf("unknown --pack-companion-mode; valid values: %s", strings.Join(validFindPackCompanionModes(), ", "))
 	}
+	if !cmd.Flags().Changed("source-manifest-candidates") {
+		if env := strings.TrimSpace(os.Getenv("DEVSPECS_SOURCE_MANIFEST_CANDIDATES")); env != "" {
+			sourceManifestCandidates = env
+		}
+	}
+	sourceManifestMode, err := indexquery.ParseSourceManifestCandidateMode(sourceManifestCandidates)
+	if err != nil {
+		return err
+	}
 	props := map[string]any{
-		"query_length_bucket": telemetry.QueryLengthBucket(query),
-		"json":                asJSON,
-		"pack":                pack,
-		"verbose":             verbose,
-		"graph_diagnostics":   graphDiag,
-		"git_receipts":        gitReceipts,
-		"anchor_first":        anchorFirst,
-		"anchor_first_mode":   anchorMode,
-		"boundary_primary":    boundaryPrimary,
-		"pack_companions":     packCompanions,
+		"query_length_bucket":        telemetry.QueryLengthBucket(query),
+		"json":                       asJSON,
+		"pack":                       pack,
+		"verbose":                    verbose,
+		"graph_diagnostics":          graphDiag,
+		"git_receipts":               gitReceipts,
+		"anchor_first":               anchorFirst,
+		"anchor_first_mode":          anchorMode,
+		"boundary_primary":           boundaryPrimary,
+		"pack_companions":            packCompanions,
+		"source_manifest_candidates": string(sourceManifestMode),
 	}
 	defer func() {
 		telemetry.RecordCommand("find", success, time.Since(start), props)
@@ -132,6 +145,19 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	loadResult, err := loadRetrievalCandidatesForQueryWithReport(db, fp, query)
 	if err != nil {
 		return fmt.Errorf("find: %w", err)
+	}
+	if sourceManifestMode != indexquery.SourceManifestCandidateModeOff {
+		manifestCandidates, manifestReport, err := loadFindSourceManifestCandidates(db, fp, query, sourceManifestMode)
+		if err != nil {
+			return fmt.Errorf("find source manifest candidates: %w", err)
+		}
+		loadResult.Report.SourceManifestMode = manifestReport.Mode
+		loadResult.Report.SourceManifestCount = manifestReport.SelectedCount
+		loadResult.Report.SourceManifestFallbackReason = manifestReport.FallbackReason
+		loadResult.Report.SourceManifestMS = manifestReport.ElapsedMS
+		if len(manifestCandidates) > 0 {
+			loadResult.Candidates = append(loadResult.Candidates, manifestCandidates...)
+		}
 	}
 	candidates := loadResult.Candidates
 	recordFindRuntimeProps(props, loadResult.Report)
@@ -248,6 +274,13 @@ func recordFindRuntimeProps(props map[string]any, report indexquery.CandidateLoa
 	if report.PreselectedCount > 0 {
 		props["preselected_count_bucket"] = telemetry.CountBucket(report.PreselectedCount)
 	}
+	if report.SourceManifestMode != "" {
+		props["source_manifest_mode"] = report.SourceManifestMode
+		props["source_manifest_count_bucket"] = telemetry.CountBucket(report.SourceManifestCount)
+		if report.SourceManifestFallbackReason != "" {
+			props["source_manifest_fallback"] = report.SourceManifestFallbackReason
+		}
+	}
 	if report.FallbackReason != "" {
 		props["find_runtime_fallback"] = report.FallbackReason
 	}
@@ -261,18 +294,22 @@ func emitFindRuntimeDebug(cmd *cobra.Command, report indexquery.CandidateLoadRep
 		return
 	}
 	_ = json.NewEncoder(cmd.ErrOrStderr()).Encode(map[string]any{
-		"type":                "find_runtime",
-		"runtime_mode":        report.RuntimeMode,
-		"effective_mode":      report.EffectiveMode,
-		"full_artifact_count": report.FullArtifactCount,
-		"preselected_count":   report.PreselectedCount,
-		"hydrated_count":      report.HydratedCount,
-		"fallback_reason":     report.FallbackReason,
-		"lane_counts":         report.LaneCounts,
-		"preselect_ms":        report.PreselectMS,
-		"hydrate_ms":          report.HydrateMS,
-		"full_load_ms":        report.FullLoadMS,
-		"optimized_error":     report.OptimizedError,
+		"type":                            "find_runtime",
+		"runtime_mode":                    report.RuntimeMode,
+		"effective_mode":                  report.EffectiveMode,
+		"full_artifact_count":             report.FullArtifactCount,
+		"preselected_count":               report.PreselectedCount,
+		"hydrated_count":                  report.HydratedCount,
+		"fallback_reason":                 report.FallbackReason,
+		"lane_counts":                     report.LaneCounts,
+		"preselect_ms":                    report.PreselectMS,
+		"hydrate_ms":                      report.HydrateMS,
+		"full_load_ms":                    report.FullLoadMS,
+		"source_manifest_mode":            report.SourceManifestMode,
+		"source_manifest_count":           report.SourceManifestCount,
+		"source_manifest_ms":              report.SourceManifestMS,
+		"source_manifest_fallback_reason": report.SourceManifestFallbackReason,
+		"optimized_error":                 report.OptimizedError,
 	})
 }
 

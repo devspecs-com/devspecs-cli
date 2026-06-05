@@ -36,17 +36,21 @@ type PreselectReport struct {
 }
 
 type CandidateLoadReport struct {
-	RuntimeMode       string
-	EffectiveMode     string
-	FullArtifactCount int
-	PreselectedCount  int
-	HydratedCount     int
-	FallbackReason    string
-	LaneCounts        map[string]int
-	PreselectMS       int64
-	HydrateMS         int64
-	FullLoadMS        int64
-	OptimizedError    string
+	RuntimeMode                  string
+	EffectiveMode                string
+	FullArtifactCount            int
+	PreselectedCount             int
+	HydratedCount                int
+	SourceManifestMode           string
+	SourceManifestCount          int
+	SourceManifestMS             int64
+	SourceManifestFallbackReason string
+	FallbackReason               string
+	LaneCounts                   map[string]int
+	PreselectMS                  int64
+	HydrateMS                    int64
+	FullLoadMS                   int64
+	OptimizedError               string
 }
 
 type CandidateLoadResult struct {

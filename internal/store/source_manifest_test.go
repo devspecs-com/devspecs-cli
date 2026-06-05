@@ -1,6 +1,7 @@
 package store
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -76,5 +77,44 @@ func TestSourceManifest_DeleteRepoSourceManifest(t *testing.T) {
 	}
 	if counts != (SourceManifestCounts{}) {
 		t.Fatalf("expected empty manifest counts after delete, got %#v", counts)
+	}
+}
+
+func TestSourceManifest_SearchSourceManifestFTS(t *testing.T) {
+	tmp := t.TempDir()
+	db, err := Open(filepath.Join(tmp, "devspecs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := "2026-06-05T00:00:00Z"
+	if _, err := db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES (?, ?, ?, ?)", "repo_src", tmp, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ReplaceRepoSourceManifest("repo_src",
+		[]SourceManifestFileInput{{
+			FileID: "src_1", RepoID: "repo_src", Path: "src/auth/session.go", ContentHash: "abc",
+			Language: "go", SourceRoot: "src/auth", SourceRootKind: "module_root", SourceRole: "implementation", FirstPartyScore: 0.9,
+		}},
+		[]SourceManifestSymbolInput{{FileID: "src_1", Symbol: "RefreshSession", Kind: "symbol"}},
+		[]SourceManifestTestInput{},
+		[]SourceManifestImportInput{{FileID: "src_1", ImportRef: "context"}},
+		[]SourceManifestFTSInput{{
+			FileID: "src_1", Path: "src/auth/session.go", PathTerms: "src auth session go",
+			SourceRoot: "src/auth", Language: "go", SourceRole: "implementation",
+			Symbols: "RefreshSession", Imports: "context",
+		}},
+		now); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.SearchSourceManifestFTS(`"refresh" OR "session"`, FilterParams{RepoRoot: tmp}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].Path != "src/auth/session.go" || rows[0].Symbols != "RefreshSession" {
+		t.Fatalf("unexpected row: %#v", rows[0])
 	}
 }

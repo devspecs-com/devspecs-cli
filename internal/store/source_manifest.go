@@ -1,6 +1,9 @@
 package store
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // SourceManifestFileInput is a compact first-party source/test file row.
 type SourceManifestFileInput struct {
@@ -60,6 +63,25 @@ type SourceManifestCounts struct {
 	Symbols int `json:"symbols"`
 	Imports int `json:"imports"`
 	FTSRows int `json:"fts_rows"`
+}
+
+// SourceManifestSearchRow is a compact source/test row returned from manifest FTS.
+type SourceManifestSearchRow struct {
+	FileID          string
+	RepoID          string
+	Path            string
+	ContentHash     string
+	SizeBytes       int64
+	Language        string
+	SourceRoot      string
+	SourceRootKind  string
+	SourceRole      string
+	FirstPartyScore float64
+	IndexedAt       string
+	Symbols         string
+	TestNames       string
+	Imports         string
+	Rank            float64
 }
 
 // ReplaceRepoSourceManifest replaces all compact source manifest rows for a repo.
@@ -210,6 +232,74 @@ func (db *DB) CountSourceManifest(repoID string) (SourceManifestCounts, error) {
 		FROM source_manifest_fts
 		WHERE file_id IN (SELECT file_id FROM source_manifest WHERE repo_id = ?)`, repoID).Scan(&out.FTSRows); err != nil {
 		return out, fmt.Errorf("count source_manifest_fts: %w", err)
+	}
+	return out, nil
+}
+
+// SearchSourceManifestFTS returns compact source/test rows matching manifest FTS.
+func (db *DB) SearchSourceManifestFTS(match string, fp FilterParams, limit int) ([]SourceManifestSearchRow, error) {
+	if strings.TrimSpace(match) == "" || limit <= 0 {
+		return nil, nil
+	}
+	query := `SELECT sm.file_id, sm.repo_id, sm.path, sm.content_hash, sm.size_bytes,
+			sm.language, sm.source_root, sm.source_root_kind, sm.source_role,
+			sm.first_party_score, sm.indexed_at,
+			source_manifest_fts.symbols, source_manifest_fts.test_names, source_manifest_fts.imports,
+			bm25(source_manifest_fts) AS rank
+		FROM source_manifest_fts
+		JOIN source_manifest sm ON sm.file_id = source_manifest_fts.file_id`
+	var conditions []string
+	args := []any{match}
+	if fp.RepoRoot != "" || fp.Branch != "" || fp.User != "" {
+		query += " JOIN repos r ON r.id = sm.repo_id"
+	}
+	conditions = append(conditions, "source_manifest_fts MATCH ?")
+	if fp.RepoRoot != "" {
+		conditions = append(conditions, "r.root_path = ?")
+		args = append(args, fp.RepoRoot)
+	}
+	if fp.Branch != "" {
+		conditions = append(conditions, "r.git_current_branch = ?")
+		args = append(args, fp.Branch)
+	}
+	if fp.User != "" {
+		conditions = append(conditions, "r.scanned_by = ?")
+		args = append(args, fp.User)
+	}
+	query += " WHERE " + strings.Join(conditions, " AND ")
+	query += " ORDER BY rank, sm.first_party_score DESC, sm.path LIMIT ?"
+	args = append(args, limit)
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search source manifest fts: %w", err)
+	}
+	defer rows.Close()
+	var out []SourceManifestSearchRow
+	for rows.Next() {
+		var row SourceManifestSearchRow
+		if err := rows.Scan(
+			&row.FileID,
+			&row.RepoID,
+			&row.Path,
+			&row.ContentHash,
+			&row.SizeBytes,
+			&row.Language,
+			&row.SourceRoot,
+			&row.SourceRootKind,
+			&row.SourceRole,
+			&row.FirstPartyScore,
+			&row.IndexedAt,
+			&row.Symbols,
+			&row.TestNames,
+			&row.Imports,
+			&row.Rank,
+		); err != nil {
+			return nil, fmt.Errorf("scan source manifest row: %w", err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate source manifest rows: %w", err)
 	}
 	return out, nil
 }
