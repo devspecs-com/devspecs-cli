@@ -39,6 +39,7 @@ func NewFindCmd() *cobra.Command {
 		sourcePackMode            string
 		sourceManifestCandidates  string
 		sourceManifestConsumption bool
+		sourceTestReceipts        string
 	)
 
 	cmd := &cobra.Command{
@@ -50,7 +51,7 @@ func NewFindCmd() *cobra.Command {
 			if cmd.Flags().Changed("experimental-anchor-first-mode") && !cmd.Flags().Changed("experimental-anchor-first-ranking") {
 				anchorFirst = true
 			}
-			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst, anchorMode, boundaryPrimary, packCompanions, sourcePackMode, sourceManifestCandidates, sourceManifestConsumption)
+			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst, anchorMode, boundaryPrimary, packCompanions, sourcePackMode, sourceManifestCandidates, sourceManifestConsumption, sourceTestReceipts)
 		},
 	}
 
@@ -74,14 +75,16 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sourcePackMode, "experimental-source-pack-mode", findSourcePackModeOff, "Hidden source pack mode: off or compact_manifest_v0")
 	cmd.Flags().StringVar(&sourceManifestCandidates, "source-manifest-candidates", "off", "Hidden scout flag: off, metadata, or window")
 	cmd.Flags().BoolVar(&sourceManifestConsumption, "source-manifest-consumption", false, "Hidden scout flag: reserve/replace source manifest candidates in pack mode")
+	cmd.Flags().StringVar(&sourceTestReceipts, "source-test-receipts", findSourceTestReceiptsModeOff, "Hidden scout flag: off or receipt_v0")
 	_ = cmd.Flags().MarkHidden("pack-companion-mode")
 	_ = cmd.Flags().MarkHidden("experimental-source-pack-mode")
 	_ = cmd.Flags().MarkHidden("source-manifest-candidates")
 	_ = cmd.Flags().MarkHidden("source-manifest-consumption")
+	_ = cmd.Flags().MarkHidden("source-test-receipts")
 	return cmd
 }
 
-func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst bool, anchorMode string, boundaryPrimary bool, packCompanions string, sourcePackMode string, sourceManifestCandidates string, sourceManifestConsumption bool) error {
+func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst bool, anchorMode string, boundaryPrimary bool, packCompanions string, sourcePackMode string, sourceManifestCandidates string, sourceManifestConsumption bool, sourceTestReceipts string) error {
 	start := time.Now()
 	success := false
 	anchorMode = retrieval.NormalizeAnchorFirstMode(anchorMode)
@@ -99,6 +102,18 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	}
 	if sourcePackMode != findSourcePackModeOff && !pack {
 		return fmt.Errorf("--experimental-source-pack-mode %s requires --pack", sourcePackMode)
+	}
+	if !cmd.Flags().Changed("source-test-receipts") {
+		if env := strings.TrimSpace(os.Getenv("DEVSPECS_SOURCE_TEST_RECEIPTS")); env != "" {
+			sourceTestReceipts = env
+		}
+	}
+	sourceTestReceipts = normalizeFindSourceTestReceiptsMode(sourceTestReceipts)
+	if sourceTestReceipts == "" {
+		return fmt.Errorf("unknown --source-test-receipts; valid values: %s", strings.Join(validFindSourceTestReceiptsModes(), ", "))
+	}
+	if sourceTestReceipts != findSourceTestReceiptsModeOff && !pack {
+		return fmt.Errorf("--source-test-receipts %s requires --pack", sourceTestReceipts)
 	}
 	if !cmd.Flags().Changed("pack-companion-mode") {
 		if env := strings.TrimSpace(os.Getenv("DEVSPECS_PACK_COMPANION_MODE")); env != "" {
@@ -146,6 +161,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 		"source_pack_mode":            sourcePackMode,
 		"source_manifest_candidates":  string(sourceManifestMode),
 		"source_manifest_consumption": sourceManifestConsumption,
+		"source_test_receipts":        sourceTestReceipts,
 	}
 	defer func() {
 		telemetry.RecordCommand("find", success, time.Since(start), props)
@@ -225,6 +241,16 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 		if boundaryPrimary {
 			rolePack = retrieval.ApplyBoundaryPrimaryPackForQuery(rolePack, query)
 		}
+		var relatedTests *FindRelatedTestContext
+		if sourceTestReceipts != findSourceTestReceiptsModeOff {
+			relatedTests, err = buildFindSourceTestReceipts(db, fp, query, rolePack, sourceTestReceipts)
+			if err != nil {
+				return fmt.Errorf("find source test receipts: %w", err)
+			}
+			if relatedTests != nil {
+				props["source_test_receipt_count_bucket"] = telemetry.CountBucket(len(relatedTests.Items))
+			}
+		}
 		var gitTrust *FindGitTrustContext
 		if gitReceipts && fp.RepoRoot != "" {
 			gitTrust = buildFindGitTrustContext(cmd.Context(), fp.RepoRoot, query, rolePack)
@@ -234,6 +260,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 		}
 		if asJSON {
 			out := findPackOutput(query, retriever.Name(), matches, reasons, rolePack)
+			out.RelatedTests = relatedTests
 			out.GitTrust = gitTrust
 			if graphDiag {
 				out.GraphDiagnostics = &graphDiagnostics
@@ -241,7 +268,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 			}
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(out)
 		}
-		if err := writeFindPackText(cmd.OutOrStdout(), query, retriever.Name(), rolePack, gitTrust, verbose); err != nil {
+		if err := writeFindPackText(cmd.OutOrStdout(), query, retriever.Name(), rolePack, relatedTests, gitTrust, verbose); err != nil {
 			return err
 		}
 		if graphDiag {

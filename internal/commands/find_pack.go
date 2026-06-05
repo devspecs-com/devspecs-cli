@@ -9,18 +9,19 @@ import (
 )
 
 type FindPackOutput struct {
-	Query            string                `json:"query"`
-	Retriever        string                `json:"retriever"`
-	Mode             string                `json:"mode"`
-	Summary          retrieval.PackSummary `json:"summary,omitempty"`
-	LocalLanguage    []string              `json:"local_language,omitempty"`
-	Groups           []retrieval.PackGroup `json:"groups"`
-	ExcludedNoise    []retrieval.PackItem  `json:"excluded_noise,omitempty"`
-	Counts           map[string]int        `json:"counts,omitempty"`
-	RankedResults    []FindResult          `json:"ranked_results"`
-	GitTrust         *FindGitTrustContext  `json:"git_trust,omitempty"`
-	GraphContext     *FindGraphPackContext `json:"graph_context,omitempty"`
-	GraphDiagnostics *FindGraphDiagnostics `json:"graph_diagnostics,omitempty"`
+	Query            string                  `json:"query"`
+	Retriever        string                  `json:"retriever"`
+	Mode             string                  `json:"mode"`
+	Summary          retrieval.PackSummary   `json:"summary,omitempty"`
+	LocalLanguage    []string                `json:"local_language,omitempty"`
+	Groups           []retrieval.PackGroup   `json:"groups"`
+	ExcludedNoise    []retrieval.PackItem    `json:"excluded_noise,omitempty"`
+	Counts           map[string]int          `json:"counts,omitempty"`
+	RankedResults    []FindResult            `json:"ranked_results"`
+	RelatedTests     *FindRelatedTestContext `json:"related_tests,omitempty"`
+	GitTrust         *FindGitTrustContext    `json:"git_trust,omitempty"`
+	GraphContext     *FindGraphPackContext   `json:"graph_context,omitempty"`
+	GraphDiagnostics *FindGraphDiagnostics   `json:"graph_diagnostics,omitempty"`
 }
 
 func findPackOutput(query, retrieverName string, candidates []retrieval.Candidate, reasons map[string][]string, rolePack retrieval.RoleGroupedPack) FindPackOutput {
@@ -37,7 +38,7 @@ func findPackOutput(query, retrieverName string, candidates []retrieval.Candidat
 	}
 }
 
-func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retrieval.RoleGroupedPack, gitTrust *FindGitTrustContext, verbose bool) error {
+func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retrieval.RoleGroupedPack, relatedTests *FindRelatedTestContext, gitTrust *FindGitTrustContext, verbose bool) error {
 	fmt.Fprintf(out, "Working set: %s\n", query)
 	if verbose {
 		fmt.Fprintf(out, "Retriever: %s\n", retrieverName)
@@ -103,8 +104,30 @@ func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retr
 			writePackItem(out, item, true, verbose)
 		}
 	}
+	writeRelatedTestsText(out, relatedTests, verbose)
 	writeGitTrustText(out, gitTrust)
 	return nil
+}
+
+func writeRelatedTestsText(out io.Writer, relatedTests *FindRelatedTestContext, verbose bool) {
+	if relatedTests == nil || len(relatedTests.Items) == 0 {
+		return
+	}
+	fmt.Fprintf(out, "\nRelated tests from selected source context (%d)\n", len(relatedTests.Items))
+	for _, item := range relatedTests.Items {
+		fmt.Fprintf(out, "  - %s\n", item.Path)
+		if verbose {
+			if len(item.SourcePaths) > 0 {
+				fmt.Fprintf(out, "      Related source: %s\n", strings.Join(firstStrings(item.SourcePaths, 2), "; "))
+			}
+			if len(item.TestNames) > 0 {
+				fmt.Fprintf(out, "      Tests: %s\n", strings.Join(firstStrings(item.TestNames, 3), "; "))
+			}
+		}
+		if len(item.Reasons) > 0 {
+			fmt.Fprintf(out, "      Evidence: %s\n", strings.Join(firstStrings(item.Reasons, 3), "; "))
+		}
+	}
 }
 
 func writePackLocalLanguage(out io.Writer, rolePack retrieval.RoleGroupedPack) {

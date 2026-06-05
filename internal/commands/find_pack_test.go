@@ -95,7 +95,7 @@ func TestWriteFindPackTextBoundaryPrimarySummarizesRelatedByDefault(t *testing.T
 		},
 	})
 	var b strings.Builder
-	if err := writeFindPackText(&b, "auth design", "test", pack, nil, false); err != nil {
+	if err := writeFindPackText(&b, "auth design", "test", pack, nil, nil, false); err != nil {
 		t.Fatal(err)
 	}
 	out := b.String()
@@ -131,7 +131,7 @@ func TestWriteFindPackTextBoundaryPrimaryVerboseShowsRelatedItems(t *testing.T) 
 		},
 	})
 	var b strings.Builder
-	if err := writeFindPackText(&b, "auth design", "test", pack, nil, true); err != nil {
+	if err := writeFindPackText(&b, "auth design", "test", pack, nil, nil, true); err != nil {
 		t.Fatal(err)
 	}
 	out := b.String()
