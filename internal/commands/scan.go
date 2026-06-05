@@ -46,6 +46,7 @@ func NewScanCmd() *cobra.Command {
 		experimentalSupportDocs        bool
 		experimentalRecentSource       bool
 		experimentalFirstPartySource   bool
+		experimentalSourceManifest     bool
 		includeTests                   bool
 		includeCodeComments            bool
 	)
@@ -54,7 +55,7 @@ func NewScanCmd() *cobra.Command {
 		Use:   "scan",
 		Short: "Scan repository for specs, plans, and ADRs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, includeTests, includeCodeComments)
+			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, experimentalSourceManifest, includeTests, includeCodeComments)
 		},
 	}
 
@@ -71,16 +72,18 @@ func NewScanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&experimentalSupportDocs, "experimental-support-docs", false, "Index bounded support docs as diagnostic context")
 	cmd.Flags().BoolVar(&experimentalRecentSource, "experimental-recent-source-context", false, "Index bounded recently changed source files as experimental implementation context")
 	cmd.Flags().BoolVar(&experimentalFirstPartySource, "experimental-first-party-source-context", false, "Index broad first-party source/test files as experimental implementation context")
+	cmd.Flags().BoolVar(&experimentalSourceManifest, "experimental-source-manifest", false, "Index compact first-party source/test metadata as experimental manifest substrate")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Index executable test cases as behavioral intent artifacts")
 	cmd.Flags().BoolVar(&includeTests, "experimental-test-cases", false, "Deprecated alias for --include-tests")
 	cmd.Flags().BoolVar(&includeCodeComments, "include-code-comments", false, "Index high-signal code comments as implementation intent artifacts")
 	_ = cmd.Flags().MarkDeprecated("experimental-test-cases", "use --include-tests")
 	_ = cmd.Flags().MarkHidden("experimental-recent-source-context")
 	_ = cmd.Flags().MarkHidden("experimental-first-party-source-context")
+	_ = cmd.Flags().MarkHidden("experimental-source-manifest")
 	return cmd
 }
 
-func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, includeTests, includeCodeComments bool) error {
+func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, experimentalSourceManifest, includeTests, includeCodeComments bool) error {
 	start := time.Now()
 	success := false
 	props := map[string]any{
@@ -92,6 +95,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 		"experimental_support_docs":        experimentalSupportDocs,
 		"experimental_recent_source":       experimentalRecentSource,
 		"experimental_first_party_source":  experimentalFirstPartySource,
+		"experimental_source_manifest":     experimentalSourceManifest,
 		"if_changed":                       ifChanged,
 		"rebuild":                          rebuild,
 		"json":                             asJSON,
@@ -177,6 +181,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	scanOpts.RichTypedIndex = experimentalRichTypedIndex
 	scanOpts.RecentSourceContext = experimentalRecentSource
 	scanOpts.FirstPartySourceContext = experimentalFirstPartySource
+	scanOpts.SourceManifest = experimentalSourceManifest
 	if verbose && !quiet && scanOpts.FreshIndex {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Using fresh-index scan path for empty/rebuilt index\n")
 	}
@@ -229,6 +234,12 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	fmt.Fprintf(out, "  %d new artifacts\n", result.New)
 	fmt.Fprintf(out, "  %d updated artifacts\n", result.Updated)
 	fmt.Fprintf(out, "  %d unchanged artifacts\n", result.Unchanged)
+	if result.SourceManifest != nil {
+		fmt.Fprintln(out, "\nSource manifest (experimental):")
+		fmt.Fprintf(out, "  %d indexed files\n", result.SourceManifest.IndexedFiles)
+		fmt.Fprintf(out, "  %d indexed tests\n", result.SourceManifest.IndexedTests)
+		fmt.Fprintf(out, "  %d symbols, %d test names, %d imports\n", result.SourceManifest.SymbolRows, result.SourceManifest.TestRows, result.SourceManifest.ImportRows)
+	}
 	fmt.Fprintln(out, "\nRun:\n  ds list")
 	return nil
 }

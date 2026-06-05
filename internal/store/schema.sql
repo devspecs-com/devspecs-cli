@@ -195,6 +195,46 @@ CREATE TABLE IF NOT EXISTS git_commit_files (
   PRIMARY KEY (repo_id, commit_sha, file_path)
 );
 
+CREATE TABLE IF NOT EXISTS source_manifest (
+  file_id           TEXT PRIMARY KEY,
+  repo_id           TEXT NOT NULL,
+  path              TEXT NOT NULL,
+  content_hash      TEXT NOT NULL,
+  size_bytes        INTEGER NOT NULL,
+  language          TEXT NOT NULL,
+  source_root       TEXT NOT NULL,
+  source_root_kind  TEXT NOT NULL,
+  source_role       TEXT NOT NULL,
+  first_party_score REAL NOT NULL DEFAULT 0,
+  ignored_reason    TEXT NOT NULL DEFAULT '',
+  indexed_at        TEXT NOT NULL,
+  UNIQUE(repo_id, path),
+  FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS source_manifest_symbols (
+  file_id TEXT NOT NULL,
+  symbol  TEXT NOT NULL,
+  kind    TEXT NOT NULL DEFAULT '',
+  line    INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY (file_id) REFERENCES source_manifest(file_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS source_manifest_tests (
+  file_id   TEXT NOT NULL,
+  test_name TEXT NOT NULL,
+  parent    TEXT NOT NULL DEFAULT '',
+  line      INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY (file_id) REFERENCES source_manifest(file_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS source_manifest_imports (
+  file_id    TEXT NOT NULL,
+  import_ref TEXT NOT NULL,
+  line       INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY (file_id) REFERENCES source_manifest(file_id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_todos_artifact ON artifact_todos(artifact_id);
 CREATE INDEX IF NOT EXISTS idx_todos_revision ON artifact_todos(revision_id);
 CREATE INDEX IF NOT EXISTS idx_todos_section ON artifact_todos(section_id);
@@ -220,6 +260,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_edges_identity ON artifact_edges(
 CREATE INDEX IF NOT EXISTS idx_git_commits_repo_committed ON git_commits(repo_id, committed_at);
 CREATE INDEX IF NOT EXISTS idx_git_commit_files_repo_file ON git_commit_files(repo_id, file_path);
 CREATE INDEX IF NOT EXISTS idx_git_commit_files_commit ON git_commit_files(commit_sha);
+CREATE INDEX IF NOT EXISTS idx_source_manifest_repo_path ON source_manifest(repo_id, path);
+CREATE INDEX IF NOT EXISTS idx_source_manifest_repo_root ON source_manifest(repo_id, source_root);
+CREATE INDEX IF NOT EXISTS idx_source_manifest_repo_role ON source_manifest(repo_id, source_role);
+CREATE INDEX IF NOT EXISTS idx_source_manifest_symbols_file ON source_manifest_symbols(file_id);
+CREATE INDEX IF NOT EXISTS idx_source_manifest_tests_file ON source_manifest_tests(file_id);
+CREATE INDEX IF NOT EXISTS idx_source_manifest_imports_file ON source_manifest_imports(file_id);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS artifacts_fts USING fts5(
   artifact_id UNINDEXED,
@@ -235,5 +281,18 @@ CREATE VIRTUAL TABLE IF NOT EXISTS artifact_sections_fts USING fts5(
   heading_path,
   title,
   body,
+  tokenize='unicode61'
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS source_manifest_fts USING fts5(
+  file_id UNINDEXED,
+  path,
+  path_terms,
+  source_root,
+  language,
+  source_role,
+  symbols,
+  test_names,
+  imports,
   tokenize='unicode61'
 );

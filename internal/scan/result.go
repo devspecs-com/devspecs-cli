@@ -51,6 +51,24 @@ type SourceCompanionRejectionExample struct {
 	Signal string `json:"signal,omitempty"`
 }
 
+// SourceManifestDiagnostics summarizes the hidden compact first-party source/test manifest.
+type SourceManifestDiagnostics struct {
+	Enabled         bool           `json:"enabled"`
+	InventoryFiles  int            `json:"inventory_files,omitempty"`
+	SourceLikeFiles int            `json:"source_like_files,omitempty"`
+	TestLikeFiles   int            `json:"test_like_files,omitempty"`
+	IndexedFiles    int            `json:"indexed_files,omitempty"`
+	IndexedTests    int            `json:"indexed_tests,omitempty"`
+	SymbolRows      int            `json:"symbol_rows,omitempty"`
+	TestRows        int            `json:"test_rows,omitempty"`
+	ImportRows      int            `json:"import_rows,omitempty"`
+	FTSRows         int            `json:"fts_rows,omitempty"`
+	IgnoredByReason map[string]int `json:"ignored_by_reason,omitempty"`
+	RowsByRoot      map[string]int `json:"rows_by_root,omitempty"`
+	RowsByLanguage  map[string]int `json:"rows_by_language,omitempty"`
+	RowsByRole      map[string]int `json:"rows_by_role,omitempty"`
+}
+
 // ProgressEvent is a coarse scan heartbeat for long eval/index runs.
 type ProgressEvent struct {
 	Phase                string         `json:"phase"`
@@ -105,6 +123,7 @@ type Result struct {
 	GitEvidence        *GitEvidenceDiagnostics              `json:"git_evidence,omitempty"`
 	WorkstreamEvidence *WorkstreamEvidenceDiagnostics       `json:"workstream_evidence,omitempty"`
 	SourceCompanions   *SourceCompanionAdmissionDiagnostics `json:"source_companion_admission,omitempty"`
+	SourceManifest     *SourceManifestDiagnostics           `json:"source_manifest,omitempty"`
 
 	sourcesAgg map[string]*sourceAgg `json:"-"`
 }

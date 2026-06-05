@@ -538,6 +538,21 @@ func sourceLanguage(rel string) string {
 	}
 }
 
+// LanguageForPath returns the source-context language label for a path.
+func LanguageForPath(rel string) string {
+	return sourceLanguage(rel)
+}
+
+// ExtractTestNames returns bounded test-name anchors from source text.
+func ExtractTestNames(body string) []string {
+	return extractSourceContextTestNames(body)
+}
+
+// ExtractSymbols returns bounded symbol anchors from source text.
+func ExtractSymbols(body string) []string {
+	return extractSourceContextSymbols(body)
+}
+
 func extractSourceContextTestNames(body string) []string {
 	return extractSourceContextPatternValues(body, sourceContextTestNamePatterns, 80)
 }

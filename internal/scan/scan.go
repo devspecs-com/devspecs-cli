@@ -50,6 +50,7 @@ type RunOptions struct {
 	RichTypedIndex            bool
 	RecentSourceContext       bool
 	FirstPartySourceContext   bool
+	SourceManifest            bool
 	GitMaxCommits             int
 	GitMaxFilesPerCommit      int
 	Progress                  func(ProgressEvent)
@@ -274,6 +275,13 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 		}
 	} else if err := s.db.DeleteRepoGitFacts(repoID); err != nil {
 		return nil, fmt.Errorf("delete git facts: %w", err)
+	}
+	if opts.SourceManifest {
+		if diagnostics, err := s.rebuildSourceManifest(ctx, repoRoot, repoID, now); err != nil {
+			return nil, fmt.Errorf("rebuild source manifest: %w", err)
+		} else {
+			result.SourceManifest = diagnostics
+		}
 	}
 	if metrics, err := s.computeOpenSpecMetrics(repoRoot, repoID); err != nil {
 		return nil, fmt.Errorf("compute openspec metrics: %w", err)

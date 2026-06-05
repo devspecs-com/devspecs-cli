@@ -18,7 +18,7 @@ func TestOpen_CreatesDB(t *testing.T) {
 	}
 	defer db.Close()
 
-	tables := []string{"schema_migrations", "repos", "artifacts", "artifact_revisions", "sources", "links", "artifact_todos", "artifact_criteria", "artifact_tags", "artifact_sections", "artifact_sections_fts", "concepts", "concept_mentions", "artifact_edges", "git_commits", "git_commit_files"}
+	tables := []string{"schema_migrations", "repos", "artifacts", "artifact_revisions", "sources", "links", "artifact_todos", "artifact_criteria", "artifact_tags", "artifact_sections", "artifact_sections_fts", "concepts", "concept_mentions", "artifact_edges", "git_commits", "git_commit_files", "source_manifest", "source_manifest_symbols", "source_manifest_tests", "source_manifest_imports", "source_manifest_fts"}
 	for _, table := range tables {
 		var name string
 		err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name)

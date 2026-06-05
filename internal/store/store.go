@@ -17,7 +17,7 @@ import (
 var schemaDDL string
 
 // SchemaVersion is the current schema version. Bump when schema.sql changes.
-const SchemaVersion = 11
+const SchemaVersion = 12
 
 // DB wraps *sql.DB with DevSpecs-specific operations.
 type DB struct {
@@ -106,6 +106,11 @@ func (db *DB) migrate() error {
 				return err
 			}
 			maxVersion = 11
+		case 11:
+			if err := db.migrate11To12(now); err != nil {
+				return err
+			}
+			maxVersion = 12
 		default:
 			return fmt.Errorf(
 				"index was created with schema v%d but this CLI requires v%d. Run 'ds scan --rebuild' or delete ~/.devspecs/devspecs.db and run 'ds scan' to rebuild",
@@ -330,5 +335,10 @@ func (db *DB) migrate10To11(now string) error {
 		return fmt.Errorf("migrate v10->v11 git commit body_preview: %w", err)
 	}
 	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 11, now)
+	return err
+}
+
+func (db *DB) migrate11To12(now string) error {
+	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 12, now)
 	return err
 }
