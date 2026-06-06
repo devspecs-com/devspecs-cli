@@ -73,11 +73,11 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().StringVar(&anchorMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, selected_only, strong_field, strict, code_task, code_task_family, or code_task_family_v2")
 	cmd.Flags().BoolVar(&boundaryPrimary, "experimental-boundary-primary", false, "Tier pack output into a source-safe primary working set plus related context summary")
 	cmd.Flags().StringVar(&packCompanions, "pack-companion-mode", findPackCompanionModeAll, "Hidden scout flag: off, generic, generic_git, or all")
-	cmd.Flags().StringVar(&sourcePackMode, "experimental-source-pack-mode", findSourcePackModeOff, "Hidden source pack mode: off or compact_manifest_v0")
+	cmd.Flags().StringVar(&sourcePackMode, "experimental-source-pack-mode", findSourcePackModeOff, "Hidden source pack mode: off, compact_manifest_v0, or compact_manifest_v1")
 	cmd.Flags().StringVar(&sourceManifestCandidates, "source-manifest-candidates", "off", "Hidden scout flag: off, metadata, or window")
 	cmd.Flags().BoolVar(&sourceManifestConsumption, "source-manifest-consumption", false, "Hidden scout flag: reserve/replace source manifest candidates in pack mode")
 	cmd.Flags().StringVar(&sourceTestReceipts, "source-test-receipts", findSourceTestReceiptsModeOff, "Hidden scout flag: off, receipt_v0, or related_files_receipt_v0")
-	cmd.Flags().StringVar(&packPresentationMode, "pack-presentation-mode", findPackPresentationModeOff, "Hidden scout flag: off or family_primary_v0")
+	cmd.Flags().StringVar(&packPresentationMode, "pack-presentation-mode", findPackPresentationModeOff, "Hidden scout flag: off, family_primary_v0, or family_primary_v1")
 	_ = cmd.Flags().MarkHidden("pack-companion-mode")
 	_ = cmd.Flags().MarkHidden("experimental-source-pack-mode")
 	_ = cmd.Flags().MarkHidden("source-manifest-candidates")
@@ -156,7 +156,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 			sourceManifestConsumption = env == "1" || strings.EqualFold(env, "true") || strings.EqualFold(env, "pack")
 		}
 	}
-	if sourcePackMode == findSourcePackModeCompactManifestV0 {
+	if sourcePackMode == findSourcePackModeCompactManifestV0 || sourcePackMode == findSourcePackModeCompactManifestV1 {
 		if !cmd.Flags().Changed("source-manifest-candidates") {
 			sourceManifestCandidates = string(indexquery.SourceManifestCandidateModeWindow)
 			sourceManifestMode = indexquery.SourceManifestCandidateModeWindow
@@ -239,7 +239,11 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	initialMatchCount := len(matches)
 	if pack {
 		if sourceManifestConsumption && sourceManifestMode != indexquery.SourceManifestCandidateModeOff {
-			matches = applyFindSourceManifestConsumptionScout(query, matches, candidates)
+			if sourcePackMode == findSourcePackModeCompactManifestV1 {
+				matches = applyFindSourceManifestConsumptionV1Scout(db, fp, query, matches, candidates)
+			} else {
+				matches = applyFindSourceManifestConsumptionScout(query, matches, candidates)
+			}
 		}
 		matches = addFindPackCompanionCandidates(cmd.Context(), fp.RepoRoot, query, matches, candidates, packCompanions)
 		if added := len(matches) - initialMatchCount; added > 0 {
@@ -280,6 +284,12 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 		}
 		if packPresentationMode == findPackPresentationModeFamilyPrimaryV0 {
 			rolePack = retrieval.ApplyFamilyPrimaryPackForQuery(rolePack, query)
+			if rolePack.Metadata != nil {
+				props["family_primary_count_bucket"] = telemetry.CountBucket(metadataInt(rolePack.Metadata, "family_primary_count"))
+				props["family_related_count_bucket"] = telemetry.CountBucket(metadataInt(rolePack.Metadata, "family_related_count"))
+			}
+		} else if packPresentationMode == findPackPresentationModeFamilyPrimaryV1 {
+			rolePack = retrieval.ApplyFamilyPrimaryPackV1ForQuery(rolePack, query)
 			if rolePack.Metadata != nil {
 				props["family_primary_count_bucket"] = telemetry.CountBucket(metadataInt(rolePack.Metadata, "family_primary_count"))
 				props["family_related_count_bucket"] = telemetry.CountBucket(metadataInt(rolePack.Metadata, "family_related_count"))

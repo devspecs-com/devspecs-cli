@@ -10,6 +10,8 @@ func TestNormalizeFindSourcePackMode(t *testing.T) {
 		"compact":             findSourcePackModeCompactManifestV0,
 		"source_manifest":     findSourcePackModeCompactManifestV0,
 		"compact_manifest_v0": findSourcePackModeCompactManifestV0,
+		"compact_manifest_v1": findSourcePackModeCompactManifestV1,
+		"manifest-v1":         findSourcePackModeCompactManifestV1,
 		"wat":                 "",
 	}
 	for in, want := range tests {

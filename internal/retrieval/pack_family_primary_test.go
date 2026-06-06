@@ -81,3 +81,61 @@ func TestApplyFamilyPrimaryPackForQuerySuppressesGenericMetadataAnchors(t *testi
 		t.Fatalf("specific anchors missing or generic: %#v", got.Metadata)
 	}
 }
+
+func TestApplyFamilyPrimaryPackV1ForQueryProtectsTopRankedEditTargets(t *testing.T) {
+	pack := RoleGroupedPack{
+		Mode: "role_grouped_pack_v0",
+		Groups: []PackGroup{
+			{
+				Role: PackRoleImplementation,
+				Items: []PackItem{
+					{OriginalRank: 1, ID: "cli", Path: "src/cli.rs", Title: "src/cli.rs", Role: PackRoleImplementation},
+					{OriginalRank: 2, ID: "main", Path: "src/main.rs", Title: "src/main.rs", Role: PackRoleImplementation},
+					{OriginalRank: 3, ID: "regex", Path: "src/regex_helper.rs", Title: "src/regex_helper.rs", Role: PackRoleImplementation},
+					{OriginalRank: 4, ID: "walk", Path: "src/walk.rs", Title: "src/walk.rs", Role: PackRoleImplementation},
+				},
+			},
+			{
+				Role: PackRoleBehaviorTests,
+				Items: []PackItem{
+					{OriginalRank: 5, ID: "tests", Path: "tests/tests.rs", Title: "tests/tests.rs", Role: PackRoleBehaviorTests, Subtype: "test_case"},
+				},
+			},
+		},
+	}
+
+	got := ApplyFamilyPrimaryPackV1ForQuery(pack, "tell users to enable hidden search when their pattern only matches dotfiles")
+	if got.Mode != FamilyPrimaryPackModeV1 {
+		t.Fatalf("mode = %q", got.Mode)
+	}
+	if got.Metadata["family_primary_exact_protection"] != "true" {
+		t.Fatalf("missing exact protection metadata: %#v", got.Metadata)
+	}
+	tiers := map[string]string{}
+	for _, group := range got.Groups {
+		for _, item := range group.Items {
+			tiers[item.Path] = item.PackTier
+		}
+	}
+	if tiers["src/cli.rs"] != PackTierPrimary {
+		t.Fatalf("top-ranked cli edit target should stay primary: %#v", tiers)
+	}
+	if tiers["src/main.rs"] != PackTierPrimary {
+		t.Fatalf("top-ranked main edit target should stay primary: %#v", tiers)
+	}
+}
+
+func TestFamilyPrimaryProtectedEntrySkipsWeakTutorialSource(t *testing.T) {
+	entry := &familyPrimaryEntry{
+		class: "source",
+		item: PackItem{
+			OriginalRank: 1,
+			Path:         "docs_src/custom_docs_ui/tutorial001.py",
+			Role:         PackRoleImplementation,
+		},
+		score: 12,
+	}
+	if familyPrimaryProtectedEntry(entry) {
+		t.Fatalf("tutorial source should not be exact-protected")
+	}
+}

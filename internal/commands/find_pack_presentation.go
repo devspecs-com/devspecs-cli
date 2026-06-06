@@ -8,6 +8,7 @@ import (
 const (
 	findPackPresentationModeOff             = "off"
 	findPackPresentationModeFamilyPrimaryV0 = "family_primary_v0"
+	findPackPresentationModeFamilyPrimaryV1 = "family_primary_v1"
 )
 
 func normalizeFindPackPresentationMode(value string) string {
@@ -16,13 +17,15 @@ func normalizeFindPackPresentationMode(value string) string {
 		return findPackPresentationModeOff
 	case "family_primary", "family-primary", "family_primary_v0", "family-primary-v0", "family":
 		return findPackPresentationModeFamilyPrimaryV0
+	case "family_primary_v1", "family-primary-v1", "family_v1", "family-v1":
+		return findPackPresentationModeFamilyPrimaryV1
 	default:
 		return ""
 	}
 }
 
 func validFindPackPresentationModes() []string {
-	return []string{findPackPresentationModeOff, findPackPresentationModeFamilyPrimaryV0}
+	return []string{findPackPresentationModeOff, findPackPresentationModeFamilyPrimaryV0, findPackPresentationModeFamilyPrimaryV1}
 }
 
 func metadataInt(metadata map[string]string, key string) int {
