@@ -77,6 +77,11 @@ type taskArtifactAddOptions struct {
 	Index  bool
 }
 
+type taskStatusOptions struct {
+	Dir    string
+	AsJSON bool
+}
+
 type taskCheckpointOptions struct {
 	Dir         string
 	Slice       string
@@ -136,6 +141,28 @@ type taskArtifactAddOutput struct {
 	IndexedPaths []string             `json:"indexed_paths,omitempty"`
 }
 
+type taskStatusOutput struct {
+	TaskID    string                  `json:"task_id"`
+	Series    string                  `json:"series"`
+	Status    string                  `json:"status"`
+	Decision  string                  `json:"decision,omitempty"`
+	UpdatedAt string                  `json:"updated_at,omitempty"`
+	Slices    []taskStatusSliceOutput `json:"slices,omitempty"`
+}
+
+type taskStatusSliceOutput struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Kind      string `json:"kind,omitempty"`
+	ParentID  string `json:"parent_id,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Stage     string `json:"stage,omitempty"`
+	Decision  string `json:"decision,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+	Plan      string `json:"plan"`
+	Result    string `json:"result"`
+}
+
 type taskCheckpointOutput struct {
 	TaskID             string   `json:"task_id"`
 	Series             string   `json:"series,omitempty"`
@@ -155,7 +182,9 @@ type taskManifest struct {
 	Series            string                 `json:"series,omitempty"`
 	Query             string                 `json:"query"`
 	Status            string                 `json:"status"`
+	Decision          string                 `json:"decision,omitempty"`
 	CreatedAt         string                 `json:"created_at"`
+	UpdatedAt         string                 `json:"updated_at,omitempty"`
 	RepoRoot          string                 `json:"repo_root"`
 	Workspace         string                 `json:"workspace"`
 	Artifacts         taskArtifactPaths      `json:"artifacts"`
@@ -173,13 +202,16 @@ type taskArtifactPaths struct {
 }
 
 type taskSliceArtifact struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Plan     string `json:"plan"`
-	Result   string `json:"result"`
-	Kind     string `json:"kind,omitempty"`
-	ParentID string `json:"parent_id,omitempty"`
-	Reason   string `json:"reason,omitempty"`
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Plan      string `json:"plan"`
+	Result    string `json:"result"`
+	Kind      string `json:"kind,omitempty"`
+	ParentID  string `json:"parent_id,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Stage     string `json:"stage,omitempty"`
+	Decision  string `json:"decision,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
 type taskPredictedContext struct {
@@ -308,6 +340,7 @@ templates for recording actual reads, edits, tests, misses, and noise.`,
 
 	cmd.AddCommand(newTaskSliceCmd())
 	cmd.AddCommand(newTaskIterationCmd())
+	cmd.AddCommand(newTaskStatusCmd())
 	cmd.AddCommand(newTaskCheckpointCmd())
 	cmd.AddCommand(newTaskEvaluateCmd())
 	return cmd
@@ -366,6 +399,22 @@ func newTaskIterationAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.Slice, "slice", "", "Parent slice ID/title/plan/result; defaults to the first slice")
 	cmd.Flags().StringVar(&opts.Reason, "reason", opts.Reason, "Iteration reason, usually improve or rework")
 	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the updated index and new iteration plan into the DevSpecs index")
+	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func newTaskStatusCmd() *cobra.Command {
+	var opts taskStatusOptions
+	opts.Dir = defaultTaskWorkspaceDir
+	cmd := &cobra.Command{
+		Use:   "status <task-id>",
+		Short: "Show task series, slice, and iteration state",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskStatus(cmd, args[0], opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	return cmd
 }
@@ -649,6 +698,78 @@ func writeAddedTaskArtifact(cmd *cobra.Command, repoRoot, workspace string, mani
 	fmt.Fprintf(cmd.OutOrStdout(), "Updated index: %s\n", indexPath)
 	if len(indexed) > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "Indexed: %s\n", strings.Join(indexed, ", "))
+	}
+	return nil
+}
+
+func runTaskStatus(cmd *cobra.Command, taskID string, opts taskStatusOptions) error {
+	taskID = strings.TrimSpace(taskID)
+	if err := validateTaskID(taskID); err != nil {
+		return err
+	}
+	_, _, manifest, err := loadTaskWorkspaceManifest(opts.Dir, taskID)
+	if err != nil {
+		return err
+	}
+	out := taskStatusFromManifest(manifest)
+	if opts.AsJSON {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	return writeTaskStatusHuman(cmd.OutOrStdout(), out)
+}
+
+func taskStatusFromManifest(manifest taskManifest) taskStatusOutput {
+	out := taskStatusOutput{
+		TaskID:    manifest.TaskID,
+		Series:    defaultTaskSeries(manifest.Series),
+		Status:    manifest.Status,
+		Decision:  manifest.Decision,
+		UpdatedAt: manifest.UpdatedAt,
+	}
+	for _, slice := range manifest.Artifacts.Slices {
+		out.Slices = append(out.Slices, taskStatusSliceOutput{
+			ID:        slice.ID,
+			Title:     slice.Title,
+			Kind:      slice.Kind,
+			ParentID:  slice.ParentID,
+			Reason:    slice.Reason,
+			Stage:     slice.Stage,
+			Decision:  slice.Decision,
+			UpdatedAt: slice.UpdatedAt,
+			Plan:      slice.Plan,
+			Result:    slice.Result,
+		})
+	}
+	return out
+}
+
+func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
+	fmt.Fprintf(out, "Task ID: %s\n", status.TaskID)
+	fmt.Fprintf(out, "Series: %s\n", status.Series)
+	fmt.Fprintf(out, "Status: %s\n", emptyAsDash(status.Status))
+	if status.Decision != "" {
+		fmt.Fprintf(out, "Decision: %s\n", status.Decision)
+	}
+	if status.UpdatedAt != "" {
+		fmt.Fprintf(out, "Updated At: %s\n", status.UpdatedAt)
+	}
+	for _, slice := range status.Slices {
+		fmt.Fprintf(out, "%s: %s", slice.ID, slice.Title)
+		if slice.Kind != "" {
+			fmt.Fprintf(out, " [%s]", slice.Kind)
+		}
+		if slice.ParentID != "" {
+			fmt.Fprintf(out, " parent=%s", slice.ParentID)
+		}
+		if slice.Stage != "" {
+			fmt.Fprintf(out, " stage=%s", slice.Stage)
+		}
+		if slice.Decision != "" {
+			fmt.Fprintf(out, " decision=%s", slice.Decision)
+		}
+		fmt.Fprintln(out)
 	}
 	return nil
 }
@@ -1370,6 +1491,16 @@ func renderTaskIndex(manifest taskManifest) string {
 				}
 				fmt.Fprint(&b, ")")
 			}
+			var state []string
+			if slice.Stage != "" {
+				state = append(state, "stage: "+slice.Stage)
+			}
+			if slice.Decision != "" {
+				state = append(state, "decision: "+slice.Decision)
+			}
+			if len(state) > 0 {
+				fmt.Fprintf(&b, " [%s]", strings.Join(state, ", "))
+			}
 			fmt.Fprintf(&b, ". Plan: `%s`. Result: `%s`.\n", slice.Plan, slice.Result)
 		}
 	}
@@ -1789,14 +1920,29 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	if err := appendTaskCheckpointToResult(resultPath, checkpointPath, checkpointJSONPath, workspace, opts, now); err != nil {
 		return err
 	}
+	applyTaskCheckpointState(&manifest, selectedSlice.ID, opts.Stage, opts.Decision, now)
+	if err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), manifest); err != nil {
+		return err
+	}
+	indexPath := filepath.Join(workspace, manifest.Artifacts.Index)
+	if err := os.WriteFile(indexPath, []byte(renderTaskIndex(manifest)), 0o644); err != nil {
+		return fmt.Errorf("write task index: %w", err)
+	}
 
 	var indexed []string
 	if opts.Index {
-		indexed, err = captureTaskArtifacts(cmd, repoRoot, []taskCaptureRequest{{
-			Path:   checkpointPath,
-			Title:  "Task " + taskID + " checkpoint " + opts.Stage,
-			Status: taskArtifactStatus(opts.Stage, opts.Decision),
-		}})
+		indexed, err = captureTaskArtifacts(cmd, repoRoot, []taskCaptureRequest{
+			{
+				Path:   indexPath,
+				Title:  "Task " + taskID + " preflight",
+				Status: taskArtifactStatus(manifest.Status, manifest.Decision),
+			},
+			{
+				Path:   checkpointPath,
+				Title:  "Task " + taskID + " checkpoint " + opts.Stage,
+				Status: taskArtifactStatus(opts.Stage, opts.Decision),
+			},
+		})
 		if err != nil {
 			return err
 		}
@@ -1847,6 +1993,33 @@ func normalizeTaskCheckpointOptions(opts taskCheckpointOptions) taskCheckpointOp
 		opts.TestMax = 12000
 	}
 	return opts
+}
+
+func applyTaskCheckpointState(manifest *taskManifest, targetID, stage, decision string, now time.Time) {
+	stage = strings.TrimSpace(stage)
+	decision = strings.TrimSpace(decision)
+	timestamp := now.Format(time.RFC3339)
+	if targetID == "" || strings.EqualFold(targetID, manifest.Series) || strings.EqualFold(targetID, defaultTaskSeries(manifest.Series)+"00") {
+		if stage != "" {
+			manifest.Status = stage
+		}
+		manifest.Decision = decision
+		manifest.UpdatedAt = timestamp
+		return
+	}
+	for i := range manifest.Artifacts.Slices {
+		if !strings.EqualFold(manifest.Artifacts.Slices[i].ID, targetID) {
+			continue
+		}
+		if stage != "" {
+			manifest.Artifacts.Slices[i].Stage = stage
+		}
+		manifest.Artifacts.Slices[i].Decision = decision
+		manifest.Artifacts.Slices[i].UpdatedAt = timestamp
+		manifest.UpdatedAt = timestamp
+		return
+	}
+	manifest.UpdatedAt = timestamp
 }
 
 func buildTaskCheckpointRecord(manifest taskManifest, opts taskCheckpointOptions, slice taskSliceArtifact, now time.Time, repoRoot string) taskCheckpointRecord {

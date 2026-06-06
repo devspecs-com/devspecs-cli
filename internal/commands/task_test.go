@@ -496,6 +496,57 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 	if filepath.Base(checkpointOut.ResultPath) != "B01-1-repair-lifecycle-status-result.md" {
 		t.Fatalf("checkpoint result path = %q", checkpointOut.ResultPath)
 	}
+
+	statusCmd := NewTaskCmd()
+	statusCmd.SetArgs([]string{
+		"status", "lifecycle-add-test",
+		"--json",
+	})
+	statusBuf := &bytes.Buffer{}
+	statusCmd.SetOut(statusBuf)
+	if err := statusCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var statusOut taskStatusOutput
+	if err := json.Unmarshal(statusBuf.Bytes(), &statusOut); err != nil {
+		t.Fatalf("status json: %v\n%s", err, statusBuf.String())
+	}
+	if statusOut.Series != "B" || statusOut.Status != "packed" {
+		t.Fatalf("status output = %#v", statusOut)
+	}
+	var promoted taskStatusSliceOutput
+	for _, slice := range statusOut.Slices {
+		if slice.ID == "B01-1" {
+			promoted = slice
+			break
+		}
+	}
+	if promoted.ID == "" || promoted.Stage != "implemented" || promoted.Decision != "promote" || promoted.UpdatedAt == "" {
+		t.Fatalf("promoted iteration status = %#v", promoted)
+	}
+
+	var updatedManifest taskManifest
+	if err := json.Unmarshal([]byte(mustReadFile(t, filepath.Join(workspace, taskManifestFilename))), &updatedManifest); err != nil {
+		t.Fatalf("updated manifest json: %v", err)
+	}
+	if updatedManifest.UpdatedAt == "" {
+		t.Fatalf("manifest updated_at was empty: %#v", updatedManifest)
+	}
+	var manifestIteration taskSliceArtifact
+	for _, slice := range updatedManifest.Artifacts.Slices {
+		if slice.ID == "B01-1" {
+			manifestIteration = slice
+			break
+		}
+	}
+	if manifestIteration.Stage != "implemented" || manifestIteration.Decision != "promote" || manifestIteration.UpdatedAt == "" {
+		t.Fatalf("manifest iteration state = %#v", manifestIteration)
+	}
+
+	indexBody = mustReadFile(t, filepath.Join(workspace, "B00-index.md"))
+	if !strings.Contains(indexBody, "B01-1: repair lifecycle status (iteration of B01, reason: improve) [stage: implemented, decision: promote]") {
+		t.Fatalf("index missing promoted iteration state:\n%s", indexBody)
+	}
 }
 
 func TestTask_StartWarnsAboutOnDiskAnchorMissingFromIndex(t *testing.T) {
