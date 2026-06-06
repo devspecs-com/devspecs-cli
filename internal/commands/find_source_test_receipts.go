@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	findSourceTestReceiptsModeOff       = "off"
-	findSourceTestReceiptsModeReceiptV0 = "receipt_v0"
+	findSourceTestReceiptsModeOff                   = "off"
+	findSourceTestReceiptsModeReceiptV0             = "receipt_v0"
+	findSourceTestReceiptsModeRelatedFilesReceiptV0 = "related_files_receipt_v0"
 
 	findSourceTestReceiptsMaxRows      = 4
 	findSourceTestReceiptsMaxPerFamily = 2
@@ -27,9 +28,11 @@ type FindRelatedTestContext struct {
 
 type FindRelatedTestReceipt struct {
 	Path        string   `json:"path"`
+	Kind        string   `json:"kind,omitempty"`
 	Score       float64  `json:"score,omitempty"`
 	Reasons     []string `json:"reasons,omitempty"`
 	SourcePaths []string `json:"source_paths,omitempty"`
+	SourceRole  string   `json:"source_role,omitempty"`
 	TestNames   []string `json:"test_names,omitempty"`
 }
 
@@ -69,13 +72,15 @@ func normalizeFindSourceTestReceiptsMode(mode string) string {
 		return findSourceTestReceiptsModeOff
 	case "receipt", "receipts", "related", "related_tests", "related_tests_v0", "test_receipts", findSourceTestReceiptsModeReceiptV0:
 		return findSourceTestReceiptsModeReceiptV0
+	case "related_files", "related_files_v0", "related_files_receipt", findSourceTestReceiptsModeRelatedFilesReceiptV0:
+		return findSourceTestReceiptsModeRelatedFilesReceiptV0
 	default:
 		return ""
 	}
 }
 
 func validFindSourceTestReceiptsModes() []string {
-	return []string{findSourceTestReceiptsModeOff, findSourceTestReceiptsModeReceiptV0}
+	return []string{findSourceTestReceiptsModeOff, findSourceTestReceiptsModeReceiptV0, findSourceTestReceiptsModeRelatedFilesReceiptV0}
 }
 
 func buildFindSourceTestReceipts(db *store.DB, fp store.FilterParams, query string, pack retrieval.RoleGroupedPack, mode string) (*FindRelatedTestContext, error) {
@@ -92,10 +97,25 @@ func buildFindSourceTestReceipts(db *store.DB, fp store.FilterParams, query stri
 		return nil, err
 	}
 	seen := findSourceTestPackPathSet(pack)
+	if mode == findSourceTestReceiptsModeRelatedFilesReceiptV0 {
+		return buildFindRelatedFileReceiptsFromRows(rows, ctx, seen, mode), nil
+	}
+	items := selectFindBehaviorTestReceipts(rows, ctx, seen, nil, findSourceTestReceiptsMaxRows)
+	return &FindRelatedTestContext{
+		Mode:  mode,
+		Count: len(items),
+		Items: items,
+	}, nil
+}
+
+func selectFindBehaviorTestReceipts(rows []findSourceTestManifestRow, ctx findSourceTestSourceContext, seen map[string]bool, already map[string]bool, limit int) []FindRelatedTestReceipt {
+	if already == nil {
+		already = map[string]bool{}
+	}
 	scored := make([]findSourceTestScoredReceipt, 0, len(rows))
 	for _, row := range rows {
 		path := normalizeFindGitReceiptPath(row.Path)
-		if path == "" || seen[path] || !findSourceTestBehaviorTestRow(row) {
+		if path == "" || seen[path] || already[path] || !findSourceTestBehaviorTestRow(row) {
 			continue
 		}
 		score, reasons, sources, strong := scoreFindSourceTestReceipt(row, ctx)
@@ -112,9 +132,11 @@ func buildFindSourceTestReceipts(db *store.DB, fp store.FilterParams, query stri
 		scored = append(scored, findSourceTestScoredReceipt{
 			item: FindRelatedTestReceipt{
 				Path:        path,
+				Kind:        "test",
 				Score:       roundFindSourceTestScore(score),
 				Reasons:     reasons,
 				SourcePaths: sources,
+				SourceRole:  row.SourceRole,
 				TestNames:   findSourceTestReceiptList(row.TestNames, 4),
 			},
 			family: findSourceTestPathFamily(path),
@@ -131,7 +153,7 @@ func buildFindSourceTestReceipts(db *store.DB, fp store.FilterParams, query stri
 	var items []FindRelatedTestReceipt
 	familyCounts := map[string]int{}
 	for _, candidate := range scored {
-		if len(items) >= findSourceTestReceiptsMaxRows {
+		if len(items) >= limit {
 			break
 		}
 		if !candidate.strong {
@@ -143,11 +165,73 @@ func buildFindSourceTestReceipts(db *store.DB, fp store.FilterParams, query stri
 		familyCounts[candidate.family]++
 		items = append(items, candidate.item)
 	}
+	return items
+}
+
+func buildFindRelatedFileReceiptsFromRows(rows []findSourceTestManifestRow, ctx findSourceTestSourceContext, seen map[string]bool, mode string) *FindRelatedTestContext {
+	selected := selectFindBehaviorTestReceipts(rows, ctx, seen, nil, findSourceTestReceiptsMaxRows)
+	selectedPaths := map[string]bool{}
+	familyCounts := map[string]int{}
+	for _, item := range selected {
+		path := normalizeFindGitReceiptPath(item.Path)
+		selectedPaths[path] = true
+		familyCounts[findSourceTestPathFamily(path)]++
+	}
+	remaining := findSourceTestReceiptsMaxRows - len(selected)
+	if remaining <= 0 {
+		return &FindRelatedTestContext{Mode: mode, Count: len(selected), Items: selected}
+	}
+
+	scored := make([]findSourceTestScoredReceipt, 0, len(rows))
+	for _, row := range rows {
+		path := normalizeFindGitReceiptPath(row.Path)
+		if path == "" || seen[path] || selectedPaths[path] {
+			continue
+		}
+		score, reasons, sources, strong := scoreFindSourceTestReceipt(row, ctx)
+		if !findSourceTestRelatedFileReceiptAllowed(row, score, reasons, strong) {
+			continue
+		}
+		kind := "source"
+		if findSourceTestBehaviorTestRow(row) {
+			kind = "test"
+		}
+		scored = append(scored, findSourceTestScoredReceipt{
+			item: FindRelatedTestReceipt{
+				Path:        path,
+				Kind:        kind,
+				Score:       roundFindSourceTestScore(score),
+				Reasons:     reasons,
+				SourcePaths: firstStrings(sources, 3),
+				SourceRole:  row.SourceRole,
+				TestNames:   findSourceTestReceiptList(row.TestNames, 4),
+			},
+			family: findSourceTestPathFamily(path),
+			score:  score,
+			strong: strong,
+		})
+	}
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score == scored[j].score {
+			return scored[i].item.Path < scored[j].item.Path
+		}
+		return scored[i].score > scored[j].score
+	})
+	for _, candidate := range scored {
+		if len(selected) >= findSourceTestReceiptsMaxRows {
+			break
+		}
+		if familyCounts[candidate.family] >= findSourceTestReceiptsMaxPerFamily {
+			continue
+		}
+		familyCounts[candidate.family]++
+		selected = append(selected, candidate.item)
+	}
 	return &FindRelatedTestContext{
 		Mode:  mode,
-		Count: len(items),
-		Items: items,
-	}, nil
+		Count: len(selected),
+		Items: selected,
+	}
 }
 
 func loadFindSourceTestManifestRows(db *store.DB, fp store.FilterParams) ([]findSourceTestManifestRow, error) {
@@ -325,6 +409,53 @@ func scoreFindSourceTestReceipt(row findSourceTestManifestRow, ctx findSourceTes
 		sources = append(sources, firstStrings(ctx.Paths, 2)...)
 	}
 	return score, reasons, firstStrings(sources, 3), strong
+}
+
+func findSourceTestRelatedFileReceiptAllowed(row findSourceTestManifestRow, score float64, reasons []string, strong bool) bool {
+	if score < 18 {
+		return false
+	}
+	direct := findSourceTestDirectEvidenceStrength(reasons)
+	if findSourceTestBehaviorTestRow(row) {
+		if findSourceTestTutorialOrExamplePath(row.Path) && direct < 7 {
+			return false
+		}
+		return strong || direct >= 4
+	}
+	if direct >= 5 {
+		return true
+	}
+	if strong && direct >= 2 && score >= 24 {
+		return true
+	}
+	return false
+}
+
+func findSourceTestDirectEvidenceStrength(reasons []string) int {
+	score := 0
+	for _, reason := range reasons {
+		switch {
+		case strings.HasPrefix(reason, "stem_anchor:"):
+			score += 2
+		case strings.HasPrefix(reason, "path_anchor:"):
+			score += 2
+		case strings.HasPrefix(reason, "test_name_anchor:"):
+			score += 2
+		case strings.HasPrefix(reason, "symbol_anchor:"):
+			score++
+		case strings.HasPrefix(reason, "selected_source_anchor:"):
+			score++
+		}
+	}
+	return score
+}
+
+func findSourceTestTutorialOrExamplePath(path string) bool {
+	path = strings.ToLower(normalizeFindGitReceiptPath(path))
+	return strings.Contains(path, "/test_tutorial/") ||
+		strings.Contains(path, "/tutorial") ||
+		strings.Contains(path, "/examples/") ||
+		strings.Contains(path, "/example")
 }
 
 func findSourceTestBehaviorTestRow(row findSourceTestManifestRow) bool {

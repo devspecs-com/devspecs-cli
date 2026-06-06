@@ -113,10 +113,17 @@ func writeRelatedTestsText(out io.Writer, relatedTests *FindRelatedTestContext, 
 	if relatedTests == nil || len(relatedTests.Items) == 0 {
 		return
 	}
-	fmt.Fprintf(out, "\nRelated tests from selected source context (%d)\n", len(relatedTests.Items))
+	title := "Related tests from selected source context"
+	if relatedTests.Mode == findSourceTestReceiptsModeRelatedFilesReceiptV0 {
+		title = "Related files from selected source context"
+	}
+	fmt.Fprintf(out, "\n%s (%d)\n", title, len(relatedTests.Items))
 	for _, item := range relatedTests.Items {
 		fmt.Fprintf(out, "  - %s\n", item.Path)
 		if verbose {
+			if item.Kind != "" {
+				fmt.Fprintf(out, "      Kind: %s\n", item.Kind)
+			}
 			if len(item.SourcePaths) > 0 {
 				fmt.Fprintf(out, "      Related source: %s\n", strings.Join(firstStrings(item.SourcePaths, 2), "; "))
 			}

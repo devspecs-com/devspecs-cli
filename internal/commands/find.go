@@ -75,7 +75,7 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sourcePackMode, "experimental-source-pack-mode", findSourcePackModeOff, "Hidden source pack mode: off or compact_manifest_v0")
 	cmd.Flags().StringVar(&sourceManifestCandidates, "source-manifest-candidates", "off", "Hidden scout flag: off, metadata, or window")
 	cmd.Flags().BoolVar(&sourceManifestConsumption, "source-manifest-consumption", false, "Hidden scout flag: reserve/replace source manifest candidates in pack mode")
-	cmd.Flags().StringVar(&sourceTestReceipts, "source-test-receipts", findSourceTestReceiptsModeOff, "Hidden scout flag: off or receipt_v0")
+	cmd.Flags().StringVar(&sourceTestReceipts, "source-test-receipts", findSourceTestReceiptsModeOff, "Hidden scout flag: off, receipt_v0, or related_files_receipt_v0")
 	_ = cmd.Flags().MarkHidden("pack-companion-mode")
 	_ = cmd.Flags().MarkHidden("experimental-source-pack-mode")
 	_ = cmd.Flags().MarkHidden("source-manifest-candidates")
