@@ -78,6 +78,9 @@ func buildFindPackAssemblyFromMatches(ctx context.Context, db *store.DB, fp stor
 	} else {
 		rolePack = applyFindPackPresentationMode(rolePack, query, opts.PackPresentationMode)
 	}
+	if normalizeFindPackScoutMode(opts.PackScoutMode) == findPackScoutModeBetaV0 {
+		rolePack = retrieval.ApplyDemotionOnlyNegativeEvidence(rolePack, query)
+	}
 	rolePack = annotateFindPackScoutMode(rolePack, opts.PackScoutMode)
 
 	return findPackAssemblyResult{
@@ -123,4 +126,7 @@ func recordFindPackPresentationProps(props map[string]any, rolePack retrieval.Ro
 	}
 	props["family_primary_count_bucket"] = telemetry.CountBucket(metadataInt(rolePack.Metadata, "family_primary_count"))
 	props["family_related_count_bucket"] = telemetry.CountBucket(metadataInt(rolePack.Metadata, "family_related_count"))
+	if count := metadataInt(rolePack.Metadata, "negative_evidence_count"); count > 0 {
+		props["pack_negative_evidence_count_bucket"] = telemetry.CountBucket(count)
+	}
 }
