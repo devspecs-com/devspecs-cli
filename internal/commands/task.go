@@ -69,6 +69,14 @@ type taskStartOptions struct {
 	Index     bool
 }
 
+type taskArtifactAddOptions struct {
+	Dir    string
+	Slice  string
+	Reason string
+	AsJSON bool
+	Index  bool
+}
+
 type taskCheckpointOptions struct {
 	Dir         string
 	Slice       string
@@ -119,6 +127,15 @@ type taskStartSliceOutput struct {
 	ResultPath string `json:"result_path"`
 }
 
+type taskArtifactAddOutput struct {
+	TaskID       string               `json:"task_id"`
+	Series       string               `json:"series"`
+	Slice        taskStartSliceOutput `json:"slice"`
+	ManifestPath string               `json:"manifest_path"`
+	IndexPath    string               `json:"index_path"`
+	IndexedPaths []string             `json:"indexed_paths,omitempty"`
+}
+
 type taskCheckpointOutput struct {
 	TaskID             string   `json:"task_id"`
 	Series             string   `json:"series,omitempty"`
@@ -156,10 +173,13 @@ type taskArtifactPaths struct {
 }
 
 type taskSliceArtifact struct {
-	ID     string `json:"id"`
-	Title  string `json:"title"`
-	Plan   string `json:"plan"`
-	Result string `json:"result"`
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Plan     string `json:"plan"`
+	Result   string `json:"result"`
+	Kind     string `json:"kind,omitempty"`
+	ParentID string `json:"parent_id,omitempty"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 type taskPredictedContext struct {
@@ -286,8 +306,67 @@ templates for recording actual reads, edits, tests, misses, and noise.`,
 	cmd.Flags().BoolVar(&opts.Force, "force", false, "Overwrite an existing task workspace")
 	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the series index and slice plans into the DevSpecs index")
 
+	cmd.AddCommand(newTaskSliceCmd())
+	cmd.AddCommand(newTaskIterationCmd())
 	cmd.AddCommand(newTaskCheckpointCmd())
 	cmd.AddCommand(newTaskEvaluateCmd())
+	return cmd
+}
+
+func newTaskSliceCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "slice",
+		Short: "Manage task slice artifacts",
+	}
+	cmd.AddCommand(newTaskSliceAddCmd())
+	return cmd
+}
+
+func newTaskSliceAddCmd() *cobra.Command {
+	var opts taskArtifactAddOptions
+	opts.Dir = defaultTaskWorkspaceDir
+	opts.Index = true
+	cmd := &cobra.Command{
+		Use:   "add <task-id> <title>",
+		Short: "Add a new slice plan/result pair to a task workspace",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskSliceAdd(cmd, args[0], args[1], opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
+	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the updated index and new slice plan into the DevSpecs index")
+	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func newTaskIterationCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "iteration",
+		Short: "Manage task slice iteration artifacts",
+	}
+	cmd.AddCommand(newTaskIterationAddCmd())
+	return cmd
+}
+
+func newTaskIterationAddCmd() *cobra.Command {
+	var opts taskArtifactAddOptions
+	opts.Dir = defaultTaskWorkspaceDir
+	opts.Reason = "improve"
+	opts.Index = true
+	cmd := &cobra.Command{
+		Use:   "add <task-id> <title>",
+		Short: "Add a new iteration plan/result pair under an existing slice",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskIterationAdd(cmd, args[0], args[1], opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
+	cmd.Flags().StringVar(&opts.Slice, "slice", "", "Parent slice ID/title/plan/result; defaults to the first slice")
+	cmd.Flags().StringVar(&opts.Reason, "reason", opts.Reason, "Iteration reason, usually improve or rework")
+	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the updated index and new iteration plan into the DevSpecs index")
+	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	return cmd
 }
 
@@ -452,6 +531,128 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 	return writeTaskStartHuman(cmd.OutOrStdout(), out, preflight.Confidence)
 }
 
+func runTaskSliceAdd(cmd *cobra.Command, taskID, title string, opts taskArtifactAddOptions) error {
+	taskID = strings.TrimSpace(taskID)
+	if err := validateTaskID(taskID); err != nil {
+		return err
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return fmt.Errorf("slice title is empty")
+	}
+	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(opts.Dir, taskID)
+	if err != nil {
+		return err
+	}
+	series := defaultTaskSeries(manifest.Series)
+	slice := newTaskSliceArtifact(series, nextTaskSliceOrdinal(manifest), title, taskUsedSliceSlugs(manifest))
+	manifest.Artifacts.Slices = append(manifest.Artifacts.Slices, slice)
+	if manifest.Artifacts.FirstSlice == "" {
+		manifest.Artifacts.FirstSlice = slice.Plan
+	}
+	if manifest.Artifacts.Result == "" {
+		manifest.Artifacts.Result = slice.Result
+	}
+	return writeAddedTaskArtifact(cmd, repoRoot, workspace, manifest, slice, opts)
+}
+
+func runTaskIterationAdd(cmd *cobra.Command, taskID, title string, opts taskArtifactAddOptions) error {
+	taskID = strings.TrimSpace(taskID)
+	if err := validateTaskID(taskID); err != nil {
+		return err
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return fmt.Errorf("iteration title is empty")
+	}
+	reason := strings.TrimSpace(opts.Reason)
+	if reason == "" {
+		reason = "improve"
+	}
+	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(opts.Dir, taskID)
+	if err != nil {
+		return err
+	}
+	parent, err := taskSliceForCheckpoint(manifest, opts.Slice)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(parent.ID, "-") {
+		return fmt.Errorf("cannot add an iteration under iteration %q; choose a parent slice", parent.ID)
+	}
+	iteration := newTaskIterationArtifact(parent, nextTaskIterationOrdinal(manifest, parent.ID), title, reason, taskUsedSliceSlugs(manifest))
+	manifest.Artifacts.Slices = append(manifest.Artifacts.Slices, iteration)
+	return writeAddedTaskArtifact(cmd, repoRoot, workspace, manifest, iteration, opts)
+}
+
+func loadTaskWorkspaceManifest(baseDir, taskID string) (string, string, taskManifest, error) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", "", taskManifest{}, err
+	}
+	repoRoot := canonicalRepoRoot(resolveRepoRootFromWd(wd))
+	workspace := taskWorkspacePath(repoRoot, baseDir, taskID)
+	manifest, err := readTaskManifest(filepath.Join(workspace, taskManifestFilename))
+	if err != nil {
+		return "", "", taskManifest{}, err
+	}
+	return repoRoot, workspace, manifest, nil
+}
+
+func writeAddedTaskArtifact(cmd *cobra.Command, repoRoot, workspace string, manifest taskManifest, slice taskSliceArtifact, opts taskArtifactAddOptions) error {
+	indexPath := filepath.Join(workspace, manifest.Artifacts.Index)
+	planPath := filepath.Join(workspace, slice.Plan)
+	resultPath := filepath.Join(workspace, slice.Result)
+	files := map[string]string{
+		indexPath:  renderTaskIndex(manifest),
+		planPath:   renderTaskSlicePlan(manifest, slice),
+		resultPath: renderTaskSliceResultTemplate(manifest, slice),
+	}
+	for path, body := range files {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", path, err)
+		}
+	}
+	manifestPath := filepath.Join(workspace, taskManifestFilename)
+	if err := writeTaskManifest(manifestPath, manifest); err != nil {
+		return err
+	}
+
+	var indexed []string
+	var err error
+	if opts.Index {
+		indexed, err = captureTaskArtifacts(cmd, repoRoot, []taskCaptureRequest{
+			{Path: indexPath, Title: "Task " + manifest.TaskID + " preflight", Status: "implementing"},
+			{Path: planPath, Title: "Task " + manifest.TaskID + " " + slice.ID + " plan: " + slice.Title, Status: "implementing"},
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	out := taskArtifactAddOutput{
+		TaskID:       manifest.TaskID,
+		Series:       defaultTaskSeries(manifest.Series),
+		Slice:        taskStartSliceOutput{ID: slice.ID, Title: slice.Title, PlanPath: planPath, ResultPath: resultPath},
+		ManifestPath: manifestPath,
+		IndexPath:    indexPath,
+		IndexedPaths: indexed,
+	}
+	if opts.AsJSON {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Added %s: %s\n", slice.ID, slice.Title)
+	fmt.Fprintf(cmd.OutOrStdout(), "%s plan: %s\n", slice.ID, planPath)
+	fmt.Fprintf(cmd.OutOrStdout(), "%s result: %s\n", slice.ID, resultPath)
+	fmt.Fprintf(cmd.OutOrStdout(), "Updated index: %s\n", indexPath)
+	if len(indexed) > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "Indexed: %s\n", strings.Join(indexed, ", "))
+	}
+	return nil
+}
+
 type taskAbsolutePaths struct {
 	Index      string
 	FirstSlice string
@@ -472,16 +673,109 @@ func taskSliceArtifacts(series, query string, values []string) []taskSliceArtifa
 	usedSlugs := map[string]int{}
 	var out []taskSliceArtifact
 	for i, title := range titles {
-		id := fmt.Sprintf("%s%02d", series, i+1)
-		slug := uniqueTaskSliceSlug(title, usedSlugs)
-		out = append(out, taskSliceArtifact{
-			ID:     id,
-			Title:  title,
-			Plan:   fmt.Sprintf("%s-%s-plan.md", id, slug),
-			Result: fmt.Sprintf("%s-%s-result.md", id, slug),
-		})
+		out = append(out, taskSliceArtifactWithSlug(fmt.Sprintf("%s%02d", series, i+1), title, uniqueTaskSliceSlug(title, usedSlugs), "slice", "", ""))
 	}
 	return out
+}
+
+func newTaskSliceArtifact(series string, ordinal int, title string, usedSlugs map[string]int) taskSliceArtifact {
+	if ordinal <= 0 {
+		ordinal = 1
+	}
+	id := fmt.Sprintf("%s%02d", defaultTaskSeries(series), ordinal)
+	return taskSliceArtifactWithSlug(id, title, uniqueTaskSliceSlug(title, usedSlugs), "slice", "", "")
+}
+
+func newTaskIterationArtifact(parent taskSliceArtifact, ordinal int, title, reason string, usedSlugs map[string]int) taskSliceArtifact {
+	if ordinal <= 0 {
+		ordinal = 1
+	}
+	id := fmt.Sprintf("%s-%d", parent.ID, ordinal)
+	return taskSliceArtifactWithSlug(id, title, uniqueTaskSliceSlug(title, usedSlugs), "iteration", parent.ID, reason)
+}
+
+func taskSliceArtifactWithSlug(id, title, slug, kind, parentID, reason string) taskSliceArtifact {
+	if kind == "" {
+		kind = "slice"
+	}
+	return taskSliceArtifact{
+		ID:       id,
+		Title:    title,
+		Plan:     fmt.Sprintf("%s-%s-plan.md", id, slug),
+		Result:   fmt.Sprintf("%s-%s-result.md", id, slug),
+		Kind:     kind,
+		ParentID: parentID,
+		Reason:   reason,
+	}
+}
+
+func nextTaskSliceOrdinal(manifest taskManifest) int {
+	series := defaultTaskSeries(manifest.Series)
+	maxOrdinal := 0
+	for _, slice := range manifest.Artifacts.Slices {
+		if slice.ParentID != "" || strings.Contains(slice.ID, "-") {
+			continue
+		}
+		id := strings.ToUpper(strings.TrimSpace(slice.ID))
+		if !strings.HasPrefix(id, series) {
+			continue
+		}
+		ordinal, ok := parseTaskOrdinal(id[len(series):])
+		if ok && ordinal > maxOrdinal {
+			maxOrdinal = ordinal
+		}
+	}
+	return maxOrdinal + 1
+}
+
+func nextTaskIterationOrdinal(manifest taskManifest, parentID string) int {
+	prefix := strings.ToUpper(strings.TrimSpace(parentID)) + "-"
+	maxOrdinal := 0
+	for _, slice := range manifest.Artifacts.Slices {
+		id := strings.ToUpper(strings.TrimSpace(slice.ID))
+		if !strings.HasPrefix(id, prefix) {
+			continue
+		}
+		ordinal, ok := parseTaskOrdinal(strings.TrimPrefix(id, prefix))
+		if ok && ordinal > maxOrdinal {
+			maxOrdinal = ordinal
+		}
+	}
+	return maxOrdinal + 1
+}
+
+func parseTaskOrdinal(value string) (int, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, false
+	}
+	ordinal := 0
+	for _, r := range value {
+		if !unicode.IsDigit(r) {
+			return 0, false
+		}
+		ordinal = ordinal*10 + int(r-'0')
+	}
+	return ordinal, true
+}
+
+func taskUsedSliceSlugs(manifest taskManifest) map[string]int {
+	used := map[string]int{}
+	for _, slice := range manifest.Artifacts.Slices {
+		path := slice.Plan
+		if path == "" {
+			path = slice.Result
+		}
+		base := filepath.Base(filepath.ToSlash(path))
+		base = strings.TrimSuffix(base, "-plan.md")
+		base = strings.TrimSuffix(base, "-result.md")
+		parts := strings.SplitN(base, "-", 2)
+		if len(parts) != 2 || parts[1] == "" {
+			continue
+		}
+		used[parts[1]]++
+	}
+	return used
 }
 
 func normalizeTaskSliceTitles(query string, values []string) []string {
@@ -1068,7 +1362,15 @@ func renderTaskIndex(manifest taskManifest) string {
 		fmt.Fprintln(&b, "No named slice artifacts were recorded in the manifest.")
 	} else {
 		for _, slice := range manifest.Artifacts.Slices {
-			fmt.Fprintf(&b, "- %s: %s. Plan: `%s`. Result: `%s`.\n", slice.ID, slice.Title, slice.Plan, slice.Result)
+			fmt.Fprintf(&b, "- %s: %s", slice.ID, slice.Title)
+			if slice.ParentID != "" {
+				fmt.Fprintf(&b, " (iteration of %s", slice.ParentID)
+				if slice.Reason != "" {
+					fmt.Fprintf(&b, ", reason: %s", slice.Reason)
+				}
+				fmt.Fprint(&b, ")")
+			}
+			fmt.Fprintf(&b, ". Plan: `%s`. Result: `%s`.\n", slice.Plan, slice.Result)
 		}
 	}
 	fmt.Fprintln(&b)

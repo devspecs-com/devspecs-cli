@@ -386,6 +386,118 @@ func TestTask_StartGeneratesRequestedSeriesArtifacts(t *testing.T) {
 	}
 }
 
+func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "lifecycle-add-test",
+		"--series", "B",
+		"--no-refresh",
+		"--index=false",
+		"--slice", "first lifecycle slice",
+		"task lifecycle flow",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	sliceCmd := NewTaskCmd()
+	sliceCmd.SetArgs([]string{
+		"slice", "add", "lifecycle-add-test", "second lifecycle slice",
+		"--index=false",
+		"--json",
+	})
+	sliceBuf := &bytes.Buffer{}
+	sliceCmd.SetOut(sliceBuf)
+	if err := sliceCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var sliceOut taskArtifactAddOutput
+	if err := json.Unmarshal(sliceBuf.Bytes(), &sliceOut); err != nil {
+		t.Fatalf("slice add json: %v\n%s", err, sliceBuf.String())
+	}
+	if sliceOut.Series != "B" || sliceOut.Slice.ID != "B02" {
+		t.Fatalf("slice add output = %#v", sliceOut)
+	}
+	if filepath.Base(sliceOut.Slice.PlanPath) != "B02-second-lifecycle-slice-plan.md" {
+		t.Fatalf("slice plan = %q", sliceOut.Slice.PlanPath)
+	}
+
+	iterationCmd := NewTaskCmd()
+	iterationCmd.SetArgs([]string{
+		"iteration", "add", "lifecycle-add-test", "repair lifecycle status",
+		"--slice", "B01",
+		"--reason", "improve",
+		"--index=false",
+		"--json",
+	})
+	iterationBuf := &bytes.Buffer{}
+	iterationCmd.SetOut(iterationBuf)
+	if err := iterationCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var iterationOut taskArtifactAddOutput
+	if err := json.Unmarshal(iterationBuf.Bytes(), &iterationOut); err != nil {
+		t.Fatalf("iteration add json: %v\n%s", err, iterationBuf.String())
+	}
+	if iterationOut.Series != "B" || iterationOut.Slice.ID != "B01-1" {
+		t.Fatalf("iteration add output = %#v", iterationOut)
+	}
+	if filepath.Base(iterationOut.Slice.PlanPath) != "B01-1-repair-lifecycle-status-plan.md" {
+		t.Fatalf("iteration plan = %q", iterationOut.Slice.PlanPath)
+	}
+
+	workspace := filepath.Join(repoDir, ".devspecs", "tasks", "lifecycle-add-test")
+	indexBody := mustReadFile(t, filepath.Join(workspace, "B00-index.md"))
+	for _, want := range []string{
+		"B02: second lifecycle slice",
+		"B01-1: repair lifecycle status (iteration of B01, reason: improve)",
+	} {
+		if !strings.Contains(indexBody, want) {
+			t.Fatalf("index missing %q:\n%s", want, indexBody)
+		}
+	}
+
+	var manifest taskManifest
+	if err := json.Unmarshal([]byte(mustReadFile(t, filepath.Join(workspace, taskManifestFilename))), &manifest); err != nil {
+		t.Fatalf("manifest json: %v", err)
+	}
+	if len(manifest.Artifacts.Slices) != 3 {
+		t.Fatalf("manifest slices = %#v", manifest.Artifacts.Slices)
+	}
+	iteration := manifest.Artifacts.Slices[2]
+	if iteration.ID != "B01-1" || iteration.Kind != "iteration" || iteration.ParentID != "B01" || iteration.Reason != "improve" {
+		t.Fatalf("iteration manifest entry = %#v", iteration)
+	}
+
+	checkpointCmd := NewTaskCmd()
+	checkpointCmd.SetArgs([]string{
+		"checkpoint", "lifecycle-add-test",
+		"--slice", "B01-1",
+		"--stage", "implemented",
+		"--decision", "promote",
+		"--index=false",
+		"--json",
+	})
+	checkpointBuf := &bytes.Buffer{}
+	checkpointCmd.SetOut(checkpointBuf)
+	if err := checkpointCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var checkpointOut taskCheckpointOutput
+	if err := json.Unmarshal(checkpointBuf.Bytes(), &checkpointOut); err != nil {
+		t.Fatalf("checkpoint json: %v\n%s", err, checkpointBuf.String())
+	}
+	if checkpointOut.Slice != "B01-1" {
+		t.Fatalf("checkpoint output = %#v", checkpointOut)
+	}
+	if filepath.Base(checkpointOut.ResultPath) != "B01-1-repair-lifecycle-status-result.md" {
+		t.Fatalf("checkpoint result path = %q", checkpointOut.ResultPath)
+	}
+}
+
 func TestTask_StartWarnsAboutOnDiskAnchorMissingFromIndex(t *testing.T) {
 	repoDir := setupTaskCommandRepo(t)
 	stalePath := filepath.Join(repoDir, "internal", "retrieval", "companion_recall_new.go")
