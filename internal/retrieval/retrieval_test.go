@@ -37,6 +37,33 @@ func TestWeightedFilesRetrieverV0_RetrievesAndExplainsCandidates(t *testing.T) {
 	}
 }
 
+func TestExplainCandidatesOrdersTermReasonsByEvidenceStrength(t *testing.T) {
+	candidates := []Candidate{{
+		Path:  "tests/e2e/tests/auth/mcp-oauth-settings-gate.sb.test.ts",
+		Title: "settings gate",
+		Body:  "fix dcr metadata handling",
+	}}
+
+	reasons := ExplainCandidates(candidates, "Fix MCP OAuth DCR metadata handling")
+	if len(reasons) != 1 {
+		t.Fatalf("reasons = %#v", reasons)
+	}
+	got := reasons[0].Reasons
+	wantPrefix := []string{
+		"query term match in path: mcp",
+		"query term match in path: oauth",
+		"query term match in body: dcr",
+	}
+	if len(got) < len(wantPrefix) {
+		t.Fatalf("too few reasons: %#v", got)
+	}
+	for i, want := range wantPrefix {
+		if got[i] != want {
+			t.Fatalf("reason[%d] = %q, want %q; all=%#v", i, got[i], want, got)
+		}
+	}
+}
+
 func TestArtifactRolePrefersDetectedSubtypeBeforeClassifierFallback(t *testing.T) {
 	cases := []struct {
 		name string

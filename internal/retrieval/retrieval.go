@@ -5543,26 +5543,7 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 	if anchor := testNameAnchorScore(c, queryLower); anchor.score > 0 {
 		reasons = append(reasons, anchor.reason)
 	}
-	for term := range terms {
-		if term == "" {
-			continue
-		}
-		switch {
-		case strings.Contains(pathLower, term):
-			reasons = append(reasons, "query term match in path: "+term)
-		case strings.Contains(titleLower, term):
-			reasons = append(reasons, "query term match in title: "+term)
-		case strings.Contains(bodyLower, term):
-			if strings.ContainsAny(term, "_.-") {
-				reasons = append(reasons, "identifier/body match: "+term)
-			} else {
-				reasons = append(reasons, "query term match in body: "+term)
-			}
-		}
-		if len(reasons) >= 3 {
-			break
-		}
-	}
+	reasons = appendQueryTermReasons(reasons, terms, pathLower, titleLower, bodyLower)
 	role := candidateRole(c)
 	switch role {
 	case "adr":
@@ -5621,6 +5602,54 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 		reasons = append(reasons, "selected by retriever score")
 	}
 	return uniqueStrings(reasons)
+}
+
+func appendQueryTermReasons(reasons []string, terms map[string]float64, pathLower, titleLower, bodyLower string) []string {
+	termList := make([]string, 0, len(terms))
+	for term := range terms {
+		if term != "" {
+			termList = append(termList, term)
+		}
+	}
+	sort.Strings(termList)
+	used := map[string]bool{}
+	add := func(reason string) bool {
+		reasons = append(reasons, reason)
+		return len(reasons) >= 3
+	}
+	for _, term := range termList {
+		if strings.Contains(pathLower, term) {
+			used[term] = true
+			if add("query term match in path: " + term) {
+				return reasons
+			}
+		}
+	}
+	for _, term := range termList {
+		if used[term] || !strings.Contains(titleLower, term) {
+			continue
+		}
+		used[term] = true
+		if add("query term match in title: " + term) {
+			return reasons
+		}
+	}
+	for _, term := range termList {
+		if used[term] || !strings.Contains(bodyLower, term) {
+			continue
+		}
+		used[term] = true
+		if strings.ContainsAny(term, "_.-") {
+			if add("identifier/body match: " + term) {
+				return reasons
+			}
+			continue
+		}
+		if add("query term match in body: " + term) {
+			return reasons
+		}
+	}
+	return reasons
 }
 
 func expandOpenSpecLinks(selected []Candidate, universe []Candidate, queryLower string, limit int) []Candidate {
