@@ -235,16 +235,9 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	retriever := retrieval.WeightedFilesRetrieverV0{AnchorFirstRanking: anchorFirst, AnchorFirstMode: anchorMode}
 	var baselineMatches []retrieval.Candidate
 	if pack && sourcePackMode == findSourcePackModeCompactManifestV2 {
-		baselineMatches = retriever.Retrieve(baseCandidates, query)
-		if len(baselineMatches) == 0 {
-			baselineMatches = retrieval.QueryBaseline(baseCandidates, query)
-		}
+		baselineMatches = retrieveFindMatches(retriever, baseCandidates, query)
 	}
-	matches := retriever.Retrieve(candidates, query)
-	if len(matches) == 0 {
-		matches = retrieval.QueryBaseline(candidates, query)
-	}
-	initialMatchCount := len(matches)
+	matches := retrieveFindMatches(retriever, candidates, query)
 	if pack {
 		if sourceManifestConsumption && sourceManifestMode != indexquery.SourceManifestCandidateModeOff {
 			if sourcePackMode == findSourcePackModeCompactManifestV2 {
@@ -258,13 +251,34 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 				matches = applyFindSourceManifestConsumptionScout(query, matches, candidates)
 			}
 		}
-		matches = addFindPackCompanionCandidates(cmd.Context(), fp.RepoRoot, query, matches, candidates, packCompanions)
-		if added := len(matches) - initialMatchCount; added > 0 {
-			props["pack_companion_count_bucket"] = telemetry.CountBucket(added)
-		}
 	}
 	reasons := reasonsByPath(retrieval.ExplainCandidates(matches, query))
 	var graphDiagnostics FindGraphDiagnostics
+	var packAssembly findPackAssemblyResult
+	if pack {
+		packAssembly, err = buildFindPackAssemblyFromMatches(cmd.Context(), db, fp, query, matches, candidates, findPackAssemblyOptions{
+			PackCompanions:       packCompanions,
+			SourceTestReceipts:   sourceTestReceipts,
+			GitReceipts:          gitReceipts,
+			BoundaryPrimary:      boundaryPrimary,
+			PackPresentationMode: packPresentationMode,
+		})
+		if err != nil {
+			return err
+		}
+		matches = packAssembly.Matches
+		reasons = packAssembly.Reasons
+		if packAssembly.CompanionAdded > 0 {
+			props["pack_companion_count_bucket"] = telemetry.CountBucket(packAssembly.CompanionAdded)
+		}
+		if packAssembly.RelatedTests != nil {
+			props["source_test_receipt_count_bucket"] = telemetry.CountBucket(len(packAssembly.RelatedTests.Items))
+		}
+		if packAssembly.GitTrust != nil {
+			props["git_receipt_count_bucket"] = telemetry.CountBucket(len(packAssembly.GitTrust.Receipts))
+		}
+		recordFindPackPresentationProps(props, packAssembly.RolePack)
+	}
 	if graphDiag {
 		graphDiagnostics = buildFindGraphDiagnostics(db, fp, query, matches)
 		props["graph_candidate_count_bucket"] = telemetry.CountBucket(graphDiagnostics.CandidateCount)
@@ -273,58 +287,17 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	props["result_count_bucket"] = telemetry.CountBucket(len(matches))
 
 	if pack {
-		rolePack := retrieval.BuildRoleGroupedPack(matches, reasons, query)
-		receiptPack := rolePack
-		var relatedTests *FindRelatedTestContext
-		if sourceTestReceipts != findSourceTestReceiptsModeOff {
-			relatedTests, err = buildFindSourceTestReceipts(db, fp, query, receiptPack, sourceTestReceipts)
-			if err != nil {
-				return fmt.Errorf("find source test receipts: %w", err)
-			}
-			if relatedTests != nil {
-				props["source_test_receipt_count_bucket"] = telemetry.CountBucket(len(relatedTests.Items))
-			}
-		}
-		var gitTrust *FindGitTrustContext
-		if gitReceipts && fp.RepoRoot != "" {
-			gitTrust = buildFindGitTrustContext(cmd.Context(), fp.RepoRoot, query, receiptPack)
-			if gitTrust != nil {
-				props["git_receipt_count_bucket"] = telemetry.CountBucket(len(gitTrust.Receipts))
-			}
-		}
-		if boundaryPrimary {
-			rolePack = retrieval.ApplyBoundaryPrimaryPackForQuery(rolePack, query)
-		}
-		if packPresentationMode == findPackPresentationModeFamilyPrimaryV0 {
-			rolePack = retrieval.ApplyFamilyPrimaryPackForQuery(rolePack, query)
-			if rolePack.Metadata != nil {
-				props["family_primary_count_bucket"] = telemetry.CountBucket(metadataInt(rolePack.Metadata, "family_primary_count"))
-				props["family_related_count_bucket"] = telemetry.CountBucket(metadataInt(rolePack.Metadata, "family_related_count"))
-			}
-		} else if packPresentationMode == findPackPresentationModeFamilyPrimaryV1 {
-			rolePack = retrieval.ApplyFamilyPrimaryPackV1ForQuery(rolePack, query)
-			if rolePack.Metadata != nil {
-				props["family_primary_count_bucket"] = telemetry.CountBucket(metadataInt(rolePack.Metadata, "family_primary_count"))
-				props["family_related_count_bucket"] = telemetry.CountBucket(metadataInt(rolePack.Metadata, "family_related_count"))
-			}
-		} else if packPresentationMode == findPackPresentationModeFamilyPrimaryV2 {
-			rolePack = retrieval.ApplyFamilyPrimaryPackV2ForQuery(rolePack, query)
-			if rolePack.Metadata != nil {
-				props["family_primary_count_bucket"] = telemetry.CountBucket(metadataInt(rolePack.Metadata, "family_primary_count"))
-				props["family_related_count_bucket"] = telemetry.CountBucket(metadataInt(rolePack.Metadata, "family_related_count"))
-			}
-		}
 		if asJSON {
-			out := findPackOutput(query, retriever.Name(), matches, reasons, rolePack)
-			out.RelatedTests = relatedTests
-			out.GitTrust = gitTrust
+			out := findPackOutput(query, retriever.Name(), matches, reasons, packAssembly.RolePack)
+			out.RelatedTests = packAssembly.RelatedTests
+			out.GitTrust = packAssembly.GitTrust
 			if graphDiag {
 				out.GraphDiagnostics = &graphDiagnostics
 				out.GraphContext = findGraphPackContext(graphDiagnostics)
 			}
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(out)
 		}
-		if err := writeFindPackText(cmd.OutOrStdout(), query, retriever.Name(), rolePack, relatedTests, gitTrust, verbose); err != nil {
+		if err := writeFindPackText(cmd.OutOrStdout(), query, retriever.Name(), packAssembly.RolePack, packAssembly.RelatedTests, packAssembly.GitTrust, verbose); err != nil {
 			return err
 		}
 		if graphDiag {

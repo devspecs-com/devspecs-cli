@@ -153,6 +153,12 @@ func TestTask_StartCreatesUncertaintyAwareWorkspace(t *testing.T) {
 	if !strings.Contains(manifest, `"slices"`) || !strings.Contains(manifest, `"A01-improve-test-companion-recall-plan.md"`) {
 		t.Fatalf("manifest missing slice artifacts:\n%s", manifest)
 	}
+	if !containsPath(out.PrimaryFiles, "internal/retrieval/ranking.go") {
+		t.Fatalf("task preflight missing primary source from shared pack assembly: %#v", out.PrimaryFiles)
+	}
+	if !containsPath(out.TestFiles, "internal/retrieval/ranking_test.go") {
+		t.Fatalf("task preflight missing test companion from shared pack assembly: %#v", out.TestFiles)
+	}
 
 	db, err := openDB()
 	if err != nil {
@@ -495,11 +501,14 @@ func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
 	if evalOut.TaskID != "checkpoint-test" {
 		t.Fatalf("evaluation task id = %q", evalOut.TaskID)
 	}
-	if len(evalOut.Misses) == 0 {
-		t.Fatalf("expected evaluation misses, got %#v", evalOut)
+	if !containsPath(evalOut.Hits, "internal/retrieval/ranking_test.go") {
+		t.Fatalf("expected shared pack assembly to count test as a hit, got %#v", evalOut)
 	}
-	if !containsPath(evalOut.Misses, "internal/retrieval/ranking_test.go") {
-		t.Fatalf("expected test miss in evaluation, got %#v", evalOut.Misses)
+	if containsPath(evalOut.Misses, "internal/retrieval/ranking_test.go") {
+		t.Fatalf("predicted test should not remain an evaluation miss, got %#v", evalOut.Misses)
+	}
+	if evalOut.Metrics.TestCompanionRecall != "1/1" {
+		t.Fatalf("test companion recall = %q", evalOut.Metrics.TestCompanionRecall)
 	}
 	if !containsPath(evalOut.Noise, "fixtures/noisy-plan.md") {
 		t.Fatalf("expected noise file in evaluation, got %#v", evalOut.Noise)

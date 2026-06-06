@@ -596,18 +596,41 @@ func buildTaskPreflight(cmd *cobra.Command, repoRoot, query string, noRefresh bo
 		AnchorFirstRanking: true,
 		AnchorFirstMode:    retrieval.DefaultAnchorFirstMode,
 	}
-	matches := retriever.Retrieve(candidates, query)
-	if len(matches) == 0 {
-		matches = retrieval.QueryBaseline(candidates, query)
+	matches := retrieveFindMatches(retriever, candidates, query)
+	packResult, err := buildFindPackAssemblyFromMatches(cmd.Context(), db, fp, query, matches, candidates, findPackAssemblyOptions{
+		PackCompanions:       taskPackCompanionMode(),
+		SourceTestReceipts:   findSourceTestReceiptsModeOff,
+		GitReceipts:          true,
+		PackPresentationMode: taskPackPresentationMode(),
+	})
+	if err != nil {
+		return taskPreflight{}, fmt.Errorf("task preflight pack assembly: %w", err)
 	}
-	reasons := reasonsByPath(retrieval.ExplainCandidates(matches, query))
-	rolePack := retrieval.BuildRoleGroupedPack(matches, reasons, query)
-	gitTrust := buildFindGitTrustContext(cmd.Context(), repoRoot, query, rolePack)
-	predicted := predictedContextFromPack(rolePack, gitTrust)
+	predicted := predictedContextFromPack(packResult.RolePack, packResult.GitTrust)
 	predicted.RelevantAreas = relevantAreasFromPredicted(predicted)
 	freshnessWarnings := taskFreshnessWarnings(repoRoot, query, candidates)
 	confidence := confidenceForPredicted(predicted)
 	return taskPreflight{Predicted: predicted, FreshnessWarnings: freshnessWarnings, Confidence: confidence}, nil
+}
+
+func taskPackCompanionMode() string {
+	if value := strings.TrimSpace(os.Getenv("DEVSPECS_TASK_PACK_COMPANION_MODE")); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(os.Getenv("DEVSPECS_PACK_COMPANION_MODE")); value != "" {
+		return value
+	}
+	return findPackCompanionModeAll
+}
+
+func taskPackPresentationMode() string {
+	if value := strings.TrimSpace(os.Getenv("DEVSPECS_TASK_PACK_PRESENTATION_MODE")); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(os.Getenv("DEVSPECS_PACK_PRESENTATION_MODE")); value != "" {
+		return value
+	}
+	return findPackPresentationModeOff
 }
 
 const (

@@ -561,6 +561,9 @@ func normalizeSinglePath(path string) string {
 	path = strings.TrimSpace(path)
 	path = filepath.ToSlash(path)
 	path = strings.TrimPrefix(path, "./")
+	if base, _, ok := strings.Cut(path, "#"); ok {
+		path = base
+	}
 	return path
 }
 
