@@ -69,6 +69,32 @@ func TestImproveTestCompanionRecall(t *testing.T) {
 	return repoDir
 }
 
+func taskGitCmd(args ...string) *exec.Cmd {
+	cmd := exec.Command("git", args...)
+	cmd.Env = cleanTaskGitTestEnv()
+	return cmd
+}
+
+func cleanTaskGitTestEnv() []string {
+	blocked := map[string]bool{
+		"GIT_DIR":                          true,
+		"GIT_WORK_TREE":                    true,
+		"GIT_INDEX_FILE":                   true,
+		"GIT_PREFIX":                       true,
+		"GIT_OBJECT_DIRECTORY":             true,
+		"GIT_ALTERNATE_OBJECT_DIRECTORIES": true,
+	}
+	var env []string
+	for _, entry := range os.Environ() {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok && blocked[key] {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return env
+}
+
 func TestTask_StartCreatesUncertaintyAwareWorkspace(t *testing.T) {
 	repoDir := setupTaskCommandRepo(t)
 
@@ -249,6 +275,117 @@ func TestTask_StartBootstrapsRepeatedSlices(t *testing.T) {
 	}
 }
 
+func TestTask_StartGeneratesRequestedSeriesArtifacts(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "b-series-test",
+		"--series", "b",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"--slice", "define lifecycle model",
+		"--slice", "repair checkpoint state",
+		"task workflow ux",
+	})
+	buf := &bytes.Buffer{}
+	startCmd.SetOut(buf)
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out taskStartOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("task json: %v\n%s", err, buf.String())
+	}
+	if out.Series != "B" {
+		t.Fatalf("series = %q", out.Series)
+	}
+	if filepath.Base(out.IndexPath) != "B00-index.md" {
+		t.Fatalf("index path = %q", out.IndexPath)
+	}
+	wantPlans := []string{
+		"B01-define-lifecycle-model-plan.md",
+		"B02-repair-checkpoint-state-plan.md",
+	}
+	for i, slice := range out.Slices {
+		if slice.ID != strings.TrimSuffix(wantPlans[i], "-"+sanitizeTaskFilename(slice.Title)+"-plan.md") {
+			t.Fatalf("slice %d id = %q", i, slice.ID)
+		}
+		if filepath.Base(slice.PlanPath) != wantPlans[i] {
+			t.Fatalf("slice %d plan = %q", i, slice.PlanPath)
+		}
+	}
+
+	var manifest taskManifest
+	if err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest); err != nil {
+		t.Fatalf("manifest json: %v", err)
+	}
+	if manifest.Series != "B" || manifest.Artifacts.Series != "B" {
+		t.Fatalf("manifest series fields = %#v", manifest)
+	}
+	if manifest.Artifacts.Index != "B00-index.md" || manifest.Artifacts.FirstSlice != wantPlans[0] {
+		t.Fatalf("manifest artifacts = %#v", manifest.Artifacts)
+	}
+	indexBody := mustReadFile(t, out.IndexPath)
+	for _, want := range []string{
+		"## Series",
+		"B",
+		"B01: define lifecycle model",
+		"B02: repair checkpoint state",
+	} {
+		if !strings.Contains(indexBody, want) {
+			t.Fatalf("B00 missing %q:\n%s", want, indexBody)
+		}
+	}
+	planBody := mustReadFile(t, out.Slices[0].PlanPath)
+	if !strings.Contains(planBody, "`B00-index.md`") {
+		t.Fatalf("B01 plan should reference B00 index:\n%s", planBody)
+	}
+
+	checkpointCmd := NewTaskCmd()
+	checkpointCmd.SetArgs([]string{
+		"checkpoint", "b-series-test",
+		"--slice", "B02",
+		"--stage", "validated",
+		"--decision", "complete",
+		"--note", "B-series checkpoint",
+		"--index=false",
+		"--json",
+	})
+	checkpointBuf := &bytes.Buffer{}
+	checkpointCmd.SetOut(checkpointBuf)
+	if err := checkpointCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var checkpointOut taskCheckpointOutput
+	if err := json.Unmarshal(checkpointBuf.Bytes(), &checkpointOut); err != nil {
+		t.Fatalf("checkpoint json: %v\n%s", err, checkpointBuf.String())
+	}
+	if checkpointOut.Series != "B" || checkpointOut.Slice != "B02" {
+		t.Fatalf("checkpoint output = %#v", checkpointOut)
+	}
+	checkpointBody := mustReadFile(t, checkpointOut.CheckpointPath)
+	for _, want := range []string{
+		"series: B",
+		"slice: B02",
+		"`../B00-index.md`",
+		"`../B02-repair-checkpoint-state-plan.md`",
+	} {
+		if !strings.Contains(checkpointBody, want) {
+			t.Fatalf("checkpoint missing %q:\n%s", want, checkpointBody)
+		}
+	}
+	var record taskCheckpointRecord
+	if err := json.Unmarshal([]byte(mustReadFile(t, checkpointOut.CheckpointJSONPath)), &record); err != nil {
+		t.Fatalf("checkpoint record json: %v", err)
+	}
+	if record.Series != "B" || record.Slice != "B02" || record.Stage != "validated" || record.Decision != "complete" {
+		t.Fatalf("checkpoint record = %#v", record)
+	}
+}
+
 func TestTask_StartWarnsAboutOnDiskAnchorMissingFromIndex(t *testing.T) {
 	repoDir := setupTaskCommandRepo(t)
 	stalePath := filepath.Join(repoDir, "internal", "retrieval", "companion_recall_new.go")
@@ -305,7 +442,7 @@ func TestTask_StartUsesGitWorktreeRoot(t *testing.T) {
 	mainRepo := filepath.Join(tmp, "main")
 	worktree := filepath.Join(tmp, "linked")
 
-	if err := exec.Command("git", "init", "-b", "main", mainRepo).Run(); err != nil {
+	if err := taskGitCmd("init", "-b", "main", mainRepo).Run(); err != nil {
 		t.Fatal(err)
 	}
 	mustMkdirAll(t, filepath.Join(mainRepo, ".devspecs"))
@@ -319,13 +456,13 @@ sources:
 
 func RootTask() {}
 `)
-	if err := exec.Command("git", "-C", mainRepo, "add", ".").Run(); err != nil {
+	if err := taskGitCmd("-C", mainRepo, "add", ".").Run(); err != nil {
 		t.Fatal(err)
 	}
-	if err := exec.Command("git", "-C", mainRepo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "init").Run(); err != nil {
+	if err := taskGitCmd("-C", mainRepo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "init").Run(); err != nil {
 		t.Fatal(err)
 	}
-	if err := exec.Command("git", "-C", mainRepo, "worktree", "add", "-b", "linked-branch", worktree).Run(); err != nil {
+	if err := taskGitCmd("-C", mainRepo, "worktree", "add", "-b", "linked-branch", worktree).Run(); err != nil {
 		t.Fatal(err)
 	}
 	subdir := filepath.Join(worktree, "internal", "taskroot")

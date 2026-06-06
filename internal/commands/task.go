@@ -31,11 +31,14 @@ var taskLifecycleStages = []string{
 	"planned",
 	"started",
 	"implemented",
+	"validated",
 	"done",
 	"blocked",
 	"completed",
 	"split",
 	"superseded",
+	"cancelled",
+	"rolled_back",
 }
 
 var taskDecisions = []string{
@@ -43,16 +46,22 @@ var taskDecisions = []string{
 	"improve",
 	"rework",
 	"rollback",
+	"block",
 	"blocked",
+	"complete",
 	"completed",
 	"split",
+	"supersede",
 	"superseded",
+	"cancel",
+	"cancelled",
 	"continue",
 }
 
 type taskStartOptions struct {
 	ID        string
 	Dir       string
+	Series    string
 	Slices    []string
 	NoRefresh bool
 	AsJSON    bool
@@ -86,6 +95,7 @@ type taskCheckpointOptions struct {
 
 type taskStartOutput struct {
 	TaskID            string                 `json:"task_id"`
+	Series            string                 `json:"series"`
 	Query             string                 `json:"query"`
 	Workspace         string                 `json:"workspace"`
 	IndexPath         string                 `json:"index_path"`
@@ -111,6 +121,7 @@ type taskStartSliceOutput struct {
 
 type taskCheckpointOutput struct {
 	TaskID             string   `json:"task_id"`
+	Series             string   `json:"series,omitempty"`
 	Slice              string   `json:"slice,omitempty"`
 	Stage              string   `json:"stage"`
 	Decision           string   `json:"decision,omitempty"`
@@ -124,6 +135,7 @@ type taskCheckpointOutput struct {
 
 type taskManifest struct {
 	TaskID            string                 `json:"task_id"`
+	Series            string                 `json:"series,omitempty"`
 	Query             string                 `json:"query"`
 	Status            string                 `json:"status"`
 	CreatedAt         string                 `json:"created_at"`
@@ -136,6 +148,7 @@ type taskManifest struct {
 }
 
 type taskArtifactPaths struct {
+	Series     string              `json:"series,omitempty"`
 	Index      string              `json:"index"`
 	FirstSlice string              `json:"first_slice,omitempty"`
 	Result     string              `json:"result,omitempty"`
@@ -199,6 +212,7 @@ type taskConfidence struct {
 type taskCheckpointRecord struct {
 	SchemaVersion int                    `json:"schema_version"`
 	TaskID        string                 `json:"task_id"`
+	Series        string                 `json:"series,omitempty"`
 	Query         string                 `json:"query,omitempty"`
 	Slice         string                 `json:"slice,omitempty"`
 	SliceTitle    string                 `json:"slice_title,omitempty"`
@@ -265,11 +279,12 @@ templates for recording actual reads, edits, tests, misses, and noise.`,
 
 	cmd.Flags().StringVar(&opts.ID, "id", "", "Task ID to use instead of a generated slug")
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
+	cmd.Flags().StringVar(&opts.Series, "series", "A", "Series prefix for generated artifacts, e.g. A or B")
 	cmd.Flags().StringArrayVar(&opts.Slices, "slice", nil, "Task slice title to scaffold; may be repeated")
 	cmd.Flags().BoolVar(&opts.NoRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&opts.Force, "force", false, "Overwrite an existing task workspace")
-	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture A00 and slice plans into the DevSpecs index")
+	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the series index and slice plans into the DevSpecs index")
 
 	cmd.AddCommand(newTaskCheckpointCmd())
 	cmd.AddCommand(newTaskEvaluateCmd())
@@ -295,8 +310,8 @@ func newTaskCheckpointCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
 	cmd.Flags().StringVar(&opts.Slice, "slice", "", "Task slice ID/title/plan/result to append to; defaults to the first slice")
-	cmd.Flags().StringVar(&opts.Stage, "stage", opts.Stage, "Lifecycle stage: packed, planned, started, implemented, done, blocked, completed, split, superseded")
-	cmd.Flags().StringVar(&opts.Decision, "decision", opts.Decision, "Decision gate: promote, improve, rework, rollback, blocked, completed, split, superseded, continue")
+	cmd.Flags().StringVar(&opts.Stage, "stage", opts.Stage, "Lifecycle stage: packed, planned, started, implemented, validated, done, blocked, completed, split, superseded, cancelled, rolled_back")
+	cmd.Flags().StringVar(&opts.Decision, "decision", opts.Decision, "Decision gate: promote, improve, rework, rollback, block, complete, split, supersede, cancel, continue")
 	cmd.Flags().StringVar(&opts.Note, "note", "", "Short checkpoint note")
 	cmd.Flags().StringVar(&opts.Description, "description", "", "What changed or was learned")
 	cmd.Flags().StringVar(&opts.Goal, "goal", "", "Checkpoint goal")
@@ -338,6 +353,10 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 	if err := validateTaskID(taskID); err != nil {
 		return err
 	}
+	series, err := normalizeTaskSeries(opts.Series)
+	if err != nil {
+		return err
+	}
 
 	workspace := taskWorkspacePath(repoRoot, opts.Dir, taskID)
 	if err := prepareTaskWorkspace(workspace, opts.Force); err != nil {
@@ -348,16 +367,18 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 	if err != nil {
 		return err
 	}
-	slices := taskSliceArtifacts(query, opts.Slices)
+	slices := taskSliceArtifacts(series, query, opts.Slices)
 	firstSlice := firstTaskSliceArtifact(taskArtifactPaths{Slices: slices})
 	relArtifacts := taskArtifactPaths{
-		Index:      "A00-index.md",
+		Series:     series,
+		Index:      taskSeriesIndexFilename(series),
 		FirstSlice: firstSlice.Plan,
 		Result:     firstSlice.Result,
 		Slices:     slices,
 	}
 	manifest := taskManifest{
 		TaskID:            taskID,
+		Series:            series,
 		Query:             query,
 		Status:            "packed",
 		CreatedAt:         now.Format(time.RFC3339),
@@ -407,6 +428,7 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 
 	out := taskStartOutput{
 		TaskID:            taskID,
+		Series:            series,
 		Query:             query,
 		Workspace:         workspace,
 		IndexPath:         paths.Index,
@@ -444,12 +466,13 @@ func taskAbsoluteArtifactPaths(workspace string, rel taskArtifactPaths) taskAbso
 	}
 }
 
-func taskSliceArtifacts(query string, values []string) []taskSliceArtifact {
+func taskSliceArtifacts(series, query string, values []string) []taskSliceArtifact {
+	series = defaultTaskSeries(series)
 	titles := normalizeTaskSliceTitles(query, values)
 	usedSlugs := map[string]int{}
 	var out []taskSliceArtifact
 	for i, title := range titles {
-		id := fmt.Sprintf("A%02d", i+1)
+		id := fmt.Sprintf("%s%02d", series, i+1)
 		slug := uniqueTaskSliceSlug(title, usedSlugs)
 		out = append(out, taskSliceArtifact{
 			ID:     id,
@@ -489,12 +512,25 @@ func firstTaskSliceArtifact(paths taskArtifactPaths) taskSliceArtifact {
 	if len(paths.Slices) > 0 {
 		return paths.Slices[0]
 	}
+	series := defaultTaskSeries(paths.Series)
 	return taskSliceArtifact{
-		ID:     "A01",
+		ID:     series + "01",
 		Title:  "First slice",
 		Plan:   paths.FirstSlice,
 		Result: paths.Result,
 	}
+}
+
+func taskSeriesIndexFilename(series string) string {
+	return fmt.Sprintf("%s00-index.md", defaultTaskSeries(series))
+}
+
+func defaultTaskSeries(series string) string {
+	series = strings.ToUpper(strings.TrimSpace(series))
+	if series == "" {
+		return "A"
+	}
+	return series
 }
 
 func taskStartSliceOutputs(workspace string, slices []taskSliceArtifact) []taskStartSliceOutput {
@@ -514,7 +550,11 @@ func taskCheckpointResourcePaths(manifest taskManifest, slice taskSliceArtifact)
 	if slice.ID == "" && slice.Plan == "" && slice.Result == "" {
 		slice = firstTaskSliceArtifact(manifest.Artifacts)
 	}
-	resources := []string{"../A00-index.md"}
+	index := manifest.Artifacts.Index
+	if index == "" {
+		index = taskSeriesIndexFilename(manifest.Series)
+	}
+	resources := []string{"../" + filepath.ToSlash(index)}
 	if slice.Plan != "" {
 		resources = append(resources, "../"+filepath.ToSlash(slice.Plan))
 	}
@@ -1007,6 +1047,8 @@ func renderTaskIndex(manifest taskManifest) string {
 	fmt.Fprintf(&b, "%s\n\n", manifest.Query)
 	fmt.Fprintln(&b, "## Status")
 	fmt.Fprintf(&b, "%s\n\n", manifest.Status)
+	fmt.Fprintln(&b, "## Series")
+	fmt.Fprintf(&b, "%s\n\n", defaultTaskSeries(manifest.Series))
 	fmt.Fprintln(&b, "## Created At")
 	fmt.Fprintf(&b, "%s\n\n", manifest.CreatedAt)
 	fmt.Fprintln(&b, "## Original Query")
@@ -1075,10 +1117,12 @@ func renderTaskSlicePlan(manifest taskManifest, slice taskSliceArtifact) string 
 	fmt.Fprintln(&b, "## Goal")
 	fmt.Fprintf(&b, "%s\n\n", slice.Title)
 	fmt.Fprintln(&b, "## Description")
-	fmt.Fprintf(&b, "Create a bounded implementation slice for `%s`. This plan is grounded by the A00 preflight, but it is not authoritative; confirm predicted files and tests before making edits.\n", manifest.Query)
+	fmt.Fprintf(&b, "Create a bounded implementation slice for `%s`. This plan is grounded by the task index preflight, but it is not authoritative; confirm predicted files and tests before making edits.\n", manifest.Query)
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "## Resources")
-	fmt.Fprintln(&b, "- `A00-index.md`")
+	if manifest.Artifacts.Index != "" {
+		fmt.Fprintf(&b, "- `%s`\n", manifest.Artifacts.Index)
+	}
 	if slice.Result != "" {
 		fmt.Fprintf(&b, "- `%s`\n", slice.Result)
 	}
@@ -1147,7 +1191,9 @@ func renderTaskSliceResultTemplate(manifest taskManifest, slice taskSliceArtifac
 	fmt.Fprintln(&b, "Fill this after the implementation attempt or use `ds task checkpoint` to append structured progress.")
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "## Resources")
-	fmt.Fprintln(&b, "- `A00-index.md`")
+	if manifest.Artifacts.Index != "" {
+		fmt.Fprintf(&b, "- `%s`\n", manifest.Artifacts.Index)
+	}
 	if slice.Plan != "" {
 		fmt.Fprintf(&b, "- `%s`\n", slice.Plan)
 	}
@@ -1456,6 +1502,7 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 
 	out := taskCheckpointOutput{
 		TaskID:             taskID,
+		Series:             defaultTaskSeries(manifest.Series),
 		Slice:              selectedSlice.ID,
 		Stage:              opts.Stage,
 		Decision:           opts.Decision,
@@ -1512,6 +1559,7 @@ func buildTaskCheckpointRecord(manifest taskManifest, opts taskCheckpointOptions
 	record := taskCheckpointRecord{
 		SchemaVersion: 1,
 		TaskID:        manifest.TaskID,
+		Series:        defaultTaskSeries(manifest.Series),
 		Query:         manifest.Query,
 		Slice:         slice.ID,
 		SliceTitle:    slice.Title,
@@ -1660,6 +1708,7 @@ func renderTaskCheckpoint(manifest taskManifest, slice taskSliceArtifact, opts t
 	var b strings.Builder
 	fmt.Fprintln(&b, "---")
 	fmt.Fprintf(&b, "task_id: %s\n", yamlScalar(manifest.TaskID))
+	fmt.Fprintf(&b, "series: %s\n", yamlScalar(defaultTaskSeries(manifest.Series)))
 	if slice.ID != "" {
 		fmt.Fprintf(&b, "slice: %s\n", yamlScalar(slice.ID))
 	}
@@ -1793,14 +1842,16 @@ func writeMarkdownList(b *strings.Builder, title string, values []string) {
 func writeTaskStartHuman(out io.Writer, result taskStartOutput, confidence taskConfidence) error {
 	fmt.Fprintf(out, "Created task workspace: %s\n", result.Workspace)
 	fmt.Fprintf(out, "Task ID: %s\n", result.TaskID)
-	fmt.Fprintf(out, "A00: %s\n", result.IndexPath)
+	fmt.Fprintf(out, "Series: %s\n", result.Series)
+	fmt.Fprintf(out, "%s00: %s\n", defaultTaskSeries(result.Series), result.IndexPath)
 	for _, slice := range result.Slices {
 		fmt.Fprintf(out, "%s plan: %s\n", slice.ID, slice.PlanPath)
 		fmt.Fprintf(out, "%s result: %s\n", slice.ID, slice.ResultPath)
 	}
 	if len(result.Slices) == 0 {
-		fmt.Fprintf(out, "A01 plan: %s\n", result.FirstSlicePath)
-		fmt.Fprintf(out, "A01 result: %s\n", result.ResultPath)
+		series := defaultTaskSeries(result.Series)
+		fmt.Fprintf(out, "%s01 plan: %s\n", series, result.FirstSlicePath)
+		fmt.Fprintf(out, "%s01 result: %s\n", series, result.ResultPath)
 	}
 	fmt.Fprintf(out, "Confidence: primary=%s tests=%s completeness=%s noise=%s\n",
 		confidence.PrimaryFileConfidence,
@@ -1852,7 +1903,21 @@ func readTaskManifest(path string) (taskManifest, error) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return manifest, fmt.Errorf("parse task manifest: %w", err)
 	}
+	normalizeTaskManifest(&manifest)
 	return manifest, nil
+}
+
+func normalizeTaskManifest(manifest *taskManifest) {
+	if strings.TrimSpace(manifest.Series) == "" {
+		manifest.Series = manifest.Artifacts.Series
+	}
+	manifest.Series = defaultTaskSeries(manifest.Series)
+	if strings.TrimSpace(manifest.Artifacts.Series) == "" {
+		manifest.Artifacts.Series = manifest.Series
+	}
+	if strings.TrimSpace(manifest.Artifacts.Index) == "" {
+		manifest.Artifacts.Index = taskSeriesIndexFilename(manifest.Series)
+	}
 }
 
 func prepareTaskWorkspace(workspace string, force bool) error {
@@ -1920,6 +1985,23 @@ func validateTaskID(taskID string) error {
 		return fmt.Errorf("task id contains unsupported character %q", r)
 	}
 	return nil
+}
+
+func normalizeTaskSeries(series string) (string, error) {
+	series = defaultTaskSeries(series)
+	if len(series) > 6 {
+		return "", fmt.Errorf("task series %q is too long; use 1-6 letters or digits", series)
+	}
+	for i, r := range series {
+		if i == 0 && !unicode.IsLetter(r) {
+			return "", fmt.Errorf("task series %q must start with a letter", series)
+		}
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			continue
+		}
+		return "", fmt.Errorf("task series contains unsupported character %q", r)
+	}
+	return series, nil
 }
 
 func predictedFilePaths(files []taskPredictedFile) []string {
