@@ -42,7 +42,7 @@ func Detect(dir string) Info {
 func findGitDir(dir string) string {
 	for {
 		candidate := filepath.Join(dir, ".git")
-		if fi, err := os.Stat(candidate); err == nil && fi.IsDir() {
+		if fi, err := os.Stat(candidate); err == nil && (fi.IsDir() || fi.Mode().IsRegular()) {
 			return candidate
 		}
 		parent := filepath.Dir(dir)

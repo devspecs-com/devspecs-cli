@@ -69,6 +69,67 @@ func TestDetect_GitDir(t *testing.T) {
 	}
 }
 
+func TestDetect_GitFileRoot(t *testing.T) {
+	tmp := t.TempDir()
+	worktree := filepath.Join(tmp, "worktree")
+	subdir := filepath.Join(worktree, "nested")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitDir := filepath.Join(tmp, "repo", ".git", "worktrees", "worktree")
+	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: "+gitDir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	info := Detect(subdir)
+	if !info.IsGit {
+		t.Error("expected IsGit=true for .git file worktree")
+	}
+	if info.RootPath != worktree {
+		t.Fatalf("expected RootPath=%q, got %q", worktree, info.RootPath)
+	}
+}
+
+func TestDetect_GitWorktree(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available:", err)
+	}
+	tmp := t.TempDir()
+	mainRepo := filepath.Join(tmp, "main")
+	worktree := filepath.Join(tmp, "linked")
+
+	if err := gitCmd("init", "-b", "main", mainRepo).Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mainRepo, "file.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitCmd("-C", mainRepo, "add", "file.txt").Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitCmd("-C", mainRepo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "init").Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitCmd("-C", mainRepo, "worktree", "add", "-b", "worktree-branch", worktree).Run(); err != nil {
+		t.Fatal(err)
+	}
+	subdir := filepath.Join(worktree, "nested")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	info := Detect(subdir)
+	if !info.IsGit {
+		t.Fatal("expected IsGit=true for git worktree")
+	}
+	if info.RootPath != worktree {
+		t.Fatalf("expected RootPath=%q, got %q", worktree, info.RootPath)
+	}
+	if info.CurrentBranch != "worktree-branch" {
+		t.Fatalf("expected worktree branch, got %q", info.CurrentBranch)
+	}
+}
+
 func TestFileFirstCommitDate(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available:", err)

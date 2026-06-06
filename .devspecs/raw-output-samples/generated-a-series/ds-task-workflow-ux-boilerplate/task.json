@@ -1,0 +1,183 @@
+{
+  "task_id": "ds-task-workflow-ux-boilerplate",
+  "query": "Capture preferred ds task workflow UX for series, slices, iterations, lifecycle decisions, and learnings",
+  "status": "packed",
+  "created_at": "2026-06-04T14:06:50Z",
+  "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
+  "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/.devspecs/raw-output-samples/generated-a-series/ds-task-workflow-ux-boilerplate",
+  "artifacts": {
+    "index": "A00-index.md",
+    "first_slice": "A01-define-series-and-slice-lifecycle-model-plan.md",
+    "result": "A01-define-series-and-slice-lifecycle-model-result.md",
+    "slices": [
+      {
+        "id": "A01",
+        "title": "define series and slice lifecycle model",
+        "plan": "A01-define-series-and-slice-lifecycle-model-plan.md",
+        "result": "A01-define-series-and-slice-lifecycle-model-result.md"
+      },
+      {
+        "id": "A02",
+        "title": "scaffold iteration-plan artifacts",
+        "plan": "A02-scaffold-iteration-plan-artifacts-plan.md",
+        "result": "A02-scaffold-iteration-plan-artifacts-result.md"
+      },
+      {
+        "id": "A03",
+        "title": "record completion supersedence split and rollback decisions",
+        "plan": "A03-record-completion-supersedence-split-and-rollbac-plan.md",
+        "result": "A03-record-completion-supersedence-split-and-rollbac-result.md"
+      },
+      {
+        "id": "A04",
+        "title": "surface learnings as bounded checkpoint evidence",
+        "plan": "A04-surface-learnings-as-bounded-checkpoint-evidence-plan.md",
+        "result": "A04-surface-learnings-as-bounded-checkpoint-evidence-result.md"
+      }
+    ]
+  },
+  "predicted_context": {
+    "relevant_areas": [
+      "internal/commands",
+      "internal/retrieval"
+    ],
+    "primary_files": [
+      {
+        "path": "internal/commands/task.go",
+        "title": "internal/commands/task.go (go)",
+        "kind": "source_context",
+        "role": "implementation_surface",
+        "evidence": [
+          "anchor-first ranking: score 24.000; matches capture, task, decisions; fields body, path, title",
+          "query term match in path: task",
+          "query term match in body: slices",
+          "authority prior: stale or superseded"
+        ]
+      },
+      {
+        "path": "internal/commands/task_evaluate.go",
+        "title": "internal/commands/task_evaluate.go (go)",
+        "kind": "source_context",
+        "role": "implementation_surface",
+        "evidence": [
+          "anchor-first ranking: score 22.861; matches task; fields path, title, body",
+          "query term match in path: task",
+          "query term match in body: slices"
+        ]
+      },
+      {
+        "path": "internal/commands/map.go",
+        "title": "internal/commands/map.go (go)",
+        "kind": "source_context",
+        "role": "implementation_surface",
+        "evidence": [
+          "query term match in body: task",
+          "query term match in body: workflow",
+          "query term match in body: slices",
+          "authority prior: stale or superseded"
+        ]
+      },
+      {
+        "path": "internal/commands/capture.go",
+        "title": "internal/commands/capture.go (go)",
+        "kind": "source_context",
+        "role": "implementation_surface",
+        "evidence": [
+          "anchor-first ranking: score 24.000; matches capture; fields path, title, body",
+          "query term match in path: capture"
+        ]
+      },
+      {
+        "path": "internal/retrieval/retrieval.go",
+        "title": "internal/retrieval/retrieval.go (go)",
+        "kind": "source_context",
+        "role": "implementation_surface",
+        "evidence": [
+          "query term match in body: task",
+          "query term match in body: workflow",
+          "query term match in body: lifecycle",
+          "authority prior: stale or superseded",
+          "lifecycle signal: superseded-or-stale"
+        ]
+      }
+    ],
+    "related_git_receipts": [
+      {
+        "sha": "4af4d35b674e1a88fc0475dcd2b2c416958b696d",
+        "short_sha": "4af4d35",
+        "committed_at": "2026-06-04",
+        "subject": "feat: author map handoffs from git task signals",
+        "matched_paths": [
+          "internal/commands/map.go"
+        ],
+        "matched_terms": [
+          "task",
+          "ds",
+          "and"
+        ],
+        "signals": [
+          "touched 1 packed path(s)",
+          "matched query anchors"
+        ]
+      },
+      {
+        "sha": "94997de9f8e4e2a07c42723f957e7c8647b902b9",
+        "short_sha": "94997de",
+        "committed_at": "2026-06-02",
+        "subject": "feat: repair map onboarding anchors",
+        "matched_paths": [
+          "internal/commands/map.go",
+          "internal/retrieval/retrieval.go"
+        ],
+        "matched_terms": [
+          "ds",
+          "and"
+        ],
+        "signals": [
+          "touched 2 packed path(s)",
+          "matched query anchors",
+          "cross-file change"
+        ]
+      },
+      {
+        "sha": "a4ebf74f090fc08e76912003f98a4c61a33052c7",
+        "short_sha": "a4ebf74",
+        "committed_at": "2026-06-01",
+        "subject": "feat: repair ds map handoff trust",
+        "matched_paths": [
+          "internal/commands/map.go",
+          "internal/retrieval/retrieval.go"
+        ],
+        "matched_terms": [
+          "ds",
+          "and"
+        ],
+        "signals": [
+          "touched 2 packed path(s)",
+          "matched query anchors",
+          "cross-file change"
+        ]
+      }
+    ]
+  },
+  "freshness_warnings": [
+    {
+      "path": "internal/commands/task_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: task"
+    }
+  ],
+  "confidence": {
+    "primary_file_confidence": "high",
+    "test_coverage_confidence": "low",
+    "docs_config_confidence": "low",
+    "git_receipt_confidence": "high",
+    "noise_risk": "low",
+    "pack_completeness": "low",
+    "why": [
+      "found 5 likely primary file(s)",
+      "test companion coverage was not evident from the initial pack",
+      "found 3 related Git receipt(s)"
+    ],
+    "agent_instruction": "Validate the test and integration surface before editing. Record critical misses and distracting inclusions in the slice result or a task checkpoint."
+  }
+}

@@ -1,0 +1,828 @@
+package commands
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/devspecs-com/devspecs-cli/internal/store"
+)
+
+func setupTaskCommandRepo(t *testing.T) string {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
+	repoDir := filepath.Join(tmp, "repo")
+
+	mustMkdirAll(t, filepath.Join(repoDir, ".devspecs"))
+	mustWriteFile(t, filepath.Join(repoDir, ".devspecs", "config.yaml"), `version: 1
+artifacts:
+  test_cases: true
+sources:
+  - type: markdown
+    paths:
+      - docs/plans
+  - type: source_context
+`)
+	mustMkdirAll(t, filepath.Join(repoDir, "internal", "retrieval"))
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "retrieval", "ranking.go"), `package retrieval
+
+func ImproveTestCompanionRecall(query string) string {
+	return "test companion recall " + query
+}
+`)
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "retrieval", "ranking_test.go"), `package retrieval
+
+import "testing"
+
+func TestImproveTestCompanionRecall(t *testing.T) {
+	if ImproveTestCompanionRecall("pack") == "" {
+		t.Fatal("missing recall")
+	}
+}
+`)
+	mustMkdirAll(t, filepath.Join(repoDir, "docs", "plans"))
+	mustWriteFile(t, filepath.Join(repoDir, "docs", "plans", "test-companion-recall.md"), `# Test companion recall
+
+## Success Criteria
+
+- [ ] Primary retrieval file is found.
+- [ ] Test companion file is found or the miss is recorded.
+`)
+
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origWd) })
+
+	scanCmd := NewScanCmd()
+	scanCmd.SetArgs([]string{"--quiet"})
+	scanCmd.SetOut(&bytes.Buffer{})
+	if err := scanCmd.Execute(); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	return repoDir
+}
+
+func TestTask_StartCreatesUncertaintyAwareWorkspace(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"--id", "spike-test", "--no-refresh", "--json", "improve test companion recall"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out taskStartOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("task json: %v\n%s", err, buf.String())
+	}
+	if out.TaskID != "spike-test" {
+		t.Fatalf("task id = %q", out.TaskID)
+	}
+	if !strings.HasPrefix(out.Workspace, filepath.Join(repoDir, ".devspecs", "tasks", "spike-test")) {
+		t.Fatalf("workspace = %q", out.Workspace)
+	}
+	if len(out.Slices) != 1 {
+		t.Fatalf("expected one default slice, got %#v", out.Slices)
+	}
+	if filepath.Base(out.FirstSlicePath) != "A01-improve-test-companion-recall-plan.md" {
+		t.Fatalf("first slice path = %q", out.FirstSlicePath)
+	}
+	if filepath.Base(out.ResultPath) != "A01-improve-test-companion-recall-result.md" {
+		t.Fatalf("result path = %q", out.ResultPath)
+	}
+	for _, path := range []string{out.IndexPath, out.FirstSlicePath, out.ResultPath, out.ManifestPath} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected %s: %v", path, err)
+		}
+	}
+
+	indexBody := mustReadFile(t, out.IndexPath)
+	for _, want := range []string{
+		"## Known Knowns",
+		"## Known Unknowns",
+		"## Confidence Summary",
+		"## Task Slices",
+		"## Agent Preflight Checklist",
+		"A01-improve-test-companion-recall-plan.md",
+		"Pack completeness",
+	} {
+		if !strings.Contains(indexBody, want) {
+			t.Fatalf("A00 missing %q:\n%s", want, indexBody)
+		}
+	}
+
+	firstSlice := mustReadFile(t, out.FirstSlicePath)
+	for _, want := range []string{
+		"## Goal",
+		"## Description",
+		"## Resources",
+		"## Success Criteria",
+		"## Tasks",
+		"## Decision Gates",
+	} {
+		if !strings.Contains(firstSlice, want) {
+			t.Fatalf("A01 missing %q:\n%s", want, firstSlice)
+		}
+	}
+
+	resultTemplate := mustReadFile(t, out.ResultPath)
+	for _, want := range []string{
+		"## Files Actually Read",
+		"## Critical Files DevSpecs Missed",
+		"## Distracting Files DevSpecs Included",
+		"## Decision Gates",
+	} {
+		if !strings.Contains(resultTemplate, want) {
+			t.Fatalf("A01-1 missing %q:\n%s", want, resultTemplate)
+		}
+	}
+
+	manifest := mustReadFile(t, out.ManifestPath)
+	if !strings.Contains(manifest, `"predicted_context"`) || !strings.Contains(manifest, `"confidence"`) {
+		t.Fatalf("manifest missing predicted context/confidence:\n%s", manifest)
+	}
+	if !strings.Contains(manifest, `"slices"`) || !strings.Contains(manifest, `"A01-improve-test-companion-recall-plan.md"`) {
+		t.Fatalf("manifest missing slice artifacts:\n%s", manifest)
+	}
+
+	db, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	artifacts, err := db.ListArtifacts(store.FilterParams{RepoRoot: repoDir, SourceType: "capture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(artifacts) < 2 {
+		t.Fatalf("expected A00/A01 to be captured, got %d", len(artifacts))
+	}
+}
+
+func TestTask_StartBootstrapsRepeatedSlices(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "multi-slice-test",
+		"--no-refresh",
+		"--json",
+		"--slice", "scout current workflow",
+		"--slice", "tighten checkpoint evidence",
+		"task workflow ux",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out taskStartOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("task json: %v\n%s", err, buf.String())
+	}
+	if len(out.Slices) != 2 {
+		t.Fatalf("expected two slices, got %#v", out.Slices)
+	}
+	wantPlans := []string{
+		"A01-scout-current-workflow-plan.md",
+		"A02-tighten-checkpoint-evidence-plan.md",
+	}
+	wantResults := []string{
+		"A01-scout-current-workflow-result.md",
+		"A02-tighten-checkpoint-evidence-result.md",
+	}
+	for i, slice := range out.Slices {
+		if filepath.Base(slice.PlanPath) != wantPlans[i] {
+			t.Fatalf("slice %d plan = %q", i, slice.PlanPath)
+		}
+		if filepath.Base(slice.ResultPath) != wantResults[i] {
+			t.Fatalf("slice %d result = %q", i, slice.ResultPath)
+		}
+		for _, path := range []string{slice.PlanPath, slice.ResultPath} {
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("expected %s: %v", path, err)
+			}
+		}
+	}
+	if filepath.Base(out.FirstSlicePath) != wantPlans[0] || filepath.Base(out.ResultPath) != wantResults[0] {
+		t.Fatalf("first slice aliases did not point at A01: %#v", out)
+	}
+
+	var manifest taskManifest
+	if err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest); err != nil {
+		t.Fatalf("manifest json: %v", err)
+	}
+	if len(manifest.Artifacts.Slices) != 2 {
+		t.Fatalf("manifest slices = %#v", manifest.Artifacts.Slices)
+	}
+	if manifest.Artifacts.FirstSlice != wantPlans[0] || manifest.Artifacts.Result != wantResults[0] {
+		t.Fatalf("manifest first aliases = %#v", manifest.Artifacts)
+	}
+	indexBody := mustReadFile(t, out.IndexPath)
+	for _, want := range []string{
+		"## Task Slices",
+		"A01: scout current workflow",
+		"A02: tighten checkpoint evidence",
+	} {
+		if !strings.Contains(indexBody, want) {
+			t.Fatalf("index missing %q:\n%s", want, indexBody)
+		}
+	}
+	if !strings.HasPrefix(out.Workspace, filepath.Join(repoDir, ".devspecs", "tasks", "multi-slice-test")) {
+		t.Fatalf("workspace = %q", out.Workspace)
+	}
+}
+
+func TestTask_StartWarnsAboutOnDiskAnchorMissingFromIndex(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	stalePath := filepath.Join(repoDir, "internal", "retrieval", "companion_recall_new.go")
+	mustWriteFile(t, stalePath, `package retrieval
+
+func ImproveCompanionRecallNew() {}
+`)
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"--id", "freshness-warning-test", "--no-refresh", "--json", "improve companion recall"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out taskStartOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("task json: %v\n%s", err, buf.String())
+	}
+	if !taskWarningsContainPath(out.FreshnessWarnings, "internal/retrieval/companion_recall_new.go") {
+		t.Fatalf("expected freshness warning for stale on-disk anchor, got %#v", out.FreshnessWarnings)
+	}
+	if len(out.FreshnessWarnings) > taskFreshnessMaxWarnings {
+		t.Fatalf("freshness warnings were not capped: %#v", out.FreshnessWarnings)
+	}
+
+	indexBody := mustReadFile(t, out.IndexPath)
+	for _, want := range []string{
+		"## Freshness Warnings",
+		"internal/retrieval/companion_recall_new.go",
+		"stale-index risk",
+	} {
+		if !strings.Contains(indexBody, want) {
+			t.Fatalf("A00 missing freshness warning %q:\n%s", want, indexBody)
+		}
+	}
+
+	var manifest taskManifest
+	if err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest); err != nil {
+		t.Fatalf("manifest json: %v", err)
+	}
+	if !taskWarningsContainPath(manifest.FreshnessWarnings, "internal/retrieval/companion_recall_new.go") {
+		t.Fatalf("manifest missing freshness warning: %#v", manifest.FreshnessWarnings)
+	}
+}
+
+func TestTask_StartUsesGitWorktreeRoot(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available:", err)
+	}
+	tmp := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
+	mainRepo := filepath.Join(tmp, "main")
+	worktree := filepath.Join(tmp, "linked")
+
+	if err := exec.Command("git", "init", "-b", "main", mainRepo).Run(); err != nil {
+		t.Fatal(err)
+	}
+	mustMkdirAll(t, filepath.Join(mainRepo, ".devspecs"))
+	mustWriteFile(t, filepath.Join(mainRepo, ".devspecs", "config.yaml"), `version: 1
+sources:
+  - type: source_context
+`)
+	mustWriteFile(t, filepath.Join(mainRepo, "go.mod"), "module example.com/worktree\n")
+	mustMkdirAll(t, filepath.Join(mainRepo, "internal", "taskroot"))
+	mustWriteFile(t, filepath.Join(mainRepo, "internal", "taskroot", "root.go"), `package taskroot
+
+func RootTask() {}
+`)
+	if err := exec.Command("git", "-C", mainRepo, "add", ".").Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", mainRepo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "init").Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", mainRepo, "worktree", "add", "-b", "linked-branch", worktree).Run(); err != nil {
+		t.Fatal(err)
+	}
+	subdir := filepath.Join(worktree, "internal", "taskroot")
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(subdir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origWd) })
+
+	scanCmd := NewScanCmd()
+	scanCmd.SetArgs([]string{"--quiet"})
+	scanCmd.SetOut(&bytes.Buffer{})
+	if err := scanCmd.Execute(); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"--id", "worktree-root-test", "--no-refresh", "--json", "taskroot"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out taskStartOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("task json: %v\n%s", err, buf.String())
+	}
+	wantPrefix := filepath.Join(worktree, ".devspecs", "tasks", "worktree-root-test")
+	if !strings.HasPrefix(out.Workspace, wantPrefix) {
+		t.Fatalf("workspace = %q, want prefix %q", out.Workspace, wantPrefix)
+	}
+	if strings.HasPrefix(out.Workspace, filepath.Join(mainRepo, ".devspecs")) {
+		t.Fatalf("workspace used main repo instead of worktree: %q", out.Workspace)
+	}
+}
+
+func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{"--id", "checkpoint-test", "--no-refresh", "improve test companion recall"})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	checkpointCmd := NewTaskCmd()
+	checkpointCmd.SetArgs([]string{
+		"checkpoint", "checkpoint-test",
+		"--stage", "implemented",
+		"--decision", "improve",
+		"--note", "found a missing same-package test",
+		"--file-read", "internal/retrieval/ranking.go",
+		"--file-edited", "internal/retrieval/ranking.go",
+		"--test-read", "internal/retrieval/ranking_test.go",
+		"--test-run", "go test ./internal/retrieval",
+		"--missed-file", "internal/retrieval/ranking_test.go",
+		"--noise-file", "fixtures/noisy-plan.md",
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	checkpointCmd.SetOut(buf)
+	if err := checkpointCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out taskCheckpointOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("checkpoint json: %v\n%s", err, buf.String())
+	}
+	if out.Stage != "implemented" || out.Decision != "improve" {
+		t.Fatalf("unexpected checkpoint output: %#v", out)
+	}
+	if out.Slice != "A01" {
+		t.Fatalf("checkpoint output slice = %q", out.Slice)
+	}
+	if out.CheckpointJSONPath == "" {
+		t.Fatalf("expected structured checkpoint path in output: %#v", out)
+	}
+	checkpointBody := mustReadFile(t, out.CheckpointPath)
+	for _, want := range []string{
+		"---",
+		"slice: A01",
+		"stage: implemented",
+		"decision: improve",
+		"created_at:",
+		"checkpoint_json:",
+		"## Structured Evidence",
+		"## Files Actually Read",
+		"`internal/retrieval/ranking.go`",
+		"## Critical Files DevSpecs Missed",
+		"`internal/retrieval/ranking_test.go`",
+		"## Distracting Files DevSpecs Included",
+		"`fixtures/noisy-plan.md`",
+	} {
+		if !strings.Contains(checkpointBody, want) {
+			t.Fatalf("checkpoint missing %q:\n%s", want, checkpointBody)
+		}
+	}
+	for _, unwanted := range []string{"\n## Stage\n", "\n## Decision\n", "\n## Created At\n"} {
+		if strings.Contains(checkpointBody, unwanted) {
+			t.Fatalf("checkpoint should keep metadata heading %q in frontmatter, not body:\n%s", unwanted, checkpointBody)
+		}
+	}
+	var record taskCheckpointRecord
+	if err := json.Unmarshal([]byte(mustReadFile(t, out.CheckpointJSONPath)), &record); err != nil {
+		t.Fatalf("checkpoint record json: %v", err)
+	}
+	if record.TaskID != "checkpoint-test" || record.Stage != "implemented" || record.Decision != "improve" {
+		t.Fatalf("unexpected checkpoint record: %#v", record)
+	}
+	if record.Slice != "A01" {
+		t.Fatalf("checkpoint record slice = %q", record.Slice)
+	}
+	if record.SchemaVersion != 1 {
+		t.Fatalf("checkpoint record schema version = %d", record.SchemaVersion)
+	}
+	if !containsPath(record.FilesEdited, "internal/retrieval/ranking.go") {
+		t.Fatalf("checkpoint record missing edited file: %#v", record.FilesEdited)
+	}
+	if !containsPath(record.MissedFiles, "internal/retrieval/ranking_test.go") {
+		t.Fatalf("checkpoint record missing missed file: %#v", record.MissedFiles)
+	}
+	resultBody := mustReadFile(t, out.ResultPath)
+	for _, want := range []string{
+		"### Checkpoint",
+		"Stage: implemented",
+		"Decision: improve",
+		"Structured Evidence:",
+		"Missed files:",
+		"`internal/retrieval/ranking_test.go`",
+	} {
+		if !strings.Contains(resultBody, want) {
+			t.Fatalf("result missing %q:\n%s", want, resultBody)
+		}
+	}
+
+	db, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	artifacts, err := db.ListArtifacts(store.FilterParams{RepoRoot: repoDir, SourceType: "capture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundCheckpoint := false
+	for _, art := range artifacts {
+		if strings.Contains(art.Title, "checkpoint-test checkpoint implemented") {
+			foundCheckpoint = true
+			if art.Status != "implemented" {
+				t.Fatalf("checkpoint status = %q", art.Status)
+			}
+		}
+	}
+	if !foundCheckpoint {
+		t.Fatalf("checkpoint capture artifact not found in %#v", artifacts)
+	}
+
+	if err := os.WriteFile(out.CheckpointPath, []byte("# scrubbed markdown checkpoint\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	evalCmd := NewTaskCmd()
+	evalCmd.SetArgs([]string{"evaluate", "checkpoint-test", "--json"})
+	evalBuf := &bytes.Buffer{}
+	evalCmd.SetOut(evalBuf)
+	if err := evalCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var evalOut taskEvaluationOutput
+	if err := json.Unmarshal(evalBuf.Bytes(), &evalOut); err != nil {
+		t.Fatalf("evaluate json: %v\n%s", err, evalBuf.String())
+	}
+	if evalOut.TaskID != "checkpoint-test" {
+		t.Fatalf("evaluation task id = %q", evalOut.TaskID)
+	}
+	if len(evalOut.Misses) == 0 {
+		t.Fatalf("expected evaluation misses, got %#v", evalOut)
+	}
+	if !containsPath(evalOut.Misses, "internal/retrieval/ranking_test.go") {
+		t.Fatalf("expected test miss in evaluation, got %#v", evalOut.Misses)
+	}
+	if !containsPath(evalOut.Noise, "fixtures/noisy-plan.md") {
+		t.Fatalf("expected noise file in evaluation, got %#v", evalOut.Noise)
+	}
+}
+
+func TestTask_CheckpointTargetsSelectedSlice(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "slice-target-test",
+		"--no-refresh",
+		"--index=false",
+		"--slice", "first pass",
+		"--slice", "second pass",
+		"improve test companion recall",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	workspace := filepath.Join(repoDir, ".devspecs", "tasks", "slice-target-test")
+	firstResult := filepath.Join(workspace, "A01-first-pass-result.md")
+	secondResult := filepath.Join(workspace, "A02-second-pass-result.md")
+
+	checkpointCmd := NewTaskCmd()
+	checkpointCmd.SetArgs([]string{
+		"checkpoint", "slice-target-test",
+		"--slice", "A02",
+		"--stage", "implemented",
+		"--decision", "promote",
+		"--note", "targeted checkpoint",
+		"--file-read", "internal/retrieval/ranking.go",
+		"--index=false",
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	checkpointCmd.SetOut(buf)
+	if err := checkpointCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out taskCheckpointOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("checkpoint json: %v\n%s", err, buf.String())
+	}
+	if out.Slice != "A02" {
+		t.Fatalf("checkpoint output slice = %q", out.Slice)
+	}
+	if filepath.Base(out.ResultPath) != "A02-second-pass-result.md" {
+		t.Fatalf("checkpoint result path = %q", out.ResultPath)
+	}
+	firstBody := mustReadFile(t, firstResult)
+	if strings.Contains(firstBody, "targeted checkpoint") {
+		t.Fatalf("first slice result should not receive A02 checkpoint:\n%s", firstBody)
+	}
+	secondBody := mustReadFile(t, secondResult)
+	for _, want := range []string{
+		"targeted checkpoint",
+		"Stage: implemented",
+		"Decision: promote",
+		"`internal/retrieval/ranking.go`",
+	} {
+		if !strings.Contains(secondBody, want) {
+			t.Fatalf("second slice result missing %q:\n%s", want, secondBody)
+		}
+	}
+	checkpointBody := mustReadFile(t, out.CheckpointPath)
+	for _, want := range []string{
+		"slice: A02",
+		"`../A02-second-pass-plan.md`",
+		"`../A02-second-pass-result.md`",
+	} {
+		if !strings.Contains(checkpointBody, want) {
+			t.Fatalf("checkpoint body missing %q:\n%s", want, checkpointBody)
+		}
+	}
+	var record taskCheckpointRecord
+	if err := json.Unmarshal([]byte(mustReadFile(t, out.CheckpointJSONPath)), &record); err != nil {
+		t.Fatalf("checkpoint record json: %v", err)
+	}
+	if record.Slice != "A02" || record.SliceTitle != "second pass" {
+		t.Fatalf("unexpected checkpoint record slice fields: %#v", record)
+	}
+}
+
+func TestTask_EvaluateReportsStructuredEvidenceWithoutInflatingActualContext(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	taskID := "json-evidence-test"
+	workspace := filepath.Join(repoDir, ".devspecs", "tasks", taskID)
+	mustMkdirAll(t, filepath.Join(workspace, "checkpoints"))
+	manifest := taskManifest{
+		TaskID:    taskID,
+		Query:     "structured checkpoint evidence",
+		Status:    "packed",
+		CreatedAt: "2026-06-04T00:00:00Z",
+		RepoRoot:  repoDir,
+		Workspace: filepath.ToSlash(workspace),
+		Artifacts: taskArtifactPaths{
+			Index:      "A00-index.md",
+			FirstSlice: "A01-first-slice.md",
+			Result:     "A01-1-result.md",
+		},
+		Predicted: taskPredictedContext{
+			PrimaryFiles: []taskPredictedFile{{Path: "internal/retrieval/ranking.go"}},
+			Tests:        []taskPredictedFile{{Path: "internal/retrieval/ranking_test.go"}},
+		},
+		Confidence: taskConfidence{
+			PrimaryFileConfidence:  "medium",
+			TestCoverageConfidence: "medium",
+			DocsConfigConfidence:   "low",
+			GitReceiptConfidence:   "low",
+			NoiseRisk:              "low",
+			PackCompleteness:       "medium",
+		},
+	}
+	if err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), manifest); err != nil {
+		t.Fatal(err)
+	}
+	record := taskCheckpointRecord{
+		SchemaVersion: 1,
+		TaskID:        taskID,
+		Query:         manifest.Query,
+		Stage:         "implemented",
+		Decision:      "improve",
+		CreatedAt:     "2026-06-04T00:00:01Z",
+		FilesRead:     []string{"internal/retrieval/ranking.go"},
+		TestsRead:     []string{"internal/retrieval/ranking_test.go"},
+		MissedFiles:   []string{"internal/commands/task_evaluate.go"},
+		NoiseFiles:    []string{"fixtures/noisy-plan.md"},
+		Evidence: taskCheckpointEvidence{
+			GitDiff: &taskGitDiffEvidence{
+				Command:      "git diff --stat -- .; git diff --name-only -- .",
+				ChangedFiles: []string{"internal/commands/task.go"},
+				MaxBytes:     12000,
+			},
+			TestCommands: []taskCommandRunEvidence{{
+				Command:  "go test ./internal/retrieval -run TestImproveTestCompanionRecall -count=1",
+				ExitCode: 0,
+				Output:   "ok",
+				MaxBytes: 12000,
+			}},
+		},
+	}
+	if err := writeTaskCheckpointRecord(filepath.Join(workspace, "checkpoints", "20260604-000001-implemented.json"), record); err != nil {
+		t.Fatal(err)
+	}
+
+	evalCmd := NewTaskCmd()
+	evalCmd.SetArgs([]string{"evaluate", taskID, "--json"})
+	evalBuf := &bytes.Buffer{}
+	evalCmd.SetOut(evalBuf)
+	if err := evalCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var evalOut taskEvaluationOutput
+	if err := json.Unmarshal(evalBuf.Bytes(), &evalOut); err != nil {
+		t.Fatalf("evaluate json: %v\n%s", err, evalBuf.String())
+	}
+	if !containsPath(evalOut.Hits, "internal/retrieval/ranking.go") {
+		t.Fatalf("expected predicted source hit, got %#v", evalOut.Hits)
+	}
+	if containsPath(evalOut.Misses, "internal/commands/task.go") {
+		t.Fatalf("git diff evidence should not inflate actual misses, got %#v", evalOut.Misses)
+	}
+	if !containsPath(evalOut.Observed.GitDiffFiles, "internal/commands/task.go") {
+		t.Fatalf("expected git diff evidence in observed context, got %#v", evalOut.Observed.GitDiffFiles)
+	}
+	if !containsPath(evalOut.Misses, "internal/commands/task_evaluate.go") {
+		t.Fatalf("expected explicit JSON missed file, got %#v", evalOut.Misses)
+	}
+	if !containsPath(evalOut.Noise, "fixtures/noisy-plan.md") {
+		t.Fatalf("expected explicit JSON noise file, got %#v", evalOut.Noise)
+	}
+	if !containsString(evalOut.Observed.TestCommands, "go test ./internal/retrieval -run TestImproveTestCompanionRecall -count=1") {
+		t.Fatalf("expected structured test command evidence, got %#v", evalOut.Observed.TestCommands)
+	}
+	if !containsString(evalOut.Observed.TestsRun, "go test ./internal/retrieval -run TestImproveTestCompanionRecall -count=1") {
+		t.Fatalf("expected structured test command to count as test run evidence, got %#v", evalOut.Observed.TestsRun)
+	}
+}
+
+func TestTask_EvaluateExcludesTaskWorkspaceReadsFromMissMetrics(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	taskID := "workspace-filter-test"
+	workspace := filepath.Join(repoDir, ".devspecs", "tasks", taskID)
+	mustMkdirAll(t, filepath.Join(workspace, "checkpoints"))
+	manifest := taskManifest{
+		TaskID:    taskID,
+		Query:     "workspace filtering",
+		Status:    "packed",
+		CreatedAt: "2026-06-04T00:00:00Z",
+		RepoRoot:  repoDir,
+		Workspace: filepath.ToSlash(workspace),
+		Artifacts: taskArtifactPaths{
+			Index:      "A00-index.md",
+			FirstSlice: "A01-workspace-filter-plan.md",
+			Result:     "A01-workspace-filter-result.md",
+			Slices: []taskSliceArtifact{{
+				ID:     "A01",
+				Title:  "workspace filter",
+				Plan:   "A01-workspace-filter-plan.md",
+				Result: "A01-workspace-filter-result.md",
+			}},
+		},
+		Predicted: taskPredictedContext{
+			PrimaryFiles: []taskPredictedFile{{Path: "internal/commands/task.go"}},
+		},
+		Confidence: taskConfidence{
+			PrimaryFileConfidence:  "high",
+			TestCoverageConfidence: "low",
+			DocsConfigConfidence:   "low",
+			GitReceiptConfidence:   "low",
+			NoiseRisk:              "low",
+			PackCompleteness:       "high",
+		},
+	}
+	if err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), manifest); err != nil {
+		t.Fatal(err)
+	}
+	workspaceIndex := filepath.ToSlash(filepath.Join(".devspecs", "tasks", taskID, "A00-index.md"))
+	workspacePlan := filepath.Join(workspace, "A01-workspace-filter-plan.md")
+	workspaceJSON := filepath.Join(workspace, taskManifestFilename)
+	record := taskCheckpointRecord{
+		SchemaVersion: 1,
+		TaskID:        taskID,
+		Query:         manifest.Query,
+		Stage:         "implemented",
+		Decision:      "improve",
+		CreatedAt:     "2026-06-04T00:00:01Z",
+		FilesRead: []string{
+			workspaceIndex,
+			workspaceJSON,
+			"internal/commands/task.go",
+		},
+		TestsRead: []string{
+			workspacePlan,
+		},
+		MissedFiles: []string{
+			workspaceIndex,
+			"A01-workspace-filter-plan.md",
+			"internal/commands/task_evaluate.go",
+		},
+	}
+	if err := writeTaskCheckpointRecord(filepath.Join(workspace, "checkpoints", "20260604-000001-implemented.json"), record); err != nil {
+		t.Fatal(err)
+	}
+
+	evalCmd := NewTaskCmd()
+	evalCmd.SetArgs([]string{"evaluate", taskID, "--json"})
+	evalBuf := &bytes.Buffer{}
+	evalCmd.SetOut(evalBuf)
+	if err := evalCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var evalOut taskEvaluationOutput
+	if err := json.Unmarshal(evalBuf.Bytes(), &evalOut); err != nil {
+		t.Fatalf("evaluate json: %v\n%s", err, evalBuf.String())
+	}
+	if !containsPath(evalOut.Observed.FilesRead, workspaceIndex) {
+		t.Fatalf("raw observed context should keep task workspace read, got %#v", evalOut.Observed.FilesRead)
+	}
+	if !containsPath(evalOut.Observed.FilesRead, workspaceJSON) {
+		t.Fatalf("raw observed context should keep absolute task workspace read, got %#v", evalOut.Observed.FilesRead)
+	}
+	if containsPath(evalOut.Misses, workspaceIndex) {
+		t.Fatalf("task workspace read should not become a miss: %#v", evalOut.Misses)
+	}
+	if containsPath(evalOut.Misses, workspacePlan) || containsPath(evalOut.Misses, "A01-workspace-filter-plan.md") {
+		t.Fatalf("task workspace plan should not become a miss: %#v", evalOut.Misses)
+	}
+	if !containsPath(evalOut.Hits, "internal/commands/task.go") {
+		t.Fatalf("normal implementation file should still count as hit, got %#v", evalOut.Hits)
+	}
+	if !containsPath(evalOut.Misses, "internal/commands/task_evaluate.go") {
+		t.Fatalf("normal explicit missed file should still count, got %#v", evalOut.Misses)
+	}
+	if evalOut.Metrics.CriticalPathRecall != "1/1" {
+		t.Fatalf("critical path recall should ignore task workspace reads, got %q", evalOut.Metrics.CriticalPathRecall)
+	}
+	if !evalOut.ConfidenceMismatch {
+		t.Fatalf("normal miss should still drive confidence mismatch when initial completeness is high")
+	}
+}
+
+func mustMkdirAll(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustWriteFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustReadFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func taskWarningsContainPath(warnings []taskFreshnessWarning, want string) bool {
+	want = filepath.ToSlash(want)
+	for _, warning := range warnings {
+		if filepath.ToSlash(warning.Path) == want {
+			return true
+		}
+	}
+	return false
+}
