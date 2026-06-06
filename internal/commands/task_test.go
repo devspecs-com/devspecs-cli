@@ -547,6 +547,86 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 	if !strings.Contains(indexBody, "B01-1: repair lifecycle status (iteration of B01, reason: improve) [stage: implemented, decision: promote]") {
 		t.Fatalf("index missing promoted iteration state:\n%s", indexBody)
 	}
+
+	decideSliceCmd := NewTaskCmd()
+	decideSliceCmd.SetArgs([]string{
+		"decide", "lifecycle-add-test",
+		"--target", "B01",
+		"--decision", "complete",
+		"--index=false",
+		"--json",
+	})
+	decideSliceBuf := &bytes.Buffer{}
+	decideSliceCmd.SetOut(decideSliceBuf)
+	if err := decideSliceCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var decideSliceOut taskDecideOutput
+	if err := json.Unmarshal(decideSliceBuf.Bytes(), &decideSliceOut); err != nil {
+		t.Fatalf("slice decide json: %v\n%s", err, decideSliceBuf.String())
+	}
+	if decideSliceOut.Target != "B01" || decideSliceOut.Stage != "completed" || decideSliceOut.Decision != "complete" {
+		t.Fatalf("slice decide output = %#v", decideSliceOut)
+	}
+
+	decideSeriesCmd := NewTaskCmd()
+	decideSeriesCmd.SetArgs([]string{
+		"decide", "lifecycle-add-test",
+		"--target", "B00",
+		"--decision", "complete",
+		"--index=false",
+		"--json",
+	})
+	decideSeriesBuf := &bytes.Buffer{}
+	decideSeriesCmd.SetOut(decideSeriesBuf)
+	if err := decideSeriesCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var decideSeriesOut taskDecideOutput
+	if err := json.Unmarshal(decideSeriesBuf.Bytes(), &decideSeriesOut); err != nil {
+		t.Fatalf("series decide json: %v\n%s", err, decideSeriesBuf.String())
+	}
+	if decideSeriesOut.Target != "B00" || decideSeriesOut.Stage != "completed" || decideSeriesOut.Decision != "complete" {
+		t.Fatalf("series decide output = %#v", decideSeriesOut)
+	}
+
+	decidedStatusCmd := NewTaskCmd()
+	decidedStatusCmd.SetArgs([]string{
+		"status", "lifecycle-add-test",
+		"--json",
+	})
+	decidedStatusBuf := &bytes.Buffer{}
+	decidedStatusCmd.SetOut(decidedStatusBuf)
+	if err := decidedStatusCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var decidedStatus taskStatusOutput
+	if err := json.Unmarshal(decidedStatusBuf.Bytes(), &decidedStatus); err != nil {
+		t.Fatalf("decided status json: %v\n%s", err, decidedStatusBuf.String())
+	}
+	if decidedStatus.Status != "completed" || decidedStatus.Decision != "complete" {
+		t.Fatalf("decided series status = %#v", decidedStatus)
+	}
+	var completedSlice taskStatusSliceOutput
+	for _, slice := range decidedStatus.Slices {
+		if slice.ID == "B01" {
+			completedSlice = slice
+			break
+		}
+	}
+	if completedSlice.Stage != "completed" || completedSlice.Decision != "complete" {
+		t.Fatalf("completed slice status = %#v", completedSlice)
+	}
+
+	indexBody = mustReadFile(t, filepath.Join(workspace, "B00-index.md"))
+	for _, want := range []string{
+		"## Status\ncompleted",
+		"B01: first lifecycle slice [stage: completed, decision: complete]",
+	} {
+		if !strings.Contains(indexBody, want) {
+			t.Fatalf("index missing decided state %q:\n%s", want, indexBody)
+		}
+	}
 }
 
 func TestTask_StartWarnsAboutOnDiskAnchorMissingFromIndex(t *testing.T) {

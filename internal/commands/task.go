@@ -82,6 +82,15 @@ type taskStatusOptions struct {
 	AsJSON bool
 }
 
+type taskDecideOptions struct {
+	Dir      string
+	Target   string
+	Stage    string
+	Decision string
+	Index    bool
+	AsJSON   bool
+}
+
 type taskCheckpointOptions struct {
 	Dir         string
 	Slice       string
@@ -161,6 +170,17 @@ type taskStatusSliceOutput struct {
 	UpdatedAt string `json:"updated_at,omitempty"`
 	Plan      string `json:"plan"`
 	Result    string `json:"result"`
+}
+
+type taskDecideOutput struct {
+	TaskID       string   `json:"task_id"`
+	Series       string   `json:"series"`
+	Target       string   `json:"target"`
+	Stage        string   `json:"stage,omitempty"`
+	Decision     string   `json:"decision"`
+	ManifestPath string   `json:"manifest_path"`
+	IndexPath    string   `json:"index_path"`
+	IndexedPaths []string `json:"indexed_paths,omitempty"`
 }
 
 type taskCheckpointOutput struct {
@@ -341,6 +361,7 @@ templates for recording actual reads, edits, tests, misses, and noise.`,
 	cmd.AddCommand(newTaskSliceCmd())
 	cmd.AddCommand(newTaskIterationCmd())
 	cmd.AddCommand(newTaskStatusCmd())
+	cmd.AddCommand(newTaskDecideCmd())
 	cmd.AddCommand(newTaskCheckpointCmd())
 	cmd.AddCommand(newTaskEvaluateCmd())
 	return cmd
@@ -415,6 +436,27 @@ func newTaskStatusCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
+	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func newTaskDecideCmd() *cobra.Command {
+	var opts taskDecideOptions
+	opts.Dir = defaultTaskWorkspaceDir
+	opts.Index = true
+	cmd := &cobra.Command{
+		Use:   "decide <task-id>",
+		Short: "Update a task series, slice, or iteration decision gate",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskDecide(cmd, args[0], opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
+	cmd.Flags().StringVar(&opts.Target, "target", "", "Series, slice, or iteration target ID/title/plan/result")
+	cmd.Flags().StringVar(&opts.Stage, "stage", "", "Lifecycle stage to set; inferred from terminal decisions when omitted")
+	cmd.Flags().StringVar(&opts.Decision, "decision", "", "Decision gate: promote, improve, rework, rollback, block, complete, split, supersede, cancel, continue")
+	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the updated task index into the DevSpecs index")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	return cmd
 }
@@ -770,6 +812,94 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 			fmt.Fprintf(out, " decision=%s", slice.Decision)
 		}
 		fmt.Fprintln(out)
+	}
+	return nil
+}
+
+func runTaskDecide(cmd *cobra.Command, taskID string, opts taskDecideOptions) error {
+	taskID = strings.TrimSpace(taskID)
+	if err := validateTaskID(taskID); err != nil {
+		return err
+	}
+	target := strings.TrimSpace(opts.Target)
+	if target == "" {
+		return fmt.Errorf("decision target is required")
+	}
+	decision := strings.TrimSpace(opts.Decision)
+	if decision == "" {
+		return fmt.Errorf("decision is required")
+	}
+	if !isAllowedValue(decision, taskDecisions) {
+		return fmt.Errorf("invalid decision %q; valid values: %s", decision, strings.Join(taskDecisions, ", "))
+	}
+	stage := strings.TrimSpace(opts.Stage)
+	if stage == "" {
+		stage = taskStageForDecision(decision)
+	}
+	if stage != "" && !isAllowedValue(stage, taskLifecycleStages) {
+		return fmt.Errorf("invalid stage %q; valid values: %s", stage, strings.Join(taskLifecycleStages, ", "))
+	}
+
+	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(opts.Dir, taskID)
+	if err != nil {
+		return err
+	}
+	targetID := target
+	if isTaskSeriesTarget(manifest, target) {
+		targetID = defaultTaskSeries(manifest.Series) + "00"
+	} else {
+		slice, err := taskSliceForCheckpoint(manifest, target)
+		if err != nil {
+			return err
+		}
+		targetID = slice.ID
+	}
+
+	now := time.Now().UTC()
+	applyTaskTargetState(&manifest, targetID, stage, decision, now)
+	stage, decision = taskStateForTarget(manifest, targetID)
+
+	manifestPath := filepath.Join(workspace, taskManifestFilename)
+	if err := writeTaskManifest(manifestPath, manifest); err != nil {
+		return err
+	}
+	indexPath := filepath.Join(workspace, manifest.Artifacts.Index)
+	if err := os.WriteFile(indexPath, []byte(renderTaskIndex(manifest)), 0o644); err != nil {
+		return fmt.Errorf("write task index: %w", err)
+	}
+
+	var indexed []string
+	if opts.Index {
+		indexed, err = captureTaskArtifacts(cmd, repoRoot, []taskCaptureRequest{{
+			Path:   indexPath,
+			Title:  "Task " + taskID + " preflight",
+			Status: taskArtifactStatus(stage, decision),
+		}})
+		if err != nil {
+			return err
+		}
+	}
+
+	out := taskDecideOutput{
+		TaskID:       manifest.TaskID,
+		Series:       defaultTaskSeries(manifest.Series),
+		Target:       targetID,
+		Stage:        stage,
+		Decision:     decision,
+		ManifestPath: manifestPath,
+		IndexPath:    indexPath,
+		IndexedPaths: indexed,
+	}
+	if opts.AsJSON {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Updated %s: stage=%s decision=%s\n", targetID, emptyAsDash(stage), decision)
+	fmt.Fprintf(cmd.OutOrStdout(), "Manifest: %s\n", manifestPath)
+	fmt.Fprintf(cmd.OutOrStdout(), "Index: %s\n", indexPath)
+	if len(indexed) > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "Indexed: %s\n", strings.Join(indexed, ", "))
 	}
 	return nil
 }
@@ -1920,7 +2050,7 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	if err := appendTaskCheckpointToResult(resultPath, checkpointPath, checkpointJSONPath, workspace, opts, now); err != nil {
 		return err
 	}
-	applyTaskCheckpointState(&manifest, selectedSlice.ID, opts.Stage, opts.Decision, now)
+	applyTaskTargetState(&manifest, selectedSlice.ID, opts.Stage, opts.Decision, now)
 	if err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), manifest); err != nil {
 		return err
 	}
@@ -1995,11 +2125,11 @@ func normalizeTaskCheckpointOptions(opts taskCheckpointOptions) taskCheckpointOp
 	return opts
 }
 
-func applyTaskCheckpointState(manifest *taskManifest, targetID, stage, decision string, now time.Time) {
+func applyTaskTargetState(manifest *taskManifest, targetID, stage, decision string, now time.Time) {
 	stage = strings.TrimSpace(stage)
 	decision = strings.TrimSpace(decision)
 	timestamp := now.Format(time.RFC3339)
-	if targetID == "" || strings.EqualFold(targetID, manifest.Series) || strings.EqualFold(targetID, defaultTaskSeries(manifest.Series)+"00") {
+	if targetID == "" || isTaskSeriesTarget(*manifest, targetID) {
 		if stage != "" {
 			manifest.Status = stage
 		}
@@ -2020,6 +2150,48 @@ func applyTaskCheckpointState(manifest *taskManifest, targetID, stage, decision 
 		return
 	}
 	manifest.UpdatedAt = timestamp
+}
+
+func isTaskSeriesTarget(manifest taskManifest, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	series := defaultTaskSeries(manifest.Series)
+	return strings.EqualFold(target, series) ||
+		strings.EqualFold(target, series+"00") ||
+		strings.EqualFold(target, manifest.Artifacts.Index)
+}
+
+func taskStageForDecision(decision string) string {
+	switch strings.ToLower(strings.TrimSpace(decision)) {
+	case "promote", "complete", "completed":
+		return "completed"
+	case "block", "blocked":
+		return "blocked"
+	case "split":
+		return "split"
+	case "supersede", "superseded":
+		return "superseded"
+	case "cancel", "cancelled":
+		return "cancelled"
+	case "rollback":
+		return "rolled_back"
+	default:
+		return ""
+	}
+}
+
+func taskStateForTarget(manifest taskManifest, targetID string) (string, string) {
+	if targetID == "" || isTaskSeriesTarget(manifest, targetID) {
+		return manifest.Status, manifest.Decision
+	}
+	for _, slice := range manifest.Artifacts.Slices {
+		if strings.EqualFold(slice.ID, targetID) {
+			return slice.Stage, slice.Decision
+		}
+	}
+	return "", ""
 }
 
 func buildTaskCheckpointRecord(manifest taskManifest, opts taskCheckpointOptions, slice taskSliceArtifact, now time.Time, repoRoot string) taskCheckpointRecord {
@@ -2559,10 +2731,12 @@ func taskArtifactStatus(stage, decision string) string {
 	stage = strings.ToLower(strings.TrimSpace(stage))
 	decision = strings.ToLower(strings.TrimSpace(decision))
 	switch {
-	case decision == "completed" || stage == "completed" || stage == "done" || stage == "implemented":
+	case decision == "promote" || decision == "complete" || decision == "completed" || stage == "completed" || stage == "done" || stage == "implemented" || stage == "validated":
 		return "implemented"
 	case decision == "superseded" || decision == "split" || stage == "superseded" || stage == "split":
 		return "superseded"
+	case decision == "block" || decision == "blocked" || decision == "cancel" || decision == "cancelled" || decision == "rollback" || stage == "blocked" || stage == "cancelled" || stage == "rolled_back":
+		return "rejected"
 	case stage == "packed" || stage == "planned" || stage == "started":
 		return "implementing"
 	default:
