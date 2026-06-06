@@ -12,6 +12,7 @@ type FindPackOutput struct {
 	Query            string                  `json:"query"`
 	Retriever        string                  `json:"retriever"`
 	Mode             string                  `json:"mode"`
+	ScoutMode        string                  `json:"scout_mode,omitempty"`
 	Summary          retrieval.PackSummary   `json:"summary,omitempty"`
 	LocalLanguage    []string                `json:"local_language,omitempty"`
 	Groups           []retrieval.PackGroup   `json:"groups"`
@@ -24,11 +25,12 @@ type FindPackOutput struct {
 	GraphDiagnostics *FindGraphDiagnostics   `json:"graph_diagnostics,omitempty"`
 }
 
-func findPackOutput(query, retrieverName string, candidates []retrieval.Candidate, reasons map[string][]string, rolePack retrieval.RoleGroupedPack) FindPackOutput {
+func findPackOutput(query, retrieverName string, candidates []retrieval.Candidate, reasons map[string][]string, rolePack retrieval.RoleGroupedPack, scoutMode string) FindPackOutput {
 	return FindPackOutput{
 		Query:         query,
 		Retriever:     retrieverName,
 		Mode:          rolePack.Mode,
+		ScoutMode:     findPackScoutDisplayName(scoutMode),
 		Summary:       rolePack.Summary,
 		LocalLanguage: retrieval.LocalLanguageReceipts(rolePack),
 		Groups:        rolePack.Groups,
@@ -45,6 +47,7 @@ func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retr
 		fmt.Fprintf(out, "Mode: %s\n", rolePack.Mode)
 	}
 	writePackSummary(out, rolePack.Summary)
+	writeFindPackScoutText(out, rolePack)
 	boundaryPrimary := retrieval.IsBoundaryPrimaryPack(rolePack) && !verbose
 	familyPrimary := retrieval.IsFamilyPrimaryPack(rolePack) && !verbose
 
@@ -111,6 +114,17 @@ func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retr
 	writeRelatedTestsText(out, relatedTests, verbose)
 	writeGitTrustText(out, gitTrust)
 	return nil
+}
+
+func writeFindPackScoutText(out io.Writer, rolePack retrieval.RoleGroupedPack) {
+	mode := findPackScoutDisplayName(findPackScoutModeFromMetadata(rolePack.Metadata))
+	if mode == "" {
+		return
+	}
+	switch mode {
+	case "beta":
+		fmt.Fprintln(out, "Scout: beta first working set; preserves the proven source/test baseline and keeps related families visible.")
+	}
 }
 
 func writeRelatedTestsText(out io.Writer, relatedTests *FindRelatedTestContext, verbose bool) {

@@ -15,6 +15,7 @@ type findPackAssemblyOptions struct {
 	GitReceipts          bool
 	BoundaryPrimary      bool
 	PackPresentationMode string
+	PackScoutMode        string
 }
 
 type findPackAssemblyResult struct {
@@ -77,6 +78,7 @@ func buildFindPackAssemblyFromMatches(ctx context.Context, db *store.DB, fp stor
 	} else {
 		rolePack = applyFindPackPresentationMode(rolePack, query, opts.PackPresentationMode)
 	}
+	rolePack = annotateFindPackScoutMode(rolePack, opts.PackScoutMode)
 
 	return findPackAssemblyResult{
 		Matches:        matches,
@@ -87,6 +89,19 @@ func buildFindPackAssemblyFromMatches(ctx context.Context, db *store.DB, fp stor
 		GitTrust:       gitTrust,
 		CompanionAdded: len(matches) - initialMatchCount,
 	}, nil
+}
+
+func annotateFindPackScoutMode(rolePack retrieval.RoleGroupedPack, mode string) retrieval.RoleGroupedPack {
+	mode = normalizeFindPackScoutMode(mode)
+	if mode == "" || mode == findPackScoutModeOff {
+		return rolePack
+	}
+	if rolePack.Metadata == nil {
+		rolePack.Metadata = map[string]string{}
+	}
+	rolePack.Metadata["pack_scout_mode"] = mode
+	rolePack.Metadata["pack_scout_contract"] = "o07_2_preserve_primary"
+	return rolePack
 }
 
 func applyFindPackPresentationMode(rolePack retrieval.RoleGroupedPack, query, mode string) retrieval.RoleGroupedPack {
