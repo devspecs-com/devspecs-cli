@@ -96,9 +96,57 @@ func TestWriteFindPackTextShowsScoutContract(t *testing.T) {
 	}
 }
 
+func TestWriteFindPackTextShowsScoutUncertainty(t *testing.T) {
+	pack := retrieval.RoleGroupedPack{
+		Mode: "role_grouped_pack_v0_family_primary_v1",
+		Summary: retrieval.PackSummary{
+			IncludedCount:     4,
+			RoleDiversity:     2,
+			HasImplementation: true,
+			HasBehaviorTests:  true,
+		},
+		Metadata: map[string]string{
+			"pack_scout_mode":                        findPackScoutModeBetaV0,
+			retrieval.PackScoutUncertaintyKey:        "true",
+			retrieval.PackScoutUncertaintyReasonsKey: "implementation surface is thin relative to tests (1 source, 3 tests)",
+		},
+		Groups: []retrieval.PackGroup{{
+			Role:  retrieval.PackRoleImplementation,
+			Title: retrieval.PackRoleTitle(retrieval.PackRoleImplementation),
+			Items: []retrieval.PackItem{{
+				OriginalRank: 1,
+				ID:           "selection",
+				Path:         "src/textual/selection.py",
+				Title:        "src/textual/selection.py",
+				Role:         retrieval.PackRoleImplementation,
+			}},
+		}},
+	}
+	var b strings.Builder
+	if err := writeFindPackText(&b, "Fix selection disappearing", "test", pack, nil, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "Scout uncertainty: implementation surface is thin relative to tests") {
+		t.Fatalf("missing scout uncertainty:\n%s", b.String())
+	}
+}
+
 func TestFindPackOutputIncludesScoutMode(t *testing.T) {
 	out := findPackOutput("auth", "test", nil, nil, retrieval.RoleGroupedPack{}, findPackScoutModeBetaV0)
 	if out.ScoutMode != "beta" {
 		t.Fatalf("scout mode = %q", out.ScoutMode)
+	}
+}
+
+func TestFindPackOutputIncludesScoutWarnings(t *testing.T) {
+	pack := retrieval.RoleGroupedPack{
+		Metadata: map[string]string{
+			retrieval.PackScoutUncertaintyKey:        "true",
+			retrieval.PackScoutUncertaintyReasonsKey: "no primary behavior tests are visible",
+		},
+	}
+	out := findPackOutput("auth", "test", nil, nil, pack, findPackScoutModeBetaV0)
+	if len(out.ScoutWarnings) != 1 || out.ScoutWarnings[0] != "no primary behavior tests are visible" {
+		t.Fatalf("scout warnings = %#v", out.ScoutWarnings)
 	}
 }

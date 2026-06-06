@@ -13,6 +13,7 @@ type FindPackOutput struct {
 	Retriever        string                  `json:"retriever"`
 	Mode             string                  `json:"mode"`
 	ScoutMode        string                  `json:"scout_mode,omitempty"`
+	ScoutWarnings    []string                `json:"scout_warnings,omitempty"`
 	Summary          retrieval.PackSummary   `json:"summary,omitempty"`
 	LocalLanguage    []string                `json:"local_language,omitempty"`
 	Groups           []retrieval.PackGroup   `json:"groups"`
@@ -31,6 +32,7 @@ func findPackOutput(query, retrieverName string, candidates []retrieval.Candidat
 		Retriever:     retrieverName,
 		Mode:          rolePack.Mode,
 		ScoutMode:     findPackScoutDisplayName(scoutMode),
+		ScoutWarnings: findPackScoutWarnings(rolePack),
 		Summary:       rolePack.Summary,
 		LocalLanguage: retrieval.LocalLanguageReceipts(rolePack),
 		Groups:        rolePack.Groups,
@@ -124,7 +126,24 @@ func writeFindPackScoutText(out io.Writer, rolePack retrieval.RoleGroupedPack) {
 	switch mode {
 	case "beta":
 		fmt.Fprintln(out, "Scout: beta first working set; preserves the proven source/test baseline and keeps related families visible.")
+		for _, warning := range findPackScoutWarnings(rolePack) {
+			fmt.Fprintf(out, "Scout uncertainty: %s\n", warning)
+		}
 	}
+}
+
+func findPackScoutWarnings(rolePack retrieval.RoleGroupedPack) []string {
+	if rolePack.Metadata == nil || rolePack.Metadata[retrieval.PackScoutUncertaintyKey] != "true" {
+		return nil
+	}
+	var warnings []string
+	for _, line := range strings.Split(rolePack.Metadata[retrieval.PackScoutUncertaintyReasonsKey], "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			warnings = append(warnings, line)
+		}
+	}
+	return warnings
 }
 
 func writeRelatedTestsText(out io.Writer, relatedTests *FindRelatedTestContext, verbose bool) {
