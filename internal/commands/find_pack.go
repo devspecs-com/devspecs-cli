@@ -430,6 +430,7 @@ type concisePackEvidence struct {
 	pathTerms  []string
 	titleTerms []string
 	bodyTerms  []string
+	bodyWindow []string
 }
 
 func (e *concisePackEvidence) addReason(reason string) {
@@ -459,6 +460,11 @@ func (e *concisePackEvidence) addReason(reason string) {
 		e.addSections(strings.TrimSpace(strings.TrimPrefix(reason, "section-packed context:")))
 	case strings.HasPrefix(lower, "indexed section match:"):
 		e.addSections(strings.TrimSpace(strings.TrimPrefix(reason, "indexed section match:")))
+	case strings.HasPrefix(lower, findPackScoutBodyEvidencePrefix):
+		body := strings.TrimSpace(strings.TrimPrefix(reason, findPackScoutBodyEvidencePrefix))
+		if body != "" {
+			e.bodyWindow = appendUniqueString(e.bodyWindow, body)
+		}
 	case lower == "test-case behavior signal":
 		e.anchors = appendUniqueString(e.anchors, "test behavior")
 	case strings.HasPrefix(lower, "matched test behavior:"):
@@ -486,6 +492,12 @@ func (e concisePackEvidence) render() []string {
 	}
 	if len(e.sections) > 0 {
 		out = append(out, "sections: "+strings.Join(firstStrings(e.sections, 2), "; "))
+	}
+	if len(out) >= 2 {
+		return out
+	}
+	if len(e.bodyWindow) > 0 {
+		out = append(out, "body evidence: "+strings.Join(firstStrings(e.bodyWindow, 1), "; "))
 	}
 	if len(out) >= 2 {
 		return out
@@ -705,6 +717,12 @@ func displayPackReason(reason string, excluded bool) []string {
 	case strings.HasPrefix(lower, "indexed section match:"):
 		if display := displaySectionListReason(reason, "section evidence", "indexed section match:"); display != "" {
 			return []string{display}
+		}
+		return nil
+	case strings.HasPrefix(lower, findPackScoutBodyEvidencePrefix):
+		body := strings.TrimSpace(strings.TrimPrefix(reason, findPackScoutBodyEvidencePrefix))
+		if body != "" {
+			return []string{"body evidence: " + body}
 		}
 		return nil
 	case strings.HasPrefix(lower, "authority prior:"):

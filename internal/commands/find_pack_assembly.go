@@ -80,6 +80,7 @@ func buildFindPackAssemblyFromMatches(ctx context.Context, db *store.DB, fp stor
 	}
 	if normalizeFindPackScoutMode(opts.PackScoutMode) == findPackScoutModeBetaV0 {
 		rolePack = retrieval.ApplyScoutSourceTestRescueForQuery(rolePack, query)
+		rolePack = addFindPackScoutBodyEvidence(fp.RepoRoot, query, rolePack)
 		rolePack = retrieval.ApplyDemotionOnlyNegativeEvidence(rolePack, query)
 	}
 	rolePack = annotateFindPackScoutMode(rolePack, opts.PackScoutMode)
@@ -132,5 +133,11 @@ func recordFindPackPresentationProps(props map[string]any, rolePack retrieval.Ro
 	}
 	if count := metadataInt(rolePack.Metadata, "pack_scout_source_rescue_count"); count > 0 {
 		props["pack_scout_source_rescue_count_bucket"] = telemetry.CountBucket(count)
+	}
+	if count := metadataInt(rolePack.Metadata, "pack_scout_body_evidence_count"); count > 0 {
+		props["pack_scout_body_evidence_count_bucket"] = telemetry.CountBucket(count)
+	}
+	if bytesRead := metadataInt(rolePack.Metadata, "pack_scout_body_evidence_bytes"); bytesRead > 0 {
+		props["pack_scout_body_evidence_bytes_bucket"] = telemetry.CountBucket(bytesRead)
 	}
 }
