@@ -142,3 +142,90 @@ func TestWriteFindPackTextBoundaryPrimaryVerboseShowsRelatedItems(t *testing.T) 
 		t.Fatalf("verbose boundary output should keep detailed role groups instead of compact summary:\n%s", out)
 	}
 }
+
+func TestWriteFindPackTextFamilyPrimarySummarizesRelatedFamilies(t *testing.T) {
+	pack := retrieval.ApplyFamilyPrimaryPackForQuery(retrieval.RoleGroupedPack{
+		Mode: "role_grouped_pack_v0",
+		Summary: retrieval.PackSummary{
+			IncludedCount:     4,
+			RoleDiversity:     2,
+			HasImplementation: true,
+			HasBehaviorTests:  true,
+		},
+		Metadata: map[string]string{
+			"local_language_receipts": strings.Join([]string{
+				"exact anchor on appears in path/body evidence across the pack",
+				"exact anchor rds appears in path/body evidence across the pack",
+			}, "\n"),
+		},
+		Groups: []retrieval.PackGroup{
+			{
+				Role:  retrieval.PackRoleImplementation,
+				Title: retrieval.PackRoleTitle(retrieval.PackRoleImplementation),
+				Items: []retrieval.PackItem{
+					{OriginalRank: 1, ID: "rds", ShortID: "rds", Path: "discovery/aws/rds.go", Title: "discovery/aws/rds.go", Role: retrieval.PackRoleImplementation},
+					{OriginalRank: 2, ID: "ecs", ShortID: "ecs", Path: "discovery/aws/ecs.go", Title: "discovery/aws/ecs.go", Role: retrieval.PackRoleImplementation},
+					{OriginalRank: 3, ID: "elasticache", ShortID: "elasticache", Path: "discovery/aws/elasticache.go", Title: "discovery/aws/elasticache.go", Role: retrieval.PackRoleImplementation},
+					{OriginalRank: 4, ID: "ec2", ShortID: "ec2", Path: "discovery/aws/ec2.go", Title: "discovery/aws/ec2.go", Role: retrieval.PackRoleImplementation},
+					{OriginalRank: 5, ID: "msk", ShortID: "msk", Path: "discovery/aws/msk.go", Title: "discovery/aws/msk.go", Role: retrieval.PackRoleImplementation},
+				},
+			},
+			{
+				Role:  retrieval.PackRoleBehaviorTests,
+				Title: retrieval.PackRoleTitle(retrieval.PackRoleBehaviorTests),
+				Items: []retrieval.PackItem{
+					{OriginalRank: 6, ID: "rds-test", ShortID: "rds-test", Path: "discovery/aws/rds_test.go#L1", SourcePath: "discovery/aws/rds_test.go", Title: "TestRDS", Subtype: "test_case", Role: retrieval.PackRoleBehaviorTests},
+					{OriginalRank: 7, ID: "ecs-test", ShortID: "ecs-test", Path: "discovery/aws/ecs_test.go#L1", SourcePath: "discovery/aws/ecs_test.go", Title: "TestECS", Subtype: "test_case", Role: retrieval.PackRoleBehaviorTests},
+					{OriginalRank: 8, ID: "elasticache-test", ShortID: "elasticache-test", Path: "discovery/aws/elasticache_test.go#L1", SourcePath: "discovery/aws/elasticache_test.go", Title: "TestElasticache", Subtype: "test_case", Role: retrieval.PackRoleBehaviorTests},
+					{OriginalRank: 9, ID: "ec2-test", ShortID: "ec2-test", Path: "discovery/aws/ec2_test.go#L1", SourcePath: "discovery/aws/ec2_test.go", Title: "TestEC2", Subtype: "test_case", Role: retrieval.PackRoleBehaviorTests},
+					{OriginalRank: 10, ID: "msk-test", ShortID: "msk-test", Path: "discovery/aws/msk_test.go#L1", SourcePath: "discovery/aws/msk_test.go", Title: "TestMSK", Subtype: "test_case", Role: retrieval.PackRoleBehaviorTests},
+				},
+			},
+		},
+	}, "Handle RDS clusters without instances in AWS discovery")
+
+	var b strings.Builder
+	if err := writeFindPackText(&b, "Handle RDS clusters without instances in AWS discovery", "test", pack, nil, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, "Related families kept for verbose/JSON:") {
+		t.Fatalf("family-primary output missing related summary:\n%s", out)
+	}
+	if strings.Contains(out, "exact anchor on appears") {
+		t.Fatalf("family-primary output leaked generic local-language receipt:\n%s", out)
+	}
+	if !strings.Contains(out, "exact anchor rds appears") {
+		t.Fatalf("family-primary output should keep specific local-language receipt:\n%s", out)
+	}
+	if strings.Contains(out, "  10. msk-test") {
+		t.Fatalf("family-primary default output should collapse related rows:\n%s", out)
+	}
+}
+
+func TestWriteFindPackTextFamilyPrimaryVerboseShowsRelatedRows(t *testing.T) {
+	pack := retrieval.ApplyFamilyPrimaryPackForQuery(retrieval.RoleGroupedPack{
+		Mode: "role_grouped_pack_v0",
+		Groups: []retrieval.PackGroup{
+			{
+				Role: retrieval.PackRoleImplementation,
+				Items: []retrieval.PackItem{
+					{OriginalRank: 1, ID: "rds", ShortID: "rds", Path: "discovery/aws/rds.go", Title: "discovery/aws/rds.go", Role: retrieval.PackRoleImplementation},
+					{OriginalRank: 2, ID: "ecs", ShortID: "ecs", Path: "discovery/aws/ecs.go", Title: "discovery/aws/ecs.go", Role: retrieval.PackRoleImplementation},
+				},
+			},
+		},
+	}, "Handle RDS clusters without instances in AWS discovery")
+
+	var b strings.Builder
+	if err := writeFindPackText(&b, "Handle RDS clusters without instances in AWS discovery", "test", pack, nil, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, "discovery/aws/ecs.go") {
+		t.Fatalf("verbose family-primary output should show related rows:\n%s", out)
+	}
+	if strings.Contains(out, "Related families kept for verbose/JSON:") {
+		t.Fatalf("verbose family-primary output should show rows instead of summary:\n%s", out)
+	}
+}

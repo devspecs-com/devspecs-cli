@@ -46,6 +46,7 @@ func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retr
 	}
 	writePackSummary(out, rolePack.Summary)
 	boundaryPrimary := retrieval.IsBoundaryPrimaryPack(rolePack) && !verbose
+	familyPrimary := retrieval.IsFamilyPrimaryPack(rolePack) && !verbose
 
 	if len(rolePack.Groups) == 0 && len(rolePack.ExcludedNoise) == 0 {
 		fmt.Fprintln(out)
@@ -60,7 +61,7 @@ func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retr
 		}
 		items := group.Items
 		relatedCount := 0
-		if boundaryPrimary {
+		if boundaryPrimary || familyPrimary {
 			items = make([]retrieval.PackItem, 0, len(group.Items))
 			for _, item := range group.Items {
 				if retrieval.PackItemIsRelated(item) {
@@ -77,12 +78,12 @@ func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retr
 		if title == "" {
 			title = retrieval.PackRoleTitle(group.Role)
 		}
-		if boundaryPrimary && relatedCount > 0 {
+		if (boundaryPrimary || familyPrimary) && relatedCount > 0 {
 			fmt.Fprintf(out, "\n%s (%d primary, %d related)\n", title, len(items), relatedCount)
 		} else {
 			fmt.Fprintf(out, "\n%s (%d)\n", title, len(items))
 		}
-		if group.OverflowCount > 0 && !boundaryPrimary {
+		if group.OverflowCount > 0 && !boundaryPrimary && !familyPrimary {
 			fmt.Fprintf(out, "  Note: %d item(s) over the recommended budget of %d.\n", group.OverflowCount, group.Budget)
 		}
 		for _, item := range items {
@@ -92,6 +93,9 @@ func writeFindPackText(out io.Writer, query, retrieverName string, rolePack retr
 
 	if boundaryPrimary {
 		writeBoundaryPrimarySummary(out, rolePack)
+	}
+	if familyPrimary {
+		writeFamilyPrimarySummary(out, rolePack)
 	}
 
 	if len(rolePack.ExcludedNoise) > 0 {
@@ -138,7 +142,7 @@ func writeRelatedTestsText(out io.Writer, relatedTests *FindRelatedTestContext, 
 }
 
 func writePackLocalLanguage(out io.Writer, rolePack retrieval.RoleGroupedPack) {
-	receipts := retrieval.LocalLanguageReceipts(rolePack)
+	receipts := displayLocalLanguageReceipts(rolePack)
 	if len(receipts) == 0 {
 		return
 	}
@@ -150,6 +154,45 @@ func writePackLocalLanguage(out io.Writer, rolePack retrieval.RoleGroupedPack) {
 	fmt.Fprintln(out, "Local language:")
 	for _, receipt := range firstStrings(receipts, 3) {
 		fmt.Fprintf(out, "- %s\n", receipt)
+	}
+}
+
+func displayLocalLanguageReceipts(rolePack retrieval.RoleGroupedPack) []string {
+	receipts := retrieval.LocalLanguageReceipts(rolePack)
+	if !retrieval.IsFamilyPrimaryPack(rolePack) {
+		return receipts
+	}
+	var out []string
+	for _, receipt := range receipts {
+		if familyPrimaryGenericReceipt(receipt) {
+			continue
+		}
+		out = append(out, receipt)
+	}
+	return out
+}
+
+func familyPrimaryGenericReceipt(receipt string) bool {
+	lower := strings.ToLower(strings.TrimSpace(receipt))
+	const prefix = "exact anchor "
+	if !strings.HasPrefix(lower, prefix) {
+		return false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(lower, prefix))
+	term, _, found := strings.Cut(rest, " ")
+	if !found || term == "" {
+		return false
+	}
+	switch term {
+	case "a", "an", "and", "are", "as", "at", "be", "before", "by", "can", "change", "changes",
+		"code", "correct", "correctly", "do", "does", "done", "file", "files", "fix", "for",
+		"from", "get", "handle", "handling", "helper", "helpers", "if", "in", "index", "into",
+		"is", "it", "make", "manager", "new", "node", "of", "old", "on", "or", "set", "sets",
+		"should", "support", "the", "to", "update", "use", "uses", "using", "util", "utils",
+		"when", "with", "without", "work":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -176,6 +219,32 @@ func writeBoundaryPrimarySummary(out io.Writer, rolePack retrieval.RoleGroupedPa
 	}
 	if len(related) > 4 {
 		fmt.Fprintf(out, "  - +%d more related group(s)\n", len(related)-4)
+	}
+}
+
+func writeFamilyPrimarySummary(out io.Writer, rolePack retrieval.RoleGroupedPack) {
+	related := retrieval.FamilyPrimaryRelatedSummaries(rolePack)
+	if len(related) == 0 {
+		return
+	}
+	total := 0
+	for _, summary := range related {
+		total += summary.Count
+	}
+	fmt.Fprintf(out, "\nRelated families kept for verbose/JSON: %d artifact(s)\n", total)
+	for _, summary := range firstBoundarySummaries(related, 6) {
+		label := summary.Title
+		if label == "" {
+			label = retrieval.PackRoleTitle(summary.Role)
+		}
+		fmt.Fprintf(out, "  - %s: %d from %s", label, summary.Count, summary.Boundary)
+		if len(summary.Examples) > 0 {
+			fmt.Fprintf(out, " (%s)", strings.Join(firstStrings(summary.Examples, 3), "; "))
+		}
+		fmt.Fprintln(out)
+	}
+	if len(related) > 6 {
+		fmt.Fprintf(out, "  - +%d more related family group(s)\n", len(related)-6)
 	}
 }
 

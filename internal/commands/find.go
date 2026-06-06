@@ -40,6 +40,7 @@ func NewFindCmd() *cobra.Command {
 		sourceManifestCandidates  string
 		sourceManifestConsumption bool
 		sourceTestReceipts        string
+		packPresentationMode      string
 	)
 
 	cmd := &cobra.Command{
@@ -51,7 +52,7 @@ func NewFindCmd() *cobra.Command {
 			if cmd.Flags().Changed("experimental-anchor-first-mode") && !cmd.Flags().Changed("experimental-anchor-first-ranking") {
 				anchorFirst = true
 			}
-			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst, anchorMode, boundaryPrimary, packCompanions, sourcePackMode, sourceManifestCandidates, sourceManifestConsumption, sourceTestReceipts)
+			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst, anchorMode, boundaryPrimary, packCompanions, sourcePackMode, sourceManifestCandidates, sourceManifestConsumption, sourceTestReceipts, packPresentationMode)
 		},
 	}
 
@@ -76,15 +77,17 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sourceManifestCandidates, "source-manifest-candidates", "off", "Hidden scout flag: off, metadata, or window")
 	cmd.Flags().BoolVar(&sourceManifestConsumption, "source-manifest-consumption", false, "Hidden scout flag: reserve/replace source manifest candidates in pack mode")
 	cmd.Flags().StringVar(&sourceTestReceipts, "source-test-receipts", findSourceTestReceiptsModeOff, "Hidden scout flag: off, receipt_v0, or related_files_receipt_v0")
+	cmd.Flags().StringVar(&packPresentationMode, "pack-presentation-mode", findPackPresentationModeOff, "Hidden scout flag: off or family_primary_v0")
 	_ = cmd.Flags().MarkHidden("pack-companion-mode")
 	_ = cmd.Flags().MarkHidden("experimental-source-pack-mode")
 	_ = cmd.Flags().MarkHidden("source-manifest-candidates")
 	_ = cmd.Flags().MarkHidden("source-manifest-consumption")
 	_ = cmd.Flags().MarkHidden("source-test-receipts")
+	_ = cmd.Flags().MarkHidden("pack-presentation-mode")
 	return cmd
 }
 
-func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst bool, anchorMode string, boundaryPrimary bool, packCompanions string, sourcePackMode string, sourceManifestCandidates string, sourceManifestConsumption bool, sourceTestReceipts string) error {
+func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst bool, anchorMode string, boundaryPrimary bool, packCompanions string, sourcePackMode string, sourceManifestCandidates string, sourceManifestConsumption bool, sourceTestReceipts string, packPresentationMode string) error {
 	start := time.Now()
 	success := false
 	anchorMode = retrieval.NormalizeAnchorFirstMode(anchorMode)
@@ -114,6 +117,21 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	}
 	if sourceTestReceipts != findSourceTestReceiptsModeOff && !pack {
 		return fmt.Errorf("--source-test-receipts %s requires --pack", sourceTestReceipts)
+	}
+	if !cmd.Flags().Changed("pack-presentation-mode") {
+		if env := strings.TrimSpace(os.Getenv("DEVSPECS_PACK_PRESENTATION_MODE")); env != "" {
+			packPresentationMode = env
+		}
+	}
+	packPresentationMode = normalizeFindPackPresentationMode(packPresentationMode)
+	if packPresentationMode == "" {
+		return fmt.Errorf("unknown --pack-presentation-mode; valid values: %s", strings.Join(validFindPackPresentationModes(), ", "))
+	}
+	if packPresentationMode != findPackPresentationModeOff && !pack {
+		return fmt.Errorf("--pack-presentation-mode %s requires --pack", packPresentationMode)
+	}
+	if boundaryPrimary && packPresentationMode != findPackPresentationModeOff {
+		return fmt.Errorf("--experimental-boundary-primary cannot be combined with --pack-presentation-mode %s", packPresentationMode)
 	}
 	if !cmd.Flags().Changed("pack-companion-mode") {
 		if env := strings.TrimSpace(os.Getenv("DEVSPECS_PACK_COMPANION_MODE")); env != "" {
@@ -162,6 +180,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 		"source_manifest_candidates":  string(sourceManifestMode),
 		"source_manifest_consumption": sourceManifestConsumption,
 		"source_test_receipts":        sourceTestReceipts,
+		"pack_presentation_mode":      packPresentationMode,
 	}
 	defer func() {
 		telemetry.RecordCommand("find", success, time.Since(start), props)
@@ -238,12 +257,10 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 
 	if pack {
 		rolePack := retrieval.BuildRoleGroupedPack(matches, reasons, query)
-		if boundaryPrimary {
-			rolePack = retrieval.ApplyBoundaryPrimaryPackForQuery(rolePack, query)
-		}
+		receiptPack := rolePack
 		var relatedTests *FindRelatedTestContext
 		if sourceTestReceipts != findSourceTestReceiptsModeOff {
-			relatedTests, err = buildFindSourceTestReceipts(db, fp, query, rolePack, sourceTestReceipts)
+			relatedTests, err = buildFindSourceTestReceipts(db, fp, query, receiptPack, sourceTestReceipts)
 			if err != nil {
 				return fmt.Errorf("find source test receipts: %w", err)
 			}
@@ -253,9 +270,19 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 		}
 		var gitTrust *FindGitTrustContext
 		if gitReceipts && fp.RepoRoot != "" {
-			gitTrust = buildFindGitTrustContext(cmd.Context(), fp.RepoRoot, query, rolePack)
+			gitTrust = buildFindGitTrustContext(cmd.Context(), fp.RepoRoot, query, receiptPack)
 			if gitTrust != nil {
 				props["git_receipt_count_bucket"] = telemetry.CountBucket(len(gitTrust.Receipts))
+			}
+		}
+		if boundaryPrimary {
+			rolePack = retrieval.ApplyBoundaryPrimaryPackForQuery(rolePack, query)
+		}
+		if packPresentationMode == findPackPresentationModeFamilyPrimaryV0 {
+			rolePack = retrieval.ApplyFamilyPrimaryPackForQuery(rolePack, query)
+			if rolePack.Metadata != nil {
+				props["family_primary_count_bucket"] = telemetry.CountBucket(metadataInt(rolePack.Metadata, "family_primary_count"))
+				props["family_related_count_bucket"] = telemetry.CountBucket(metadataInt(rolePack.Metadata, "family_related_count"))
 			}
 		}
 		if asJSON {
