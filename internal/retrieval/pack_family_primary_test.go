@@ -156,6 +156,33 @@ func TestFamilyPrimaryProtectedEntryKeepsLossSafePreservedSource(t *testing.T) {
 	}
 }
 
+func TestApplyFamilyPrimaryPackV1ProtectsScoutAnchorAdmissions(t *testing.T) {
+	pack := RoleGroupedPack{
+		Mode: "role_grouped_pack_v0",
+		Groups: []PackGroup{
+			{
+				Role: PackRoleImplementation,
+				Items: []PackItem{
+					{OriginalRank: 1, ID: "flow-trigger", Path: "api/src/ai/tools/trigger-flow/index.ts", Title: "trigger flow", Role: PackRoleImplementation, Reasons: []string{"anchor-first ranking: score 24.000; matches flow"}},
+					{OriginalRank: 2, ID: "flow-tree", Path: "api/src/utils/construct-flow-tree.ts", Title: "construct flow tree", Role: PackRoleImplementation, Reasons: []string{"anchor-first ranking: score 21.000; matches flow"}},
+					{OriginalRank: 3, ID: "flow-settings", Path: "app/src/modules/settings/routes/flows/flow.vue", Title: "flow settings", Role: PackRoleImplementation, Reasons: []string{"anchor-first ranking: score 24.000; matches flow"}},
+					{OriginalRank: 9, ID: "bookmark-add", Path: "app/src/modules/content/components/bookmark-add.vue", Title: "bookmark add", Role: PackRoleImplementation, Reasons: []string{"relationship expansion: scout_anchor_admission", "anchor-first ranking: score 24.000; matches bookmark"}},
+					{OriginalRank: 10, ID: "bookmark-delete", Path: "app/src/modules/content/components/bookmark-delete.vue", Title: "bookmark delete", Role: PackRoleImplementation, Reasons: []string{"relationship expansion: scout_anchor_admission", "anchor-first ranking: score 24.000; matches bookmark"}},
+				},
+			},
+		},
+	}
+
+	got := ApplyFamilyPrimaryPackV1ForQuery(pack, "Improve bookmark flow")
+	tiers := familyPrimaryTestTiers(got)
+	if tiers["app/src/modules/content/components/bookmark-add.vue"] != PackTierPrimary {
+		t.Fatalf("admitted bookmark source should be primary: %#v", tiers)
+	}
+	if tiers["app/src/modules/content/components/bookmark-delete.vue"] != PackTierPrimary {
+		t.Fatalf("second admitted bookmark source should be primary: %#v", tiers)
+	}
+}
+
 func TestApplyFamilyPrimaryPackV2KeepsSameFamilyTestPrimary(t *testing.T) {
 	pack := RoleGroupedPack{
 		Mode: "role_grouped_pack_v0",

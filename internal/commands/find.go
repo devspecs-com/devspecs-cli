@@ -279,6 +279,13 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 				matches = applyFindSourceManifestConsumptionScout(query, matches, candidates)
 			}
 		}
+		if packScoutMode == findPackScoutModeBetaV0 {
+			before := len(matches)
+			matches = retrieval.AddScoutAnchorAdmissionCandidates(matches, baseCandidates, query)
+			if len(matches) > before {
+				props["pack_scout_anchor_admission_count_bucket"] = telemetry.CountBucket(len(matches) - before)
+			}
+		}
 	}
 	reasons := reasonsByPath(retrieval.ExplainCandidates(matches, query))
 	var graphDiagnostics FindGraphDiagnostics

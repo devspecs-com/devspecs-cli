@@ -466,6 +466,11 @@ func familyPrimaryProtectedEntries(entries map[string]*familyPrimaryEntry) []*fa
 	sort.SliceStable(protected, func(i, j int) bool {
 		left := protected[i]
 		right := protected[j]
+		leftScout := familyPrimaryScoutAnchorAdmission(left)
+		rightScout := familyPrimaryScoutAnchorAdmission(right)
+		if leftScout != rightScout {
+			return leftScout
+		}
 		if left.item.OriginalRank != right.item.OriginalRank {
 			return left.item.OriginalRank < right.item.OriginalRank
 		}
@@ -496,10 +501,18 @@ func familyPrimaryProtectedEntry(entry *familyPrimaryEntry) bool {
 	}
 	reasons := strings.ToLower(strings.Join(entry.item.Reasons, "\n"))
 	return strings.Contains(reasons, "source-family ranking") ||
+		strings.Contains(reasons, "scout_anchor_admission") ||
 		strings.Contains(reasons, "source_manifest_family_recovery") ||
 		strings.Contains(reasons, "source_manifest_consumption_recovery") ||
 		strings.Contains(reasons, "source_manifest_loss_safe_preserved") ||
 		strings.Contains(reasons, "same_stem_source_recovery")
+}
+
+func familyPrimaryScoutAnchorAdmission(entry *familyPrimaryEntry) bool {
+	if entry == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(strings.Join(entry.item.Reasons, "\n")), "scout_anchor_admission")
 }
 
 func firstFamilyPrimaryClass(entries []*familyPrimaryEntry, class string) *familyPrimaryEntry {
