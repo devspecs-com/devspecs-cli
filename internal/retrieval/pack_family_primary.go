@@ -306,6 +306,7 @@ func familyPrimaryProtectedEntry(entry *familyPrimaryEntry) bool {
 	return strings.Contains(reasons, "source-family ranking") ||
 		strings.Contains(reasons, "source_manifest_family_recovery") ||
 		strings.Contains(reasons, "source_manifest_consumption_recovery") ||
+		strings.Contains(reasons, "source_manifest_loss_safe_preserved") ||
 		strings.Contains(reasons, "same_stem_source_recovery")
 }
 

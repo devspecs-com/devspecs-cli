@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
+	"github.com/devspecs-com/devspecs-cli/internal/store"
 )
 
 func TestSelectFindSourceManifestRecoveryCandidatesAddsSameStemSourceFromSelectedTest(t *testing.T) {
@@ -82,6 +83,58 @@ func TestSelectFindFilesystemSourceRecoveryCandidatesAddsSourceFromSelectedTest(
 	}
 	if got[0].Metadata["retrieval_expansion_reason"] != "filesystem_source_family_recovery" {
 		t.Fatalf("missing filesystem recovery metadata: %#v", got[0].Metadata)
+	}
+}
+
+func TestApplyFindSourceManifestConsumptionV2PreservesDefaultSourceWinner(t *testing.T) {
+	baseline := []retrieval.Candidate{{
+		Path:  "apps/web/lib/api/links/get-links-for-workspace.ts",
+		Kind:  "source_context",
+		Title: "get links for workspace",
+		Body:  "workspace links sorting efficiency",
+	}}
+	matches := []retrieval.Candidate{{
+		Path:  "apps/web/lib/export/links.ts",
+		Kind:  "source_context",
+		Title: "export links",
+		Body:  "workspace links export",
+	}}
+
+	got := applyFindSourceManifestConsumptionV2Scout(nil, store.FilterParams{}, "improve link sort efficiency for workspace links", baseline, matches, nil)
+	if !findPackHasPath(got, "apps/web/lib/api/links/get-links-for-workspace.ts") {
+		t.Fatalf("expected loss-safe default source preservation, got %#v", retrieval.CandidatePaths(got))
+	}
+	for _, candidate := range got {
+		if candidate.Path != "apps/web/lib/api/links/get-links-for-workspace.ts" {
+			continue
+		}
+		if candidate.Metadata["retrieval_expansion_reason"] != "source_manifest_loss_safe_preserved" {
+			t.Fatalf("missing loss-safe metadata: %#v", candidate.Metadata)
+		}
+		if candidate.Metadata["pack_tier"] != retrieval.PackTierPrimary {
+			t.Fatalf("expected primary preservation tier: %#v", candidate.Metadata)
+		}
+		return
+	}
+}
+
+func TestApplyFindSourceManifestConsumptionV2SkipsWeakTutorialPreserve(t *testing.T) {
+	baseline := []retrieval.Candidate{{
+		Path:  "docs_src/custom_docs_ui/tutorial001.py",
+		Kind:  "source_context",
+		Title: "tutorial001",
+		Body:  "swagger oauth2 redirect",
+	}}
+	matches := []retrieval.Candidate{{
+		Path:  "fastapi/openapi/docs.py",
+		Kind:  "source_context",
+		Title: "openapi docs",
+		Body:  "swagger oauth2 redirect",
+	}}
+
+	got := applyFindSourceManifestConsumptionV2Scout(nil, store.FilterParams{}, "serve Swagger UI OAuth2 redirect from a custom docs redirect URL", baseline, matches, nil)
+	if findPackHasPath(got, "docs_src/custom_docs_ui/tutorial001.py") {
+		t.Fatalf("did not expect weak tutorial preservation, got %#v", retrieval.CandidatePaths(got))
 	}
 }
 

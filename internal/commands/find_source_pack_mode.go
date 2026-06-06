@@ -6,6 +6,7 @@ const (
 	findSourcePackModeOff               = "off"
 	findSourcePackModeCompactManifestV0 = "compact_manifest_v0"
 	findSourcePackModeCompactManifestV1 = "compact_manifest_v1"
+	findSourcePackModeCompactManifestV2 = "compact_manifest_v2"
 )
 
 func normalizeFindSourcePackMode(mode string) string {
@@ -16,11 +17,13 @@ func normalizeFindSourcePackMode(mode string) string {
 		return findSourcePackModeCompactManifestV0
 	case "source_manifest_v1", "compact_manifest_v1", "compact-v1", "manifest-v1":
 		return findSourcePackModeCompactManifestV1
+	case "source_manifest_v2", "compact_manifest_v2", "compact-v2", "manifest-v2":
+		return findSourcePackModeCompactManifestV2
 	default:
 		return ""
 	}
 }
 
 func validFindSourcePackModes() []string {
-	return []string{findSourcePackModeOff, findSourcePackModeCompactManifestV0, findSourcePackModeCompactManifestV1}
+	return []string{findSourcePackModeOff, findSourcePackModeCompactManifestV0, findSourcePackModeCompactManifestV1, findSourcePackModeCompactManifestV2}
 }

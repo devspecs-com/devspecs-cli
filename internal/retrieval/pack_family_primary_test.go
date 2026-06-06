@@ -139,3 +139,19 @@ func TestFamilyPrimaryProtectedEntrySkipsWeakTutorialSource(t *testing.T) {
 		t.Fatalf("tutorial source should not be exact-protected")
 	}
 }
+
+func TestFamilyPrimaryProtectedEntryKeepsLossSafePreservedSource(t *testing.T) {
+	entry := &familyPrimaryEntry{
+		class: "source",
+		item: PackItem{
+			OriginalRank: 12,
+			Path:         "apps/web/lib/api/links/get-links-for-workspace.ts",
+			Role:         PackRoleImplementation,
+			Reasons:      []string{"relationship expansion: source_manifest_loss_safe_preserved"},
+		},
+		score: 2,
+	}
+	if !familyPrimaryProtectedEntry(entry) {
+		t.Fatalf("loss-safe preserved source should stay protected")
+	}
+}

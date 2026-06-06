@@ -73,7 +73,7 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().StringVar(&anchorMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, selected_only, strong_field, strict, code_task, code_task_family, or code_task_family_v2")
 	cmd.Flags().BoolVar(&boundaryPrimary, "experimental-boundary-primary", false, "Tier pack output into a source-safe primary working set plus related context summary")
 	cmd.Flags().StringVar(&packCompanions, "pack-companion-mode", findPackCompanionModeAll, "Hidden scout flag: off, generic, generic_git, or all")
-	cmd.Flags().StringVar(&sourcePackMode, "experimental-source-pack-mode", findSourcePackModeOff, "Hidden source pack mode: off, compact_manifest_v0, or compact_manifest_v1")
+	cmd.Flags().StringVar(&sourcePackMode, "experimental-source-pack-mode", findSourcePackModeOff, "Hidden source pack mode: off, compact_manifest_v0, compact_manifest_v1, or compact_manifest_v2")
 	cmd.Flags().StringVar(&sourceManifestCandidates, "source-manifest-candidates", "off", "Hidden scout flag: off, metadata, or window")
 	cmd.Flags().BoolVar(&sourceManifestConsumption, "source-manifest-consumption", false, "Hidden scout flag: reserve/replace source manifest candidates in pack mode")
 	cmd.Flags().StringVar(&sourceTestReceipts, "source-test-receipts", findSourceTestReceiptsModeOff, "Hidden scout flag: off, receipt_v0, or related_files_receipt_v0")
@@ -156,7 +156,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 			sourceManifestConsumption = env == "1" || strings.EqualFold(env, "true") || strings.EqualFold(env, "pack")
 		}
 	}
-	if sourcePackMode == findSourcePackModeCompactManifestV0 || sourcePackMode == findSourcePackModeCompactManifestV1 {
+	if sourcePackMode == findSourcePackModeCompactManifestV0 || sourcePackMode == findSourcePackModeCompactManifestV1 || sourcePackMode == findSourcePackModeCompactManifestV2 {
 		if !cmd.Flags().Changed("source-manifest-candidates") {
 			sourceManifestCandidates = string(indexquery.SourceManifestCandidateModeWindow)
 			sourceManifestMode = indexquery.SourceManifestCandidateModeWindow
@@ -215,6 +215,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	if err != nil {
 		return fmt.Errorf("find: %w", err)
 	}
+	baseCandidates := append([]retrieval.Candidate(nil), loadResult.Candidates...)
 	if sourceManifestMode != indexquery.SourceManifestCandidateModeOff {
 		manifestCandidates, manifestReport, err := loadFindSourceManifestCandidates(db, fp, query, sourceManifestMode)
 		if err != nil {
@@ -232,6 +233,13 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	recordFindRuntimeProps(props, loadResult.Report)
 	emitFindRuntimeDebug(cmd, loadResult.Report)
 	retriever := retrieval.WeightedFilesRetrieverV0{AnchorFirstRanking: anchorFirst, AnchorFirstMode: anchorMode}
+	var baselineMatches []retrieval.Candidate
+	if pack && sourcePackMode == findSourcePackModeCompactManifestV2 {
+		baselineMatches = retriever.Retrieve(baseCandidates, query)
+		if len(baselineMatches) == 0 {
+			baselineMatches = retrieval.QueryBaseline(baseCandidates, query)
+		}
+	}
 	matches := retriever.Retrieve(candidates, query)
 	if len(matches) == 0 {
 		matches = retrieval.QueryBaseline(candidates, query)
@@ -239,7 +247,12 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	initialMatchCount := len(matches)
 	if pack {
 		if sourceManifestConsumption && sourceManifestMode != indexquery.SourceManifestCandidateModeOff {
-			if sourcePackMode == findSourcePackModeCompactManifestV1 {
+			if sourcePackMode == findSourcePackModeCompactManifestV2 {
+				if len(baselineMatches) > 0 {
+					baselineMatches = addFindPackCompanionCandidates(cmd.Context(), fp.RepoRoot, query, baselineMatches, baseCandidates, packCompanions)
+				}
+				matches = applyFindSourceManifestConsumptionV2Scout(db, fp, query, baselineMatches, matches, candidates)
+			} else if sourcePackMode == findSourcePackModeCompactManifestV1 {
 				matches = applyFindSourceManifestConsumptionV1Scout(db, fp, query, matches, candidates)
 			} else {
 				matches = applyFindSourceManifestConsumptionScout(query, matches, candidates)

@@ -14,6 +14,7 @@ import (
 const (
 	findSourceManifestRecoveryMaxAdditions = 4
 	findSourceManifestRecoveryMaxPerFamily = 2
+	findSourceManifestLossSafeMaxPreserved = 8
 )
 
 type findSourceManifestRecoveryCandidate struct {
@@ -48,6 +49,77 @@ func applyFindSourceManifestConsumptionV1Scout(db *store.DB, fp store.FilterPara
 	out = append(out, base...)
 	out = append(out, additions...)
 	return out
+}
+
+func applyFindSourceManifestConsumptionV2Scout(db *store.DB, fp store.FilterParams, query string, baseline, matches, all []retrieval.Candidate) []retrieval.Candidate {
+	base := applyFindSourceManifestConsumptionV1Scout(db, fp, query, matches, all)
+	if len(base) == 0 || len(baseline) == 0 {
+		return base
+	}
+	return mergeFindSourceManifestLossSafeCandidates(query, baseline, base)
+}
+
+func mergeFindSourceManifestLossSafeCandidates(query string, baseline, recovered []retrieval.Candidate) []retrieval.Candidate {
+	terms := findSourceManifestRecoveryTerms(query)
+	out := append([]retrieval.Candidate(nil), recovered...)
+	seen := findPackCandidatePathSet(out)
+	preserved := 0
+	for i, candidate := range baseline {
+		if preserved >= findSourceManifestLossSafeMaxPreserved {
+			break
+		}
+		path := findSourceManifestConsumptionPath(candidate)
+		if path == "" || seen[path] {
+			continue
+		}
+		if !findSourceManifestLossSafePreservable(candidate, terms, i) {
+			continue
+		}
+		out = append(out, annotateFindSourceManifestLossSafeCandidate(candidate, i+1))
+		seen[path] = true
+		preserved++
+	}
+	return out
+}
+
+func findSourceManifestLossSafePreservable(candidate retrieval.Candidate, terms []string, baselineIndex int) bool {
+	path := findSourceManifestConsumptionPath(candidate)
+	if path == "" || findSourceManifestWeakSourceNoise(candidate) || findSourceManifestRecoveryWeakPath(path) {
+		return false
+	}
+	if !findSourceManifestLossSafeSourceLike(candidate) {
+		return false
+	}
+	score := findSourceManifestConsumptionScore(candidate, terms)
+	if score >= 8 {
+		return true
+	}
+	return baselineIndex >= 0 && baselineIndex < 6 && score > 0
+}
+
+func findSourceManifestLossSafeSourceLike(candidate retrieval.Candidate) bool {
+	if strings.EqualFold(candidate.Kind, "source_context") || strings.EqualFold(candidate.Metadata["source_type"], "source_context") {
+		return true
+	}
+	path := candidate.Path
+	if path == "" {
+		path = candidate.Source
+	}
+	return findPackLooksSourcePath(path) || findPackLooksTestPath(path)
+}
+
+func annotateFindSourceManifestLossSafeCandidate(candidate retrieval.Candidate, baselineRank int) retrieval.Candidate {
+	metadata := map[string]string{}
+	for key, value := range candidate.Metadata {
+		metadata[key] = value
+	}
+	metadata["retrieval_expansion_reason"] = "source_manifest_loss_safe_preserved"
+	metadata["source_manifest_loss_safe_preserved"] = "true"
+	metadata["source_manifest_loss_safe_baseline_rank"] = strconv.Itoa(baselineRank)
+	metadata["pack_tier"] = retrieval.PackTierPrimary
+	metadata["pack_tier_reason"] = "preserved default source/test candidate during manifest recovery"
+	candidate.Metadata = metadata
+	return candidate
 }
 
 func findSourceManifestRecoveryRepoRoot(db *store.DB, candidates []retrieval.Candidate) string {
