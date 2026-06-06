@@ -151,25 +151,29 @@ type taskArtifactAddOutput struct {
 }
 
 type taskStatusOutput struct {
-	TaskID    string                  `json:"task_id"`
-	Series    string                  `json:"series"`
-	Status    string                  `json:"status"`
-	Decision  string                  `json:"decision,omitempty"`
-	UpdatedAt string                  `json:"updated_at,omitempty"`
-	Slices    []taskStatusSliceOutput `json:"slices,omitempty"`
+	TaskID               string                  `json:"task_id"`
+	Series               string                  `json:"series"`
+	Status               string                  `json:"status"`
+	Decision             string                  `json:"decision,omitempty"`
+	UpdatedAt            string                  `json:"updated_at,omitempty"`
+	LatestCheckpoint     string                  `json:"latest_checkpoint,omitempty"`
+	LatestCheckpointJSON string                  `json:"latest_checkpoint_json,omitempty"`
+	Slices               []taskStatusSliceOutput `json:"slices,omitempty"`
 }
 
 type taskStatusSliceOutput struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Kind      string `json:"kind,omitempty"`
-	ParentID  string `json:"parent_id,omitempty"`
-	Reason    string `json:"reason,omitempty"`
-	Stage     string `json:"stage,omitempty"`
-	Decision  string `json:"decision,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
-	Plan      string `json:"plan"`
-	Result    string `json:"result"`
+	ID                   string `json:"id"`
+	Title                string `json:"title"`
+	Kind                 string `json:"kind,omitempty"`
+	ParentID             string `json:"parent_id,omitempty"`
+	Reason               string `json:"reason,omitempty"`
+	Stage                string `json:"stage,omitempty"`
+	Decision             string `json:"decision,omitempty"`
+	UpdatedAt            string `json:"updated_at,omitempty"`
+	LatestCheckpoint     string `json:"latest_checkpoint,omitempty"`
+	LatestCheckpointJSON string `json:"latest_checkpoint_json,omitempty"`
+	Plan                 string `json:"plan"`
+	Result               string `json:"result"`
 }
 
 type taskDecideOutput struct {
@@ -198,19 +202,21 @@ type taskCheckpointOutput struct {
 }
 
 type taskManifest struct {
-	TaskID            string                 `json:"task_id"`
-	Series            string                 `json:"series,omitempty"`
-	Query             string                 `json:"query"`
-	Status            string                 `json:"status"`
-	Decision          string                 `json:"decision,omitempty"`
-	CreatedAt         string                 `json:"created_at"`
-	UpdatedAt         string                 `json:"updated_at,omitempty"`
-	RepoRoot          string                 `json:"repo_root"`
-	Workspace         string                 `json:"workspace"`
-	Artifacts         taskArtifactPaths      `json:"artifacts"`
-	Predicted         taskPredictedContext   `json:"predicted_context"`
-	FreshnessWarnings []taskFreshnessWarning `json:"freshness_warnings,omitempty"`
-	Confidence        taskConfidence         `json:"confidence"`
+	TaskID               string                 `json:"task_id"`
+	Series               string                 `json:"series,omitempty"`
+	Query                string                 `json:"query"`
+	Status               string                 `json:"status"`
+	Decision             string                 `json:"decision,omitempty"`
+	CreatedAt            string                 `json:"created_at"`
+	UpdatedAt            string                 `json:"updated_at,omitempty"`
+	LatestCheckpoint     string                 `json:"latest_checkpoint,omitempty"`
+	LatestCheckpointJSON string                 `json:"latest_checkpoint_json,omitempty"`
+	RepoRoot             string                 `json:"repo_root"`
+	Workspace            string                 `json:"workspace"`
+	Artifacts            taskArtifactPaths      `json:"artifacts"`
+	Predicted            taskPredictedContext   `json:"predicted_context"`
+	FreshnessWarnings    []taskFreshnessWarning `json:"freshness_warnings,omitempty"`
+	Confidence           taskConfidence         `json:"confidence"`
 }
 
 type taskArtifactPaths struct {
@@ -222,16 +228,18 @@ type taskArtifactPaths struct {
 }
 
 type taskSliceArtifact struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Plan      string `json:"plan"`
-	Result    string `json:"result"`
-	Kind      string `json:"kind,omitempty"`
-	ParentID  string `json:"parent_id,omitempty"`
-	Reason    string `json:"reason,omitempty"`
-	Stage     string `json:"stage,omitempty"`
-	Decision  string `json:"decision,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
+	ID                   string `json:"id"`
+	Title                string `json:"title"`
+	Plan                 string `json:"plan"`
+	Result               string `json:"result"`
+	Kind                 string `json:"kind,omitempty"`
+	ParentID             string `json:"parent_id,omitempty"`
+	Reason               string `json:"reason,omitempty"`
+	Stage                string `json:"stage,omitempty"`
+	Decision             string `json:"decision,omitempty"`
+	UpdatedAt            string `json:"updated_at,omitempty"`
+	LatestCheckpoint     string `json:"latest_checkpoint,omitempty"`
+	LatestCheckpointJSON string `json:"latest_checkpoint_json,omitempty"`
 }
 
 type taskPredictedContext struct {
@@ -764,24 +772,28 @@ func runTaskStatus(cmd *cobra.Command, taskID string, opts taskStatusOptions) er
 
 func taskStatusFromManifest(manifest taskManifest) taskStatusOutput {
 	out := taskStatusOutput{
-		TaskID:    manifest.TaskID,
-		Series:    defaultTaskSeries(manifest.Series),
-		Status:    manifest.Status,
-		Decision:  manifest.Decision,
-		UpdatedAt: manifest.UpdatedAt,
+		TaskID:               manifest.TaskID,
+		Series:               defaultTaskSeries(manifest.Series),
+		Status:               manifest.Status,
+		Decision:             manifest.Decision,
+		UpdatedAt:            manifest.UpdatedAt,
+		LatestCheckpoint:     manifest.LatestCheckpoint,
+		LatestCheckpointJSON: manifest.LatestCheckpointJSON,
 	}
 	for _, slice := range manifest.Artifacts.Slices {
 		out.Slices = append(out.Slices, taskStatusSliceOutput{
-			ID:        slice.ID,
-			Title:     slice.Title,
-			Kind:      slice.Kind,
-			ParentID:  slice.ParentID,
-			Reason:    slice.Reason,
-			Stage:     slice.Stage,
-			Decision:  slice.Decision,
-			UpdatedAt: slice.UpdatedAt,
-			Plan:      slice.Plan,
-			Result:    slice.Result,
+			ID:                   slice.ID,
+			Title:                slice.Title,
+			Kind:                 slice.Kind,
+			ParentID:             slice.ParentID,
+			Reason:               slice.Reason,
+			Stage:                slice.Stage,
+			Decision:             slice.Decision,
+			UpdatedAt:            slice.UpdatedAt,
+			LatestCheckpoint:     slice.LatestCheckpoint,
+			LatestCheckpointJSON: slice.LatestCheckpointJSON,
+			Plan:                 slice.Plan,
+			Result:               slice.Result,
 		})
 	}
 	return out
@@ -797,6 +809,12 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 	if status.UpdatedAt != "" {
 		fmt.Fprintf(out, "Updated At: %s\n", status.UpdatedAt)
 	}
+	if status.LatestCheckpoint != "" {
+		fmt.Fprintf(out, "Latest Checkpoint: %s\n", status.LatestCheckpoint)
+	}
+	if status.LatestCheckpointJSON != "" {
+		fmt.Fprintf(out, "Latest Checkpoint JSON: %s\n", status.LatestCheckpointJSON)
+	}
 	for _, slice := range status.Slices {
 		fmt.Fprintf(out, "%s: %s", slice.ID, slice.Title)
 		if slice.Kind != "" {
@@ -810,6 +828,9 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 		}
 		if slice.Decision != "" {
 			fmt.Fprintf(out, " decision=%s", slice.Decision)
+		}
+		if slice.LatestCheckpoint != "" {
+			fmt.Fprintf(out, " checkpoint=%s", slice.LatestCheckpoint)
 		}
 		fmt.Fprintln(out)
 	}
@@ -1628,6 +1649,9 @@ func renderTaskIndex(manifest taskManifest) string {
 			if slice.Decision != "" {
 				state = append(state, "decision: "+slice.Decision)
 			}
+			if slice.LatestCheckpoint != "" {
+				state = append(state, "checkpoint: "+slice.LatestCheckpoint)
+			}
 			if len(state) > 0 {
 				fmt.Fprintf(&b, " [%s]", strings.Join(state, ", "))
 			}
@@ -2051,6 +2075,7 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 		return err
 	}
 	applyTaskTargetState(&manifest, selectedSlice.ID, opts.Stage, opts.Decision, now)
+	applyTaskTargetCheckpointRefs(&manifest, selectedSlice.ID, taskRelativePath(workspace, checkpointPath), jsonRel)
 	if err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), manifest); err != nil {
 		return err
 	}
@@ -2150,6 +2175,27 @@ func applyTaskTargetState(manifest *taskManifest, targetID, stage, decision stri
 		return
 	}
 	manifest.UpdatedAt = timestamp
+}
+
+func applyTaskTargetCheckpointRefs(manifest *taskManifest, targetID, checkpoint, checkpointJSON string) {
+	checkpoint = strings.TrimSpace(checkpoint)
+	checkpointJSON = strings.TrimSpace(checkpointJSON)
+	if checkpoint == "" && checkpointJSON == "" {
+		return
+	}
+	if targetID == "" || isTaskSeriesTarget(*manifest, targetID) {
+		manifest.LatestCheckpoint = checkpoint
+		manifest.LatestCheckpointJSON = checkpointJSON
+		return
+	}
+	for i := range manifest.Artifacts.Slices {
+		if !strings.EqualFold(manifest.Artifacts.Slices[i].ID, targetID) {
+			continue
+		}
+		manifest.Artifacts.Slices[i].LatestCheckpoint = checkpoint
+		manifest.Artifacts.Slices[i].LatestCheckpointJSON = checkpointJSON
+		return
+	}
 }
 
 func isTaskSeriesTarget(manifest taskManifest, target string) bool {

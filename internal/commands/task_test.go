@@ -524,6 +524,12 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 	if promoted.ID == "" || promoted.Stage != "implemented" || promoted.Decision != "promote" || promoted.UpdatedAt == "" {
 		t.Fatalf("promoted iteration status = %#v", promoted)
 	}
+	if !strings.HasPrefix(promoted.LatestCheckpoint, "checkpoints/") || !strings.HasSuffix(promoted.LatestCheckpoint, "-implemented.md") {
+		t.Fatalf("promoted iteration checkpoint = %#v", promoted)
+	}
+	if !strings.HasPrefix(promoted.LatestCheckpointJSON, "checkpoints/") || !strings.HasSuffix(promoted.LatestCheckpointJSON, "-implemented.json") {
+		t.Fatalf("promoted iteration checkpoint json = %#v", promoted)
+	}
 
 	var updatedManifest taskManifest
 	if err := json.Unmarshal([]byte(mustReadFile(t, filepath.Join(workspace, taskManifestFilename))), &updatedManifest); err != nil {
@@ -542,9 +548,12 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 	if manifestIteration.Stage != "implemented" || manifestIteration.Decision != "promote" || manifestIteration.UpdatedAt == "" {
 		t.Fatalf("manifest iteration state = %#v", manifestIteration)
 	}
+	if manifestIteration.LatestCheckpoint != promoted.LatestCheckpoint || manifestIteration.LatestCheckpointJSON != promoted.LatestCheckpointJSON {
+		t.Fatalf("manifest iteration checkpoint refs = %#v", manifestIteration)
+	}
 
 	indexBody = mustReadFile(t, filepath.Join(workspace, "B00-index.md"))
-	if !strings.Contains(indexBody, "B01-1: repair lifecycle status (iteration of B01, reason: improve) [stage: implemented, decision: promote]") {
+	if !strings.Contains(indexBody, "B01-1: repair lifecycle status (iteration of B01, reason: improve) [stage: implemented, decision: promote, checkpoint: checkpoints/") {
 		t.Fatalf("index missing promoted iteration state:\n%s", indexBody)
 	}
 
