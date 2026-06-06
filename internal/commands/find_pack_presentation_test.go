@@ -11,6 +11,8 @@ func TestNormalizeFindPackPresentationMode(t *testing.T) {
 		"family-primary-v0": findPackPresentationModeFamilyPrimaryV0,
 		"family_primary_v1": findPackPresentationModeFamilyPrimaryV1,
 		"family-v1":         findPackPresentationModeFamilyPrimaryV1,
+		"family_primary_v2": findPackPresentationModeFamilyPrimaryV2,
+		"family-v2":         findPackPresentationModeFamilyPrimaryV2,
 		"wat":               "",
 	}
 	for in, want := range tests {

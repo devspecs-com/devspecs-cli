@@ -12,9 +12,11 @@ import (
 const (
 	FamilyPrimaryPackMode   = "role_grouped_pack_v0_family_primary_v0"
 	FamilyPrimaryPackModeV1 = "role_grouped_pack_v0_family_primary_v1"
+	FamilyPrimaryPackModeV2 = "role_grouped_pack_v0_family_primary_v2"
 
 	familyPrimaryCap          = 6
 	familyPrimaryCapV1        = 8
+	familyPrimaryCapV2        = 7
 	familyPrimaryStrongFamily = 4
 )
 
@@ -51,22 +53,28 @@ type familyPrimaryEntry struct {
 }
 
 func ApplyFamilyPrimaryPackForQuery(pack RoleGroupedPack, query string) RoleGroupedPack {
-	return applyFamilyPrimaryPackForQuery(pack, query, FamilyPrimaryPackMode, familyPrimaryCap, false)
+	anchors, suppressed := familyPrimaryQueryAnchors(query)
+	return applyFamilyPrimaryPackForQueryWithEntries(pack, query, FamilyPrimaryPackMode, familyPrimaryCap, false, anchors, suppressed, familyPrimaryEntriesWithAnchors(pack, anchors, false), selectFamilyPrimaryEntries)
 }
 
 func ApplyFamilyPrimaryPackV1ForQuery(pack RoleGroupedPack, query string) RoleGroupedPack {
-	return applyFamilyPrimaryPackForQuery(pack, query, FamilyPrimaryPackModeV1, familyPrimaryCapV1, true)
+	anchors, suppressed := familyPrimaryQueryAnchors(query)
+	return applyFamilyPrimaryPackForQueryWithEntries(pack, query, FamilyPrimaryPackModeV1, familyPrimaryCapV1, true, anchors, suppressed, familyPrimaryEntriesWithAnchors(pack, anchors, false), selectFamilyPrimaryEntries)
 }
 
-func applyFamilyPrimaryPackForQuery(pack RoleGroupedPack, query, mode string, cap int, protectExact bool) RoleGroupedPack {
-	entries := familyPrimaryEntries(pack, query)
+func ApplyFamilyPrimaryPackV2ForQuery(pack RoleGroupedPack, query string) RoleGroupedPack {
+	anchors, suppressed := familyPrimaryQueryAnchorsV2(query)
+	return applyFamilyPrimaryPackForQueryWithEntries(pack, query, FamilyPrimaryPackModeV2, familyPrimaryCapV2, true, anchors, suppressed, familyPrimaryEntriesWithAnchors(pack, anchors, true), selectFamilyPrimaryEntriesV2)
+}
+
+func applyFamilyPrimaryPackForQueryWithEntries(pack RoleGroupedPack, query, mode string, cap int, protectExact bool, anchors, suppressed []string, entries map[string]*familyPrimaryEntry, selector func(map[string]*familyPrimaryEntry, int, bool) map[string]bool) RoleGroupedPack {
 	if len(entries) == 0 {
 		pack.Mode = mode
 		pack.Metadata = familyPrimaryMetadata(pack, nil, 0, 0, cap, protectExact)
 		return pack
 	}
 
-	selected := selectFamilyPrimaryEntries(entries, cap, protectExact)
+	selected := selector(entries, cap, protectExact)
 	primaryCount := 0
 	relatedCount := 0
 	for groupIdx := range pack.Groups {
@@ -100,7 +108,6 @@ func applyFamilyPrimaryPackForQuery(pack RoleGroupedPack, query, mode string, ca
 		})
 	}
 
-	anchors, suppressed := familyPrimaryQueryAnchors(query)
 	pack.Mode = mode
 	pack.Metadata = familyPrimaryMetadata(pack, anchors, primaryCount, relatedCount, cap, protectExact)
 	if len(suppressed) > 0 {
@@ -111,7 +118,7 @@ func applyFamilyPrimaryPackForQuery(pack RoleGroupedPack, query, mode string, ca
 }
 
 func IsFamilyPrimaryPack(pack RoleGroupedPack) bool {
-	return pack.Mode == FamilyPrimaryPackMode || pack.Mode == FamilyPrimaryPackModeV1 || (pack.Metadata != nil && pack.Metadata["family_primary"] == "true")
+	return pack.Mode == FamilyPrimaryPackMode || pack.Mode == FamilyPrimaryPackModeV1 || pack.Mode == FamilyPrimaryPackModeV2 || (pack.Metadata != nil && pack.Metadata["family_primary"] == "true")
 }
 
 func FamilyPrimaryRelatedSummaries(pack RoleGroupedPack) []PackBoundarySummary {
@@ -150,9 +157,13 @@ func FamilyPrimaryRelatedSummaries(pack RoleGroupedPack) []PackBoundarySummary {
 	return out
 }
 
-func familyPrimaryEntries(pack RoleGroupedPack, query string) map[string]*familyPrimaryEntry {
-	anchors, _ := familyPrimaryQueryAnchors(query)
+func familyPrimaryEntriesWithAnchors(pack RoleGroupedPack, anchors []string, rarityWeighted bool) map[string]*familyPrimaryEntry {
 	out := map[string]*familyPrimaryEntry{}
+	var anchorDF map[string]int
+	totalItems := familyPrimaryPackItemCount(pack)
+	if rarityWeighted {
+		anchorDF = familyPrimaryAnchorDocumentFrequency(pack, anchors)
+	}
 	for groupIdx, group := range pack.Groups {
 		for itemIdx, item := range group.Items {
 			key := packBoundaryItemKey(item)
@@ -167,12 +178,27 @@ func familyPrimaryEntries(pack RoleGroupedPack, query string) map[string]*family
 				item:     item,
 				family:   familyPrimaryFamilyKey(group.Role, item, anchors),
 				class:    class,
-				score:    familyPrimaryScore(item, anchors),
+			}
+			if rarityWeighted {
+				entry.score = familyPrimaryScoreV2(item, anchors, anchorDF, totalItems)
+			} else {
+				entry.score = familyPrimaryScore(item, anchors)
 			}
 			out[key] = entry
 		}
 	}
 	return out
+}
+
+func familyPrimaryPackItemCount(pack RoleGroupedPack) int {
+	total := 0
+	for _, group := range pack.Groups {
+		total += len(group.Items)
+	}
+	if total <= 0 {
+		return 1
+	}
+	return total
 }
 
 func selectFamilyPrimaryEntries(entries map[string]*familyPrimaryEntry, cap int, protectExact bool) map[string]bool {
@@ -261,6 +287,172 @@ func selectFamilyPrimaryEntries(entries map[string]*familyPrimaryEntry, cap int,
 		}
 	}
 	return selected
+}
+
+func selectFamilyPrimaryEntriesV2(entries map[string]*familyPrimaryEntry, cap int, protectExact bool) map[string]bool {
+	if cap <= 0 {
+		cap = familyPrimaryCapV2
+	}
+	byFamily := map[string][]*familyPrimaryEntry{}
+	for _, entry := range entries {
+		byFamily[entry.family] = append(byFamily[entry.family], entry)
+	}
+	families := make([]string, 0, len(byFamily))
+	for family := range byFamily {
+		families = append(families, family)
+		sort.SliceStable(byFamily[family], func(i, j int) bool {
+			left := byFamily[family][i]
+			right := byFamily[family][j]
+			if left.score != right.score {
+				return left.score > right.score
+			}
+			if left.item.OriginalRank != right.item.OriginalRank {
+				return left.item.OriginalRank < right.item.OriginalRank
+			}
+			return left.item.Path < right.item.Path
+		})
+	}
+	sort.SliceStable(families, func(i, j int) bool {
+		left := byFamily[families[i]][0]
+		right := byFamily[families[j]][0]
+		if left.score != right.score {
+			return left.score > right.score
+		}
+		return families[i] < families[j]
+	})
+
+	selected := map[string]bool{}
+	add := func(entry *familyPrimaryEntry) {
+		if len(selected) >= cap || entry == nil {
+			return
+		}
+		key := packBoundaryItemKey(entry.item)
+		if key != "" {
+			selected[key] = true
+		}
+	}
+	replaceWeakest := func(entry *familyPrimaryEntry) {
+		if entry == nil {
+			return
+		}
+		key := packBoundaryItemKey(entry.item)
+		if key == "" || selected[key] {
+			return
+		}
+		if len(selected) < cap {
+			selected[key] = true
+			return
+		}
+		var weakestKey string
+		var weakest *familyPrimaryEntry
+		for candidateKey := range selected {
+			candidate := entries[candidateKey]
+			if candidate == nil || familyPrimaryProtectedEntry(candidate) {
+				continue
+			}
+			if weakest == nil ||
+				candidate.score < weakest.score ||
+				(candidate.score == weakest.score && candidate.item.OriginalRank > weakest.item.OriginalRank) {
+				weakest = candidate
+				weakestKey = candidateKey
+			}
+		}
+		if weakest != nil && entry.score >= weakest.score+1.25 {
+			delete(selected, weakestKey)
+			selected[key] = true
+		}
+	}
+
+	if protectExact {
+		for _, entry := range familyPrimaryProtectedEntriesV2(entries) {
+			add(entry)
+		}
+	}
+	familyPrimaryAddPairClosure(selected, entries, byFamily, cap, replaceWeakest)
+	for i, family := range families {
+		if i >= familyPrimaryStrongFamily || len(selected) >= cap {
+			break
+		}
+		if byFamily[family][0].score < 3.0 {
+			continue
+		}
+		add(firstFamilyPrimaryClass(byFamily[family], "source"))
+		familyPrimaryAddPairClosure(selected, entries, byFamily, cap, replaceWeakest)
+		add(firstFamilyPrimaryClass(byFamily[family], "test"))
+	}
+	for _, family := range families {
+		if len(selected) >= cap {
+			break
+		}
+		for _, entry := range byFamily[family] {
+			if entry.score >= 6.0 {
+				add(entry)
+				familyPrimaryAddPairClosure(selected, entries, byFamily, cap, replaceWeakest)
+			}
+			if len(selected) >= cap {
+				break
+			}
+		}
+	}
+	if len(selected) == 0 {
+		for _, family := range families {
+			add(byFamily[family][0])
+			break
+		}
+	}
+	return selected
+}
+
+func familyPrimaryProtectedEntriesV2(entries map[string]*familyPrimaryEntry) []*familyPrimaryEntry {
+	var protected []*familyPrimaryEntry
+	for _, entry := range entries {
+		if !familyPrimaryProtectedEntry(entry) {
+			continue
+		}
+		protected = append(protected, entry)
+	}
+	sort.SliceStable(protected, func(i, j int) bool {
+		left := protected[i]
+		right := protected[j]
+		if left.score != right.score {
+			return left.score > right.score
+		}
+		if left.item.OriginalRank != right.item.OriginalRank {
+			return left.item.OriginalRank < right.item.OriginalRank
+		}
+		return left.item.Path < right.item.Path
+	})
+	if len(protected) > 6 {
+		protected = protected[:6]
+	}
+	return protected
+}
+
+func familyPrimaryAddPairClosure(selected map[string]bool, entries map[string]*familyPrimaryEntry, byFamily map[string][]*familyPrimaryEntry, cap int, add func(*familyPrimaryEntry)) {
+	selectedFamilies := map[string]map[string]bool{}
+	for key := range selected {
+		entry := entries[key]
+		if entry == nil || (entry.class != "source" && entry.class != "test") {
+			continue
+		}
+		classes := selectedFamilies[entry.family]
+		if classes == nil {
+			classes = map[string]bool{}
+			selectedFamilies[entry.family] = classes
+		}
+		classes[entry.class] = true
+	}
+	for family, classes := range selectedFamilies {
+		if classes["source"] && !classes["test"] {
+			add(firstFamilyPrimaryClass(byFamily[family], "test"))
+		}
+		if classes["test"] && !classes["source"] {
+			add(firstFamilyPrimaryClass(byFamily[family], "source"))
+		}
+		if len(selected) >= cap {
+			return
+		}
+	}
 }
 
 func familyPrimaryProtectedEntries(entries map[string]*familyPrimaryEntry) []*familyPrimaryEntry {
@@ -357,6 +549,40 @@ func familyPrimaryQueryAnchors(query string) ([]string, []string) {
 	return anchors, suppressed
 }
 
+func familyPrimaryQueryAnchorsV2(query string) ([]string, []string) {
+	anchors, suppressed := familyPrimaryQueryAnchors(query)
+	seen := map[string]bool{}
+	for _, anchor := range anchors {
+		seen[anchor] = true
+	}
+	add := func(anchor string) {
+		anchor = familyPrimaryCompact(anchor)
+		if len(anchor) < 3 || familyPrimaryPresentationStopTerms[anchor] || seen[anchor] {
+			return
+		}
+		seen[anchor] = true
+		anchors = append(anchors, anchor)
+	}
+	for _, anchor := range append([]string(nil), anchors...) {
+		if strings.HasPrefix(anchor, "synchron") {
+			add("sync")
+		}
+		switch {
+		case strings.HasSuffix(anchor, "ies") && len(anchor) > 5:
+			add(strings.TrimSuffix(anchor, "ies") + "y")
+		case strings.HasSuffix(anchor, "ed") && len(anchor) > 5:
+			add(strings.TrimSuffix(anchor, "d"))
+			add(strings.TrimSuffix(anchor, "ed"))
+		case strings.HasSuffix(anchor, "es") && len(anchor) > 5:
+			add(strings.TrimSuffix(anchor, "s"))
+			add(strings.TrimSuffix(anchor, "es"))
+		case strings.HasSuffix(anchor, "s") && len(anchor) > 4:
+			add(strings.TrimSuffix(anchor, "s"))
+		}
+	}
+	return anchors, suppressed
+}
+
 func familyPrimaryFamilyKey(role string, item PackItem, anchors []string) string {
 	path := filepath.ToSlash(strings.TrimSpace(item.Path))
 	if path == "" {
@@ -428,6 +654,99 @@ func familyPrimaryScore(item PackItem, anchors []string) float64 {
 		score += 0.5
 	}
 	return score
+}
+
+func familyPrimaryAnchorDocumentFrequency(pack RoleGroupedPack, anchors []string) map[string]int {
+	df := map[string]int{}
+	for _, group := range pack.Groups {
+		for _, item := range group.Items {
+			for _, anchor := range anchors {
+				if familyPrimaryAnchorStrength(item, anchor) > 0 {
+					df[anchor]++
+				}
+			}
+		}
+	}
+	return df
+}
+
+func familyPrimaryScoreV2(item PackItem, anchors []string, df map[string]int, total int) float64 {
+	if total <= 0 {
+		total = 1
+	}
+	var score float64
+	for _, anchor := range anchors {
+		strength := familyPrimaryAnchorStrength(item, anchor)
+		if strength <= 0 {
+			continue
+		}
+		score += strength * familyPrimaryAnchorRarityWeight(df[anchor], total)
+	}
+	rank := item.OriginalRank
+	if rank <= 0 {
+		rank = 99
+	}
+	rankBonus := 2.8 - float64(rank)*0.10
+	if rankBonus > 0 {
+		score += rankBonus
+	}
+	if familyPrimaryClass(item.Role, item) == "test" {
+		score += 0.75
+	}
+	if strings.Contains(strings.ToLower(strings.Join(item.Reasons, "\n")), "source_manifest_loss_safe_preserved") {
+		score += 0.75
+	}
+	return score
+}
+
+func familyPrimaryAnchorStrength(item PackItem, anchor string) float64 {
+	anchor = familyPrimaryCompact(anchor)
+	if anchor == "" {
+		return 0
+	}
+	path := filepath.ToSlash(strings.ToLower(item.Path))
+	title := strings.ToLower(item.Title)
+	reasons := strings.ToLower(strings.Join(item.Reasons, "\n"))
+	pathCompact := familyPrimaryCompact(path)
+	titleCompact := familyPrimaryCompact(title)
+	reasonCompact := familyPrimaryCompact(reasons)
+	tokens := familyPrimaryPathTokenSet(path)
+	stem := familyPrimaryStem(path)
+	switch {
+	case anchor == stem:
+		return 8
+	case tokens[anchor]:
+		return 4.5
+	case strings.Contains(pathCompact, anchor):
+		return 3.5
+	case strings.Contains(titleCompact, anchor):
+		return 3
+	case strings.Contains(reasonCompact, anchor):
+		return 1.25
+	default:
+		return 0
+	}
+}
+
+func familyPrimaryAnchorRarityWeight(df, total int) float64 {
+	if df <= 0 || total <= 0 {
+		return 1
+	}
+	ratio := float64(df) / float64(total)
+	switch {
+	case df <= 1:
+		return 2.4
+	case df <= 2:
+		return 2.0
+	case df <= 4:
+		return 1.6
+	case ratio <= 0.35:
+		return 1.25
+	case ratio >= 0.70:
+		return 0.45
+	default:
+		return 0.8
+	}
 }
 
 func familyPrimaryStem(path string) string {

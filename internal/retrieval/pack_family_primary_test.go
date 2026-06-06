@@ -155,3 +155,91 @@ func TestFamilyPrimaryProtectedEntryKeepsLossSafePreservedSource(t *testing.T) {
 		t.Fatalf("loss-safe preserved source should stay protected")
 	}
 }
+
+func TestApplyFamilyPrimaryPackV2KeepsSameFamilyTestPrimary(t *testing.T) {
+	pack := RoleGroupedPack{
+		Mode: "role_grouped_pack_v0",
+		Groups: []PackGroup{
+			{
+				Role: PackRoleImplementation,
+				Items: []PackItem{
+					{OriginalRank: 1, ID: "link-card", Path: "web/src/components/MemoContent/LinkMetadataCard.tsx", Title: "LinkMetadataCard", Role: PackRoleImplementation, Reasons: []string{"anchor-first ranking: score 24.000; matches description, metadata, link"}},
+					{OriginalRank: 2, ID: "dialog", Path: "web/src/components/MemoMetadata/Relation/LinkMemoDialog.tsx", Title: "LinkMemoDialog", Role: PackRoleImplementation, Reasons: []string{"anchor-first ranking: score 24.000; matches description, metadata, link, preview"}},
+					{OriginalRank: 3, ID: "html-meta", Path: "internal/httpgetter/html_meta.go", Title: "internal/httpgetter/html_meta.go", Role: PackRoleImplementation, Reasons: []string{"anchor-first ranking: score 24.000; matches parse, html, description"}},
+					{OriginalRank: 4, ID: "markdown-link", Path: "web/src/components/MemoContent/markdown/Link.tsx", Title: "Link", Role: PackRoleImplementation, Reasons: []string{"anchor-first ranking: score 24.000; matches link"}},
+					{OriginalRank: 5, ID: "linked", Path: "web/src/components/Settings/LinkedIdentitySection.tsx", Title: "LinkedIdentitySection", Role: PackRoleImplementation, Reasons: []string{"relationship expansion: source_manifest_loss_safe_preserved"}},
+				},
+			},
+			{
+				Role: PackRoleBehaviorTests,
+				Items: []PackItem{
+					{OriginalRank: 6, ID: "link-meta-test", Path: "server/router/api/v1/link_metadata_test.go", Title: "TestGetLinkMetadata", Role: PackRoleBehaviorTests, Subtype: "test_case", Reasons: []string{"relationship expansion: source_manifest_family_recovery"}},
+					{OriginalRank: 7, ID: "preview-test", Path: "web/tests/preview-image-dialog.test.tsx", Title: "preview image dialog", Role: PackRoleBehaviorTests, Subtype: "test_case", Reasons: []string{"relationship expansion: source_manifest_family_recovery"}},
+					{OriginalRank: 8, ID: "html-meta-test", Path: "internal/httpgetter/html_meta_test.go", Title: "TestGetHTMLMetaWithNameOnly", Role: PackRoleBehaviorTests, Subtype: "test_case", Reasons: []string{"relationship expansion: source_manifest_loss_safe_preserved"}},
+				},
+			},
+		},
+	}
+
+	got := ApplyFamilyPrimaryPackV2ForQuery(pack, "parse html description metadata when building link preview cards")
+	tiers := familyPrimaryTestTiers(got)
+	if tiers["internal/httpgetter/html_meta.go"] != PackTierPrimary {
+		t.Fatalf("html_meta source should stay primary: %#v", tiers)
+	}
+	if tiers["internal/httpgetter/html_meta_test.go"] != PackTierPrimary {
+		t.Fatalf("same-family html_meta test should be primary: %#v", tiers)
+	}
+}
+
+func TestApplyFamilyPrimaryPackV2UsesAnchorVariantsForSharedPages(t *testing.T) {
+	pack := RoleGroupedPack{
+		Mode: "role_grouped_pack_v0",
+		Groups: []PackGroup{{
+			Role: PackRoleImplementation,
+			Items: []PackItem{
+				{OriginalRank: 1, ID: "dashboard", Path: "src/components/hooks/queries/useDashboardQuery.ts", Title: "useDashboardQuery", Role: PackRoleImplementation, Reasons: []string{"anchor-first ranking: score 24.000; matches api, hooks, dashboard"}},
+				{OriginalRank: 2, ID: "api", Path: "src/components/hooks/useApi.ts", Title: "useApi", Role: PackRoleImplementation, Reasons: []string{"anchor-first ranking: score 24.000; matches api, hooks"}},
+				{OriginalRank: 3, ID: "event", Path: "src/components/hooks/queries/useEventStatsQuery.ts", Title: "useEventStatsQuery", Role: PackRoleImplementation, Reasons: []string{"anchor-first ranking: score 24.000; matches api, hooks"}},
+				{OriginalRank: 4, ID: "website", Path: "src/components/hooks/queries/useWebsiteValuesQuery.ts", Title: "useWebsiteValuesQuery", Role: PackRoleImplementation, Reasons: []string{"anchor-first ranking: score 24.000; matches api, hooks"}},
+				{OriginalRank: 5, ID: "share", Path: "src/components/hooks/queries/useShareTokenQuery.ts", Title: "useShareTokenQuery", Role: PackRoleImplementation, Reasons: []string{"relationship expansion: source_manifest_loss_safe_preserved", "anchor-first ranking: score 24.000; matches api, hooks"}},
+			},
+		}},
+	}
+
+	got := ApplyFamilyPrimaryPackV2ForQuery(pack, "repair permission checks and API hooks for shared dashboard pages")
+	tiers := familyPrimaryTestTiers(got)
+	if tiers["src/components/hooks/queries/useShareTokenQuery.ts"] != PackTierPrimary {
+		t.Fatalf("share-token hook should be primary via shared/share anchor variant: %#v", tiers)
+	}
+}
+
+func TestApplyFamilyPrimaryPackV2UsesSynchronizationVariant(t *testing.T) {
+	pack := RoleGroupedPack{
+		Mode: "role_grouped_pack_v0",
+		Groups: []PackGroup{{
+			Role: PackRoleImplementation,
+			Items: []PackItem{
+				{OriginalRank: 1, ID: "oauth", Path: "routers/web/auth/oauth.go", Title: "oauth.go", Role: PackRoleImplementation, Reasons: []string{"anchor-first ranking: score 24.000; matches oauth, external, claims"}},
+				{OriginalRank: 2, ID: "external", Path: "models/user/external_login_user.go", Title: "external_login_user.go", Role: PackRoleImplementation, Reasons: []string{"anchor-first ranking: score 24.000; matches external"}},
+				{OriginalRank: 3, ID: "source-sync", Path: "services/auth/source/oauth2/source_sync.go", Title: "source_sync.go", Role: PackRoleImplementation, Reasons: []string{"anchor-first ranking: score 24.000; matches oauth"}},
+				{OriginalRank: 4, ID: "signin-sync", Path: "routers/web/auth/oauth_signin_sync.go", Title: "oauth_signin_sync.go", Role: PackRoleImplementation, Reasons: []string{"relationship expansion: source_manifest_loss_safe_preserved"}},
+			},
+		}},
+	}
+
+	got := ApplyFamilyPrimaryPackV2ForQuery(pack, "make oauth sign in synchronization apply external claims during the first login")
+	tiers := familyPrimaryTestTiers(got)
+	if tiers["routers/web/auth/oauth_signin_sync.go"] != PackTierPrimary {
+		t.Fatalf("signin sync source should be primary via synchronization/sync variant: %#v", tiers)
+	}
+}
+
+func familyPrimaryTestTiers(pack RoleGroupedPack) map[string]string {
+	tiers := map[string]string{}
+	for _, group := range pack.Groups {
+		for _, item := range group.Items {
+			tiers[item.Path] = item.PackTier
+		}
+	}
+	return tiers
+}
