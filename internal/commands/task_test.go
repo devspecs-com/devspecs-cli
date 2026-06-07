@@ -1521,6 +1521,24 @@ func TestTask_EvaluateReportsStructuredEvidenceWithoutInflatingActualContext(t *
 	}
 }
 
+func TestTask_GitChangedFileParserIgnoresWarnings(t *testing.T) {
+	files := appendTaskGitChangedFiles(nil, strings.Join([]string{
+		"warning: in the working copy of 'internal/retrieval/ranking.go', LF will be replaced by CRLF the next time Git touches it",
+		"internal/retrieval/ranking.go",
+		"",
+		".devspecs/tasks/p02/P00-index.md",
+	}, "\n"))
+	if containsPath(files, "warning: in the working copy of 'internal/retrieval/ranking.go', LF will be replaced by CRLF the next time Git touches it") {
+		t.Fatalf("warning line should not be parsed as changed file: %#v", files)
+	}
+	if !containsPath(files, "internal/retrieval/ranking.go") {
+		t.Fatalf("expected real changed file, got %#v", files)
+	}
+	if !containsPath(files, ".devspecs/tasks/p02/P00-index.md") {
+		t.Fatalf("expected task artifact changed file, got %#v", files)
+	}
+}
+
 func TestTask_EvaluateExcludesTaskWorkspaceReadsFromMissMetrics(t *testing.T) {
 	repoDir := setupTaskCommandRepo(t)
 	taskID := "workspace-filter-test"

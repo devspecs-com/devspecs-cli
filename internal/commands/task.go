@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -3527,20 +3528,44 @@ func collectTaskGitDiffEvidence(repoRoot string, maxBytes int) taskGitDiffEviden
 			}
 			continue
 		}
-		for _, line := range strings.Split(output, "\n") {
-			evidence.ChangedFiles = appendNormalizedUnique(evidence.ChangedFiles, line)
-		}
+		evidence.ChangedFiles = appendTaskGitChangedFiles(evidence.ChangedFiles, output)
 	}
 	return evidence
+}
+
+func appendTaskGitChangedFiles(paths []string, output string) []string {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if !isTaskGitChangedFileLine(line) {
+			continue
+		}
+		paths = appendNormalizedUnique(paths, line)
+	}
+	return paths
+}
+
+func isTaskGitChangedFileLine(line string) bool {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return false
+	}
+	return !strings.HasPrefix(strings.ToLower(line), "warning:")
 }
 
 func runBoundedGitCommand(repoRoot string, maxBytes int, args ...string) (string, bool, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoRoot
-	output, err := cmd.CombinedOutput()
-	text, truncated := boundedText(string(output), maxBytes)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	text, truncated := boundedText(stdout.String(), maxBytes)
 	if err != nil {
-		message := strings.TrimSpace(text)
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = strings.TrimSpace(text)
+		}
 		if message == "" {
 			message = err.Error()
 		}
