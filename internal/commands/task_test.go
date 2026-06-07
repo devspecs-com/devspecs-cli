@@ -340,6 +340,30 @@ func TestTask_StartSurfacesCheckpointFactRiskCards(t *testing.T) {
 	if !strings.Contains(planBody, "Prior checkpoint missed a related test") {
 		t.Fatalf("plan missing risk card:\n%s", planBody)
 	}
+
+	promptCmd := NewTaskCmd()
+	promptCmd.SetArgs([]string{"prompt", "risk-card-test", "--json"})
+	promptBuf := &bytes.Buffer{}
+	promptCmd.SetOut(promptBuf)
+	if err := promptCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var promptOut taskPromptOutput
+	if err := json.Unmarshal(promptBuf.Bytes(), &promptOut); err != nil {
+		t.Fatalf("prompt json: %v\n%s", err, promptBuf.String())
+	}
+	for _, want := range []string{
+		"Risk cards:",
+		"Treat these as evidence-backed checks, not required edit targets.",
+		"Prior checkpoint missed a related test",
+	} {
+		if !strings.Contains(promptOut.Prompt, want) {
+			t.Fatalf("prompt missing risk card text %q:\n%s", want, promptOut.Prompt)
+		}
+	}
+	if strings.Index(promptOut.Prompt, "Risk cards:") > strings.Index(promptOut.Prompt, "Target plan:") {
+		t.Fatalf("risk cards should appear before target plan:\n%s", promptOut.Prompt)
+	}
 }
 
 func TestTask_StartSkipsUnrelatedCheckpointFactRiskCards(t *testing.T) {
@@ -385,6 +409,31 @@ func TestTask_StartSkipsUnrelatedCheckpointFactRiskCards(t *testing.T) {
 	}
 	if taskRiskCardByID(out.RiskCards, "prior-test-miss") != nil || taskRiskCardByID(out.RiskCards, "prior-critical-miss") != nil {
 		t.Fatalf("unrelated fact should not create miss risk cards: %#v", out.RiskCards)
+	}
+}
+
+func TestTask_RiskCardsUseQueryMatchedLearningWhenPredictedContextWeak(t *testing.T) {
+	cards := taskRiskCardsFromCheckpointFacts("fix discount rounding", taskPredictedContext{}, []store.TaskCheckpointFact{{
+		TaskID:        "prior-discount-task",
+		CheckpointID:  "cp_discount",
+		FeedbackJSON:  `{"critical_missed":["internal/invoice/pricing_test.go"]}`,
+		LearningsJSON: `[{"learning_type":"validation_gap","summary":"discount rounding needed an explicit package test","evidence_refs":["internal/invoice/pricing_test.go"],"applies_to":"internal/invoice","confidence":"high"}]`,
+	}})
+	if taskRiskCardByID(cards, "prior-test-miss") == nil {
+		t.Fatalf("expected query-matched prior-test-miss card, got %#v", cards)
+	}
+	if taskRiskCardByID(cards, "validation-gap") == nil {
+		t.Fatalf("expected validation-gap card, got %#v", cards)
+	}
+
+	unrelated := taskRiskCardsFromCheckpointFacts("fix discount rounding", taskPredictedContext{}, []store.TaskCheckpointFact{{
+		TaskID:        "prior-billing-task",
+		CheckpointID:  "cp_billing",
+		FeedbackJSON:  `{"critical_missed":["services/billing/webhook_test.go"]}`,
+		LearningsJSON: `[{"learning_type":"validation_gap","summary":"webhook retries needed a package test","evidence_refs":["services/billing/webhook_test.go"],"applies_to":"services/billing","confidence":"high"}]`,
+	}})
+	if taskRiskCardByID(unrelated, "prior-test-miss") != nil {
+		t.Fatalf("unrelated query learning should not create prior-test-miss: %#v", unrelated)
 	}
 }
 

@@ -1551,6 +1551,7 @@ func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput) strin
 	fmt.Fprintln(&b, "```")
 	fmt.Fprintln(&b)
 	fmt.Fprintf(&b, "Goal: %s\n\n", target.Title)
+	writeTaskPromptRiskCards(&b, ctx.Manifest.RiskCards)
 	fmt.Fprintln(&b, "Do not implement sibling slices, future slices, or the full task track. Stop after this target's acceptance checks are satisfied.")
 	fmt.Fprintf(&b, "Record the outcome in `%s` or with `ds task checkpoint %s --slice %s`.\n", filepath.ToSlash(taskRelativePath(ctx.RepoRoot, target.ResultPath)), target.TaskID, target.Target)
 	fmt.Fprintln(&b, "At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.")
@@ -1561,6 +1562,21 @@ func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput) strin
 		fmt.Fprintln(&b, target.PlanBody)
 	}
 	return b.String()
+}
+
+func writeTaskPromptRiskCards(b *strings.Builder, cards []taskRiskCard) {
+	if len(cards) == 0 {
+		return
+	}
+	fmt.Fprintln(b, "Risk cards:")
+	fmt.Fprintln(b, "Treat these as evidence-backed checks, not required edit targets.")
+	for _, card := range cards {
+		fmt.Fprintf(b, "- %s [%s]: %s\n", card.Title, card.Severity, card.AgentCheck)
+		if len(card.Evidence) > 0 {
+			fmt.Fprintf(b, "  Evidence: %s\n", strings.Join(firstStrings(card.Evidence, 2), "; "))
+		}
+	}
+	fmt.Fprintln(b)
 }
 
 func firstNonEmptyTaskString(values ...string) string {
@@ -2069,7 +2085,7 @@ func buildTaskPreflight(cmd *cobra.Command, repoRoot, query string, noRefresh bo
 	predicted.RelevantAreas = relevantAreasFromPredicted(predicted)
 	freshnessWarnings := taskFreshnessWarnings(repoRoot, query, candidates)
 	confidence := confidenceForPredicted(predicted)
-	riskCards := buildTaskRiskCards(db, repoRoot, predicted, freshnessWarnings)
+	riskCards := buildTaskRiskCards(db, repoRoot, query, predicted, freshnessWarnings)
 	return taskPreflight{Predicted: predicted, FreshnessWarnings: freshnessWarnings, RiskCards: riskCards, Confidence: confidence}, nil
 }
 
@@ -2099,7 +2115,7 @@ const (
 	taskRiskFactLimit     = 50
 )
 
-func buildTaskRiskCards(db *store.DB, repoRoot string, predicted taskPredictedContext, warnings []taskFreshnessWarning) []taskRiskCard {
+func buildTaskRiskCards(db *store.DB, repoRoot, query string, predicted taskPredictedContext, warnings []taskFreshnessWarning) []taskRiskCard {
 	var cards []taskRiskCard
 	if len(warnings) > 0 {
 		var evidence []string
@@ -2124,7 +2140,7 @@ func buildTaskRiskCards(db *store.DB, repoRoot string, predicted taskPredictedCo
 		})
 	}
 	facts := recentTaskCheckpointFacts(db, repoRoot, taskRiskFactLimit)
-	cards = append(cards, taskRiskCardsFromCheckpointFacts(predicted, facts)...)
+	cards = append(cards, taskRiskCardsFromCheckpointFacts(query, predicted, facts)...)
 	if len(cards) > taskRiskCardLimit {
 		return cards[:taskRiskCardLimit]
 	}
@@ -2150,15 +2166,19 @@ func recentTaskCheckpointFacts(db *store.DB, repoRoot string, limit int) []store
 	return facts
 }
 
-func taskRiskCardsFromCheckpointFacts(predicted taskPredictedContext, facts []store.TaskCheckpointFact) []taskRiskCard {
+func taskRiskCardsFromCheckpointFacts(query string, predicted taskPredictedContext, facts []store.TaskCheckpointFact) []taskRiskCard {
 	var testMissEvidence []string
 	var criticalMissEvidence []string
 	var noiseEvidence []string
 	var validationEvidence []string
+	queryTerms := taskFreshnessQueryTerms(query)
+	predictedWeak := taskRiskPredictedContextWeak(predicted)
 	for _, fact := range facts {
 		feedback := parseTaskCheckpointFeedbackJSON(fact.FeedbackJSON)
+		learnings := parseTaskCheckpointLearningsJSON(fact.LearningsJSON)
+		queryMatchedFact := predictedWeak && taskRiskFactMatchesQuery(queryTerms, feedback, learnings)
 		for _, path := range feedback.CriticalMissed {
-			if !taskRiskPathMatchesPredicted(path, predicted) {
+			if !taskRiskPathMatchesPredicted(path, predicted) && !queryMatchedFact {
 				continue
 			}
 			evidence := taskRiskFactPathEvidence(fact, "missed", path)
@@ -2174,14 +2194,14 @@ func taskRiskCardsFromCheckpointFacts(predicted taskPredictedContext, facts []st
 			}
 			noiseEvidence = appendUniqueString(noiseEvidence, taskRiskFactPathEvidence(fact, "called distracting", path))
 		}
-		for _, learning := range parseTaskCheckpointLearningsJSON(fact.LearningsJSON) {
+		for _, learning := range learnings {
 			switch strings.ToLower(strings.TrimSpace(learning.LearningType)) {
 			case "validation_gap":
 				validationEvidence = appendUniqueString(validationEvidence, taskRiskFactLearningEvidence(fact, learning))
 			case "noise", "risk_false_positive":
 				noiseEvidence = appendUniqueString(noiseEvidence, taskRiskFactLearningEvidence(fact, learning))
 			case "miss", "substrate_gap":
-				if taskRiskLearningMatchesPredicted(learning, predicted) {
+				if taskRiskLearningMatchesPredicted(learning, predicted) || (predictedWeak && taskRiskLearningMatchesQuery(queryTerms, learning)) {
 					criticalMissEvidence = appendUniqueString(criticalMissEvidence, taskRiskFactLearningEvidence(fact, learning))
 				}
 			}
@@ -2279,6 +2299,66 @@ func taskRiskLearningMatchesPredicted(learning taskCheckpointLearning, predicted
 		}
 	}
 	return taskRiskPathMatchesPredicted(learning.AppliesTo, predicted)
+}
+
+func taskRiskPredictedContextWeak(predicted taskPredictedContext) bool {
+	return len(predicted.PrimaryFiles) == 0 || len(taskRiskPredictedPaths(predicted)) == 0
+}
+
+func taskRiskFactMatchesQuery(queryTerms []string, feedback taskPredictedContextFeedback, learnings []taskCheckpointLearning) bool {
+	if len(queryTerms) == 0 {
+		return false
+	}
+	for _, path := range feedback.CriticalMissed {
+		if taskRiskTextMatchesQuery(queryTerms, path) {
+			return true
+		}
+	}
+	for _, path := range feedback.DistractingIncluded {
+		if taskRiskTextMatchesQuery(queryTerms, path) {
+			return true
+		}
+	}
+	for _, learning := range learnings {
+		if taskRiskLearningMatchesQuery(queryTerms, learning) {
+			return true
+		}
+	}
+	return false
+}
+
+func taskRiskLearningMatchesQuery(queryTerms []string, learning taskCheckpointLearning) bool {
+	if len(queryTerms) == 0 {
+		return false
+	}
+	parts := []string{
+		learning.LearningType,
+		learning.Summary,
+		learning.AppliesTo,
+	}
+	parts = append(parts, learning.EvidenceRefs...)
+	return taskRiskTextMatchesQuery(queryTerms, strings.Join(parts, " "))
+}
+
+func taskRiskTextMatchesQuery(queryTerms []string, text string) bool {
+	text = strings.ToLower(filepath.ToSlash(text))
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	needed := 1
+	if len(queryTerms) >= 2 {
+		needed = 2
+	}
+	matches := 0
+	for _, term := range queryTerms {
+		if strings.Contains(text, strings.ToLower(term)) {
+			matches++
+			if matches >= needed {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func taskRiskPredictedPaths(predicted taskPredictedContext) []string {
