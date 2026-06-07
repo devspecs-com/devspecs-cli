@@ -17,7 +17,7 @@ import (
 var schemaDDL string
 
 // SchemaVersion is the current schema version. Bump when schema.sql changes.
-const SchemaVersion = 13
+const SchemaVersion = 14
 
 // SQLiteBusyTimeoutMS is the local index write-wait window for concurrent CLI
 // commands before SQLite returns a busy/locked error.
@@ -141,6 +141,11 @@ func (db *DB) migrate() error {
 				return err
 			}
 			maxVersion = 13
+		case 13:
+			if err := db.migrate13To14(now); err != nil {
+				return err
+			}
+			maxVersion = 14
 		default:
 			return fmt.Errorf(
 				"index was created with schema v%d but this CLI requires v%d. Run 'ds scan --rebuild' or delete ~/.devspecs/devspecs.db and run 'ds scan' to rebuild",
@@ -388,5 +393,39 @@ func (db *DB) migrate12To13(now string) error {
 		}
 	}
 	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 13, now)
+	return err
+}
+
+func (db *DB) migrate13To14(now string) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS task_checkpoint_facts (
+			repo_id              TEXT NOT NULL,
+			task_id              TEXT NOT NULL,
+			checkpoint_id        TEXT NOT NULL,
+			target               TEXT NOT NULL,
+			series               TEXT NOT NULL DEFAULT '',
+			stage                TEXT NOT NULL DEFAULT '',
+			decision             TEXT NOT NULL DEFAULT '',
+			checkpoint_path      TEXT NOT NULL DEFAULT '',
+			checkpoint_json_path TEXT NOT NULL DEFAULT '',
+			created_at           TEXT NOT NULL,
+			actual_context_json  TEXT NOT NULL DEFAULT '{}',
+			feedback_json        TEXT NOT NULL DEFAULT '{}',
+			evidence_json        TEXT NOT NULL DEFAULT '{}',
+			learnings_json       TEXT NOT NULL DEFAULT '[]',
+			next_json            TEXT NOT NULL DEFAULT '{}',
+			indexed_at           TEXT NOT NULL,
+			PRIMARY KEY (repo_id, task_id, checkpoint_id),
+			FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_task_checkpoint_facts_task ON task_checkpoint_facts(repo_id, task_id, target, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_task_checkpoint_facts_stage ON task_checkpoint_facts(repo_id, stage, decision)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate v13->v14 task checkpoint facts: %w", err)
+		}
+	}
+	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 14, now)
 	return err
 }

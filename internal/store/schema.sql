@@ -1,4 +1,4 @@
--- DevSpecs v0.1 schema (version 13)
+-- DevSpecs v0.1 schema (version 14)
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version    INTEGER PRIMARY KEY,
@@ -235,6 +235,27 @@ CREATE TABLE IF NOT EXISTS source_manifest_imports (
   FOREIGN KEY (file_id) REFERENCES source_manifest(file_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS task_checkpoint_facts (
+  repo_id              TEXT NOT NULL,
+  task_id              TEXT NOT NULL,
+  checkpoint_id        TEXT NOT NULL,
+  target               TEXT NOT NULL,
+  series               TEXT NOT NULL DEFAULT '',
+  stage                TEXT NOT NULL DEFAULT '',
+  decision             TEXT NOT NULL DEFAULT '',
+  checkpoint_path      TEXT NOT NULL DEFAULT '',
+  checkpoint_json_path TEXT NOT NULL DEFAULT '',
+  created_at           TEXT NOT NULL,
+  actual_context_json  TEXT NOT NULL DEFAULT '{}',
+  feedback_json        TEXT NOT NULL DEFAULT '{}',
+  evidence_json        TEXT NOT NULL DEFAULT '{}',
+  learnings_json       TEXT NOT NULL DEFAULT '[]',
+  next_json            TEXT NOT NULL DEFAULT '{}',
+  indexed_at           TEXT NOT NULL,
+  PRIMARY KEY (repo_id, task_id, checkpoint_id),
+  FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_todos_artifact ON artifact_todos(artifact_id);
 CREATE INDEX IF NOT EXISTS idx_todos_revision ON artifact_todos(revision_id);
 CREATE INDEX IF NOT EXISTS idx_todos_section ON artifact_todos(section_id);
@@ -260,6 +281,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_edges_identity ON artifact_edges(
 CREATE INDEX IF NOT EXISTS idx_git_commits_repo_committed ON git_commits(repo_id, committed_at);
 CREATE INDEX IF NOT EXISTS idx_git_commit_files_repo_file ON git_commit_files(repo_id, file_path);
 CREATE INDEX IF NOT EXISTS idx_git_commit_files_commit ON git_commit_files(commit_sha);
+CREATE INDEX IF NOT EXISTS idx_task_checkpoint_facts_task ON task_checkpoint_facts(repo_id, task_id, target, created_at);
+CREATE INDEX IF NOT EXISTS idx_task_checkpoint_facts_stage ON task_checkpoint_facts(repo_id, stage, decision);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS artifacts_fts USING fts5(
   artifact_id UNINDEXED,

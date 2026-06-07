@@ -17,18 +17,19 @@ type taskEvaluateOptions struct {
 }
 
 type taskEvaluationOutput struct {
-	TaskID             string            `json:"task_id"`
-	Query              string            `json:"query"`
-	Hits               []string          `json:"hits,omitempty"`
-	Misses             []string          `json:"misses,omitempty"`
-	Noise              []string          `json:"noise,omitempty"`
-	CompanionMisses    []string          `json:"companion_misses,omitempty"`
-	ReceiptMisses      []string          `json:"receipt_misses,omitempty"`
-	ConfidenceMismatch bool              `json:"confidence_mismatch"`
-	Metrics            taskMetrics       `json:"metrics"`
-	UsefulnessClass    string            `json:"usefulness_class"`
-	Notes              []string          `json:"notes,omitempty"`
-	Observed           taskObservedPaths `json:"observed_context"`
+	TaskID             string                    `json:"task_id"`
+	Query              string                    `json:"query"`
+	Hits               []string                  `json:"hits,omitempty"`
+	Misses             []string                  `json:"misses,omitempty"`
+	Noise              []string                  `json:"noise,omitempty"`
+	CompanionMisses    []string                  `json:"companion_misses,omitempty"`
+	ReceiptMisses      []string                  `json:"receipt_misses,omitempty"`
+	ConfidenceMismatch bool                      `json:"confidence_mismatch"`
+	Metrics            taskMetrics               `json:"metrics"`
+	UsefulnessClass    string                    `json:"usefulness_class"`
+	Notes              []string                  `json:"notes,omitempty"`
+	Observed           taskObservedPaths         `json:"observed_context"`
+	CheckpointSummary  taskCheckpointReadSummary `json:"checkpoint_summary"`
 }
 
 type taskMetrics struct {
@@ -49,6 +50,14 @@ type taskObservedPaths struct {
 	NoiseFiles   []string `json:"noise_files,omitempty"`
 	GitDiffFiles []string `json:"git_diff_files,omitempty"`
 	TestCommands []string `json:"test_commands,omitempty"`
+}
+
+type taskCheckpointReadSummary struct {
+	JSONRecords              int      `json:"json_records"`
+	MarkdownFallbacks        int      `json:"markdown_fallbacks"`
+	EvidenceOnlyGitDiffFiles []string `json:"evidence_only_git_diff_files,omitempty"`
+	EvidenceOnlyTestCommands []string `json:"evidence_only_test_commands,omitempty"`
+	Notes                    []string `json:"notes,omitempty"`
 }
 
 func newTaskEvaluateCmd() *cobra.Command {
@@ -82,11 +91,12 @@ func runTaskEvaluate(cmd *cobra.Command, taskID string, opts taskEvaluateOptions
 	if err != nil {
 		return err
 	}
-	observed, err := readTaskObservedPaths(workspace)
+	observed, checkpointSummary, err := readTaskObservedPathsDetailed(workspace)
 	if err != nil {
 		return err
 	}
 	evaluation := evaluateTaskContext(manifest, observed)
+	evaluation.CheckpointSummary = checkpointSummary
 	if opts.AsJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
@@ -95,15 +105,16 @@ func runTaskEvaluate(cmd *cobra.Command, taskID string, opts taskEvaluateOptions
 	return writeTaskEvaluationHuman(cmd.OutOrStdout(), evaluation)
 }
 
-func readTaskObservedPaths(workspace string) (taskObservedPaths, error) {
+func readTaskObservedPathsDetailed(workspace string) (taskObservedPaths, taskCheckpointReadSummary, error) {
 	var observed taskObservedPaths
+	var summary taskCheckpointReadSummary
 	checkpointDir := filepath.Join(workspace, "checkpoints")
 	entries, err := os.ReadDir(checkpointDir)
 	if os.IsNotExist(err) {
-		return observed, nil
+		return observed, summary, nil
 	}
 	if err != nil {
-		return observed, fmt.Errorf("read checkpoints: %w", err)
+		return observed, summary, fmt.Errorf("read checkpoints: %w", err)
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	jsonStems := map[string]bool{}
@@ -124,8 +135,10 @@ func readTaskObservedPaths(workspace string) (taskObservedPaths, error) {
 		if strings.HasSuffix(lowerName, ".json") {
 			record, err := readTaskCheckpointRecord(path)
 			if err != nil {
-				return observed, err
+				return observed, summary, err
 			}
+			summary.JSONRecords++
+			appendCheckpointReadSummary(&summary, record)
 			appendObservedFromCheckpointRecord(&observed, record)
 			continue
 		}
@@ -135,12 +148,14 @@ func readTaskObservedPaths(workspace string) (taskObservedPaths, error) {
 			}
 			data, err := os.ReadFile(path)
 			if err != nil {
-				return observed, err
+				return observed, summary, err
 			}
+			summary.MarkdownFallbacks++
 			appendObservedFromCheckpointMarkdown(&observed, string(data))
 		}
 	}
-	return observed, nil
+	finalizeTaskCheckpointReadSummary(&summary)
+	return observed, summary, nil
 }
 
 func readTaskCheckpointRecord(path string) (taskCheckpointRecord, error) {
@@ -152,6 +167,7 @@ func readTaskCheckpointRecord(path string) (taskCheckpointRecord, error) {
 	if err := json.Unmarshal(data, &record); err != nil {
 		return record, fmt.Errorf("parse checkpoint JSON %s: %w", path, err)
 	}
+	normalizeTaskCheckpointRecord(&record)
 	return record, nil
 }
 
@@ -165,9 +181,31 @@ func appendObservedFromCheckpointRecord(observed *taskObservedPaths, record task
 	if record.Evidence.GitDiff != nil {
 		observed.GitDiffFiles = appendNormalizedUnique(observed.GitDiffFiles, record.Evidence.GitDiff.ChangedFiles...)
 	}
+	observed.GitDiffFiles = appendNormalizedUnique(observed.GitDiffFiles, record.Evidence.GitDiffPaths...)
 	for _, command := range record.Evidence.TestCommands {
 		observed.TestCommands = appendUniqueString(observed.TestCommands, command.Command)
-		observed.TestsRun = appendUniqueString(observed.TestsRun, command.Command)
+	}
+}
+
+func appendCheckpointReadSummary(summary *taskCheckpointReadSummary, record taskCheckpointRecord) {
+	if record.Evidence.GitDiff != nil {
+		summary.EvidenceOnlyGitDiffFiles = appendNormalizedUnique(summary.EvidenceOnlyGitDiffFiles, record.Evidence.GitDiff.ChangedFiles...)
+	}
+	summary.EvidenceOnlyGitDiffFiles = appendNormalizedUnique(summary.EvidenceOnlyGitDiffFiles, record.Evidence.GitDiffPaths...)
+	for _, command := range record.Evidence.TestCommands {
+		summary.EvidenceOnlyTestCommands = appendUniqueString(summary.EvidenceOnlyTestCommands, command.Command)
+	}
+}
+
+func finalizeTaskCheckpointReadSummary(summary *taskCheckpointReadSummary) {
+	if summary.JSONRecords > 0 {
+		summary.Notes = appendUniqueString(summary.Notes, "Structured checkpoint JSON was preferred over markdown twins.")
+	}
+	if summary.MarkdownFallbacks > 0 {
+		summary.Notes = appendUniqueString(summary.Notes, "Markdown checkpoint fallback was used for legacy records without JSON twins.")
+	}
+	if len(summary.EvidenceOnlyGitDiffFiles) > 0 || len(summary.EvidenceOnlyTestCommands) > 0 {
+		summary.Notes = appendUniqueString(summary.Notes, "Git diff and test command receipts were kept as evidence-only substrate.")
 	}
 }
 
@@ -582,6 +620,12 @@ func writeTaskEvaluationHuman(out interface{ Write([]byte) (int, error) }, evalu
 	fmt.Fprintf(out, "Test companion recall: %s\n", evaluation.Metrics.TestCompanionRecall)
 	fmt.Fprintf(out, "Noise count: %d\n", evaluation.Metrics.NoiseCount)
 	fmt.Fprintf(out, "Related commit surfaced: %t\n", evaluation.Metrics.RelatedCommitSurfaced)
+	if evaluation.CheckpointSummary.JSONRecords > 0 || evaluation.CheckpointSummary.MarkdownFallbacks > 0 {
+		fmt.Fprintf(out, "Checkpoint records: json=%d markdown_fallback=%d\n",
+			evaluation.CheckpointSummary.JSONRecords,
+			evaluation.CheckpointSummary.MarkdownFallbacks,
+		)
+	}
 	if len(evaluation.Hits) > 0 {
 		fmt.Fprintln(out, "\nHits")
 		for _, path := range evaluation.Hits {

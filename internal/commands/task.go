@@ -16,6 +16,7 @@ import (
 	"unicode"
 
 	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/devspecs-com/devspecs-cli/internal/idgen"
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/spf13/cobra"
@@ -122,27 +123,30 @@ type taskDecideOptions struct {
 }
 
 type taskCheckpointOptions struct {
-	Dir         string
-	Slice       string
-	Stage       string
-	Decision    string
-	Note        string
-	Description string
-	Goal        string
-	Resources   []string
-	FilesRead   []string
-	FilesEdited []string
-	TestsRead   []string
-	TestsRun    []string
-	MissedFiles []string
-	NoiseFiles  []string
-	Tasks       []string
-	GitDiff     bool
-	GitDiffMax  int
-	TestOutput  bool
-	TestMax     int
-	Index       bool
-	AsJSON      bool
+	Dir          string
+	Slice        string
+	Stage        string
+	Decision     string
+	Note         string
+	Description  string
+	Goal         string
+	Resources    []string
+	FilesRead    []string
+	FilesEdited  []string
+	TestsRead    []string
+	TestsRun     []string
+	MissedFiles  []string
+	NoiseFiles   []string
+	Tasks        []string
+	Learnings    []string
+	NextTarget   string
+	NextDecision string
+	GitDiff      bool
+	GitDiffMax   int
+	TestOutput   bool
+	TestMax      int
+	Index        bool
+	AsJSON       bool
 }
 
 type taskStartOutput struct {
@@ -188,6 +192,7 @@ type taskStatusOutput struct {
 	Status               string                  `json:"status"`
 	Decision             string                  `json:"decision,omitempty"`
 	UpdatedAt            string                  `json:"updated_at,omitempty"`
+	LatestCheckpointID   string                  `json:"latest_checkpoint_id,omitempty"`
 	LatestCheckpoint     string                  `json:"latest_checkpoint,omitempty"`
 	LatestCheckpointJSON string                  `json:"latest_checkpoint_json,omitempty"`
 	Slices               []taskStatusSliceOutput `json:"slices,omitempty"`
@@ -203,6 +208,7 @@ type taskStatusSliceOutput struct {
 	Stage                string `json:"stage,omitempty"`
 	Decision             string `json:"decision,omitempty"`
 	UpdatedAt            string `json:"updated_at,omitempty"`
+	LatestCheckpointID   string `json:"latest_checkpoint_id,omitempty"`
 	LatestCheckpoint     string `json:"latest_checkpoint,omitempty"`
 	LatestCheckpointJSON string `json:"latest_checkpoint_json,omitempty"`
 	Plan                 string `json:"plan"`
@@ -224,6 +230,7 @@ type taskCheckpointOutput struct {
 	TaskID             string   `json:"task_id"`
 	Series             string   `json:"series,omitempty"`
 	Slice              string   `json:"slice,omitempty"`
+	CheckpointID       string   `json:"checkpoint_id,omitempty"`
 	Stage              string   `json:"stage"`
 	Decision           string   `json:"decision,omitempty"`
 	CheckpointPath     string   `json:"checkpoint_path"`
@@ -231,6 +238,8 @@ type taskCheckpointOutput struct {
 	ResultPath         string   `json:"result_path"`
 	IndexedPaths       []string `json:"indexed_paths,omitempty"`
 	GitDiffFiles       []string `json:"git_diff_files,omitempty"`
+	LearningCount      int      `json:"learning_count,omitempty"`
+	FactIndexed        bool     `json:"fact_indexed,omitempty"`
 	TestEvidenceCount  int      `json:"test_evidence_count,omitempty"`
 }
 
@@ -307,6 +316,7 @@ type taskManifest struct {
 	Decision             string                 `json:"decision,omitempty"`
 	CreatedAt            string                 `json:"created_at"`
 	UpdatedAt            string                 `json:"updated_at,omitempty"`
+	LatestCheckpointID   string                 `json:"latest_checkpoint_id,omitempty"`
 	LatestCheckpoint     string                 `json:"latest_checkpoint,omitempty"`
 	LatestCheckpointJSON string                 `json:"latest_checkpoint_json,omitempty"`
 	RepoRoot             string                 `json:"repo_root"`
@@ -336,6 +346,7 @@ type taskSliceArtifact struct {
 	Stage                string `json:"stage,omitempty"`
 	Decision             string `json:"decision,omitempty"`
 	UpdatedAt            string `json:"updated_at,omitempty"`
+	LatestCheckpointID   string `json:"latest_checkpoint_id,omitempty"`
 	LatestCheckpoint     string `json:"latest_checkpoint,omitempty"`
 	LatestCheckpointJSON string `json:"latest_checkpoint_json,omitempty"`
 }
@@ -388,32 +399,68 @@ type taskConfidence struct {
 }
 
 type taskCheckpointRecord struct {
-	SchemaVersion int                    `json:"schema_version"`
-	TaskID        string                 `json:"task_id"`
-	Series        string                 `json:"series,omitempty"`
-	Query         string                 `json:"query,omitempty"`
-	Slice         string                 `json:"slice,omitempty"`
-	SliceTitle    string                 `json:"slice_title,omitempty"`
-	Stage         string                 `json:"stage"`
-	Decision      string                 `json:"decision,omitempty"`
-	CreatedAt     string                 `json:"created_at"`
-	Goal          string                 `json:"goal,omitempty"`
-	Description   string                 `json:"description,omitempty"`
-	Note          string                 `json:"note,omitempty"`
-	Resources     []string               `json:"resources,omitempty"`
-	FilesRead     []string               `json:"files_read,omitempty"`
-	FilesEdited   []string               `json:"files_edited,omitempty"`
-	TestsRead     []string               `json:"tests_read,omitempty"`
-	TestsRun      []string               `json:"tests_run,omitempty"`
-	MissedFiles   []string               `json:"missed_files,omitempty"`
-	NoiseFiles    []string               `json:"noise_files,omitempty"`
-	Tasks         []string               `json:"tasks,omitempty"`
-	Evidence      taskCheckpointEvidence `json:"evidence,omitempty"`
+	SchemaVersion            int                              `json:"schema_version"`
+	CheckpointID             string                           `json:"checkpoint_id,omitempty"`
+	TaskID                   string                           `json:"task_id"`
+	Target                   string                           `json:"target,omitempty"`
+	Series                   string                           `json:"series,omitempty"`
+	Query                    string                           `json:"query,omitempty"`
+	Slice                    string                           `json:"slice,omitempty"`
+	SliceTitle               string                           `json:"slice_title,omitempty"`
+	ParentSlice              string                           `json:"parent_slice,omitempty"`
+	Iteration                string                           `json:"iteration,omitempty"`
+	Stage                    string                           `json:"stage"`
+	Decision                 string                           `json:"decision,omitempty"`
+	CreatedAt                string                           `json:"created_at"`
+	Goal                     string                           `json:"goal,omitempty"`
+	Description              string                           `json:"description,omitempty"`
+	Note                     string                           `json:"note,omitempty"`
+	Resources                []string                         `json:"resources,omitempty"`
+	FilesRead                []string                         `json:"files_read,omitempty"`
+	FilesEdited              []string                         `json:"files_edited,omitempty"`
+	TestsRead                []string                         `json:"tests_read,omitempty"`
+	TestsRun                 []string                         `json:"tests_run,omitempty"`
+	MissedFiles              []string                         `json:"missed_files,omitempty"`
+	NoiseFiles               []string                         `json:"noise_files,omitempty"`
+	Tasks                    []string                         `json:"tasks,omitempty"`
+	ActualContext            taskCheckpointActualContext      `json:"actual_context,omitempty"`
+	PredictedContextFeedback taskPredictedContextFeedback     `json:"predicted_context_feedback,omitempty"`
+	Evidence                 taskCheckpointEvidence           `json:"evidence,omitempty"`
+	Learnings                []taskCheckpointLearning         `json:"learnings,omitempty"`
+	Next                     taskCheckpointNextRecommendation `json:"next,omitempty"`
+}
+
+type taskCheckpointActualContext struct {
+	FilesRead   []string `json:"files_read,omitempty"`
+	FilesEdited []string `json:"files_edited,omitempty"`
+	TestsRead   []string `json:"tests_read,omitempty"`
+	TestsRun    []string `json:"tests_run,omitempty"`
+}
+
+type taskPredictedContextFeedback struct {
+	RelevantFound       []string `json:"relevant_found,omitempty"`
+	CriticalMissed      []string `json:"critical_missed,omitempty"`
+	DistractingIncluded []string `json:"distracting_included,omitempty"`
+}
+
+type taskCheckpointLearning struct {
+	LearningType string   `json:"learning_type"`
+	Summary      string   `json:"summary"`
+	EvidenceRefs []string `json:"evidence_refs,omitempty"`
+	AppliesTo    string   `json:"applies_to,omitempty"`
+	Confidence   string   `json:"confidence,omitempty"`
+}
+
+type taskCheckpointNextRecommendation struct {
+	RecommendedTarget   string `json:"recommended_target,omitempty"`
+	RecommendedDecision string `json:"recommended_decision,omitempty"`
 }
 
 type taskCheckpointEvidence struct {
 	GitDiff      *taskGitDiffEvidence     `json:"git_diff,omitempty"`
 	TestCommands []taskCommandRunEvidence `json:"test_commands,omitempty"`
+	GitDiffPaths []string                 `json:"git_diff_paths,omitempty"`
+	PlanRefs     []string                 `json:"plan_refs,omitempty"`
 }
 
 type taskGitDiffEvidence struct {
@@ -732,6 +779,9 @@ func newTaskCheckpointCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&opts.MissedFiles, "missed-file", nil, "Critical file DevSpecs missed; may be repeated")
 	cmd.Flags().StringArrayVar(&opts.NoiseFiles, "noise-file", nil, "Distracting file DevSpecs included; may be repeated")
 	cmd.Flags().StringArrayVar(&opts.Tasks, "task", nil, "Task/checklist item update; may be repeated")
+	cmd.Flags().StringArrayVar(&opts.Learnings, "learning", nil, "Compact learning as type: summary or type|summary|confidence|applies_to|refs; may be repeated")
+	cmd.Flags().StringVar(&opts.NextTarget, "next-target", "", "Recommended next task target")
+	cmd.Flags().StringVar(&opts.NextDecision, "next-decision", "", "Recommended next decision gate")
 	cmd.Flags().BoolVar(&opts.GitDiff, "git-diff", false, "Include bounded git diff stat and changed-file evidence in checkpoint JSON")
 	cmd.Flags().IntVar(&opts.GitDiffMax, "git-diff-max-bytes", opts.GitDiffMax, "Maximum bytes of git diff stat evidence to keep")
 	cmd.Flags().BoolVar(&opts.TestOutput, "capture-test-output", false, "Run --test-run commands and include bounded output evidence in checkpoint JSON")
@@ -1186,6 +1236,7 @@ func taskStatusFromManifest(manifest taskManifest) taskStatusOutput {
 		Status:               manifest.Status,
 		Decision:             manifest.Decision,
 		UpdatedAt:            manifest.UpdatedAt,
+		LatestCheckpointID:   manifest.LatestCheckpointID,
 		LatestCheckpoint:     manifest.LatestCheckpoint,
 		LatestCheckpointJSON: manifest.LatestCheckpointJSON,
 	}
@@ -1199,6 +1250,7 @@ func taskStatusFromManifest(manifest taskManifest) taskStatusOutput {
 			Stage:                slice.Stage,
 			Decision:             slice.Decision,
 			UpdatedAt:            slice.UpdatedAt,
+			LatestCheckpointID:   slice.LatestCheckpointID,
 			LatestCheckpoint:     slice.LatestCheckpoint,
 			LatestCheckpointJSON: slice.LatestCheckpointJSON,
 			Plan:                 slice.Plan,
@@ -1223,6 +1275,9 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 	}
 	if status.LatestCheckpoint != "" {
 		fmt.Fprintf(out, "Latest Checkpoint: %s\n", status.LatestCheckpoint)
+	}
+	if status.LatestCheckpointID != "" {
+		fmt.Fprintf(out, "Latest Checkpoint ID: %s\n", status.LatestCheckpointID)
 	}
 	if status.LatestCheckpointJSON != "" {
 		fmt.Fprintf(out, "Latest Checkpoint JSON: %s\n", status.LatestCheckpointJSON)
@@ -1249,6 +1304,9 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 		}
 		if slice.LatestCheckpoint != "" {
 			fmt.Fprintf(out, " checkpoint=%s", slice.LatestCheckpoint)
+		}
+		if slice.LatestCheckpointID != "" {
+			fmt.Fprintf(out, " checkpoint_id=%s", slice.LatestCheckpointID)
 		}
 		fmt.Fprintln(out)
 	}
@@ -2432,6 +2490,9 @@ func renderTaskIndex(manifest taskManifest) string {
 			if slice.LatestCheckpoint != "" {
 				state = append(state, "checkpoint: "+slice.LatestCheckpoint)
 			}
+			if slice.LatestCheckpointID != "" {
+				state = append(state, "checkpoint_id: "+slice.LatestCheckpointID)
+			}
 			if len(state) > 0 {
 				fmt.Fprintf(&b, " [%s]", strings.Join(state, ", "))
 			}
@@ -2949,11 +3010,12 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 		return fmt.Errorf("create checkpoint dir: %w", err)
 	}
 	checkpointStem := fmt.Sprintf("%s-%s", now.Format("20060102-150405"), sanitizeTaskFilename(opts.Stage))
+	checkpointID := taskCheckpointID(selectedSlice.ID, opts.Stage, now)
 	checkpointPath := filepath.Join(checkpointDir, checkpointStem+".md")
 	checkpointJSONPath := filepath.Join(checkpointDir, checkpointStem+".json")
-	record := buildTaskCheckpointRecord(manifest, opts, selectedSlice, now, repoRoot)
+	record := buildTaskCheckpointRecord(manifest, opts, selectedSlice, checkpointID, now, repoRoot)
 	jsonRel := taskRelativePath(workspace, checkpointJSONPath)
-	body := renderTaskCheckpoint(manifest, selectedSlice, opts, now, jsonRel)
+	body := renderTaskCheckpoint(manifest, selectedSlice, opts, now, checkpointID, jsonRel)
 	if err := os.WriteFile(checkpointPath, []byte(body), 0o644); err != nil {
 		return fmt.Errorf("write checkpoint: %w", err)
 	}
@@ -2965,7 +3027,7 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 		return err
 	}
 	applyTaskTargetState(&manifest, selectedSlice.ID, opts.Stage, opts.Decision, now)
-	applyTaskTargetCheckpointRefs(&manifest, selectedSlice.ID, taskRelativePath(workspace, checkpointPath), jsonRel)
+	applyTaskTargetCheckpointRefs(&manifest, selectedSlice.ID, checkpointID, taskRelativePath(workspace, checkpointPath), jsonRel)
 	if err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), manifest); err != nil {
 		return err
 	}
@@ -2975,6 +3037,7 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	}
 
 	var indexed []string
+	factIndexed := false
 	if opts.Index {
 		indexed, err = captureTaskArtifacts(cmd, repoRoot, []taskCaptureRequest{
 			{
@@ -2991,18 +3054,25 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 		if err != nil {
 			return err
 		}
+		if err := indexTaskCheckpointFact(repoRoot, manifest, record, checkpointPath, checkpointJSONPath, workspace, now); err != nil {
+			return err
+		}
+		factIndexed = true
 	}
 
 	out := taskCheckpointOutput{
 		TaskID:             taskID,
 		Series:             defaultTaskSeries(manifest.Series),
 		Slice:              selectedSlice.ID,
+		CheckpointID:       checkpointID,
 		Stage:              opts.Stage,
 		Decision:           opts.Decision,
 		CheckpointPath:     checkpointPath,
 		CheckpointJSONPath: checkpointJSONPath,
 		ResultPath:         resultPath,
 		IndexedPaths:       indexed,
+		LearningCount:      len(record.Learnings),
+		FactIndexed:        factIndexed,
 		TestEvidenceCount:  len(record.Evidence.TestCommands),
 	}
 	if record.Evidence.GitDiff != nil {
@@ -3031,6 +3101,9 @@ func normalizeTaskCheckpointOptions(opts taskCheckpointOptions) taskCheckpointOp
 	opts.MissedFiles = normalizePathList(opts.MissedFiles)
 	opts.NoiseFiles = normalizePathList(opts.NoiseFiles)
 	opts.Tasks = normalizeList(opts.Tasks)
+	opts.Learnings = normalizeList(opts.Learnings)
+	opts.NextTarget = strings.TrimSpace(opts.NextTarget)
+	opts.NextDecision = strings.TrimSpace(opts.NextDecision)
 	if opts.GitDiffMax <= 0 {
 		opts.GitDiffMax = 12000
 	}
@@ -3038,6 +3111,37 @@ func normalizeTaskCheckpointOptions(opts taskCheckpointOptions) taskCheckpointOp
 		opts.TestMax = 12000
 	}
 	return opts
+}
+
+func taskCheckpointID(target, stage string, now time.Time) string {
+	parts := []string{
+		"cp",
+		now.Format("20060102T150405Z"),
+		sanitizeTaskFilename(target),
+		sanitizeTaskFilename(stage),
+	}
+	var kept []string
+	for _, part := range parts {
+		part = strings.Trim(part, "-")
+		if part != "" {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, "_")
+}
+
+func taskCheckpointParentSlice(slice taskSliceArtifact) string {
+	if strings.TrimSpace(slice.ParentID) != "" {
+		return slice.ParentID
+	}
+	return slice.ID
+}
+
+func taskCheckpointIteration(slice taskSliceArtifact) string {
+	if strings.TrimSpace(slice.ParentID) != "" || strings.Contains(slice.ID, "-") {
+		return slice.ID
+	}
+	return ""
 }
 
 func applyTaskTargetState(manifest *taskManifest, targetID, stage, decision string, now time.Time) {
@@ -3067,13 +3171,15 @@ func applyTaskTargetState(manifest *taskManifest, targetID, stage, decision stri
 	manifest.UpdatedAt = timestamp
 }
 
-func applyTaskTargetCheckpointRefs(manifest *taskManifest, targetID, checkpoint, checkpointJSON string) {
+func applyTaskTargetCheckpointRefs(manifest *taskManifest, targetID, checkpointID, checkpoint, checkpointJSON string) {
+	checkpointID = strings.TrimSpace(checkpointID)
 	checkpoint = strings.TrimSpace(checkpoint)
 	checkpointJSON = strings.TrimSpace(checkpointJSON)
-	if checkpoint == "" && checkpointJSON == "" {
+	if checkpointID == "" && checkpoint == "" && checkpointJSON == "" {
 		return
 	}
 	if targetID == "" || isTaskSeriesTarget(*manifest, targetID) {
+		manifest.LatestCheckpointID = checkpointID
 		manifest.LatestCheckpoint = checkpoint
 		manifest.LatestCheckpointJSON = checkpointJSON
 		return
@@ -3082,6 +3188,7 @@ func applyTaskTargetCheckpointRefs(manifest *taskManifest, targetID, checkpoint,
 		if !strings.EqualFold(manifest.Artifacts.Slices[i].ID, targetID) {
 			continue
 		}
+		manifest.Artifacts.Slices[i].LatestCheckpointID = checkpointID
 		manifest.Artifacts.Slices[i].LatestCheckpoint = checkpoint
 		manifest.Artifacts.Slices[i].LatestCheckpointJSON = checkpointJSON
 		return
@@ -3130,7 +3237,7 @@ func taskStateForTarget(manifest taskManifest, targetID string) (string, string)
 	return "", ""
 }
 
-func buildTaskCheckpointRecord(manifest taskManifest, opts taskCheckpointOptions, slice taskSliceArtifact, now time.Time, repoRoot string) taskCheckpointRecord {
+func buildTaskCheckpointRecord(manifest taskManifest, opts taskCheckpointOptions, slice taskSliceArtifact, checkpointID string, now time.Time, repoRoot string) taskCheckpointRecord {
 	goal := strings.TrimSpace(opts.Goal)
 	if goal == "" {
 		goal = fmt.Sprintf("Record progress for `%s`.", manifest.Query)
@@ -3139,31 +3246,55 @@ func buildTaskCheckpointRecord(manifest taskManifest, opts taskCheckpointOptions
 	if description == "" {
 		description = "Checkpoint generated by `ds task checkpoint`."
 	}
-	record := taskCheckpointRecord{
-		SchemaVersion: 1,
-		TaskID:        manifest.TaskID,
-		Series:        defaultTaskSeries(manifest.Series),
-		Query:         manifest.Query,
-		Slice:         slice.ID,
-		SliceTitle:    slice.Title,
-		Stage:         opts.Stage,
-		Decision:      opts.Decision,
-		CreatedAt:     now.Format(time.RFC3339),
-		Goal:          goal,
-		Description:   description,
-		Note:          strings.TrimSpace(opts.Note),
-		Resources:     appendUniqueValues(taskCheckpointResourcePaths(manifest, slice), opts.Resources...),
-		FilesRead:     opts.FilesRead,
-		FilesEdited:   opts.FilesEdited,
-		TestsRead:     opts.TestsRead,
-		TestsRun:      opts.TestsRun,
-		MissedFiles:   opts.MissedFiles,
-		NoiseFiles:    opts.NoiseFiles,
-		Tasks:         opts.Tasks,
+	actual := taskCheckpointActualContext{
+		FilesRead:   opts.FilesRead,
+		FilesEdited: opts.FilesEdited,
+		TestsRead:   opts.TestsRead,
+		TestsRun:    opts.TestsRun,
 	}
+	feedback := taskPredictedContextFeedback{
+		RelevantFound:       taskCheckpointRelevantFound(manifest, actual),
+		CriticalMissed:      opts.MissedFiles,
+		DistractingIncluded: opts.NoiseFiles,
+	}
+	record := taskCheckpointRecord{
+		SchemaVersion:            2,
+		CheckpointID:             checkpointID,
+		TaskID:                   manifest.TaskID,
+		Target:                   slice.ID,
+		Series:                   defaultTaskSeries(manifest.Series),
+		Query:                    manifest.Query,
+		Slice:                    slice.ID,
+		SliceTitle:               slice.Title,
+		ParentSlice:              taskCheckpointParentSlice(slice),
+		Iteration:                taskCheckpointIteration(slice),
+		Stage:                    opts.Stage,
+		Decision:                 opts.Decision,
+		CreatedAt:                now.Format(time.RFC3339),
+		Goal:                     goal,
+		Description:              description,
+		Note:                     strings.TrimSpace(opts.Note),
+		Resources:                appendUniqueValues(taskCheckpointResourcePaths(manifest, slice), opts.Resources...),
+		FilesRead:                opts.FilesRead,
+		FilesEdited:              opts.FilesEdited,
+		TestsRead:                opts.TestsRead,
+		TestsRun:                 opts.TestsRun,
+		MissedFiles:              opts.MissedFiles,
+		NoiseFiles:               opts.NoiseFiles,
+		Tasks:                    opts.Tasks,
+		ActualContext:            actual,
+		PredictedContextFeedback: feedback,
+		Learnings:                parseTaskCheckpointLearnings(opts.Learnings),
+		Next: taskCheckpointNextRecommendation{
+			RecommendedTarget:   opts.NextTarget,
+			RecommendedDecision: opts.NextDecision,
+		},
+	}
+	record.Evidence.PlanRefs = appendUniqueValues(nil, record.Resources...)
 	if opts.GitDiff {
 		gitDiff := collectTaskGitDiffEvidence(repoRoot, opts.GitDiffMax)
 		record.Evidence.GitDiff = &gitDiff
+		record.Evidence.GitDiffPaths = appendNormalizedUnique(record.Evidence.GitDiffPaths, gitDiff.ChangedFiles...)
 	}
 	if opts.TestOutput {
 		for _, command := range opts.TestsRun {
@@ -3171,6 +3302,190 @@ func buildTaskCheckpointRecord(manifest taskManifest, opts taskCheckpointOptions
 		}
 	}
 	return record
+}
+
+func taskCheckpointRelevantFound(manifest taskManifest, actual taskCheckpointActualContext) []string {
+	predicted := appendNormalizedUnique(nil, predictedFilePaths(manifest.Predicted.PrimaryFiles)...)
+	predicted = appendNormalizedUnique(predicted, predictedFilePaths(manifest.Predicted.Tests)...)
+	predicted = appendNormalizedUnique(predicted, predictedFilePaths(manifest.Predicted.DocsPlansConfig)...)
+	predicted = appendNormalizedUnique(predicted, predictedFilePaths(manifest.Predicted.SupportingContext)...)
+	actualPaths := appendNormalizedUnique(nil, actual.FilesRead...)
+	actualPaths = appendNormalizedUnique(actualPaths, actual.FilesEdited...)
+	actualPaths = appendNormalizedUnique(actualPaths, actual.TestsRead...)
+	var found []string
+	for _, path := range actualPaths {
+		if containsPath(predicted, path) {
+			found = appendNormalizedUnique(found, path)
+		}
+	}
+	return found
+}
+
+func parseTaskCheckpointLearnings(values []string) []taskCheckpointLearning {
+	var out []taskCheckpointLearning
+	for _, raw := range values {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		parts := strings.Split(raw, "|")
+		var learning taskCheckpointLearning
+		if len(parts) > 1 {
+			learning.LearningType = strings.TrimSpace(parts[0])
+			learning.Summary = strings.TrimSpace(parts[1])
+			if len(parts) > 2 {
+				learning.Confidence = strings.TrimSpace(parts[2])
+			}
+			if len(parts) > 3 {
+				learning.AppliesTo = strings.TrimSpace(parts[3])
+			}
+			if len(parts) > 4 {
+				learning.EvidenceRefs = normalizePathList(strings.Split(parts[4], ","))
+			}
+		} else if typ, summary, ok := strings.Cut(raw, ":"); ok {
+			learning.LearningType = strings.TrimSpace(typ)
+			learning.Summary = strings.TrimSpace(summary)
+		} else {
+			learning.LearningType = "workflow_friction"
+			learning.Summary = raw
+		}
+		if learning.LearningType == "" {
+			learning.LearningType = "workflow_friction"
+		}
+		if learning.Summary == "" {
+			continue
+		}
+		if learning.Confidence == "" {
+			learning.Confidence = "medium"
+		}
+		out = append(out, learning)
+	}
+	return out
+}
+
+func normalizeTaskCheckpointRecord(record *taskCheckpointRecord) {
+	if record == nil {
+		return
+	}
+	if record.Target == "" {
+		record.Target = record.Slice
+	}
+	if record.Slice == "" {
+		record.Slice = record.Target
+	}
+	if record.ParentSlice == "" {
+		record.ParentSlice = record.Slice
+	}
+	if record.CheckpointID == "" {
+		record.CheckpointID = taskCheckpointID(firstNonEmptyTaskString(record.Target, record.Slice), record.Stage, parseTaskCheckpointCreatedAt(record.CreatedAt))
+	}
+	if len(record.ActualContext.FilesRead)+len(record.ActualContext.FilesEdited)+len(record.ActualContext.TestsRead)+len(record.ActualContext.TestsRun) == 0 {
+		record.ActualContext = taskCheckpointActualContext{
+			FilesRead:   record.FilesRead,
+			FilesEdited: record.FilesEdited,
+			TestsRead:   record.TestsRead,
+			TestsRun:    record.TestsRun,
+		}
+	}
+	record.FilesRead = appendNormalizedUnique(record.FilesRead, record.ActualContext.FilesRead...)
+	record.FilesEdited = appendNormalizedUnique(record.FilesEdited, record.ActualContext.FilesEdited...)
+	record.TestsRead = appendNormalizedUnique(record.TestsRead, record.ActualContext.TestsRead...)
+	record.TestsRun = appendUniqueValues(record.TestsRun, record.ActualContext.TestsRun...)
+	if len(record.PredictedContextFeedback.CriticalMissed)+len(record.PredictedContextFeedback.DistractingIncluded) == 0 {
+		record.PredictedContextFeedback.CriticalMissed = record.MissedFiles
+		record.PredictedContextFeedback.DistractingIncluded = record.NoiseFiles
+	}
+	record.MissedFiles = appendNormalizedUnique(record.MissedFiles, record.PredictedContextFeedback.CriticalMissed...)
+	record.NoiseFiles = appendNormalizedUnique(record.NoiseFiles, record.PredictedContextFeedback.DistractingIncluded...)
+	if record.Evidence.GitDiff != nil {
+		record.Evidence.GitDiffPaths = appendNormalizedUnique(record.Evidence.GitDiffPaths, record.Evidence.GitDiff.ChangedFiles...)
+	}
+	if len(record.Evidence.PlanRefs) == 0 {
+		record.Evidence.PlanRefs = appendUniqueValues(nil, record.Resources...)
+	}
+}
+
+func parseTaskCheckpointCreatedAt(createdAt string) time.Time {
+	if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(createdAt)); err == nil {
+		return parsed
+	}
+	return time.Unix(0, 0).UTC()
+}
+
+func indexTaskCheckpointFact(repoRoot string, manifest taskManifest, record taskCheckpointRecord, checkpointPath, checkpointJSONPath, workspace string, now time.Time) error {
+	db, err := openDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	repoID, err := ensureTaskFactRepo(db, repoRoot, now.Format(time.RFC3339))
+	if err != nil {
+		return err
+	}
+	actualJSON, err := marshalTaskFactJSON(record.ActualContext, "{}")
+	if err != nil {
+		return err
+	}
+	feedbackJSON, err := marshalTaskFactJSON(record.PredictedContextFeedback, "{}")
+	if err != nil {
+		return err
+	}
+	evidenceJSON, err := marshalTaskFactJSON(record.Evidence, "{}")
+	if err != nil {
+		return err
+	}
+	learningsJSON, err := marshalTaskFactJSON(record.Learnings, "[]")
+	if err != nil {
+		return err
+	}
+	nextJSON, err := marshalTaskFactJSON(record.Next, "{}")
+	if err != nil {
+		return err
+	}
+	return db.UpsertTaskCheckpointFact(store.TaskCheckpointFact{
+		RepoID:             repoID,
+		TaskID:             manifest.TaskID,
+		CheckpointID:       record.CheckpointID,
+		Target:             firstNonEmptyTaskString(record.Target, record.Slice),
+		Series:             defaultTaskSeries(record.Series),
+		Stage:              record.Stage,
+		Decision:           record.Decision,
+		CheckpointPath:     taskRelativePath(workspace, checkpointPath),
+		CheckpointJSONPath: taskRelativePath(workspace, checkpointJSONPath),
+		CreatedAt:          record.CreatedAt,
+		ActualContextJSON:  actualJSON,
+		FeedbackJSON:       feedbackJSON,
+		EvidenceJSON:       evidenceJSON,
+		LearningsJSON:      learningsJSON,
+		NextJSON:           nextJSON,
+		IndexedAt:          now.Format(time.RFC3339),
+	})
+}
+
+func ensureTaskFactRepo(db *store.DB, repoRoot, now string) (string, error) {
+	var repoID string
+	err := db.QueryRow("SELECT id FROM repos WHERE root_path = ?", repoRoot).Scan(&repoID)
+	if err == nil {
+		return repoID, nil
+	}
+	ids := idgen.NewFactory()
+	repoID = ids.NewWithPrefix("repo_")
+	if _, err := db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES (?, ?, ?, ?)", repoID, repoRoot, now, now); err != nil {
+		return "", err
+	}
+	return repoID, nil
+}
+
+func marshalTaskFactJSON(value any, fallback string) (string, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	text := string(data)
+	if text == "null" || text == "" {
+		return fallback, nil
+	}
+	return text, nil
 }
 
 func writeTaskCheckpointRecord(path string, record taskCheckpointRecord) error {
@@ -3287,13 +3602,20 @@ func taskRelativePath(base, path string) string {
 	return filepath.ToSlash(rel)
 }
 
-func renderTaskCheckpoint(manifest taskManifest, slice taskSliceArtifact, opts taskCheckpointOptions, now time.Time, checkpointJSONRel string) string {
+func renderTaskCheckpoint(manifest taskManifest, slice taskSliceArtifact, opts taskCheckpointOptions, now time.Time, checkpointID, checkpointJSONRel string) string {
 	var b strings.Builder
 	fmt.Fprintln(&b, "---")
+	fmt.Fprintln(&b, "schema_version: 2")
+	fmt.Fprintf(&b, "checkpoint_id: %s\n", yamlScalar(checkpointID))
 	fmt.Fprintf(&b, "task_id: %s\n", yamlScalar(manifest.TaskID))
 	fmt.Fprintf(&b, "series: %s\n", yamlScalar(defaultTaskSeries(manifest.Series)))
 	if slice.ID != "" {
+		fmt.Fprintf(&b, "target: %s\n", yamlScalar(slice.ID))
 		fmt.Fprintf(&b, "slice: %s\n", yamlScalar(slice.ID))
+		fmt.Fprintf(&b, "parent_slice: %s\n", yamlScalar(taskCheckpointParentSlice(slice)))
+		if iteration := taskCheckpointIteration(slice); iteration != "" {
+			fmt.Fprintf(&b, "iteration: %s\n", yamlScalar(iteration))
+		}
 	}
 	fmt.Fprintf(&b, "stage: %s\n", yamlScalar(opts.Stage))
 	if strings.TrimSpace(opts.Decision) != "" {
@@ -3328,6 +3650,7 @@ func renderTaskCheckpoint(manifest taskManifest, slice taskSliceArtifact, opts t
 	fmt.Fprintln(&b, "## Note")
 	fmt.Fprintf(&b, "%s\n\n", emptyAsDash(opts.Note))
 	fmt.Fprintln(&b, "## Structured Evidence")
+	fmt.Fprintf(&b, "- Checkpoint ID: `%s`\n", checkpointID)
 	fmt.Fprintf(&b, "- `%s`\n\n", checkpointJSONRel)
 	writeMarkdownList(&b, "Files Actually Read", opts.FilesRead)
 	writeMarkdownList(&b, "Files Actually Edited", opts.FilesEdited)

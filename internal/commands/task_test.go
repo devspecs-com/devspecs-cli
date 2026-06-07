@@ -1156,6 +1156,9 @@ func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
 		"--test-run", "go test ./internal/retrieval",
 		"--missed-file", "internal/retrieval/ranking_test.go",
 		"--noise-file", "fixtures/noisy-plan.md",
+		"--learning", "retrieval|same-package tests are important rescue evidence|high|A01|internal/retrieval/ranking_test.go",
+		"--next-target", "A01-1",
+		"--next-decision", "improve",
 		"--json",
 	})
 	buf := &bytes.Buffer{}
@@ -1176,15 +1179,23 @@ func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
 	if out.CheckpointJSONPath == "" {
 		t.Fatalf("expected structured checkpoint path in output: %#v", out)
 	}
+	if out.CheckpointID == "" || out.LearningCount != 1 || !out.FactIndexed {
+		t.Fatalf("expected checkpoint id, learning count, and indexed fact in output: %#v", out)
+	}
 	checkpointBody := mustReadFile(t, out.CheckpointPath)
 	for _, want := range []string{
 		"---",
+		"schema_version: 2",
+		"checkpoint_id:",
+		"target: A01",
 		"slice: A01",
+		"parent_slice: A01",
 		"stage: implemented",
 		"decision: improve",
 		"created_at:",
 		"checkpoint_json:",
 		"## Structured Evidence",
+		"Checkpoint ID:",
 		"## Files Actually Read",
 		"`internal/retrieval/ranking.go`",
 		"## Critical Files DevSpecs Missed",
@@ -1211,14 +1222,29 @@ func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
 	if record.Slice != "A01" {
 		t.Fatalf("checkpoint record slice = %q", record.Slice)
 	}
-	if record.SchemaVersion != 1 {
+	if record.SchemaVersion != 2 {
 		t.Fatalf("checkpoint record schema version = %d", record.SchemaVersion)
+	}
+	if record.CheckpointID != out.CheckpointID || record.Target != "A01" || record.ParentSlice != "A01" {
+		t.Fatalf("checkpoint record identity = %#v", record)
 	}
 	if !containsPath(record.FilesEdited, "internal/retrieval/ranking.go") {
 		t.Fatalf("checkpoint record missing edited file: %#v", record.FilesEdited)
 	}
+	if !containsPath(record.ActualContext.FilesEdited, "internal/retrieval/ranking.go") {
+		t.Fatalf("checkpoint record missing actual context edited file: %#v", record.ActualContext)
+	}
 	if !containsPath(record.MissedFiles, "internal/retrieval/ranking_test.go") {
 		t.Fatalf("checkpoint record missing missed file: %#v", record.MissedFiles)
+	}
+	if !containsPath(record.PredictedContextFeedback.CriticalMissed, "internal/retrieval/ranking_test.go") {
+		t.Fatalf("checkpoint record missing predicted feedback: %#v", record.PredictedContextFeedback)
+	}
+	if len(record.Learnings) != 1 || !strings.Contains(record.Learnings[0].Summary, "same-package tests") {
+		t.Fatalf("checkpoint record learnings = %#v", record.Learnings)
+	}
+	if record.Next.RecommendedTarget != "A01-1" || record.Next.RecommendedDecision != "improve" {
+		t.Fatalf("checkpoint next recommendation = %#v", record.Next)
 	}
 	resultBody := mustReadFile(t, out.ResultPath)
 	for _, want := range []string{
@@ -1255,6 +1281,26 @@ func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
 	if !foundCheckpoint {
 		t.Fatalf("checkpoint capture artifact not found in %#v", artifacts)
 	}
+	var repoID string
+	if err := db.QueryRow("SELECT id FROM repos WHERE root_path = ?", repoDir).Scan(&repoID); err != nil {
+		t.Fatal(err)
+	}
+	facts, err := db.ListTaskCheckpointFacts(repoID, "checkpoint-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(facts) != 1 {
+		t.Fatalf("checkpoint facts = %#v", facts)
+	}
+	if facts[0].CheckpointID != out.CheckpointID || facts[0].Target != "A01" || facts[0].Stage != "implemented" {
+		t.Fatalf("checkpoint fact identity = %#v", facts[0])
+	}
+	if !strings.Contains(facts[0].ActualContextJSON, "internal/retrieval/ranking.go") {
+		t.Fatalf("checkpoint fact actual context = %s", facts[0].ActualContextJSON)
+	}
+	if !strings.Contains(facts[0].LearningsJSON, "same-package tests") {
+		t.Fatalf("checkpoint fact learnings = %s", facts[0].LearningsJSON)
+	}
 
 	if err := os.WriteFile(out.CheckpointPath, []byte("# scrubbed markdown checkpoint\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1284,6 +1330,9 @@ func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
 	}
 	if !containsPath(evalOut.Noise, "fixtures/noisy-plan.md") {
 		t.Fatalf("expected noise file in evaluation, got %#v", evalOut.Noise)
+	}
+	if evalOut.CheckpointSummary.JSONRecords != 1 || evalOut.CheckpointSummary.MarkdownFallbacks != 0 {
+		t.Fatalf("expected JSON checkpoint read summary, got %#v", evalOut.CheckpointSummary)
 	}
 }
 
@@ -1458,8 +1507,17 @@ func TestTask_EvaluateReportsStructuredEvidenceWithoutInflatingActualContext(t *
 	if !containsString(evalOut.Observed.TestCommands, "go test ./internal/retrieval -run TestImproveTestCompanionRecall -count=1") {
 		t.Fatalf("expected structured test command evidence, got %#v", evalOut.Observed.TestCommands)
 	}
-	if !containsString(evalOut.Observed.TestsRun, "go test ./internal/retrieval -run TestImproveTestCompanionRecall -count=1") {
-		t.Fatalf("expected structured test command to count as test run evidence, got %#v", evalOut.Observed.TestsRun)
+	if containsString(evalOut.Observed.TestsRun, "go test ./internal/retrieval -run TestImproveTestCompanionRecall -count=1") {
+		t.Fatalf("test command receipt should stay evidence-only unless recorded as actual context, got %#v", evalOut.Observed.TestsRun)
+	}
+	if !containsPath(evalOut.CheckpointSummary.EvidenceOnlyGitDiffFiles, "internal/commands/task.go") {
+		t.Fatalf("expected evidence-only git diff summary, got %#v", evalOut.CheckpointSummary)
+	}
+	if !containsString(evalOut.CheckpointSummary.EvidenceOnlyTestCommands, "go test ./internal/retrieval -run TestImproveTestCompanionRecall -count=1") {
+		t.Fatalf("expected evidence-only test command summary, got %#v", evalOut.CheckpointSummary)
+	}
+	if evalOut.CheckpointSummary.JSONRecords != 1 || evalOut.CheckpointSummary.MarkdownFallbacks != 0 {
+		t.Fatalf("expected structured checkpoint summary, got %#v", evalOut.CheckpointSummary)
 	}
 }
 
