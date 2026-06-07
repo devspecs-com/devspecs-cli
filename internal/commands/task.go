@@ -90,6 +90,28 @@ type taskSyncOptions struct {
 	AsJSON bool
 }
 
+type taskTargetOptions struct {
+	Dir    string
+	Target string
+	AsJSON bool
+}
+
+type taskTargetStateOptions struct {
+	Dir      string
+	Target   string
+	Stage    string
+	Decision string
+	Index    bool
+	AsJSON   bool
+}
+
+type taskAuditOptions struct {
+	Dir     string
+	Target  string
+	GitDiff bool
+	AsJSON  bool
+}
+
 type taskDecideOptions struct {
 	Dir      string
 	Target   string
@@ -228,6 +250,52 @@ type taskArtifactFreshness struct {
 	ModifiedAt     string `json:"modified_at"`
 	StateUpdatedAt string `json:"state_updated_at"`
 	Reason         string `json:"reason"`
+}
+
+type taskTargetOutput struct {
+	TaskID            string                  `json:"task_id"`
+	Series            string                  `json:"series"`
+	Profile           string                  `json:"profile,omitempty"`
+	Query             string                  `json:"query"`
+	Workspace         string                  `json:"workspace"`
+	IndexPath         string                  `json:"index_path"`
+	Target            string                  `json:"target"`
+	Title             string                  `json:"title"`
+	Kind              string                  `json:"kind,omitempty"`
+	ParentID          string                  `json:"parent_id,omitempty"`
+	Reason            string                  `json:"reason,omitempty"`
+	Stage             string                  `json:"stage,omitempty"`
+	Decision          string                  `json:"decision,omitempty"`
+	PlanPath          string                  `json:"plan_path"`
+	ResultPath        string                  `json:"result_path"`
+	SiblingTargets    []string                `json:"sibling_targets,omitempty"`
+	ArtifactFreshness []taskArtifactFreshness `json:"artifact_freshness,omitempty"`
+	PlanBody          string                  `json:"plan_body,omitempty"`
+}
+
+type taskPromptOutput struct {
+	TaskID         string           `json:"task_id"`
+	Target         string           `json:"target"`
+	Prompt         string           `json:"prompt"`
+	TargetContext  taskTargetOutput `json:"target_context"`
+	SiblingTargets []string         `json:"sibling_targets,omitempty"`
+}
+
+type taskAuditOutput struct {
+	TaskID          string   `json:"task_id"`
+	Series          string   `json:"series"`
+	Target          string   `json:"target"`
+	Title           string   `json:"title"`
+	Recommendation  string   `json:"recommendation"`
+	ObservedEdited  []string `json:"observed_edited,omitempty"`
+	GitDiffFiles    []string `json:"git_diff_files,omitempty"`
+	InScopePaths    []string `json:"in_scope_paths,omitempty"`
+	ReviewPaths     []string `json:"review_paths,omitempty"`
+	OutOfScopePaths []string `json:"out_of_scope_paths,omitempty"`
+	AllowedSurface  []string `json:"allowed_surface,omitempty"`
+	ReviewSurface   []string `json:"review_surface,omitempty"`
+	Checkpoints     []string `json:"checkpoints,omitempty"`
+	Notes           []string `json:"notes,omitempty"`
 }
 
 type taskManifest struct {
@@ -401,6 +469,12 @@ templates for recording actual reads, edits, tests, misses, and noise.`,
 	cmd.AddCommand(newTaskSliceCmd())
 	cmd.AddCommand(newTaskIterationCmd())
 	cmd.AddCommand(newTaskSyncCmd())
+	cmd.AddCommand(newTaskNextCmd())
+	cmd.AddCommand(newTaskShowCmd())
+	cmd.AddCommand(newTaskPromptCmd())
+	cmd.AddCommand(newTaskStartTargetCmd())
+	cmd.AddCommand(newTaskFinishCmd())
+	cmd.AddCommand(newTaskAuditCmd())
 	cmd.AddCommand(newTaskStatusCmd())
 	cmd.AddCommand(newTaskDecideCmd())
 	cmd.AddCommand(newTaskCheckpointCmd())
@@ -477,6 +551,114 @@ func newTaskSyncCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
+	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func newTaskNextCmd() *cobra.Command {
+	var opts taskTargetOptions
+	opts.Dir = defaultTaskWorkspaceDir
+	cmd := &cobra.Command{
+		Use:   "next <task-id>",
+		Short: "Show the next bounded task target",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskNext(cmd, args[0], opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
+	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func newTaskShowCmd() *cobra.Command {
+	var opts taskTargetOptions
+	opts.Dir = defaultTaskWorkspaceDir
+	cmd := &cobra.Command{
+		Use:   "show <task-id>",
+		Short: "Show exact context for one task target",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskShow(cmd, args[0], opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
+	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice/iteration target; defaults to the next target")
+	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func newTaskPromptCmd() *cobra.Command {
+	var opts taskTargetOptions
+	opts.Dir = defaultTaskWorkspaceDir
+	cmd := &cobra.Command{
+		Use:   "prompt <task-id>",
+		Short: "Emit an agent prompt bounded to one task target",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskPrompt(cmd, args[0], opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
+	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice/iteration target; defaults to the next target")
+	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func newTaskStartTargetCmd() *cobra.Command {
+	var opts taskTargetStateOptions
+	opts.Dir = defaultTaskWorkspaceDir
+	opts.Index = true
+	cmd := &cobra.Command{
+		Use:   "start <task-id>",
+		Short: "Mark one task target as started",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskStartTarget(cmd, args[0], opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
+	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice/iteration target; defaults to the next target")
+	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the updated task index into the DevSpecs index")
+	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func newTaskFinishCmd() *cobra.Command {
+	var opts taskTargetStateOptions
+	opts.Dir = defaultTaskWorkspaceDir
+	opts.Index = true
+	cmd := &cobra.Command{
+		Use:   "finish <task-id>",
+		Short: "Finish one task target with a decision gate",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskFinish(cmd, args[0], opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
+	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice/iteration target; defaults to the started or next target")
+	cmd.Flags().StringVar(&opts.Stage, "stage", "", "Lifecycle stage to set; inferred from decision when omitted")
+	cmd.Flags().StringVar(&opts.Decision, "decision", "", "Decision gate: promote, improve, rework, rollback, block, complete, split, supersede, cancel, continue")
+	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the updated task index into the DevSpecs index")
+	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func newTaskAuditCmd() *cobra.Command {
+	var opts taskAuditOptions
+	opts.Dir = defaultTaskWorkspaceDir
+	cmd := &cobra.Command{
+		Use:   "audit <task-id>",
+		Short: "Audit whether observed edits stayed inside one task target",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskAudit(cmd, args[0], opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
+	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice/iteration target; defaults to the next target")
+	cmd.Flags().BoolVar(&opts.GitDiff, "git-diff", false, "Include current git diff changed files in the audit")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	return cmd
 }
@@ -861,6 +1043,122 @@ func runTaskSync(cmd *cobra.Command, taskID string, opts taskSyncOptions) error 
 	return nil
 }
 
+func runTaskNext(cmd *cobra.Command, taskID string, opts taskTargetOptions) error {
+	ctx, err := loadTaskTargetContext(opts.Dir, taskID, "")
+	if err != nil {
+		return err
+	}
+	out := taskTargetOutputFromContext(ctx, false)
+	if opts.AsJSON {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	return writeTaskTargetHuman(cmd.OutOrStdout(), "Next task target", out, false)
+}
+
+func runTaskShow(cmd *cobra.Command, taskID string, opts taskTargetOptions) error {
+	ctx, err := loadTaskTargetContext(opts.Dir, taskID, opts.Target)
+	if err != nil {
+		return err
+	}
+	out := taskTargetOutputFromContext(ctx, true)
+	if opts.AsJSON {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	return writeTaskTargetHuman(cmd.OutOrStdout(), "Task target", out, true)
+}
+
+func runTaskPrompt(cmd *cobra.Command, taskID string, opts taskTargetOptions) error {
+	ctx, err := loadTaskTargetContext(opts.Dir, taskID, opts.Target)
+	if err != nil {
+		return err
+	}
+	target := taskTargetOutputFromContext(ctx, true)
+	prompt := renderTaskAgentPrompt(ctx, target)
+	out := taskPromptOutput{
+		TaskID:         target.TaskID,
+		Target:         target.Target,
+		Prompt:         prompt,
+		TargetContext:  target,
+		SiblingTargets: target.SiblingTargets,
+	}
+	if opts.AsJSON {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	_, err = fmt.Fprint(cmd.OutOrStdout(), prompt)
+	return err
+}
+
+func runTaskStartTarget(cmd *cobra.Command, taskID string, opts taskTargetStateOptions) error {
+	ctx, err := loadTaskTargetContext(opts.Dir, taskID, opts.Target)
+	if err != nil {
+		return err
+	}
+	return runTaskDecide(cmd, taskID, taskDecideOptions{
+		Dir:      opts.Dir,
+		Target:   ctx.Slice.ID,
+		Stage:    "started",
+		Decision: "continue",
+		Index:    opts.Index,
+		AsJSON:   opts.AsJSON,
+	})
+}
+
+func runTaskFinish(cmd *cobra.Command, taskID string, opts taskTargetStateOptions) error {
+	decision := strings.TrimSpace(opts.Decision)
+	if decision == "" {
+		return fmt.Errorf("decision is required")
+	}
+	if !isAllowedValue(decision, taskDecisions) {
+		return fmt.Errorf("invalid decision %q; valid values: %s", decision, strings.Join(taskDecisions, ", "))
+	}
+	ctx, err := loadTaskTargetContext(opts.Dir, taskID, opts.Target)
+	if err != nil {
+		return err
+	}
+	stage := strings.TrimSpace(opts.Stage)
+	if stage == "" {
+		stage = taskStageForDecision(decision)
+	}
+	if stage == "" {
+		if strings.EqualFold(decision, "continue") {
+			stage = "started"
+		} else {
+			stage = "implemented"
+		}
+	}
+	return runTaskDecide(cmd, taskID, taskDecideOptions{
+		Dir:      opts.Dir,
+		Target:   ctx.Slice.ID,
+		Stage:    stage,
+		Decision: decision,
+		Index:    opts.Index,
+		AsJSON:   opts.AsJSON,
+	})
+}
+
+func runTaskAudit(cmd *cobra.Command, taskID string, opts taskAuditOptions) error {
+	ctx, err := loadTaskTargetContext(opts.Dir, taskID, opts.Target)
+	if err != nil {
+		return err
+	}
+	out, err := buildTaskAuditOutput(ctx, opts.GitDiff)
+	if err != nil {
+		return err
+	}
+	if opts.AsJSON {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	return writeTaskAuditHuman(cmd.OutOrStdout(), out)
+}
+
 func runTaskStatus(cmd *cobra.Command, taskID string, opts taskStatusOptions) error {
 	taskID = strings.TrimSpace(taskID)
 	if err := validateTaskID(taskID); err != nil {
@@ -1057,6 +1355,366 @@ func taskAbsoluteArtifactPaths(workspace string, rel taskArtifactPaths) taskAbso
 		FirstSlice: filepath.Join(workspace, rel.FirstSlice),
 		Result:     filepath.Join(workspace, rel.Result),
 	}
+}
+
+type taskTargetContext struct {
+	RepoRoot          string
+	Workspace         string
+	ManifestPath      string
+	IndexPath         string
+	Manifest          taskManifest
+	Slice             taskSliceArtifact
+	SiblingTargets    []string
+	ArtifactFreshness []taskArtifactFreshness
+}
+
+func loadTaskTargetContext(baseDir, taskID, selector string) (taskTargetContext, error) {
+	taskID = strings.TrimSpace(taskID)
+	if err := validateTaskID(taskID); err != nil {
+		return taskTargetContext{}, err
+	}
+	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(baseDir, taskID)
+	if err != nil {
+		return taskTargetContext{}, err
+	}
+	var slice taskSliceArtifact
+	if strings.TrimSpace(selector) == "" {
+		slice, err = taskNextSlice(manifest)
+	} else {
+		slice, err = taskSliceForCheckpoint(manifest, selector)
+	}
+	if err != nil {
+		return taskTargetContext{}, err
+	}
+	return taskTargetContext{
+		RepoRoot:          repoRoot,
+		Workspace:         workspace,
+		ManifestPath:      filepath.Join(workspace, taskManifestFilename),
+		IndexPath:         filepath.Join(workspace, manifest.Artifacts.Index),
+		Manifest:          manifest,
+		Slice:             slice,
+		SiblingTargets:    taskSiblingTargetIDs(manifest, slice.ID),
+		ArtifactFreshness: taskArtifactFreshnessWarnings(workspace, manifest),
+	}, nil
+}
+
+func taskTargetOutputFromContext(ctx taskTargetContext, includePlanBody bool) taskTargetOutput {
+	planPath := filepath.Join(ctx.Workspace, filepath.FromSlash(ctx.Slice.Plan))
+	resultPath := filepath.Join(ctx.Workspace, filepath.FromSlash(ctx.Slice.Result))
+	out := taskTargetOutput{
+		TaskID:            ctx.Manifest.TaskID,
+		Series:            defaultTaskSeries(ctx.Manifest.Series),
+		Profile:           defaultTaskProfile(ctx.Manifest.Profile),
+		Query:             ctx.Manifest.Query,
+		Workspace:         ctx.Workspace,
+		IndexPath:         ctx.IndexPath,
+		Target:            ctx.Slice.ID,
+		Title:             ctx.Slice.Title,
+		Kind:              ctx.Slice.Kind,
+		ParentID:          ctx.Slice.ParentID,
+		Reason:            ctx.Slice.Reason,
+		Stage:             ctx.Slice.Stage,
+		Decision:          ctx.Slice.Decision,
+		PlanPath:          planPath,
+		ResultPath:        resultPath,
+		SiblingTargets:    ctx.SiblingTargets,
+		ArtifactFreshness: ctx.ArtifactFreshness,
+	}
+	if includePlanBody {
+		if data, err := os.ReadFile(planPath); err == nil {
+			out.PlanBody = string(data)
+		}
+	}
+	return out
+}
+
+func writeTaskTargetHuman(out io.Writer, title string, target taskTargetOutput, includePlanBody bool) error {
+	fmt.Fprintf(out, "%s: %s\n", title, target.Target)
+	fmt.Fprintf(out, "Task ID: %s\n", target.TaskID)
+	fmt.Fprintf(out, "Series: %s\n", target.Series)
+	if target.Profile != "" {
+		fmt.Fprintf(out, "Profile: %s\n", target.Profile)
+	}
+	fmt.Fprintf(out, "Title: %s\n", target.Title)
+	fmt.Fprintf(out, "Stage: %s\n", emptyAsDash(target.Stage))
+	fmt.Fprintf(out, "Decision: %s\n", emptyAsDash(target.Decision))
+	fmt.Fprintf(out, "Plan: %s\n", target.PlanPath)
+	fmt.Fprintf(out, "Result: %s\n", target.ResultPath)
+	if len(target.SiblingTargets) > 0 {
+		fmt.Fprintf(out, "Out-of-scope sibling targets: %s\n", strings.Join(target.SiblingTargets, ", "))
+	}
+	if len(target.ArtifactFreshness) > 0 {
+		fmt.Fprintln(out, "Stale task artifacts:")
+		for _, warning := range target.ArtifactFreshness {
+			fmt.Fprintf(out, "  - %s changed after task state; run `ds task sync %s`.\n", warning.Path, target.TaskID)
+		}
+	}
+	if includePlanBody && target.PlanBody != "" {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Plan body:")
+		fmt.Fprintln(out, target.PlanBody)
+	}
+	return nil
+}
+
+func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are working on DevSpecs task %s target %s only.\n\n", target.TaskID, target.Target)
+	fmt.Fprintln(&b, "Boundary:")
+	fmt.Fprintln(&b, "```yaml")
+	fmt.Fprintln(&b, "devspecs:")
+	fmt.Fprintf(&b, "  task_id: %s\n", target.TaskID)
+	fmt.Fprintf(&b, "  target: %s\n", target.Target)
+	fmt.Fprintf(&b, "  allowed_scope: %s\n", strings.TrimSpace(firstNonEmptyTaskString(target.Kind, "slice")))
+	fmt.Fprintf(&b, "  plan: %s\n", filepath.ToSlash(taskRelativePath(ctx.RepoRoot, target.PlanPath)))
+	fmt.Fprintf(&b, "  result: %s\n", filepath.ToSlash(taskRelativePath(ctx.RepoRoot, target.ResultPath)))
+	if len(target.SiblingTargets) > 0 {
+		fmt.Fprintln(&b, "  must_not_implement:")
+		for _, sibling := range target.SiblingTargets {
+			fmt.Fprintf(&b, "    - %s\n", sibling)
+		}
+	}
+	fmt.Fprintln(&b, "```")
+	fmt.Fprintln(&b)
+	fmt.Fprintf(&b, "Goal: %s\n\n", target.Title)
+	fmt.Fprintln(&b, "Do not implement sibling slices, future slices, or the full task track. Stop after this target's acceptance checks are satisfied.")
+	fmt.Fprintf(&b, "Record the outcome in `%s` or with `ds task checkpoint %s --slice %s`.\n", filepath.ToSlash(taskRelativePath(ctx.RepoRoot, target.ResultPath)), target.TaskID, target.Target)
+	fmt.Fprintln(&b, "At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.")
+	fmt.Fprintln(&b)
+	if target.PlanBody != "" {
+		fmt.Fprintln(&b, "Target plan:")
+		fmt.Fprintln(&b)
+		fmt.Fprintln(&b, target.PlanBody)
+	}
+	return b.String()
+}
+
+func firstNonEmptyTaskString(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func taskNextSlice(manifest taskManifest) (taskSliceArtifact, error) {
+	slices := taskSyncSlices(manifest)
+	for _, slice := range slices {
+		if strings.EqualFold(strings.TrimSpace(slice.Stage), "started") && !taskTargetTerminal(slice) {
+			return slice, nil
+		}
+	}
+	for _, slice := range slices {
+		if !taskTargetTerminal(slice) {
+			return slice, nil
+		}
+	}
+	if len(slices) == 0 {
+		return taskSliceArtifact{}, fmt.Errorf("task has no slice targets")
+	}
+	return taskSliceArtifact{}, fmt.Errorf("all task targets are terminal")
+}
+
+func taskTargetTerminal(slice taskSliceArtifact) bool {
+	decision := strings.ToLower(strings.TrimSpace(slice.Decision))
+	if decision != "" && decision != "continue" {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(slice.Stage)) {
+	case "done", "completed", "blocked", "split", "superseded", "cancelled", "rolled_back":
+		return true
+	default:
+		return false
+	}
+}
+
+func taskSiblingTargetIDs(manifest taskManifest, targetID string) []string {
+	var out []string
+	for _, slice := range taskSyncSlices(manifest) {
+		if strings.EqualFold(slice.ID, targetID) {
+			continue
+		}
+		out = appendUniqueString(out, slice.ID)
+	}
+	return out
+}
+
+func buildTaskAuditOutput(ctx taskTargetContext, includeCurrentGitDiff bool) (taskAuditOutput, error) {
+	observed, checkpoints, err := readTaskObservedPathsForTarget(ctx.Workspace, ctx.Slice.ID)
+	if err != nil {
+		return taskAuditOutput{}, err
+	}
+	gitDiffFiles := appendNormalizedUnique(nil, observed.GitDiffFiles...)
+	var notes []string
+	if includeCurrentGitDiff {
+		current := collectTaskGitDiffEvidence(ctx.RepoRoot, 12000)
+		gitDiffFiles = appendNormalizedUnique(gitDiffFiles, current.ChangedFiles...)
+		if current.Error != "" {
+			notes = append(notes, "Current git diff evidence could not be fully collected: "+current.Error)
+		}
+	}
+	allowed := taskAuditAllowedSurface(ctx)
+	reviewSurface := taskAuditReviewSurface(ctx)
+	observedEdited := appendNormalizedUnique(nil, observed.FilesEdited...)
+	observedChanged := appendNormalizedUnique(nil, observedEdited...)
+	observedChanged = appendNormalizedUnique(observedChanged, gitDiffFiles...)
+
+	var inScope []string
+	var review []string
+	var outOfScope []string
+	for _, path := range observedChanged {
+		switch {
+		case containsPath(allowed, path):
+			inScope = appendNormalizedUnique(inScope, path)
+		case containsPath(reviewSurface, path) || taskAuditPathInWorkspace(ctx, path):
+			review = appendNormalizedUnique(review, path)
+		default:
+			outOfScope = appendNormalizedUnique(outOfScope, path)
+		}
+	}
+
+	recommendation := "pass"
+	if len(outOfScope) > 0 {
+		recommendation = "drift"
+	} else if len(review) > 0 {
+		recommendation = "review"
+	}
+	if len(observedChanged) == 0 {
+		notes = append(notes, "No edited-file or git-diff evidence found for this target yet.")
+		recommendation = "review"
+	}
+	if len(checkpoints) == 0 {
+		notes = append(notes, "No structured checkpoint JSON matched this target.")
+	}
+	if includeCurrentGitDiff {
+		notes = append(notes, "Current git diff files were included in the scope audit.")
+	}
+
+	return taskAuditOutput{
+		TaskID:          ctx.Manifest.TaskID,
+		Series:          defaultTaskSeries(ctx.Manifest.Series),
+		Target:          ctx.Slice.ID,
+		Title:           ctx.Slice.Title,
+		Recommendation:  recommendation,
+		ObservedEdited:  observedEdited,
+		GitDiffFiles:    gitDiffFiles,
+		InScopePaths:    inScope,
+		ReviewPaths:     review,
+		OutOfScopePaths: outOfScope,
+		AllowedSurface:  allowed,
+		ReviewSurface:   reviewSurface,
+		Checkpoints:     checkpoints,
+		Notes:           uniqueStrings(notes),
+	}, nil
+}
+
+func writeTaskAuditHuman(out io.Writer, audit taskAuditOutput) error {
+	fmt.Fprintf(out, "Scope audit: %s %s\n", audit.TaskID, audit.Target)
+	fmt.Fprintf(out, "Recommendation: %s\n", audit.Recommendation)
+	if len(audit.InScopePaths) > 0 {
+		fmt.Fprintln(out, "In scope:")
+		for _, path := range audit.InScopePaths {
+			fmt.Fprintf(out, "  - %s\n", path)
+		}
+	}
+	if len(audit.ReviewPaths) > 0 {
+		fmt.Fprintln(out, "Review:")
+		for _, path := range audit.ReviewPaths {
+			fmt.Fprintf(out, "  - %s\n", path)
+		}
+	}
+	if len(audit.OutOfScopePaths) > 0 {
+		fmt.Fprintln(out, "Out of scope:")
+		for _, path := range audit.OutOfScopePaths {
+			fmt.Fprintf(out, "  - %s\n", path)
+		}
+	}
+	if len(audit.Notes) > 0 {
+		fmt.Fprintln(out, "Notes:")
+		for _, note := range audit.Notes {
+			fmt.Fprintf(out, "  - %s\n", note)
+		}
+	}
+	return nil
+}
+
+func readTaskObservedPathsForTarget(workspace, targetID string) (taskObservedPaths, []string, error) {
+	var observed taskObservedPaths
+	var checkpoints []string
+	checkpointDir := filepath.Join(workspace, "checkpoints")
+	entries, err := os.ReadDir(checkpointDir)
+	if os.IsNotExist(err) {
+		return observed, checkpoints, nil
+	}
+	if err != nil {
+		return observed, checkpoints, fmt.Errorf("read checkpoints: %w", err)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".json") {
+			continue
+		}
+		path := filepath.Join(checkpointDir, entry.Name())
+		record, err := readTaskCheckpointRecord(path)
+		if err != nil {
+			return observed, checkpoints, err
+		}
+		if !strings.EqualFold(strings.TrimSpace(record.Slice), targetID) {
+			continue
+		}
+		appendObservedFromCheckpointRecord(&observed, record)
+		checkpoints = append(checkpoints, taskRelativePath(workspace, path))
+	}
+	return observed, checkpoints, nil
+}
+
+func taskAuditAllowedSurface(ctx taskTargetContext) []string {
+	var allowed []string
+	allowed = appendNormalizedUnique(allowed, predictedFilePaths(ctx.Manifest.Predicted.PrimaryFiles)...)
+	allowed = appendNormalizedUnique(allowed, predictedFilePaths(ctx.Manifest.Predicted.Tests)...)
+	allowed = appendNormalizedUnique(allowed, taskAuditWorkspaceArtifactPaths(ctx)...)
+	return allowed
+}
+
+func taskAuditReviewSurface(ctx taskTargetContext) []string {
+	var review []string
+	review = appendNormalizedUnique(review, predictedFilePaths(ctx.Manifest.Predicted.DocsPlansConfig)...)
+	review = appendNormalizedUnique(review, predictedFilePaths(ctx.Manifest.Predicted.SupportingContext)...)
+	for _, path := range taskAuditWorkspaceArtifactPaths(ctx) {
+		review = appendNormalizedUnique(review, path)
+	}
+	return review
+}
+
+func taskAuditWorkspaceArtifactPaths(ctx taskTargetContext) []string {
+	var out []string
+	workspaceRel := taskRelativePath(ctx.RepoRoot, ctx.Workspace)
+	add := func(path string) {
+		path = filepath.ToSlash(strings.TrimSpace(path))
+		if path == "" {
+			return
+		}
+		out = appendNormalizedUnique(out, path)
+		if workspaceRel != "" && workspaceRel != "." {
+			out = appendNormalizedUnique(out, filepath.ToSlash(filepath.Join(workspaceRel, filepath.FromSlash(path))))
+		}
+	}
+	add(taskManifestFilename)
+	add(ctx.Manifest.Artifacts.Index)
+	add(ctx.Slice.Plan)
+	add(ctx.Slice.Result)
+	return out
+}
+
+func taskAuditPathInWorkspace(ctx taskTargetContext, path string) bool {
+	path = normalizeSinglePath(path)
+	workspaceRel := normalizeSinglePath(taskRelativePath(ctx.RepoRoot, ctx.Workspace))
+	if workspaceRel == "" || workspaceRel == "." {
+		return false
+	}
+	return path == workspaceRel || strings.HasPrefix(path, strings.TrimRight(workspaceRel, "/")+"/")
 }
 
 func taskSliceArtifacts(series, query string, values []string) []taskSliceArtifact {

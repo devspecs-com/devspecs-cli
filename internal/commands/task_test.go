@@ -343,6 +343,122 @@ func TestTask_StartBootstrapsRepeatedSlices(t *testing.T) {
 	}
 }
 
+func TestTask_BoundaryPrimitivesResolveOneTarget(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "boundary-test",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"--slice", "first bounded slice",
+		"--slice", "second bounded slice",
+		"task boundary primitives",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	nextCmd := NewTaskCmd()
+	nextCmd.SetArgs([]string{"next", "boundary-test", "--json"})
+	nextBuf := &bytes.Buffer{}
+	nextCmd.SetOut(nextBuf)
+	if err := nextCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var nextOut taskTargetOutput
+	if err := json.Unmarshal(nextBuf.Bytes(), &nextOut); err != nil {
+		t.Fatalf("next json: %v\n%s", err, nextBuf.String())
+	}
+	if nextOut.Target != "A01" || !containsString(nextOut.SiblingTargets, "A02") {
+		t.Fatalf("next output = %#v", nextOut)
+	}
+
+	promptCmd := NewTaskCmd()
+	promptCmd.SetArgs([]string{"prompt", "boundary-test", "--json"})
+	promptBuf := &bytes.Buffer{}
+	promptCmd.SetOut(promptBuf)
+	if err := promptCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var promptOut taskPromptOutput
+	if err := json.Unmarshal(promptBuf.Bytes(), &promptOut); err != nil {
+		t.Fatalf("prompt json: %v\n%s", err, promptBuf.String())
+	}
+	for _, want := range []string{
+		"target A01 only",
+		"must_not_implement",
+		"- A02",
+		"Do not implement sibling slices",
+	} {
+		if !strings.Contains(promptOut.Prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, promptOut.Prompt)
+		}
+	}
+
+	startTargetCmd := NewTaskCmd()
+	startTargetCmd.SetArgs([]string{"start", "boundary-test", "--index=false", "--json"})
+	startTargetBuf := &bytes.Buffer{}
+	startTargetCmd.SetOut(startTargetBuf)
+	if err := startTargetCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var startTargetOut taskDecideOutput
+	if err := json.Unmarshal(startTargetBuf.Bytes(), &startTargetOut); err != nil {
+		t.Fatalf("start target json: %v\n%s", err, startTargetBuf.String())
+	}
+	if startTargetOut.Target != "A01" || startTargetOut.Stage != "started" || startTargetOut.Decision != "continue" {
+		t.Fatalf("start target output = %#v", startTargetOut)
+	}
+
+	finishCmd := NewTaskCmd()
+	finishCmd.SetArgs([]string{"finish", "boundary-test", "--decision", "promote", "--index=false", "--json"})
+	finishBuf := &bytes.Buffer{}
+	finishCmd.SetOut(finishBuf)
+	if err := finishCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var finishOut taskDecideOutput
+	if err := json.Unmarshal(finishBuf.Bytes(), &finishOut); err != nil {
+		t.Fatalf("finish json: %v\n%s", err, finishBuf.String())
+	}
+	if finishOut.Target != "A01" || finishOut.Stage != "completed" || finishOut.Decision != "promote" {
+		t.Fatalf("finish output = %#v", finishOut)
+	}
+
+	nextAfterCmd := NewTaskCmd()
+	nextAfterCmd.SetArgs([]string{"next", "boundary-test", "--json"})
+	nextAfterBuf := &bytes.Buffer{}
+	nextAfterCmd.SetOut(nextAfterBuf)
+	if err := nextAfterCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var nextAfter taskTargetOutput
+	if err := json.Unmarshal(nextAfterBuf.Bytes(), &nextAfter); err != nil {
+		t.Fatalf("next after json: %v\n%s", err, nextAfterBuf.String())
+	}
+	if nextAfter.Target != "A02" {
+		t.Fatalf("next after finish = %#v", nextAfter)
+	}
+
+	showCmd := NewTaskCmd()
+	showCmd.SetArgs([]string{"show", "boundary-test", "--target", "A02", "--json"})
+	showBuf := &bytes.Buffer{}
+	showCmd.SetOut(showBuf)
+	if err := showCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var showOut taskTargetOutput
+	if err := json.Unmarshal(showBuf.Bytes(), &showOut); err != nil {
+		t.Fatalf("show json: %v\n%s", err, showBuf.String())
+	}
+	if showOut.Target != "A02" || !strings.Contains(showOut.PlanBody, "second bounded slice") {
+		t.Fatalf("show output = %#v", showOut)
+	}
+}
+
 func TestTask_StartGeneratesRequestedSeriesArtifacts(t *testing.T) {
 	setupTaskCommandRepo(t)
 
@@ -867,6 +983,88 @@ func TestTask_StatusWarnsAndSyncRecapturesEditedArtifacts(t *testing.T) {
 	}
 	if !foundResult {
 		t.Fatalf("sync did not capture result artifact: %#v", artifacts)
+	}
+}
+
+func TestTask_AuditReportsPassAndDrift(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "audit-test",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"improve test companion recall",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	passCheckpointCmd := NewTaskCmd()
+	passCheckpointCmd.SetArgs([]string{
+		"checkpoint", "audit-test",
+		"--stage", "implemented",
+		"--decision", "continue",
+		"--file-edited", "internal/retrieval/ranking.go",
+		"--file-edited", "internal/retrieval/ranking_test.go",
+		"--index=false",
+		"--json",
+	})
+	passCheckpointCmd.SetOut(&bytes.Buffer{})
+	if err := passCheckpointCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	auditCmd := NewTaskCmd()
+	auditCmd.SetArgs([]string{"audit", "audit-test", "--target", "A01", "--json"})
+	auditBuf := &bytes.Buffer{}
+	auditCmd.SetOut(auditBuf)
+	if err := auditCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var auditOut taskAuditOutput
+	if err := json.Unmarshal(auditBuf.Bytes(), &auditOut); err != nil {
+		t.Fatalf("audit json: %v\n%s", err, auditBuf.String())
+	}
+	if auditOut.Recommendation != "pass" || len(auditOut.OutOfScopePaths) != 0 {
+		t.Fatalf("expected pass audit, got %#v", auditOut)
+	}
+	if !containsPath(auditOut.InScopePaths, "internal/retrieval/ranking.go") {
+		t.Fatalf("audit missing in-scope source: %#v", auditOut.InScopePaths)
+	}
+	if !containsPath(auditOut.InScopePaths, "internal/retrieval/ranking_test.go") {
+		t.Fatalf("audit missing in-scope test: %#v", auditOut.InScopePaths)
+	}
+
+	driftCheckpointCmd := NewTaskCmd()
+	driftCheckpointCmd.SetArgs([]string{
+		"checkpoint", "audit-test",
+		"--stage", "implemented",
+		"--decision", "continue",
+		"--file-edited", "internal/other/unrelated.go",
+		"--index=false",
+		"--json",
+	})
+	driftCheckpointCmd.SetOut(&bytes.Buffer{})
+	if err := driftCheckpointCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	driftAuditCmd := NewTaskCmd()
+	driftAuditCmd.SetArgs([]string{"audit", "audit-test", "--target", "A01", "--json"})
+	driftAuditBuf := &bytes.Buffer{}
+	driftAuditCmd.SetOut(driftAuditBuf)
+	if err := driftAuditCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var driftOut taskAuditOutput
+	if err := json.Unmarshal(driftAuditBuf.Bytes(), &driftOut); err != nil {
+		t.Fatalf("drift audit json: %v\n%s", err, driftAuditBuf.String())
+	}
+	if driftOut.Recommendation != "drift" || !containsPath(driftOut.OutOfScopePaths, "internal/other/unrelated.go") {
+		t.Fatalf("expected drift audit, got %#v", driftOut)
 	}
 }
 
