@@ -80,6 +80,7 @@ func buildFindPackAssemblyFromMatches(ctx context.Context, db *store.DB, fp stor
 	}
 	if normalizeFindPackScoutMode(opts.PackScoutMode) == findPackScoutModeBetaV0 {
 		rolePack = retrieval.ApplyScoutSourceTestRescueForQuery(rolePack, query)
+		rolePack = retrieval.ApplyScoutSourcePrimaryPreservationForQuery(rolePack, query)
 		rolePack = addFindPackScoutBodyEvidence(fp.RepoRoot, query, rolePack)
 		rolePack = retrieval.ApplyDemotionOnlyNegativeEvidence(rolePack, query)
 		rolePack = retrieval.ApplyScoutUncertaintyForQuery(rolePack, query)

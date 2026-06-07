@@ -22,7 +22,7 @@ func ApplyScoutUncertaintyForQuery(pack RoleGroupedPack, query string) RoleGroup
 		reasons = append(reasons, "no primary implementation surface is visible")
 	case sourcePrimary <= 1 && testPrimary >= 3:
 		reasons = append(reasons, fmt.Sprintf("implementation surface is thin relative to tests (%d source, %d tests)", sourcePrimary, testPrimary))
-	case sourcePrimary >= 4 && testPrimary <= 1:
+	case sourcePrimary >= 4 && testPrimary == 0:
 		reasons = append(reasons, fmt.Sprintf("behavior-test surface is thin relative to source (%d source, %d tests)", sourcePrimary, testPrimary))
 	case testPrimary == 0 && sourcePrimary > 0:
 		reasons = append(reasons, "no primary behavior tests are visible")

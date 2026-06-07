@@ -96,3 +96,67 @@ func TestApplyScoutSourceTestRescueStopsAtPrimaryCap(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyScoutSourcePrimaryPreservationPromotesHighRankRelatedSource(t *testing.T) {
+	pack := RoleGroupedPack{
+		Mode: FamilyPrimaryPackModeV1,
+		Groups: []PackGroup{
+			{
+				Role: PackRoleImplementation,
+				Items: []PackItem{
+					{OriginalRank: 1, ID: "arrow", Path: "src/language-js/print/arrow-function.js", Role: PackRoleImplementation, PackTier: PackTierPrimary},
+					{OriginalRank: 3, ID: "type-check", Path: "scripts/tools/prefer-create-type-check-function.js", Role: PackRoleImplementation, PackTier: PackTierPrimary},
+					{OriginalRank: 4, ID: "comments", Path: "src/language-js/comments/handle-comments.js", Role: PackRoleImplementation, PackTier: PackTierRelated, Reasons: []string{"query term match in path: comment"}},
+				},
+			},
+			{
+				Role: PackRoleBehaviorTests,
+				Items: []PackItem{
+					{OriginalRank: 9, ID: "arrow-test", Path: "tests/format/js/in/arrow-function.js", Role: PackRoleBehaviorTests, PackTier: PackTierPrimary, Subtype: "test_case"},
+				},
+			},
+		},
+	}
+
+	got := ApplyScoutSourcePrimaryPreservationForQuery(pack, "fix unstable comment in arrow function with sequence expression body")
+	tiers := familyPrimaryTestTiers(got)
+	if tiers["src/language-js/comments/handle-comments.js"] != PackTierPrimary {
+		t.Fatalf("high-rank comment source should be preserved as primary: %#v", tiers)
+	}
+	if got.Metadata[packScoutSourcePreservationCountKey] != "1" {
+		t.Fatalf("missing preservation metadata: %#v", got.Metadata)
+	}
+}
+
+func TestApplyScoutSourcePrimaryPreservationCanPromoteOverRescueCap(t *testing.T) {
+	pack := RoleGroupedPack{
+		Mode: FamilyPrimaryPackModeV1,
+		Groups: []PackGroup{
+			{
+				Role: PackRoleImplementation,
+				Items: []PackItem{
+					{OriginalRank: 1, ID: "conda", Path: "models/packages/conda/search.go", Role: PackRoleImplementation, PackTier: PackTierPrimary},
+					{OriginalRank: 2, ID: "nuget", Path: "models/packages/nuget/search.go", Role: PackRoleImplementation, PackTier: PackTierPrimary},
+					{OriginalRank: 3, ID: "api", Path: "routers/api/v1/packages/package.go", Role: PackRoleImplementation, PackTier: PackTierPrimary},
+					{OriginalRank: 4, ID: "conan", Path: "models/packages/conan/search.go", Role: PackRoleImplementation, PackTier: PackTierPrimary},
+					{OriginalRank: 6, ID: "rubygems", Path: "routers/api/packages/rubygems/rubygems.go", Role: PackRoleImplementation, PackTier: PackTierPrimary},
+					{OriginalRank: 7, ID: "npm", Path: "modules/packages/npm/creator.go", Role: PackRoleImplementation, PackTier: PackTierPrimary},
+					{OriginalRank: 12, ID: "package", Path: "models/packages/package.go", Role: PackRoleImplementation, PackTier: PackTierRelated, Reasons: []string{"relationship expansion: source_manifest_family_recovery"}},
+				},
+			},
+			{
+				Role: PackRoleBehaviorTests,
+				Items: []PackItem{
+					{OriginalRank: 17, ID: "package-test", Path: "models/packages/package_test.go#L24", Role: PackRoleBehaviorTests, PackTier: PackTierPrimary, Subtype: "test_case"},
+					{OriginalRank: 19, ID: "rubygems-test", Path: "routers/api/packages/rubygems/rubygems_test.go#L15", Role: PackRoleBehaviorTests, PackTier: PackTierPrimary, Subtype: "test_case"},
+				},
+			},
+		},
+	}
+
+	got := ApplyScoutSourcePrimaryPreservationForQuery(pack, "search package versions by type name version and reject duplicate versions")
+	tiers := familyPrimaryTestTiers(got)
+	if tiers["models/packages/package.go"] != PackTierPrimary {
+		t.Fatalf("package source should be preserved beyond old rescue cap: %#v", tiers)
+	}
+}

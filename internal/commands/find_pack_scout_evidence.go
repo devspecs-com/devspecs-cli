@@ -34,7 +34,7 @@ func addFindPackScoutBodyEvidence(repoRoot, query string, rolePack retrieval.Rol
 	for groupIdx := range rolePack.Groups {
 		for itemIdx := range rolePack.Groups[groupIdx].Items {
 			item := &rolePack.Groups[groupIdx].Items[itemIdx]
-			if !packItemHasReasonPrefix(*item, "scout source rescue:") || item.Path == "" {
+			if (!packItemHasReasonPrefix(*item, "scout source rescue:") && !packItemHasReasonPrefix(*item, "scout source preservation:")) || item.Path == "" {
 				continue
 			}
 			evidence, bytesRead := findPackScoutBodyEvidence(repoRoot, item.Path, queryTerms)

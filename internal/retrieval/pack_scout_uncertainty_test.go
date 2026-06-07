@@ -61,3 +61,30 @@ func TestApplyScoutUncertaintyForQuerySkipsBalancedSourceTestPack(t *testing.T) 
 		t.Fatalf("balanced source/test pack should not warn: %#v", got.Metadata)
 	}
 }
+
+func TestApplyScoutUncertaintyForQueryDoesNotWarnWhenSingleTestSupportsBroadSourcePack(t *testing.T) {
+	pack := RoleGroupedPack{
+		Groups: []PackGroup{
+			{
+				Role: PackRoleImplementation,
+				Items: []PackItem{
+					{OriginalRank: 1, Path: "httpie/manager/tasks/sessions.py", Role: PackRoleImplementation},
+					{OriginalRank: 2, Path: "httpie/legacy/v3_1_0_session_cookie_format.py", Role: PackRoleImplementation},
+					{OriginalRank: 3, Path: "httpie/legacy/v3_2_0_session_header_format.py", Role: PackRoleImplementation},
+					{OriginalRank: 4, Path: "httpie/sessions.py", Role: PackRoleImplementation},
+				},
+			},
+			{
+				Role: PackRoleBehaviorTests,
+				Items: []PackItem{
+					{OriginalRank: 5, Path: "tests/test_sessions.py", Role: PackRoleBehaviorTests, Subtype: "test_case"},
+				},
+			},
+		},
+	}
+
+	got := ApplyScoutUncertaintyForQuery(pack, "upgrade old HTTPie session files and bind legacy cookies to the current host")
+	if got.Metadata != nil && got.Metadata[PackScoutUncertaintyKey] == "true" {
+		t.Fatalf("single supporting test should not warn by itself: %#v", got.Metadata)
+	}
+}

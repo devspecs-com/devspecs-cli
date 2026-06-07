@@ -10,8 +10,11 @@ import (
 )
 
 const (
-	packScoutSourceRescueCountKey = "pack_scout_source_rescue_count"
-	packScoutSourceRescueCap      = 6
+	packScoutSourceRescueCountKey       = "pack_scout_source_rescue_count"
+	packScoutSourcePreservationCountKey = "pack_scout_source_preservation_count"
+	packScoutSourceRescueCap            = 6
+	packScoutSourcePreservationCap      = 9
+	packScoutSourcePreservationMax      = 2
 )
 
 // ApplyScoutSourceTestRescueForQuery promotes a small number of related source
@@ -104,6 +107,82 @@ func ApplyScoutSourceTestRescueForQuery(pack RoleGroupedPack, query string) Role
 	return pack
 }
 
+// ApplyScoutSourcePrimaryPreservationForQuery promotes a small number of
+// already-selected related source rows back into the beta primary tier when
+// family-primary presentation would otherwise hide high-confidence edit-target
+// candidates behind the related wall.
+func ApplyScoutSourcePrimaryPreservationForQuery(pack RoleGroupedPack, query string) RoleGroupedPack {
+	queryRoots := scoutRootSet(scoutQueryTokens(query))
+	if len(queryRoots) == 0 {
+		return pack
+	}
+	primaryCount := scoutPrimaryCount(pack)
+	if primaryCount >= packScoutSourcePreservationCap {
+		return pack
+	}
+	testRoots := scoutPrimaryTestRoots(pack)
+	anchors, _ := familyPrimaryQueryAnchors(query)
+	primaryTestFamilies := scoutPrimaryTestFamilies(pack, anchors)
+
+	type promotion struct {
+		groupIdx int
+		itemIdx  int
+		score    int
+		reasons  []string
+	}
+	var promotions []promotion
+	for groupIdx, group := range pack.Groups {
+		for itemIdx, item := range group.Items {
+			if !PackItemIsRelated(item) || familyPrimaryClass(group.Role, item) != "source" || familyPrimaryWeakPath(item.Path) {
+				continue
+			}
+			score, reasons := scoutSourcePreservationScore(group.Role, item, queryRoots, testRoots, primaryTestFamilies, anchors)
+			if score >= 5 {
+				promotions = append(promotions, promotion{groupIdx: groupIdx, itemIdx: itemIdx, score: score, reasons: reasons})
+			}
+		}
+	}
+	if len(promotions) == 0 {
+		return pack
+	}
+	sort.SliceStable(promotions, func(i, j int) bool {
+		if promotions[i].score != promotions[j].score {
+			return promotions[i].score > promotions[j].score
+		}
+		left := pack.Groups[promotions[i].groupIdx].Items[promotions[i].itemIdx]
+		right := pack.Groups[promotions[j].groupIdx].Items[promotions[j].itemIdx]
+		if left.OriginalRank != right.OriginalRank {
+			return left.OriginalRank < right.OriginalRank
+		}
+		return left.Path < right.Path
+	})
+
+	promoted := 0
+	for _, promotion := range promotions {
+		if primaryCount >= packScoutSourcePreservationCap || promoted >= packScoutSourcePreservationMax {
+			break
+		}
+		item := &pack.Groups[promotion.groupIdx].Items[promotion.itemIdx]
+		if !PackItemIsRelated(*item) {
+			continue
+		}
+		item.PackTier = PackTierPrimary
+		item.Reasons = appendUniqueString(item.Reasons, "scout source preservation: "+strings.Join(promotion.reasons, "; "))
+		promoted++
+		primaryCount++
+	}
+	if promoted == 0 {
+		return pack
+	}
+	sortScoutPrimaryFirst(pack)
+	if pack.Metadata == nil {
+		pack.Metadata = map[string]string{}
+	}
+	pack.Metadata[packScoutSourcePreservationCountKey] = strconv.Itoa(promoted)
+	pack.Notes = appendUniqueString(pack.Notes, fmt.Sprintf("Scout source preservation promoted %d related source row(s).", promoted))
+	return pack
+}
+
 func scoutPrimaryCount(pack RoleGroupedPack) int {
 	count := 0
 	for _, group := range pack.Groups {
@@ -162,6 +241,79 @@ func scoutSourceRescueScore(item PackItem, queryRoots, testRoots map[string]bool
 		reasons = append(reasons, "primary test roots "+strings.Join(firstScoutStrings(testMatches, 4), ","))
 	}
 	return score, reasons
+}
+
+func scoutSourcePreservationScore(role string, item PackItem, queryRoots, testRoots, primaryTestFamilies map[string]bool, anchors []string) (int, []string) {
+	score, reasons := scoutSourceRescueScore(item, queryRoots, testRoots)
+	if primaryTestFamilies[familyPrimaryFamilyKey(role, item, anchors)] {
+		score += 5
+		reasons = append(reasons, "primary test family")
+	}
+	if rankBonus := scoutSourcePreservationRankBonus(item.OriginalRank); rankBonus > 0 {
+		score += rankBonus
+		reasons = append(reasons, fmt.Sprintf("top source rank %d", item.OriginalRank))
+	}
+	reasonsText := strings.ToLower(strings.Join(item.Reasons, "\n"))
+	switch {
+	case strings.Contains(reasonsText, "anchor-first ranking: score 24"):
+		score += 2
+		reasons = append(reasons, "strong anchor rank")
+	case strings.Contains(reasonsText, "source_manifest_loss_safe_preserved"):
+		score += 1
+		reasons = append(reasons, "loss-safe source candidate")
+	case strings.Contains(reasonsText, "source_manifest_family_recovery"),
+		strings.Contains(reasonsText, "source_manifest_consumption_recovery"),
+		strings.Contains(reasonsText, "same_stem_source_recovery"):
+		score += 1
+		reasons = append(reasons, "source-manifest candidate")
+	}
+	return score, reasons
+}
+
+func scoutPrimaryTestFamilies(pack RoleGroupedPack, anchors []string) map[string]bool {
+	families := map[string]bool{}
+	for _, group := range pack.Groups {
+		for _, item := range group.Items {
+			if PackItemIsRelated(item) || familyPrimaryClass(group.Role, item) != "test" {
+				continue
+			}
+			if family := familyPrimaryFamilyKey(group.Role, item, anchors); family != "" {
+				families[family] = true
+			}
+		}
+	}
+	return families
+}
+
+func scoutSourcePreservationRankBonus(rank int) int {
+	switch {
+	case rank > 0 && rank <= 4:
+		return 4
+	case rank == 5:
+		return 3
+	case rank > 5 && rank <= 8:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func sortScoutPrimaryFirst(pack RoleGroupedPack) {
+	for groupIdx := range pack.Groups {
+		sort.SliceStable(pack.Groups[groupIdx].Items, func(i, j int) bool {
+			left := pack.Groups[groupIdx].Items[i]
+			right := pack.Groups[groupIdx].Items[j]
+			leftRelated := PackItemIsRelated(left)
+			rightRelated := PackItemIsRelated(right)
+			if leftRelated != rightRelated {
+				return !leftRelated
+			}
+			if left.OriginalRank != right.OriginalRank {
+				return left.OriginalRank < right.OriginalRank
+			}
+			return left.Path < right.Path
+		})
+	}
 }
 
 func scoutQueryTokens(query string) []string {
