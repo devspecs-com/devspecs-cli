@@ -2,6 +2,7 @@ package retrieval
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -24,6 +25,10 @@ func ApplyScoutUncertaintyForQuery(pack RoleGroupedPack, query string) RoleGroup
 		reasons = append(reasons, fmt.Sprintf("implementation surface is thin relative to tests (%d source, %d tests)", sourcePrimary, testPrimary))
 	case sourcePrimary >= 4 && testPrimary == 0:
 		reasons = append(reasons, fmt.Sprintf("behavior-test surface is thin relative to source (%d source, %d tests)", sourcePrimary, testPrimary))
+	case sourcePrimary >= 3 && testPrimary == 1:
+		if gaps := scoutSingleTestSourceFamilyGaps(pack, query); len(gaps) > 0 {
+			reasons = append(reasons, "visible behavior test is not backed by a primary source family: "+strings.Join(firstScoutStrings(gaps, 4), ", "))
+		}
 	case testPrimary == 0 && sourcePrimary > 0:
 		reasons = append(reasons, "no primary behavior tests are visible")
 	}
@@ -65,6 +70,48 @@ func scoutPrimarySourceTestCounts(pack RoleGroupedPack) (int, int) {
 		}
 	}
 	return sourcePrimary, testPrimary
+}
+
+func scoutSingleTestSourceFamilyGaps(pack RoleGroupedPack, query string) []string {
+	queryRoots := scoutRootSet(scoutQueryTokens(query))
+	if len(queryRoots) == 0 {
+		return nil
+	}
+	sourceRoots := map[string]bool{}
+	testRoots := map[string]bool{}
+	for _, group := range pack.Groups {
+		for _, item := range group.Items {
+			if PackItemIsRelated(item) {
+				continue
+			}
+			roots := scoutPrimaryItemRoots(item)
+			switch familyPrimaryClass(group.Role, item) {
+			case "source":
+				for root := range roots {
+					sourceRoots[root] = true
+				}
+			case "test":
+				for root := range roots {
+					testRoots[root] = true
+				}
+			}
+		}
+	}
+
+	var gaps []string
+	for root := range testRoots {
+		if queryRoots[root] && !sourceRoots[root] && !scoutGenericRoot(root) {
+			gaps = append(gaps, root)
+		}
+	}
+	sort.Strings(gaps)
+	return gaps
+}
+
+func scoutPrimaryItemRoots(item PackItem) map[string]bool {
+	tokens := append(scoutPathTokens(item.Path), scoutBasenameTokens(item.Path)...)
+	tokens = append(tokens, scoutPathTokens(item.Title)...)
+	return scoutRootSet(tokens)
 }
 
 func scoutMissingPrimaryAnchorRoots(pack RoleGroupedPack, query string) []string {

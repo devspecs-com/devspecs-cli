@@ -88,3 +88,36 @@ func TestApplyScoutUncertaintyForQueryDoesNotWarnWhenSingleTestSupportsBroadSour
 		t.Fatalf("single supporting test should not warn by itself: %#v", got.Metadata)
 	}
 }
+
+func TestApplyScoutUncertaintyForQueryWarnsWhenSingleTestFamilyLacksSourceSupport(t *testing.T) {
+	pack := RoleGroupedPack{
+		Groups: []PackGroup{
+			{
+				Role: PackRoleImplementation,
+				Items: []PackItem{
+					{OriginalRank: 1, Path: "crates/ty_python_semantic/src/types/function.rs", Role: PackRoleImplementation},
+					{OriginalRank: 2, Path: "crates/ty_python_semantic/src/types/infer/builder/function.rs", Role: PackRoleImplementation},
+					{OriginalRank: 3, Path: "crates/ruff_linter/src/rules/flake8_return/rules/function.rs", Role: PackRoleImplementation},
+				},
+			},
+			{
+				Role: PackRoleBehaviorTests,
+				Items: []PackItem{
+					{OriginalRank: 4, Path: "crates/ty_server/tests/e2e/completions.rs", Role: PackRoleBehaviorTests, Subtype: "test_case"},
+				},
+			},
+		},
+	}
+
+	got := ApplyScoutUncertaintyForQuery(pack, "[ty] Add function parentheses completion")
+	if got.Metadata[PackScoutUncertaintyKey] != "true" {
+		t.Fatalf("missing uncertainty metadata: %#v", got.Metadata)
+	}
+	reasons := got.Metadata[PackScoutUncertaintyReasonsKey]
+	if !strings.Contains(reasons, "visible behavior test is not backed") {
+		t.Fatalf("missing source-family gap warning: %q", reasons)
+	}
+	if !strings.Contains(reasons, "completion") {
+		t.Fatalf("missing test family root in warning: %q", reasons)
+	}
+}
