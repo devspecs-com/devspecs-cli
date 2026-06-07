@@ -366,6 +366,102 @@ func TestTask_StartSurfacesCheckpointFactRiskCards(t *testing.T) {
 	}
 }
 
+func TestTask_StartSurfacesAdvisoryFilesFromCheckpointFacts(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	db, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repoID := taskTestRepoID(t, db, repoDir)
+	now := "2026-06-07T00:00:00Z"
+	if err := db.UpsertTaskCheckpointFact(store.TaskCheckpointFact{
+		RepoID:             repoID,
+		TaskID:             "prior-discount-task",
+		CheckpointID:       "cp_discount",
+		Target:             "P01",
+		Series:             "P",
+		Stage:              "implemented",
+		Decision:           "improve",
+		CheckpointPath:     "checkpoints/prior.md",
+		CheckpointJSONPath: "checkpoints/prior.json",
+		CreatedAt:          now,
+		ActualContextJSON:  `{"files_read":["internal/invoice/pricing.go"],"files_edited":["internal/invoice/pricing.go"]}`,
+		FeedbackJSON:       `{"critical_missed":["internal/invoice/pricing_test.go"],"distracting_included":["docs/legacy/discount-rounding-notes.md"]}`,
+		EvidenceJSON:       `{}`,
+		LearningsJSON:      `[{"learning_type":"validation_gap","summary":"discount rounding needed an explicit package test","evidence_refs":["internal/invoice/pricing_test.go"],"applies_to":"internal/invoice","confidence":"high"}]`,
+		NextJSON:           `{}`,
+		IndexedAt:          now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"--id", "advisory-file-test", "--no-refresh", "--index=false", "--json", "fix discount rounding"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out taskStartOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("task json: %v\n%s", err, buf.String())
+	}
+	for _, path := range []string{
+		"internal/invoice/pricing.go",
+		"internal/invoice/pricing_test.go",
+		"docs/legacy/discount-rounding-notes.md",
+	} {
+		if taskAdvisoryFileByPath(out.AdvisoryFiles, path) == nil {
+			t.Fatalf("missing advisory file %q: %#v", path, out.AdvisoryFiles)
+		}
+	}
+	if file := taskAdvisoryFileByPath(out.AdvisoryFiles, "internal/invoice/pricing_test.go"); file == nil || file.Kind != "prior-missed-test" {
+		t.Fatalf("missed test advisory = %#v", file)
+	}
+
+	var manifest taskManifest
+	if err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest); err != nil {
+		t.Fatalf("manifest json: %v", err)
+	}
+	if taskAdvisoryFileByPath(manifest.AdvisoryFiles, "internal/invoice/pricing.go") == nil {
+		t.Fatalf("manifest missing advisory files: %#v", manifest.AdvisoryFiles)
+	}
+	planBody := mustReadFile(t, out.FirstSlicePath)
+	for _, want := range []string{
+		"Advisory Files From Prior Checkpoints",
+		"not as files the initial pack ranked as primary",
+		"internal/invoice/pricing.go",
+		"internal/invoice/pricing_test.go",
+	} {
+		if !strings.Contains(planBody, want) {
+			t.Fatalf("plan missing advisory text %q:\n%s", want, planBody)
+		}
+	}
+
+	promptCmd := NewTaskCmd()
+	promptCmd.SetArgs([]string{"prompt", "advisory-file-test", "--json"})
+	promptBuf := &bytes.Buffer{}
+	promptCmd.SetOut(promptBuf)
+	if err := promptCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var promptOut taskPromptOutput
+	if err := json.Unmarshal(promptBuf.Bytes(), &promptOut); err != nil {
+		t.Fatalf("prompt json: %v\n%s", err, promptBuf.String())
+	}
+	for _, want := range []string{
+		"Advisory context from prior checkpoints:",
+		"not pack-ranked edit targets",
+		"internal/invoice/pricing.go",
+		"internal/invoice/pricing_test.go",
+	} {
+		if !strings.Contains(promptOut.Prompt, want) {
+			t.Fatalf("prompt missing advisory text %q:\n%s", want, promptOut.Prompt)
+		}
+	}
+}
+
 func TestTask_StartSkipsUnrelatedCheckpointFactRiskCards(t *testing.T) {
 	repoDir := setupTaskCommandRepo(t)
 	db, err := openDB()
@@ -1852,6 +1948,16 @@ func taskRiskCardByID(cards []taskRiskCard, id string) *taskRiskCard {
 	for i := range cards {
 		if cards[i].ID == id {
 			return &cards[i]
+		}
+	}
+	return nil
+}
+
+func taskAdvisoryFileByPath(files []taskAdvisoryFile, path string) *taskAdvisoryFile {
+	path = filepath.ToSlash(path)
+	for i := range files {
+		if filepath.ToSlash(files[i].Path) == path {
+			return &files[i]
 		}
 	}
 	return nil
