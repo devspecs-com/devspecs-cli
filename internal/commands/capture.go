@@ -71,7 +71,7 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 	}
 	db, err := store.Open(dbPath)
 	if err != nil {
-		return fmt.Errorf("open db: %w", err)
+		return fmt.Errorf("open db: %w", store.FriendlySQLiteBusyError(err))
 	}
 	defer db.Close()
 

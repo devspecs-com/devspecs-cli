@@ -101,5 +101,9 @@ func openDB() (*store.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve db path: %w", err)
 	}
-	return store.Open(dbPath)
+	db, err := store.Open(dbPath)
+	if err != nil {
+		return nil, store.FriendlySQLiteBusyError(err)
+	}
+	return db, nil
 }

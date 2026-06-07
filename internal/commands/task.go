@@ -24,6 +24,8 @@ import (
 const (
 	defaultTaskWorkspaceDir = ".devspecs/tasks"
 	taskManifestFilename    = "task.json"
+	taskProfileCodeChange   = "code-change"
+	taskProfileGreenfield   = "greenfield"
 )
 
 var taskLifecycleStages = []string{
@@ -62,6 +64,7 @@ type taskStartOptions struct {
 	ID        string
 	Dir       string
 	Series    string
+	Profile   string
 	Slices    []string
 	NoRefresh bool
 	AsJSON    bool
@@ -78,6 +81,11 @@ type taskArtifactAddOptions struct {
 }
 
 type taskStatusOptions struct {
+	Dir    string
+	AsJSON bool
+}
+
+type taskSyncOptions struct {
 	Dir    string
 	AsJSON bool
 }
@@ -118,6 +126,7 @@ type taskCheckpointOptions struct {
 type taskStartOutput struct {
 	TaskID            string                 `json:"task_id"`
 	Series            string                 `json:"series"`
+	Profile           string                 `json:"profile"`
 	Query             string                 `json:"query"`
 	Workspace         string                 `json:"workspace"`
 	IndexPath         string                 `json:"index_path"`
@@ -153,12 +162,14 @@ type taskArtifactAddOutput struct {
 type taskStatusOutput struct {
 	TaskID               string                  `json:"task_id"`
 	Series               string                  `json:"series"`
+	Profile              string                  `json:"profile,omitempty"`
 	Status               string                  `json:"status"`
 	Decision             string                  `json:"decision,omitempty"`
 	UpdatedAt            string                  `json:"updated_at,omitempty"`
 	LatestCheckpoint     string                  `json:"latest_checkpoint,omitempty"`
 	LatestCheckpointJSON string                  `json:"latest_checkpoint_json,omitempty"`
 	Slices               []taskStatusSliceOutput `json:"slices,omitempty"`
+	ArtifactFreshness    []taskArtifactFreshness `json:"artifact_freshness,omitempty"`
 }
 
 type taskStatusSliceOutput struct {
@@ -201,9 +212,28 @@ type taskCheckpointOutput struct {
 	TestEvidenceCount  int      `json:"test_evidence_count,omitempty"`
 }
 
+type taskSyncOutput struct {
+	TaskID            string                  `json:"task_id"`
+	Series            string                  `json:"series"`
+	Profile           string                  `json:"profile,omitempty"`
+	Workspace         string                  `json:"workspace"`
+	ManifestPath      string                  `json:"manifest_path"`
+	IndexedPaths      []string                `json:"indexed_paths,omitempty"`
+	ArtifactFreshness []taskArtifactFreshness `json:"artifact_freshness,omitempty"`
+}
+
+type taskArtifactFreshness struct {
+	Path           string `json:"path"`
+	Kind           string `json:"kind,omitempty"`
+	ModifiedAt     string `json:"modified_at"`
+	StateUpdatedAt string `json:"state_updated_at"`
+	Reason         string `json:"reason"`
+}
+
 type taskManifest struct {
 	TaskID               string                 `json:"task_id"`
 	Series               string                 `json:"series,omitempty"`
+	Profile              string                 `json:"profile,omitempty"`
 	Query                string                 `json:"query"`
 	Status               string                 `json:"status"`
 	Decision             string                 `json:"decision,omitempty"`
@@ -341,6 +371,7 @@ type taskCommandRunEvidence struct {
 func NewTaskCmd() *cobra.Command {
 	var opts taskStartOptions
 	opts.Dir = defaultTaskWorkspaceDir
+	opts.Profile = taskProfileCodeChange
 	opts.Index = true
 
 	cmd := &cobra.Command{
@@ -360,6 +391,7 @@ templates for recording actual reads, edits, tests, misses, and noise.`,
 	cmd.Flags().StringVar(&opts.ID, "id", "", "Task ID to use instead of a generated slug")
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
 	cmd.Flags().StringVar(&opts.Series, "series", "A", "Series prefix for generated artifacts, e.g. A or B")
+	cmd.Flags().StringVar(&opts.Profile, "profile", taskProfileCodeChange, "Task generation profile: code-change or greenfield")
 	cmd.Flags().StringArrayVar(&opts.Slices, "slice", nil, "Task slice title to scaffold; may be repeated")
 	cmd.Flags().BoolVar(&opts.NoRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
@@ -368,6 +400,7 @@ templates for recording actual reads, edits, tests, misses, and noise.`,
 
 	cmd.AddCommand(newTaskSliceCmd())
 	cmd.AddCommand(newTaskIterationCmd())
+	cmd.AddCommand(newTaskSyncCmd())
 	cmd.AddCommand(newTaskStatusCmd())
 	cmd.AddCommand(newTaskDecideCmd())
 	cmd.AddCommand(newTaskCheckpointCmd())
@@ -428,6 +461,22 @@ func newTaskIterationAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.Slice, "slice", "", "Parent slice ID/title/plan/result; defaults to the first slice")
 	cmd.Flags().StringVar(&opts.Reason, "reason", opts.Reason, "Iteration reason, usually improve or rework")
 	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the updated index and new iteration plan into the DevSpecs index")
+	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func newTaskSyncCmd() *cobra.Command {
+	var opts taskSyncOptions
+	opts.Dir = defaultTaskWorkspaceDir
+	cmd := &cobra.Command{
+		Use:   "sync <task-id>",
+		Short: "Recapture task workspace artifacts into the DevSpecs index",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskSync(cmd, args[0], opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	return cmd
 }
@@ -535,6 +584,10 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 	if err != nil {
 		return err
 	}
+	profile, err := normalizeTaskProfile(opts.Profile)
+	if err != nil {
+		return err
+	}
 
 	workspace := taskWorkspacePath(repoRoot, opts.Dir, taskID)
 	if err := prepareTaskWorkspace(workspace, opts.Force); err != nil {
@@ -557,6 +610,7 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 	manifest := taskManifest{
 		TaskID:            taskID,
 		Series:            series,
+		Profile:           profile,
 		Query:             query,
 		Status:            "packed",
 		CreatedAt:         now.Format(time.RFC3339),
@@ -607,6 +661,7 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 	out := taskStartOutput{
 		TaskID:            taskID,
 		Series:            series,
+		Profile:           profile,
 		Query:             query,
 		Workspace:         workspace,
 		IndexPath:         paths.Index,
@@ -752,16 +807,71 @@ func writeAddedTaskArtifact(cmd *cobra.Command, repoRoot, workspace string, mani
 	return nil
 }
 
+func runTaskSync(cmd *cobra.Command, taskID string, opts taskSyncOptions) error {
+	taskID = strings.TrimSpace(taskID)
+	if err := validateTaskID(taskID); err != nil {
+		return err
+	}
+	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(opts.Dir, taskID)
+	if err != nil {
+		return err
+	}
+	before := taskArtifactFreshnessWarnings(workspace, manifest)
+	requests := taskSyncCaptureRequests(workspace, manifest)
+	if len(requests) == 0 {
+		return fmt.Errorf("no task artifacts found to sync for %s", taskID)
+	}
+	indexed, err := captureTaskArtifacts(cmd, repoRoot, requests)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	manifest.UpdatedAt = now.Format(time.RFC3339)
+	manifestPath := filepath.Join(workspace, taskManifestFilename)
+	if err := writeTaskManifest(manifestPath, manifest); err != nil {
+		return err
+	}
+
+	out := taskSyncOutput{
+		TaskID:            manifest.TaskID,
+		Series:            defaultTaskSeries(manifest.Series),
+		Profile:           defaultTaskProfile(manifest.Profile),
+		Workspace:         workspace,
+		ManifestPath:      manifestPath,
+		IndexedPaths:      indexed,
+		ArtifactFreshness: before,
+	}
+	if opts.AsJSON {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Synced task workspace: %s\n", workspace)
+	fmt.Fprintf(cmd.OutOrStdout(), "Task ID: %s\n", out.TaskID)
+	fmt.Fprintf(cmd.OutOrStdout(), "Series: %s\n", out.Series)
+	fmt.Fprintf(cmd.OutOrStdout(), "Profile: %s\n", out.Profile)
+	fmt.Fprintf(cmd.OutOrStdout(), "Manifest: %s\n", manifestPath)
+	if len(before) > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "Freshened %d edited task artifact(s).\n", len(before))
+	}
+	if len(indexed) > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "Indexed: %s\n", strings.Join(indexed, ", "))
+	}
+	return nil
+}
+
 func runTaskStatus(cmd *cobra.Command, taskID string, opts taskStatusOptions) error {
 	taskID = strings.TrimSpace(taskID)
 	if err := validateTaskID(taskID); err != nil {
 		return err
 	}
-	_, _, manifest, err := loadTaskWorkspaceManifest(opts.Dir, taskID)
+	_, workspace, manifest, err := loadTaskWorkspaceManifest(opts.Dir, taskID)
 	if err != nil {
 		return err
 	}
 	out := taskStatusFromManifest(manifest)
+	out.ArtifactFreshness = taskArtifactFreshnessWarnings(workspace, manifest)
 	if opts.AsJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
@@ -774,6 +884,7 @@ func taskStatusFromManifest(manifest taskManifest) taskStatusOutput {
 	out := taskStatusOutput{
 		TaskID:               manifest.TaskID,
 		Series:               defaultTaskSeries(manifest.Series),
+		Profile:              defaultTaskProfile(manifest.Profile),
 		Status:               manifest.Status,
 		Decision:             manifest.Decision,
 		UpdatedAt:            manifest.UpdatedAt,
@@ -802,6 +913,9 @@ func taskStatusFromManifest(manifest taskManifest) taskStatusOutput {
 func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 	fmt.Fprintf(out, "Task ID: %s\n", status.TaskID)
 	fmt.Fprintf(out, "Series: %s\n", status.Series)
+	if status.Profile != "" {
+		fmt.Fprintf(out, "Profile: %s\n", status.Profile)
+	}
 	fmt.Fprintf(out, "Status: %s\n", emptyAsDash(status.Status))
 	if status.Decision != "" {
 		fmt.Fprintf(out, "Decision: %s\n", status.Decision)
@@ -814,6 +928,12 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 	}
 	if status.LatestCheckpointJSON != "" {
 		fmt.Fprintf(out, "Latest Checkpoint JSON: %s\n", status.LatestCheckpointJSON)
+	}
+	if len(status.ArtifactFreshness) > 0 {
+		fmt.Fprintln(out, "Stale task artifacts:")
+		for _, warning := range status.ArtifactFreshness {
+			fmt.Fprintf(out, "  - %s changed after task state; run `ds task sync %s`.\n", warning.Path, status.TaskID)
+		}
 	}
 	for _, slice := range status.Slices {
 		fmt.Fprintf(out, "%s: %s", slice.ID, slice.Title)
@@ -1615,6 +1735,8 @@ func renderTaskIndex(manifest taskManifest) string {
 	fmt.Fprintf(&b, "%s\n\n", manifest.Status)
 	fmt.Fprintln(&b, "## Series")
 	fmt.Fprintf(&b, "%s\n\n", defaultTaskSeries(manifest.Series))
+	fmt.Fprintln(&b, "## Profile")
+	fmt.Fprintf(&b, "%s\n\n", defaultTaskProfile(manifest.Profile))
 	fmt.Fprintln(&b, "## Created At")
 	fmt.Fprintf(&b, "%s\n\n", manifest.CreatedAt)
 	fmt.Fprintln(&b, "## Original Query")
@@ -1677,28 +1799,57 @@ func renderTaskIndex(manifest taskManifest) string {
 		fmt.Fprintf(&b, "- %s\n", unknown)
 	}
 	fmt.Fprintln(&b)
-	writeConfidenceSummary(&b, manifest.Confidence)
+	confidence := manifest.Confidence
+	if taskProfileIsGreenfield(manifest) {
+		confidence.AgentInstruction = "Use the evidence to define the first bounded planning artifact, evaluation signal, and next-slice decision before implementation scope expands."
+	}
+	writeConfidenceSummary(&b, confidence)
 	first := firstTaskSliceArtifact(manifest.Artifacts)
 	fmt.Fprintln(&b, "## Suggested Starting Slice")
 	if first.Plan != "" {
-		fmt.Fprintf(&b, "Use `%s` as the first bounded plan in this task thread. Refine it before editing if primary files, tests, or integration points look incomplete.\n", first.Plan)
+		if taskProfileIsGreenfield(manifest) {
+			fmt.Fprintf(&b, "Use `%s` as the first bounded planning slice in this task thread. Refine claims, interfaces, evaluation shape, and unknowns before committing to implementation scope.\n", first.Plan)
+		} else {
+			fmt.Fprintf(&b, "Use `%s` as the first bounded plan in this task thread. Refine it before editing if primary files, tests, or integration points look incomplete.\n", first.Plan)
+		}
 	} else {
-		fmt.Fprintln(&b, "Start by refining the first bounded plan in this task thread before editing.")
+		if taskProfileIsGreenfield(manifest) {
+			fmt.Fprintln(&b, "Start by refining the first bounded planning slice in this task thread before committing to implementation scope.")
+		} else {
+			fmt.Fprintln(&b, "Start by refining the first bounded plan in this task thread before editing.")
+		}
 	}
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "## Agent Preflight Checklist")
-	fmt.Fprintln(&b, "- [ ] Verify the likely primary files against the repo before editing.")
-	fmt.Fprintln(&b, "- [ ] Search for same-package or same-command tests if test confidence is not high.")
-	fmt.Fprintln(&b, "- [ ] Check receipt-touched related files before assuming the pack is complete.")
-	if first.Result != "" {
-		fmt.Fprintf(&b, "- [ ] Record files actually read, edited, tests run, misses, and noise in `%s` or `ds task checkpoint`.\n", first.Result)
+	if taskProfileIsGreenfield(manifest) {
+		fmt.Fprintln(&b, "- [ ] Treat predicted files as evidence, not required edit targets.")
+		fmt.Fprintln(&b, "- [ ] Identify the claim, interface, adapter, data model, or evaluation shape this slice should settle.")
+		fmt.Fprintln(&b, "- [ ] Record assumptions, known unknowns, and the chosen next artifact before widening scope.")
 	} else {
-		fmt.Fprintln(&b, "- [ ] Record files actually read, edited, tests run, misses, and noise in the slice result or `ds task checkpoint`.")
+		fmt.Fprintln(&b, "- [ ] Verify the likely primary files against the repo before editing.")
+		fmt.Fprintln(&b, "- [ ] Search for same-package or same-command tests if test confidence is not high.")
+		fmt.Fprintln(&b, "- [ ] Check receipt-touched related files before assuming the pack is complete.")
+	}
+	if first.Result != "" {
+		if taskProfileIsGreenfield(manifest) {
+			fmt.Fprintf(&b, "- [ ] Record evidence reviewed, decisions made, open questions, and next-slice recommendation in `%s` or `ds task checkpoint`.\n", first.Result)
+		} else {
+			fmt.Fprintf(&b, "- [ ] Record files actually read, edited, tests run, misses, and noise in `%s` or `ds task checkpoint`.\n", first.Result)
+		}
+	} else {
+		if taskProfileIsGreenfield(manifest) {
+			fmt.Fprintln(&b, "- [ ] Record evidence reviewed, decisions made, open questions, and next-slice recommendation in the slice result or `ds task checkpoint`.")
+		} else {
+			fmt.Fprintln(&b, "- [ ] Record files actually read, edited, tests run, misses, and noise in the slice result or `ds task checkpoint`.")
+		}
 	}
 	return b.String()
 }
 
 func renderTaskSlicePlan(manifest taskManifest, slice taskSliceArtifact) string {
+	if taskProfileIsGreenfield(manifest) {
+		return renderTaskGreenfieldSlicePlan(manifest, slice)
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Task %s %s Plan\n\n", manifest.TaskID, slice.ID)
 	fmt.Fprintln(&b, "## Goal")
@@ -1766,6 +1917,71 @@ func renderTaskSlicePlan(manifest taskManifest, slice taskSliceArtifact) string 
 	fmt.Fprintln(&b, "- Improve: useful start, but incomplete/noisy enough to require template or retrieval changes.")
 	fmt.Fprintln(&b, "- Rework: task workspace feels like planning overhead or fails to capture useful evidence.")
 	fmt.Fprintln(&b, "- Rollback: workspace creates false confidence or worsens agent performance.")
+	return b.String()
+}
+
+func renderTaskGreenfieldSlicePlan(manifest taskManifest, slice taskSliceArtifact) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Task %s %s Plan\n\n", manifest.TaskID, slice.ID)
+	fmt.Fprintln(&b, "## Goal")
+	fmt.Fprintf(&b, "%s\n\n", slice.Title)
+	fmt.Fprintln(&b, "## Description")
+	fmt.Fprintf(&b, "Create a bounded planning slice for `%s`. Use the task index as evidence, then settle the claim, interface, evaluation shape, and known unknowns needed before implementation scope expands.\n", manifest.Query)
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "## Resources")
+	if manifest.Artifacts.Index != "" {
+		fmt.Fprintf(&b, "- `%s`\n", manifest.Artifacts.Index)
+	}
+	if slice.Result != "" {
+		fmt.Fprintf(&b, "- `%s`\n", slice.Result)
+	}
+	fmt.Fprintln(&b, "- `task.json`")
+	for _, file := range firstPredictedResources(manifest.Predicted) {
+		fmt.Fprintf(&b, "- `%s`\n", file)
+	}
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "## Starting Context")
+	writeGreenfieldEvidenceFiles(&b, "Evidence to Review", manifest.Predicted.PrimaryFiles, "No likely primary files were found; identify the first artifact from the repo and task goal.")
+	writeGreenfieldEvidenceFiles(&b, "Test or Evaluation Signals", manifest.Predicted.Tests, "No likely tests were found; define the first useful validation signal.")
+	fmt.Fprintln(&b, "## Expected Change Surface")
+	fmt.Fprintln(&b, "- Planning artifacts, acceptance checks, interface notes, eval cards, or test design.")
+	fmt.Fprintln(&b, "- Implementation code only if the slice explicitly narrows to one low-risk first artifact.")
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "## Out-of-Scope Areas")
+	fmt.Fprintln(&b, "- Treating a greenfield planning slice as permission to implement the full thread.")
+	fmt.Fprintln(&b, "- Broad retrieval or pack-ranking changes unless the slice is explicitly about DevSpecs itself.")
+	fmt.Fprintln(&b, "- Assuming the generated context is complete without recording verification.")
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "## Risks")
+	for _, unknown := range taskKnownUnknowns(manifest) {
+		fmt.Fprintf(&b, "- %s\n", unknown)
+	}
+	if len(manifest.Predicted.NoiseRisks) > 0 {
+		fmt.Fprintln(&b, "- Initial pack includes downgraded noise candidates; keep them as reference only unless verification supports them.")
+	}
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "## Success Criteria")
+	fmt.Fprintln(&b, "- [ ] The slice states the product or engineering claim being settled.")
+	fmt.Fprintln(&b, "- [ ] Interfaces, adapters, data model, or evaluation shape are named at the right level of detail.")
+	fmt.Fprintln(&b, "- [ ] Known unknowns and assumptions are recorded.")
+	fmt.Fprintln(&b, "- [ ] The next slice recommendation is promote, improve, rework, rollback, or block.")
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "## Tasks")
+	fmt.Fprintln(&b, "- [ ] Review the task index and any likely evidence files.")
+	fmt.Fprintln(&b, "- [ ] Define the first claim, interface, adapter, data model, or evaluation target.")
+	fmt.Fprintln(&b, "- [ ] Draft the smallest useful planning artifact for that target.")
+	fmt.Fprintln(&b, "- [ ] Decide whether the next slice should implement, evaluate, improve, rework, rollback, or block.")
+	if slice.Result != "" {
+		fmt.Fprintf(&b, "- [ ] Update `%s` or run `ds task checkpoint`.\n", slice.Result)
+	} else {
+		fmt.Fprintln(&b, "- [ ] Update the slice result or run `ds task checkpoint`.")
+	}
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "## Decision Gates")
+	fmt.Fprintln(&b, "- Promote: the planning slice gives the next agent a bounded, useful unit of work.")
+	fmt.Fprintln(&b, "- Improve: the slice is directionally useful but needs another planning iteration.")
+	fmt.Fprintln(&b, "- Rework: the plan chose the wrong claim, artifact, or evaluation target.")
+	fmt.Fprintln(&b, "- Rollback: the scaffold added noise or false confidence.")
 	return b.String()
 }
 
@@ -1908,6 +2124,18 @@ func writeInlinePredictedFiles(b *strings.Builder, title string, files []taskPre
 	fmt.Fprintln(b)
 }
 
+func writeGreenfieldEvidenceFiles(b *strings.Builder, title string, files []taskPredictedFile, empty string) {
+	fmt.Fprintf(b, "### %s\n", title)
+	if len(files) == 0 {
+		fmt.Fprintf(b, "- %s\n\n", empty)
+		return
+	}
+	for _, file := range files {
+		fmt.Fprintf(b, "- `%s`\n", file.Path)
+	}
+	fmt.Fprintln(b)
+}
+
 func writeGitReceipts(b *strings.Builder, predicted taskPredictedContext) {
 	fmt.Fprintln(b, "## Related Git Receipts")
 	if len(predicted.RelatedGitReceipts) == 0 {
@@ -1999,7 +2227,11 @@ func taskKnownUnknowns(manifest taskManifest) []string {
 		out = append(out, "On-disk task anchors may be missing from the indexed candidate set.")
 	}
 	if manifest.Confidence.PackCompleteness != "high" {
-		out = append(out, "Pack completeness is not high; verify the working set before editing.")
+		if taskProfileIsGreenfield(manifest) {
+			out = append(out, "Pack completeness is not high; verify the working set before committing to implementation scope.")
+		} else {
+			out = append(out, "Pack completeness is not high; verify the working set before editing.")
+		}
 	}
 	return uniqueStrings(out)
 }
@@ -2536,6 +2768,7 @@ func writeTaskStartHuman(out io.Writer, result taskStartOutput, confidence taskC
 	fmt.Fprintf(out, "Created task workspace: %s\n", result.Workspace)
 	fmt.Fprintf(out, "Task ID: %s\n", result.TaskID)
 	fmt.Fprintf(out, "Series: %s\n", result.Series)
+	fmt.Fprintf(out, "Profile: %s\n", result.Profile)
 	fmt.Fprintf(out, "%s00: %s\n", defaultTaskSeries(result.Series), result.IndexPath)
 	for _, slice := range result.Slices {
 		fmt.Fprintf(out, "%s plan: %s\n", slice.ID, slice.PlanPath)
@@ -2611,6 +2844,7 @@ func normalizeTaskManifest(manifest *taskManifest) {
 	if strings.TrimSpace(manifest.Artifacts.Index) == "" {
 		manifest.Artifacts.Index = taskSeriesIndexFilename(manifest.Series)
 	}
+	manifest.Profile = defaultTaskProfile(manifest.Profile)
 }
 
 func prepareTaskWorkspace(workspace string, force bool) error {
@@ -2697,6 +2931,30 @@ func normalizeTaskSeries(series string) (string, error) {
 	return series, nil
 }
 
+func normalizeTaskProfile(profile string) (string, error) {
+	profile = strings.ToLower(strings.TrimSpace(profile))
+	switch profile {
+	case "", "default", "code", "code-change", "code_change", "implementation":
+		return taskProfileCodeChange, nil
+	case "greenfield", "planning", "plan":
+		return taskProfileGreenfield, nil
+	default:
+		return "", fmt.Errorf("invalid task profile %q; valid values: %s, %s", profile, taskProfileCodeChange, taskProfileGreenfield)
+	}
+}
+
+func defaultTaskProfile(profile string) string {
+	normalized, err := normalizeTaskProfile(profile)
+	if err != nil {
+		return taskProfileCodeChange
+	}
+	return normalized
+}
+
+func taskProfileIsGreenfield(manifest taskManifest) bool {
+	return defaultTaskProfile(manifest.Profile) == taskProfileGreenfield
+}
+
 func predictedFilePaths(files []taskPredictedFile) []string {
 	var out []string
 	for _, file := range files {
@@ -2734,6 +2992,153 @@ func appendFile(path, body string) error {
 	defer f.Close()
 	_, err = f.WriteString(body)
 	return err
+}
+
+type taskSyncArtifactCandidate struct {
+	RelPath string
+	Kind    string
+	Title   string
+	Status  string
+}
+
+func taskSyncCaptureRequests(workspace string, manifest taskManifest) []taskCaptureRequest {
+	var requests []taskCaptureRequest
+	seen := map[string]bool{}
+	add := func(candidate taskSyncArtifactCandidate) {
+		relPath := filepath.ToSlash(strings.TrimSpace(candidate.RelPath))
+		if relPath == "" || seen[relPath] {
+			return
+		}
+		path := filepath.Join(workspace, filepath.FromSlash(relPath))
+		if _, err := os.Stat(path); err != nil {
+			return
+		}
+		status := candidate.Status
+		if status == "" || status == "unknown" {
+			status = "implementing"
+		}
+		requests = append(requests, taskCaptureRequest{
+			Path:   path,
+			Title:  candidate.Title,
+			Status: status,
+		})
+		seen[relPath] = true
+	}
+
+	series := defaultTaskSeries(manifest.Series)
+	seriesStatus := taskArtifactStatus(manifest.Status, manifest.Decision)
+	add(taskSyncArtifactCandidate{
+		RelPath: manifest.Artifacts.Index,
+		Kind:    "index",
+		Title:   "Task " + manifest.TaskID + " preflight",
+		Status:  seriesStatus,
+	})
+	for _, slice := range taskSyncSlices(manifest) {
+		status := taskCaptureStatusForSlice(manifest, slice)
+		id := slice.ID
+		if id == "" {
+			id = series + "01"
+		}
+		title := strings.TrimSpace(slice.Title)
+		if title == "" {
+			title = "slice"
+		}
+		add(taskSyncArtifactCandidate{
+			RelPath: slice.Plan,
+			Kind:    "plan",
+			Title:   "Task " + manifest.TaskID + " " + id + " plan: " + title,
+			Status:  status,
+		})
+		add(taskSyncArtifactCandidate{
+			RelPath: slice.Result,
+			Kind:    "result",
+			Title:   "Task " + manifest.TaskID + " " + id + " result: " + title,
+			Status:  status,
+		})
+	}
+	return requests
+}
+
+func taskArtifactFreshnessWarnings(workspace string, manifest taskManifest) []taskArtifactFreshness {
+	stateTime, stateText, ok := taskManifestFreshnessTime(manifest)
+	if !ok {
+		return nil
+	}
+	var warnings []taskArtifactFreshness
+	seen := map[string]bool{}
+	for _, candidate := range taskFreshnessCandidates(manifest) {
+		relPath := filepath.ToSlash(strings.TrimSpace(candidate.RelPath))
+		if relPath == "" || seen[relPath] {
+			continue
+		}
+		seen[relPath] = true
+		path := filepath.Join(workspace, filepath.FromSlash(relPath))
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		modified := info.ModTime().UTC()
+		if !modified.After(stateTime.Add(2 * time.Second)) {
+			continue
+		}
+		warnings = append(warnings, taskArtifactFreshness{
+			Path:           relPath,
+			Kind:           candidate.Kind,
+			ModifiedAt:     modified.Format(time.RFC3339),
+			StateUpdatedAt: stateText,
+			Reason:         "task artifact changed after the task state was last captured; run ds task sync",
+		})
+	}
+	return warnings
+}
+
+func taskFreshnessCandidates(manifest taskManifest) []taskSyncArtifactCandidate {
+	var out []taskSyncArtifactCandidate
+	out = append(out, taskSyncArtifactCandidate{RelPath: manifest.Artifacts.Index, Kind: "index"})
+	for _, slice := range taskSyncSlices(manifest) {
+		out = append(out,
+			taskSyncArtifactCandidate{RelPath: slice.Plan, Kind: "plan"},
+			taskSyncArtifactCandidate{RelPath: slice.Result, Kind: "result"},
+		)
+	}
+	return out
+}
+
+func taskSyncSlices(manifest taskManifest) []taskSliceArtifact {
+	if len(manifest.Artifacts.Slices) > 0 {
+		return manifest.Artifacts.Slices
+	}
+	first := firstTaskSliceArtifact(manifest.Artifacts)
+	if first.Plan == "" && first.Result == "" {
+		return nil
+	}
+	return []taskSliceArtifact{first}
+}
+
+func taskCaptureStatusForSlice(manifest taskManifest, slice taskSliceArtifact) string {
+	status := taskArtifactStatus(slice.Stage, slice.Decision)
+	if status == "" || status == "unknown" {
+		status = taskArtifactStatus(manifest.Status, manifest.Decision)
+	}
+	if status == "" || status == "unknown" {
+		return "implementing"
+	}
+	return status
+}
+
+func taskManifestFreshnessTime(manifest taskManifest) (time.Time, string, bool) {
+	value := strings.TrimSpace(manifest.UpdatedAt)
+	if value == "" {
+		value = strings.TrimSpace(manifest.CreatedAt)
+	}
+	if value == "" {
+		return time.Time{}, "", false
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, "", false
+	}
+	return parsed.UTC(), value, true
 }
 
 type taskCaptureRequest struct {

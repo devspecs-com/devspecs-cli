@@ -19,6 +19,10 @@ var schemaDDL string
 // SchemaVersion is the current schema version. Bump when schema.sql changes.
 const SchemaVersion = 13
 
+// SQLiteBusyTimeoutMS is the local index write-wait window for concurrent CLI
+// commands before SQLite returns a busy/locked error.
+const SQLiteBusyTimeoutMS = 5000
+
 // DB wraps *sql.DB with DevSpecs-specific operations.
 type DB struct {
 	*sql.DB
@@ -32,7 +36,8 @@ func Open(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
 
-	sqlDB, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)")
+	dsn := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=busy_timeout(%d)", dbPath, SQLiteBusyTimeoutMS)
+	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
@@ -43,6 +48,26 @@ func Open(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return db, nil
+}
+
+// IsSQLiteBusyError reports whether err looks like SQLite write contention.
+func IsSQLiteBusyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "database is locked") ||
+		strings.Contains(message, "database is busy") ||
+		strings.Contains(message, "sqlite_busy") ||
+		strings.Contains(message, "busy timeout")
+}
+
+// FriendlySQLiteBusyError adds an operator-facing hint to SQLite lock errors.
+func FriendlySQLiteBusyError(err error) error {
+	if !IsSQLiteBusyError(err) {
+		return err
+	}
+	return fmt.Errorf("local DevSpecs index is busy; another ds command is writing. Wait for scan, capture, or task sync to finish, then retry: %w", err)
 }
 
 func (db *DB) migrate() error {

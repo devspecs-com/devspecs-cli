@@ -200,6 +200,74 @@ func TestTask_StartCreatesUncertaintyAwareWorkspace(t *testing.T) {
 	}
 }
 
+func TestTask_StartGreenfieldProfileUsesPlanningTemplate(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "greenfield-test",
+		"--profile", "greenfield",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"plan claims zone provider adapters",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out taskStartOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("task json: %v\n%s", err, buf.String())
+	}
+	if out.Profile != taskProfileGreenfield {
+		t.Fatalf("profile = %q", out.Profile)
+	}
+
+	var manifest taskManifest
+	if err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest); err != nil {
+		t.Fatalf("manifest json: %v", err)
+	}
+	if manifest.Profile != taskProfileGreenfield {
+		t.Fatalf("manifest profile = %q", manifest.Profile)
+	}
+
+	indexBody := mustReadFile(t, out.IndexPath)
+	for _, want := range []string{
+		"## Profile",
+		"greenfield",
+		"Treat predicted files as evidence, not required edit targets.",
+		"before implementation scope expands",
+	} {
+		if !strings.Contains(indexBody, want) {
+			t.Fatalf("greenfield index missing %q:\n%s", want, indexBody)
+		}
+	}
+
+	planBody := mustReadFile(t, out.FirstSlicePath)
+	for _, want := range []string{
+		"bounded planning slice",
+		"Test or Evaluation Signals",
+		"Planning artifacts, acceptance checks, interface notes, eval cards, or test design.",
+		"Draft the smallest useful planning artifact",
+	} {
+		if !strings.Contains(planBody, want) {
+			t.Fatalf("greenfield plan missing %q:\n%s", want, planBody)
+		}
+	}
+	for _, unwanted := range []string{
+		"Inspect the predicted primary files.",
+		"Implement the smallest useful change.",
+		"Primary implementation surface is verified before edits.",
+	} {
+		if strings.Contains(planBody, unwanted) {
+			t.Fatalf("greenfield plan contains code-change boilerplate %q:\n%s", unwanted, planBody)
+		}
+	}
+}
+
 func TestTask_StartBootstrapsRepeatedSlices(t *testing.T) {
 	repoDir := setupTaskCommandRepo(t)
 
@@ -682,6 +750,123 @@ func ImproveCompanionRecallNew() {}
 	}
 	if !taskWarningsContainPath(manifest.FreshnessWarnings, "internal/retrieval/companion_recall_new.go") {
 		t.Fatalf("manifest missing freshness warning: %#v", manifest.FreshnessWarnings)
+	}
+}
+
+func TestTask_StatusWarnsAndSyncRecapturesEditedArtifacts(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "sync-freshness-test",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"improve test companion recall",
+	})
+	startBuf := &bytes.Buffer{}
+	startCmd.SetOut(startBuf)
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var startOut taskStartOutput
+	if err := json.Unmarshal(startBuf.Bytes(), &startOut); err != nil {
+		t.Fatalf("start json: %v\n%s", err, startBuf.String())
+	}
+
+	manifest, err := readTaskManifest(startOut.ManifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.UpdatedAt = "2026-01-01T00:00:00Z"
+	if err := writeTaskManifest(startOut.ManifestPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+	mustWriteFile(t, startOut.FirstSlicePath, mustReadFile(t, startOut.FirstSlicePath)+"\n\n## Dogfood Notes\n- edited after task creation\n")
+
+	statusCmd := NewTaskCmd()
+	statusCmd.SetArgs([]string{"status", "sync-freshness-test", "--json"})
+	statusBuf := &bytes.Buffer{}
+	statusCmd.SetOut(statusBuf)
+	if err := statusCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var statusOut taskStatusOutput
+	if err := json.Unmarshal(statusBuf.Bytes(), &statusOut); err != nil {
+		t.Fatalf("status json: %v\n%s", err, statusBuf.String())
+	}
+	if !taskArtifactFreshnessContainsPath(statusOut.ArtifactFreshness, "A01-improve-test-companion-recall-plan.md") {
+		t.Fatalf("expected stale plan warning, got %#v", statusOut.ArtifactFreshness)
+	}
+
+	syncCmd := NewTaskCmd()
+	syncCmd.SetArgs([]string{"sync", "sync-freshness-test", "--json"})
+	syncBuf := &bytes.Buffer{}
+	syncCmd.SetOut(syncBuf)
+	if err := syncCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var syncOut taskSyncOutput
+	if err := json.Unmarshal(syncBuf.Bytes(), &syncOut); err != nil {
+		t.Fatalf("sync json: %v\n%s", err, syncBuf.String())
+	}
+	if syncOut.TaskID != "sync-freshness-test" || syncOut.ManifestPath == "" {
+		t.Fatalf("sync output = %#v", syncOut)
+	}
+	for _, want := range []string{
+		".devspecs/tasks/sync-freshness-test/A00-index.md",
+		".devspecs/tasks/sync-freshness-test/A01-improve-test-companion-recall-plan.md",
+		".devspecs/tasks/sync-freshness-test/A01-improve-test-companion-recall-result.md",
+	} {
+		if !containsPath(syncOut.IndexedPaths, want) {
+			t.Fatalf("sync indexed paths missing %q: %#v", want, syncOut.IndexedPaths)
+		}
+	}
+	if !taskArtifactFreshnessContainsPath(syncOut.ArtifactFreshness, "A01-improve-test-companion-recall-plan.md") {
+		t.Fatalf("sync should report what it freshened, got %#v", syncOut.ArtifactFreshness)
+	}
+
+	afterManifest, err := readTaskManifest(startOut.ManifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterManifest.UpdatedAt == "" || afterManifest.UpdatedAt == "2026-01-01T00:00:00Z" {
+		t.Fatalf("sync did not update manifest timestamp: %#v", afterManifest)
+	}
+
+	afterStatusCmd := NewTaskCmd()
+	afterStatusCmd.SetArgs([]string{"status", "sync-freshness-test", "--json"})
+	afterStatusBuf := &bytes.Buffer{}
+	afterStatusCmd.SetOut(afterStatusBuf)
+	if err := afterStatusCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var afterStatus taskStatusOutput
+	if err := json.Unmarshal(afterStatusBuf.Bytes(), &afterStatus); err != nil {
+		t.Fatalf("after status json: %v\n%s", err, afterStatusBuf.String())
+	}
+	if len(afterStatus.ArtifactFreshness) != 0 {
+		t.Fatalf("expected sync to clear stale warnings, got %#v", afterStatus.ArtifactFreshness)
+	}
+
+	db, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	artifacts, err := db.ListArtifacts(store.FilterParams{RepoRoot: repoDir, SourceType: "capture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundResult := false
+	for _, art := range artifacts {
+		if strings.Contains(art.Title, "sync-freshness-test A01 result") {
+			foundResult = true
+			break
+		}
+	}
+	if !foundResult {
+		t.Fatalf("sync did not capture result artifact: %#v", artifacts)
 	}
 }
 
@@ -1216,6 +1401,16 @@ func containsString(values []string, want string) bool {
 }
 
 func taskWarningsContainPath(warnings []taskFreshnessWarning, want string) bool {
+	want = filepath.ToSlash(want)
+	for _, warning := range warnings {
+		if filepath.ToSlash(warning.Path) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func taskArtifactFreshnessContainsPath(warnings []taskArtifactFreshness, want string) bool {
 	want = filepath.ToSlash(want)
 	for _, warning := range warnings {
 		if filepath.ToSlash(warning.Path) == want {
