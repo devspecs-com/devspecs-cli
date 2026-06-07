@@ -84,6 +84,40 @@ func (db *DB) ListTaskCheckpointFacts(repoID, taskID string) ([]TaskCheckpointFa
 	return out, rows.Err()
 }
 
+// ListRecentTaskCheckpointFacts returns recent compact checkpoint facts for a repo.
+func (db *DB) ListRecentTaskCheckpointFacts(repoID string, limit int) ([]TaskCheckpointFact, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := db.Query(
+		`SELECT repo_id, task_id, checkpoint_id, target, series, stage, decision,
+			checkpoint_path, checkpoint_json_path, created_at,
+			actual_context_json, feedback_json, evidence_json, learnings_json, next_json, indexed_at
+		FROM task_checkpoint_facts
+		WHERE repo_id = ?
+		ORDER BY created_at DESC
+		LIMIT ?`,
+		repoID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TaskCheckpointFact
+	for rows.Next() {
+		var f TaskCheckpointFact
+		if err := rows.Scan(
+			&f.RepoID, &f.TaskID, &f.CheckpointID, &f.Target, &f.Series, &f.Stage, &f.Decision,
+			&f.CheckpointPath, &f.CheckpointJSONPath, &f.CreatedAt,
+			&f.ActualContextJSON, &f.FeedbackJSON, &f.EvidenceJSON, &f.LearningsJSON, &f.NextJSON, &f.IndexedAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 func nonEmptyJSON(value, fallback string) string {
 	if value == "" {
 		return fallback

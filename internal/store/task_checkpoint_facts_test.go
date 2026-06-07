@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestTaskCheckpointFactsUpsertAndList(t *testing.T) {
@@ -13,7 +12,7 @@ func TestTaskCheckpointFactsUpsertAndList(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := "2026-06-06T00:00:00Z"
 	if _, err := db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES (?, ?, ?, ?)", "repo_task", "/tmp/task-facts", now, now); err != nil {
 		t.Fatal(err)
 	}
@@ -57,5 +56,21 @@ func TestTaskCheckpointFactsUpsertAndList(t *testing.T) {
 	}
 	if strings.TrimSpace(facts[0].LearningsJSON) != "[]" {
 		t.Fatalf("expected empty learnings fallback, got %q", facts[0].LearningsJSON)
+	}
+
+	second := fact
+	second.TaskID = "task-two"
+	second.CheckpointID = "cp_002"
+	second.CreatedAt = "2026-06-07T00:00:00Z"
+	second.LearningsJSON = `[{"learning_type":"validation_gap","summary":"add validation"}]`
+	if err := db.UpsertTaskCheckpointFact(second); err != nil {
+		t.Fatal(err)
+	}
+	recent, err := db.ListRecentTaskCheckpointFacts("repo_task", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recent) != 1 || recent[0].TaskID != "task-two" {
+		t.Fatalf("recent facts = %#v", recent)
 	}
 }

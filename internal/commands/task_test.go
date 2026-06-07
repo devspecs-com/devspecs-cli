@@ -268,6 +268,126 @@ func TestTask_StartGreenfieldProfileUsesPlanningTemplate(t *testing.T) {
 	}
 }
 
+func TestTask_StartSurfacesCheckpointFactRiskCards(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	db, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repoID := taskTestRepoID(t, db, repoDir)
+	now := "2026-06-07T00:00:00Z"
+	if err := db.UpsertTaskCheckpointFact(store.TaskCheckpointFact{
+		RepoID:             repoID,
+		TaskID:             "prior-risk-task",
+		CheckpointID:       "cp_prior",
+		Target:             "A01",
+		Series:             "A",
+		Stage:              "implemented",
+		Decision:           "improve",
+		CheckpointPath:     "checkpoints/prior.md",
+		CheckpointJSONPath: "checkpoints/prior.json",
+		CreatedAt:          now,
+		ActualContextJSON:  `{}`,
+		FeedbackJSON:       `{"critical_missed":["internal/retrieval/ranking_test.go"],"distracting_included":["fixtures/noisy-plan.md"]}`,
+		EvidenceJSON:       `{}`,
+		LearningsJSON:      `[{"learning_type":"validation_gap","summary":"focused retrieval validation was missing","evidence_refs":["internal/retrieval/ranking_test.go"],"applies_to":"internal/retrieval","confidence":"high"}]`,
+		NextJSON:           `{}`,
+		IndexedAt:          now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"--id", "risk-card-test", "--no-refresh", "--index=false", "--json", "improve test companion recall"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out taskStartOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("task json: %v\n%s", err, buf.String())
+	}
+	for _, id := range []string{"prior-test-miss", "prior-noise", "validation-gap"} {
+		if taskRiskCardByID(out.RiskCards, id) == nil {
+			t.Fatalf("missing risk card %q: %#v", id, out.RiskCards)
+		}
+	}
+	testMiss := taskRiskCardByID(out.RiskCards, "prior-test-miss")
+	if testMiss == nil || !strings.Contains(strings.Join(testMiss.Evidence, "\n"), "internal/retrieval/ranking_test.go") {
+		t.Fatalf("prior test miss evidence = %#v", testMiss)
+	}
+
+	var manifest taskManifest
+	if err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest); err != nil {
+		t.Fatalf("manifest json: %v", err)
+	}
+	if taskRiskCardByID(manifest.RiskCards, "prior-test-miss") == nil {
+		t.Fatalf("manifest missing risk cards: %#v", manifest.RiskCards)
+	}
+	indexBody := mustReadFile(t, out.IndexPath)
+	for _, want := range []string{
+		"## Risk Cards",
+		"Prior checkpoint missed a related test",
+		"Search same-package and same-stem tests before editing.",
+	} {
+		if !strings.Contains(indexBody, want) {
+			t.Fatalf("index missing risk card %q:\n%s", want, indexBody)
+		}
+	}
+	planBody := mustReadFile(t, out.FirstSlicePath)
+	if !strings.Contains(planBody, "Prior checkpoint missed a related test") {
+		t.Fatalf("plan missing risk card:\n%s", planBody)
+	}
+}
+
+func TestTask_StartSkipsUnrelatedCheckpointFactRiskCards(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	db, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repoID := taskTestRepoID(t, db, repoDir)
+	now := "2026-06-07T00:00:00Z"
+	if err := db.UpsertTaskCheckpointFact(store.TaskCheckpointFact{
+		RepoID:             repoID,
+		TaskID:             "prior-unrelated-task",
+		CheckpointID:       "cp_unrelated",
+		Target:             "A01",
+		Series:             "A",
+		Stage:              "implemented",
+		Decision:           "improve",
+		CheckpointPath:     "checkpoints/unrelated.md",
+		CheckpointJSONPath: "checkpoints/unrelated.json",
+		CreatedAt:          now,
+		ActualContextJSON:  `{}`,
+		FeedbackJSON:       `{"critical_missed":["services/billing/webhook_test.go"]}`,
+		EvidenceJSON:       `{}`,
+		LearningsJSON:      `[]`,
+		NextJSON:           `{}`,
+		IndexedAt:          now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"--id", "unrelated-risk-card-test", "--no-refresh", "--index=false", "--json", "improve test companion recall"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out taskStartOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("task json: %v\n%s", err, buf.String())
+	}
+	if taskRiskCardByID(out.RiskCards, "prior-test-miss") != nil || taskRiskCardByID(out.RiskCards, "prior-critical-miss") != nil {
+		t.Fatalf("unrelated fact should not create miss risk cards: %#v", out.RiskCards)
+	}
+}
+
 func TestTask_StartBootstrapsRepeatedSlices(t *testing.T) {
 	repoDir := setupTaskCommandRepo(t)
 
@@ -848,10 +968,15 @@ func ImproveCompanionRecallNew() {}
 	if len(out.FreshnessWarnings) > taskFreshnessMaxWarnings {
 		t.Fatalf("freshness warnings were not capped: %#v", out.FreshnessWarnings)
 	}
+	staleCard := taskRiskCardByID(out.RiskCards, "stale-index")
+	if staleCard == nil || !strings.Contains(strings.Join(staleCard.Evidence, "\n"), "internal/retrieval/companion_recall_new.go") {
+		t.Fatalf("expected stale-index risk card, got %#v", out.RiskCards)
+	}
 
 	indexBody := mustReadFile(t, out.IndexPath)
 	for _, want := range []string{
 		"## Freshness Warnings",
+		"## Risk Cards",
 		"internal/retrieval/companion_recall_new.go",
 		"stale-index risk",
 	} {
@@ -1672,6 +1797,24 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func taskRiskCardByID(cards []taskRiskCard, id string) *taskRiskCard {
+	for i := range cards {
+		if cards[i].ID == id {
+			return &cards[i]
+		}
+	}
+	return nil
+}
+
+func taskTestRepoID(t *testing.T, db *store.DB, repoDir string) string {
+	t.Helper()
+	var repoID string
+	if err := db.QueryRow("SELECT id FROM repos WHERE root_path = ?", repoDir).Scan(&repoID); err != nil {
+		t.Fatal(err)
+	}
+	return repoID
 }
 
 func taskWarningsContainPath(warnings []taskFreshnessWarning, want string) bool {

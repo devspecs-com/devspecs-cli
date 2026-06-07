@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -167,6 +168,7 @@ type taskStartOutput struct {
 	DocsConfigFiles   []string               `json:"docs_config_files,omitempty"`
 	NoiseRiskFiles    []string               `json:"noise_risk_files,omitempty"`
 	FreshnessWarnings []taskFreshnessWarning `json:"freshness_warnings,omitempty"`
+	RiskCards         []taskRiskCard         `json:"risk_cards,omitempty"`
 	PackCompleteness  string                 `json:"pack_completeness"`
 }
 
@@ -325,6 +327,7 @@ type taskManifest struct {
 	Artifacts            taskArtifactPaths      `json:"artifacts"`
 	Predicted            taskPredictedContext   `json:"predicted_context"`
 	FreshnessWarnings    []taskFreshnessWarning `json:"freshness_warnings,omitempty"`
+	RiskCards            []taskRiskCard         `json:"risk_cards,omitempty"`
 	Confidence           taskConfidence         `json:"confidence"`
 }
 
@@ -386,6 +389,16 @@ type taskGitReceipt struct {
 type taskFreshnessWarning struct {
 	Path   string `json:"path"`
 	Reason string `json:"reason"`
+}
+
+type taskRiskCard struct {
+	ID         string   `json:"id"`
+	Title      string   `json:"title"`
+	Severity   string   `json:"severity"`
+	Source     string   `json:"source"`
+	Evidence   []string `json:"evidence,omitempty"`
+	AgentCheck string   `json:"agent_check"`
+	Count      int      `json:"count,omitempty"`
 }
 
 type taskConfidence struct {
@@ -852,6 +865,7 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 		Artifacts:         relArtifacts,
 		Predicted:         preflight.Predicted,
 		FreshnessWarnings: preflight.FreshnessWarnings,
+		RiskCards:         preflight.RiskCards,
 		Confidence:        preflight.Confidence,
 	}
 
@@ -908,6 +922,7 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 		DocsConfigFiles:   predictedFilePaths(preflight.Predicted.DocsPlansConfig),
 		NoiseRiskFiles:    predictedFilePaths(preflight.Predicted.NoiseRisks),
 		FreshnessWarnings: preflight.FreshnessWarnings,
+		RiskCards:         preflight.RiskCards,
 		PackCompleteness:  preflight.Confidence.PackCompleteness,
 	}
 	if opts.AsJSON {
@@ -2016,6 +2031,7 @@ func taskSliceForCheckpoint(manifest taskManifest, selector string) (taskSliceAr
 type taskPreflight struct {
 	Predicted         taskPredictedContext
 	FreshnessWarnings []taskFreshnessWarning
+	RiskCards         []taskRiskCard
 	Confidence        taskConfidence
 }
 
@@ -2053,7 +2069,8 @@ func buildTaskPreflight(cmd *cobra.Command, repoRoot, query string, noRefresh bo
 	predicted.RelevantAreas = relevantAreasFromPredicted(predicted)
 	freshnessWarnings := taskFreshnessWarnings(repoRoot, query, candidates)
 	confidence := confidenceForPredicted(predicted)
-	return taskPreflight{Predicted: predicted, FreshnessWarnings: freshnessWarnings, Confidence: confidence}, nil
+	riskCards := buildTaskRiskCards(db, repoRoot, predicted, freshnessWarnings)
+	return taskPreflight{Predicted: predicted, FreshnessWarnings: freshnessWarnings, RiskCards: riskCards, Confidence: confidence}, nil
 }
 
 func taskPackCompanionMode() string {
@@ -2074,6 +2091,235 @@ func taskPackPresentationMode() string {
 		return value
 	}
 	return findPackPresentationModeOff
+}
+
+const (
+	taskRiskCardLimit     = 6
+	taskRiskEvidenceLimit = 4
+	taskRiskFactLimit     = 50
+)
+
+func buildTaskRiskCards(db *store.DB, repoRoot string, predicted taskPredictedContext, warnings []taskFreshnessWarning) []taskRiskCard {
+	var cards []taskRiskCard
+	if len(warnings) > 0 {
+		var evidence []string
+		for _, warning := range warnings {
+			if warning.Path == "" {
+				continue
+			}
+			item := "`" + warning.Path + "`"
+			if warning.Reason != "" {
+				item += " - " + warning.Reason
+			}
+			evidence = appendUniqueString(evidence, item)
+		}
+		cards = appendTaskRiskCard(cards, taskRiskCard{
+			ID:         "stale-index",
+			Title:      "On-disk task anchors were not in the indexed candidate set",
+			Severity:   "medium",
+			Source:     "freshness",
+			Evidence:   firstStrings(evidence, taskRiskEvidenceLimit),
+			AgentCheck: "Inspect the warned files or refresh the index before trusting missing context.",
+			Count:      len(evidence),
+		})
+	}
+	facts := recentTaskCheckpointFacts(db, repoRoot, taskRiskFactLimit)
+	cards = append(cards, taskRiskCardsFromCheckpointFacts(predicted, facts)...)
+	if len(cards) > taskRiskCardLimit {
+		return cards[:taskRiskCardLimit]
+	}
+	return cards
+}
+
+func recentTaskCheckpointFacts(db *store.DB, repoRoot string, limit int) []store.TaskCheckpointFact {
+	if db == nil || strings.TrimSpace(repoRoot) == "" {
+		return nil
+	}
+	var repoID string
+	err := db.QueryRow("SELECT id FROM repos WHERE root_path = ?", repoRoot).Scan(&repoID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return nil
+	}
+	facts, err := db.ListRecentTaskCheckpointFacts(repoID, limit)
+	if err != nil {
+		return nil
+	}
+	return facts
+}
+
+func taskRiskCardsFromCheckpointFacts(predicted taskPredictedContext, facts []store.TaskCheckpointFact) []taskRiskCard {
+	var testMissEvidence []string
+	var criticalMissEvidence []string
+	var noiseEvidence []string
+	var validationEvidence []string
+	for _, fact := range facts {
+		feedback := parseTaskCheckpointFeedbackJSON(fact.FeedbackJSON)
+		for _, path := range feedback.CriticalMissed {
+			if !taskRiskPathMatchesPredicted(path, predicted) {
+				continue
+			}
+			evidence := taskRiskFactPathEvidence(fact, "missed", path)
+			if looksLikeTestPath(path) {
+				testMissEvidence = appendUniqueString(testMissEvidence, evidence)
+			} else {
+				criticalMissEvidence = appendUniqueString(criticalMissEvidence, evidence)
+			}
+		}
+		for _, path := range feedback.DistractingIncluded {
+			if path == "" {
+				continue
+			}
+			noiseEvidence = appendUniqueString(noiseEvidence, taskRiskFactPathEvidence(fact, "called distracting", path))
+		}
+		for _, learning := range parseTaskCheckpointLearningsJSON(fact.LearningsJSON) {
+			switch strings.ToLower(strings.TrimSpace(learning.LearningType)) {
+			case "validation_gap":
+				validationEvidence = appendUniqueString(validationEvidence, taskRiskFactLearningEvidence(fact, learning))
+			case "noise", "risk_false_positive":
+				noiseEvidence = appendUniqueString(noiseEvidence, taskRiskFactLearningEvidence(fact, learning))
+			case "miss", "substrate_gap":
+				if taskRiskLearningMatchesPredicted(learning, predicted) {
+					criticalMissEvidence = appendUniqueString(criticalMissEvidence, taskRiskFactLearningEvidence(fact, learning))
+				}
+			}
+		}
+	}
+	var cards []taskRiskCard
+	if len(testMissEvidence) > 0 {
+		cards = appendTaskRiskCard(cards, taskRiskCard{
+			ID:         "prior-test-miss",
+			Title:      "Prior checkpoint missed a related test",
+			Severity:   "medium",
+			Source:     "checkpoint_fact",
+			Evidence:   firstStrings(testMissEvidence, taskRiskEvidenceLimit),
+			AgentCheck: "Search same-package and same-stem tests before editing.",
+			Count:      len(testMissEvidence),
+		})
+	}
+	if len(criticalMissEvidence) > 0 {
+		cards = appendTaskRiskCard(cards, taskRiskCard{
+			ID:         "prior-critical-miss",
+			Title:      "Prior checkpoint recorded a critical miss in a related area",
+			Severity:   "medium",
+			Source:     "checkpoint_fact",
+			Evidence:   firstStrings(criticalMissEvidence, taskRiskEvidenceLimit),
+			AgentCheck: "Inspect the related area before assuming the initial pack is complete.",
+			Count:      len(criticalMissEvidence),
+		})
+	}
+	if len(noiseEvidence) > 0 {
+		cards = appendTaskRiskCard(cards, taskRiskCard{
+			ID:         "prior-noise",
+			Title:      "Prior checkpoint recorded distracting context",
+			Severity:   "low",
+			Source:     "checkpoint_fact",
+			Evidence:   firstStrings(noiseEvidence, taskRiskEvidenceLimit),
+			AgentCheck: "Keep that family as reference-only unless this task verifies it.",
+			Count:      len(noiseEvidence),
+		})
+	}
+	if len(validationEvidence) > 0 {
+		cards = appendTaskRiskCard(cards, taskRiskCard{
+			ID:         "validation-gap",
+			Title:      "Prior checkpoint recorded a validation gap",
+			Severity:   "medium",
+			Source:     "checkpoint_fact",
+			Evidence:   firstStrings(validationEvidence, taskRiskEvidenceLimit),
+			AgentCheck: "Identify the first validation command or eval artifact before implementation scope expands.",
+			Count:      len(validationEvidence),
+		})
+	}
+	return cards
+}
+
+func appendTaskRiskCard(cards []taskRiskCard, card taskRiskCard) []taskRiskCard {
+	if strings.TrimSpace(card.ID) == "" || strings.TrimSpace(card.Title) == "" {
+		return cards
+	}
+	for _, existing := range cards {
+		if strings.EqualFold(existing.ID, card.ID) {
+			return cards
+		}
+	}
+	return append(cards, card)
+}
+
+func parseTaskCheckpointFeedbackJSON(text string) taskPredictedContextFeedback {
+	var feedback taskPredictedContextFeedback
+	_ = json.Unmarshal([]byte(strings.TrimSpace(text)), &feedback)
+	return feedback
+}
+
+func parseTaskCheckpointLearningsJSON(text string) []taskCheckpointLearning {
+	var learnings []taskCheckpointLearning
+	_ = json.Unmarshal([]byte(strings.TrimSpace(text)), &learnings)
+	return learnings
+}
+
+func taskRiskPathMatchesPredicted(path string, predicted taskPredictedContext) bool {
+	path = normalizeSinglePath(path)
+	if path == "" {
+		return false
+	}
+	for _, current := range taskRiskPredictedPaths(predicted) {
+		if taskRiskPathsRelated(path, current) {
+			return true
+		}
+	}
+	return false
+}
+
+func taskRiskLearningMatchesPredicted(learning taskCheckpointLearning, predicted taskPredictedContext) bool {
+	for _, ref := range learning.EvidenceRefs {
+		if taskRiskPathMatchesPredicted(ref, predicted) {
+			return true
+		}
+	}
+	return taskRiskPathMatchesPredicted(learning.AppliesTo, predicted)
+}
+
+func taskRiskPredictedPaths(predicted taskPredictedContext) []string {
+	paths := appendNormalizedUnique(nil, predictedFilePaths(predicted.PrimaryFiles)...)
+	paths = appendNormalizedUnique(paths, predictedFilePaths(predicted.Tests)...)
+	paths = appendNormalizedUnique(paths, predictedFilePaths(predicted.DocsPlansConfig)...)
+	paths = appendNormalizedUnique(paths, predictedFilePaths(predicted.SupportingContext)...)
+	return paths
+}
+
+func taskRiskPathsRelated(left, right string) bool {
+	left = normalizeSinglePath(left)
+	right = normalizeSinglePath(right)
+	if left == "" || right == "" {
+		return false
+	}
+	if containsPath([]string{left}, right) || containsPath([]string{right}, left) {
+		return true
+	}
+	if pathArea(left) != "" && pathArea(left) == pathArea(right) {
+		return true
+	}
+	if filepath.Dir(left) == filepath.Dir(right) {
+		return true
+	}
+	return testCompanionStem(left) != "" && testCompanionStem(left) == testCompanionStem(right)
+}
+
+func taskRiskFactPathEvidence(fact store.TaskCheckpointFact, verb, path string) string {
+	return fmt.Sprintf("task %s checkpoint %s %s `%s`", fact.TaskID, fact.CheckpointID, verb, normalizeSinglePath(path))
+}
+
+func taskRiskFactLearningEvidence(fact store.TaskCheckpointFact, learning taskCheckpointLearning) string {
+	summary := strings.TrimSpace(learning.Summary)
+	if summary == "" {
+		summary = strings.TrimSpace(learning.LearningType)
+	}
+	if summary == "" {
+		return ""
+	}
+	return fmt.Sprintf("task %s checkpoint %s learned: %s", fact.TaskID, fact.CheckpointID, summary)
 }
 
 const (
@@ -2509,6 +2755,7 @@ func renderTaskIndex(manifest taskManifest) string {
 	writeGitReceipts(&b, manifest.Predicted)
 	writePredictedFiles(&b, "Noise Risks", manifest.Predicted.NoiseRisks)
 	writeFreshnessWarnings(&b, manifest.FreshnessWarnings)
+	writeTaskRiskCards(&b, manifest.RiskCards)
 	fmt.Fprintln(&b, "## Known Knowns")
 	for _, known := range taskKnownKnowns(manifest) {
 		fmt.Fprintf(&b, "- %s\n", known)
@@ -2610,6 +2857,7 @@ func renderTaskSlicePlan(manifest taskManifest, slice taskSliceArtifact) string 
 	for _, unknown := range taskKnownUnknowns(manifest) {
 		fmt.Fprintf(&b, "- %s\n", unknown)
 	}
+	writeTaskRiskCardBullets(&b, manifest.RiskCards)
 	if len(manifest.Predicted.NoiseRisks) > 0 {
 		fmt.Fprintln(&b, "- Initial pack includes downgraded noise candidates; avoid editing them unless verification supports it.")
 	}
@@ -2676,6 +2924,7 @@ func renderTaskGreenfieldSlicePlan(manifest taskManifest, slice taskSliceArtifac
 	for _, unknown := range taskKnownUnknowns(manifest) {
 		fmt.Fprintf(&b, "- %s\n", unknown)
 	}
+	writeTaskRiskCardBullets(&b, manifest.RiskCards)
 	if len(manifest.Predicted.NoiseRisks) > 0 {
 		fmt.Fprintln(&b, "- Initial pack includes downgraded noise candidates; keep them as reference only unless verification supports them.")
 	}
@@ -2829,6 +3078,38 @@ func writeFreshnessWarnings(b *strings.Builder, warnings []taskFreshnessWarning)
 		fmt.Fprintln(b)
 	}
 	fmt.Fprintln(b)
+}
+
+func writeTaskRiskCards(b *strings.Builder, cards []taskRiskCard) {
+	if len(cards) == 0 {
+		return
+	}
+	fmt.Fprintln(b, "## Risk Cards")
+	fmt.Fprintln(b, "Evidence-backed checks to run before trusting the initial task context. These are not required edit targets.")
+	fmt.Fprintln(b)
+	for _, card := range cards {
+		fmt.Fprintf(b, "- %s [%s, %s]\n", card.Title, card.Severity, card.Source)
+		if card.AgentCheck != "" {
+			fmt.Fprintf(b, "  Agent check: %s\n", card.AgentCheck)
+		}
+		if len(card.Evidence) > 0 {
+			fmt.Fprintf(b, "  Evidence: %s\n", strings.Join(firstStrings(card.Evidence, taskRiskEvidenceLimit), "; "))
+		}
+	}
+	fmt.Fprintln(b)
+}
+
+func writeTaskRiskCardBullets(b *strings.Builder, cards []taskRiskCard) {
+	for _, card := range cards {
+		if card.Title == "" {
+			continue
+		}
+		fmt.Fprintf(b, "- %s: %s", card.Title, card.AgentCheck)
+		if len(card.Evidence) > 0 {
+			fmt.Fprintf(b, " Evidence: %s.", strings.Join(firstStrings(card.Evidence, 2), "; "))
+		}
+		fmt.Fprintln(b)
+	}
 }
 
 func writeInlinePredictedFiles(b *strings.Builder, title string, files []taskPredictedFile) {
@@ -3791,6 +4072,12 @@ func writeTaskStartHuman(out io.Writer, result taskStartOutput, confidence taskC
 		confidence.PackCompleteness,
 		confidence.NoiseRisk,
 	)
+	if len(result.RiskCards) > 0 {
+		fmt.Fprintf(out, "Risk cards: %d\n", len(result.RiskCards))
+		for _, card := range firstTaskRiskCards(result.RiskCards, 3) {
+			fmt.Fprintf(out, "  - %s: %s\n", card.Title, card.AgentCheck)
+		}
+	}
 	if len(result.FreshnessWarnings) > 0 {
 		fmt.Fprintf(out, "Freshness warnings: %d on-disk anchor(s) were not in the indexed candidate set\n", len(result.FreshnessWarnings))
 		for _, warning := range firstTaskFreshnessWarnings(result.FreshnessWarnings, 3) {
@@ -3805,6 +4092,13 @@ func writeTaskStartHuman(out io.Writer, result taskStartOutput, confidence taskC
 		fmt.Fprintf(out, "Indexed: %s\n", strings.Join(result.IndexedPaths, ", "))
 	}
 	return nil
+}
+
+func firstTaskRiskCards(cards []taskRiskCard, limit int) []taskRiskCard {
+	if limit <= 0 || len(cards) <= limit {
+		return cards
+	}
+	return cards[:limit]
 }
 
 func firstTaskFreshnessWarnings(warnings []taskFreshnessWarning, limit int) []taskFreshnessWarning {
