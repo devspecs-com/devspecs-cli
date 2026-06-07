@@ -1596,8 +1596,8 @@ func writeTaskPromptAdvisoryFiles(b *strings.Builder, files []taskAdvisoryFile) 
 	if len(files) == 0 {
 		return
 	}
-	fmt.Fprintln(b, "Advisory context from prior checkpoints:")
-	fmt.Fprintln(b, "Treat these as evidence-backed checks, not pack-ranked edit targets.")
+	fmt.Fprintln(b, "Checkpoint leads:")
+	fmt.Fprintln(b, "The current pack is weak, so these prior checkpoint facts are verification leads only. They are not pack-ranked edit targets.")
 	for _, file := range files {
 		fmt.Fprintf(b, "- `%s` [%s]: %s\n", file.Path, file.Kind, file.AgentCheck)
 		if len(file.Evidence) > 0 {
@@ -2144,7 +2144,7 @@ const (
 	taskRiskCardLimit     = 6
 	taskRiskEvidenceLimit = 4
 	taskRiskFactLimit     = 50
-	taskAdvisoryFileLimit = 8
+	taskAdvisoryFileLimit = 5
 )
 
 func buildTaskRiskCardsFromFacts(query string, predicted taskPredictedContext, warnings []taskFreshnessWarning, facts []store.TaskCheckpointFact) []taskRiskCard {
@@ -2180,13 +2180,16 @@ func buildTaskRiskCardsFromFacts(query string, predicted taskPredictedContext, w
 
 func taskAdvisoryFilesFromCheckpointFacts(query string, predicted taskPredictedContext, facts []store.TaskCheckpointFact) []taskAdvisoryFile {
 	queryTerms := taskFreshnessQueryTerms(query)
-	predictedWeak := taskRiskPredictedContextWeak(predicted)
+	predictedWeak := taskAdvisoryPredictedContextWeak(predicted)
 	var out []taskAdvisoryFile
+	if !predictedWeak {
+		return nil
+	}
 	for _, fact := range facts {
 		feedback := parseTaskCheckpointFeedbackJSON(fact.FeedbackJSON)
 		learnings := parseTaskCheckpointLearningsJSON(fact.LearningsJSON)
 		actual := parseTaskCheckpointActualContextJSON(fact.ActualContextJSON)
-		queryMatchedFact := predictedWeak && taskRiskFactMatchesQuery(queryTerms, feedback, learnings)
+		queryMatchedFact := taskRiskFactMatchesQuery(queryTerms, feedback, learnings)
 		relatedToPredicted := taskCheckpointFactRelatedToPredicted(actual, feedback, learnings, predicted)
 		if !queryMatchedFact && !relatedToPredicted {
 			continue
@@ -2258,14 +2261,8 @@ func taskAdvisoryFilesFromCheckpointFacts(query string, predicted taskPredictedC
 				})
 			}
 		}
-		if len(out) >= taskAdvisoryFileLimit {
-			return out[:taskAdvisoryFileLimit]
-		}
 	}
-	if len(out) > taskAdvisoryFileLimit {
-		return out[:taskAdvisoryFileLimit]
-	}
-	return out
+	return selectTaskAdvisoryFiles(out)
 }
 
 func recentTaskCheckpointFacts(db *store.DB, repoRoot string, limit int) []store.TaskCheckpointFact {
@@ -2461,6 +2458,65 @@ func appendTaskAdvisoryFile(files []taskAdvisoryFile, file taskAdvisoryFile) []t
 	return append(files, file)
 }
 
+func selectTaskAdvisoryFiles(files []taskAdvisoryFile) []taskAdvisoryFile {
+	if len(files) == 0 {
+		return nil
+	}
+	type bucket struct {
+		name  string
+		kinds []string
+		limit int
+	}
+	buckets := []bucket{
+		{name: "source", kinds: []string{"prior-source", "prior-edited-source"}, limit: 1},
+		{name: "test", kinds: []string{"prior-missed-test", "prior-test", "prior-test-evidence"}, limit: 1},
+		{name: "noise", kinds: []string{"prior-noise"}, limit: 1},
+		{name: "miss", kinds: []string{"prior-missed-file"}, limit: 1},
+		{name: "evidence", kinds: []string{"prior-test-evidence", "prior-evidence"}, limit: 1},
+	}
+	selected := make([]taskAdvisoryFile, 0, len(files))
+	usedPaths := map[string]bool{}
+	for _, bucket := range buckets {
+		count := 0
+		for _, kind := range bucket.kinds {
+			for _, file := range files {
+				path := normalizeSinglePath(file.Path)
+				if path == "" || usedPaths[path] || file.Kind != kind {
+					continue
+				}
+				selected = append(selected, file)
+				usedPaths[path] = true
+				count++
+				if count >= bucket.limit || len(selected) >= taskAdvisoryFileLimit {
+					break
+				}
+			}
+			if count >= bucket.limit || len(selected) >= taskAdvisoryFileLimit {
+				break
+			}
+		}
+		if len(selected) >= taskAdvisoryFileLimit {
+			return selected
+		}
+	}
+	for _, file := range files {
+		path := normalizeSinglePath(file.Path)
+		if path == "" || usedPaths[path] {
+			continue
+		}
+		selected = append(selected, file)
+		usedPaths[path] = true
+		if len(selected) >= taskAdvisoryFileLimit {
+			break
+		}
+	}
+	return selected
+}
+
+func taskAdvisoryPredictedContextWeak(predicted taskPredictedContext) bool {
+	return len(predicted.PrimaryFiles) == 0 || len(predicted.Tests) == 0 || len(taskRiskPredictedPaths(predicted)) == 0
+}
+
 func taskAdvisoryActualKind(path string, edited bool) string {
 	if looksLikeTestPath(path) {
 		return "prior-test"
@@ -2474,17 +2530,17 @@ func taskAdvisoryActualKind(path string, edited bool) string {
 func taskAdvisoryAgentCheck(kind string) string {
 	switch strings.TrimSpace(kind) {
 	case "prior-source", "prior-edited-source":
-		return "Inspect this prior source context before choosing an edit target."
+		return "Verify this prior source lead before choosing an edit target."
 	case "prior-test", "prior-test-evidence":
-		return "Inspect this prior test context before editing."
+		return "Verify this prior test lead before editing."
 	case "prior-missed-test":
-		return "Inspect this prior missed test or companion test before editing."
+		return "Verify this prior missed test or companion test before editing."
 	case "prior-missed-file":
-		return "Inspect this prior missed file before trusting the initial context."
+		return "Verify this prior missed file before trusting the initial context."
 	case "prior-noise":
 		return "Treat as possible noise or reference-only context unless this task verifies it."
 	default:
-		return "Inspect this prior checkpoint evidence before trusting the initial context."
+		return "Verify this prior checkpoint evidence before trusting the initial context."
 	}
 }
 
@@ -3122,10 +3178,11 @@ func renderTaskSlicePlan(manifest taskManifest, slice taskSliceArtifact) string 
 		fmt.Fprintf(&b, "- `%s`\n", slice.Result)
 	}
 	fmt.Fprintln(&b, "- `task.json`")
-	for _, file := range firstPredictedResources(manifest.Predicted) {
-		fmt.Fprintf(&b, "- `%s`\n", file)
-	}
+	resources := firstPredictedResources(manifest.Predicted)
 	for _, file := range firstAdvisoryResources(manifest.AdvisoryFiles) {
+		resources = appendNormalizedUnique(resources, file)
+	}
+	for _, file := range resources {
 		fmt.Fprintf(&b, "- `%s`\n", file)
 	}
 	fmt.Fprintln(&b)
@@ -3135,7 +3192,15 @@ func renderTaskSlicePlan(manifest taskManifest, slice taskSliceArtifact) string 
 	writeInlineAdvisoryFiles(&b, manifest.AdvisoryFiles)
 	fmt.Fprintln(&b, "## Expected Change Surface")
 	if len(manifest.Predicted.PrimaryFiles) == 0 {
-		fmt.Fprintln(&b, "- Unknown. Identify the primary file before editing.")
+		leads := taskAdvisorySourceLeads(manifest.AdvisoryFiles)
+		if len(leads) == 0 {
+			fmt.Fprintln(&b, "- Unknown. Identify the primary file before editing.")
+		} else {
+			fmt.Fprintln(&b, "- No pack-ranked primary file. Verify these checkpoint leads before choosing an edit target:")
+			for _, file := range leads {
+				fmt.Fprintf(&b, "  - `%s`\n", file.Path)
+			}
+		}
 	} else {
 		for _, file := range manifest.Predicted.PrimaryFiles {
 			fmt.Fprintf(&b, "- `%s`\n", file.Path)
@@ -3397,8 +3462,8 @@ func writeTaskAdvisoryFiles(b *strings.Builder, files []taskAdvisoryFile) {
 	if len(files) == 0 {
 		return
 	}
-	fmt.Fprintln(b, "## Advisory Context From Prior Checkpoints")
-	fmt.Fprintln(b, "Evidence-backed files to check because compact checkpoint facts matched this task. These are not pack-ranked edit targets.")
+	fmt.Fprintln(b, "## Checkpoint Leads")
+	fmt.Fprintln(b, "The current pack is weak, so these compact checkpoint facts are verification leads only. They are not pack-ranked edit targets.")
 	fmt.Fprintln(b)
 	for _, file := range files {
 		fmt.Fprintf(b, "- `%s` [%s, %s]\n", file.Path, file.Kind, file.Source)
@@ -3428,7 +3493,7 @@ func writeTaskRiskCardBullets(b *strings.Builder, cards []taskRiskCard) {
 func writeInlinePredictedFiles(b *strings.Builder, title string, files []taskPredictedFile) {
 	fmt.Fprintf(b, "### %s\n", title)
 	if len(files) == 0 {
-		fmt.Fprintln(b, "- None found. Search before editing.")
+		fmt.Fprintln(b, "- No pack-ranked files. Verify checkpoint leads below or search before editing.")
 		fmt.Fprintln(b)
 		return
 	}
@@ -3442,8 +3507,8 @@ func writeInlineAdvisoryFiles(b *strings.Builder, files []taskAdvisoryFile) {
 	if len(files) == 0 {
 		return
 	}
-	fmt.Fprintln(b, "### Advisory Files From Prior Checkpoints")
-	fmt.Fprintln(b, "Treat these as evidence-backed checks, not as files the initial pack ranked as primary.")
+	fmt.Fprintln(b, "### Checkpoint Leads")
+	fmt.Fprintln(b, "Verify these prior checkpoint facts before widening search. They are not files the initial pack ranked as primary.")
 	for _, file := range files {
 		fmt.Fprintf(b, "- `%s` [%s]", file.Path, file.Kind)
 		if file.AgentCheck != "" {
@@ -3600,6 +3665,17 @@ func firstAdvisoryResources(files []taskAdvisoryFile) []string {
 		}
 	}
 	return out
+}
+
+func taskAdvisorySourceLeads(files []taskAdvisoryFile) []taskAdvisoryFile {
+	var out []taskAdvisoryFile
+	for _, file := range files {
+		switch file.Kind {
+		case "prior-source", "prior-edited-source", "prior-missed-file", "prior-evidence":
+			out = append(out, file)
+		}
+	}
+	return firstTaskAdvisoryFiles(out, 3)
 }
 
 func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOptions) error {
@@ -4424,7 +4500,7 @@ func writeTaskStartHuman(out io.Writer, result taskStartOutput, confidence taskC
 		}
 	}
 	if len(result.AdvisoryFiles) > 0 {
-		fmt.Fprintf(out, "Advisory files: %d\n", len(result.AdvisoryFiles))
+		fmt.Fprintf(out, "Checkpoint leads: %d\n", len(result.AdvisoryFiles))
 		for _, file := range firstTaskAdvisoryFiles(result.AdvisoryFiles, 3) {
 			fmt.Fprintf(out, "  - %s: %s\n", file.Path, file.AgentCheck)
 		}

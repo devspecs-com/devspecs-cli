@@ -429,8 +429,9 @@ func TestTask_StartSurfacesAdvisoryFilesFromCheckpointFacts(t *testing.T) {
 	}
 	planBody := mustReadFile(t, out.FirstSlicePath)
 	for _, want := range []string{
-		"Advisory Files From Prior Checkpoints",
-		"not as files the initial pack ranked as primary",
+		"Checkpoint Leads",
+		"not files the initial pack ranked as primary",
+		"No pack-ranked primary file. Verify these checkpoint leads",
 		"internal/invoice/pricing.go",
 		"internal/invoice/pricing_test.go",
 	} {
@@ -451,14 +452,45 @@ func TestTask_StartSurfacesAdvisoryFilesFromCheckpointFacts(t *testing.T) {
 		t.Fatalf("prompt json: %v\n%s", err, promptBuf.String())
 	}
 	for _, want := range []string{
-		"Advisory context from prior checkpoints:",
-		"not pack-ranked edit targets",
+		"Checkpoint leads:",
+		"verification leads only",
 		"internal/invoice/pricing.go",
 		"internal/invoice/pricing_test.go",
 	} {
 		if !strings.Contains(promptOut.Prompt, want) {
 			t.Fatalf("prompt missing advisory text %q:\n%s", want, promptOut.Prompt)
 		}
+	}
+}
+
+func TestTask_AdvisoryFilesAreCappedAndPrioritized(t *testing.T) {
+	facts := []store.TaskCheckpointFact{{
+		TaskID:            "prior-wide-task",
+		CheckpointID:      "cp_wide",
+		ActualContextJSON: `{"files_read":["src/a.go","src/b.go"],"files_edited":["src/c.go"],"tests_read":["src/a_test.go"]}`,
+		FeedbackJSON:      `{"critical_missed":["src/missed_test.go","src/missed.go"],"distracting_included":["docs/noise-a.md","docs/noise-b.md"]}`,
+		LearningsJSON:     `[{"learning_type":"validation_gap","summary":"discount rounding needed package tests","evidence_refs":["src/learned_test.go","src/learned.go"],"applies_to":"src","confidence":"high"}]`,
+	}}
+	files := taskAdvisoryFilesFromCheckpointFacts("fix discount rounding", taskPredictedContext{}, facts)
+	if len(files) > taskAdvisoryFileLimit {
+		t.Fatalf("advisory files exceed cap: %d > %d: %#v", len(files), taskAdvisoryFileLimit, files)
+	}
+	wantKinds := []string{"prior-source", "prior-missed-test", "prior-noise", "prior-missed-file", "prior-test-evidence"}
+	if len(files) != len(wantKinds) {
+		t.Fatalf("advisory files len = %d, want %d: %#v", len(files), len(wantKinds), files)
+	}
+	for i, want := range wantKinds {
+		if files[i].Kind != want {
+			t.Fatalf("advisory kind[%d] = %q, want %q: %#v", i, files[i].Kind, want, files)
+		}
+	}
+
+	strongPredicted := taskPredictedContext{
+		PrimaryFiles: []taskPredictedFile{{Path: "src/main.go"}},
+		Tests:        []taskPredictedFile{{Path: "src/main_test.go"}},
+	}
+	if got := taskAdvisoryFilesFromCheckpointFacts("fix discount rounding", strongPredicted, facts); len(got) != 0 {
+		t.Fatalf("strong predicted context should suppress checkpoint leads, got %#v", got)
 	}
 }
 
