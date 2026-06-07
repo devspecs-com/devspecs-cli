@@ -472,8 +472,11 @@ func TestFindPack_JSONOutputKeepsRankedResultsAndGroups(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
 		t.Fatalf("find --json --pack invalid: %v\n%s", err, buf.String())
 	}
-	if out.Mode != "role_grouped_pack_v0" {
+	if out.Mode != "role_grouped_pack_v0_family_primary_v1" {
 		t.Fatalf("pack mode = %q", out.Mode)
+	}
+	if out.ScoutMode != "beta" {
+		t.Fatalf("scout mode = %q", out.ScoutMode)
 	}
 	if len(out.Groups) == 0 {
 		t.Fatalf("find --json --pack returned no groups: %#v", out)

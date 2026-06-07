@@ -25,6 +25,17 @@ func normalizeFindPackScoutMode(value string) string {
 	}
 }
 
+func resolveFindPackScoutMode(value string, pack, flagChanged bool, envValue string) string {
+	if !flagChanged {
+		if envValue = strings.TrimSpace(envValue); envValue != "" {
+			value = envValue
+		} else if pack {
+			value = findPackScoutModeBetaV0
+		}
+	}
+	return normalizeFindPackScoutMode(value)
+}
+
 func validFindPackScoutModes() []string {
 	return []string{findPackScoutModeOff, findPackScoutModeBetaV0}
 }

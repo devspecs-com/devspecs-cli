@@ -73,7 +73,7 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&anchorFirst, "experimental-anchor-first-ranking", true, "Use repo-local TF-IDF anchor-first ordering; pass false to disable")
 	cmd.Flags().StringVar(&anchorMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, selected_only, strong_field, strict, code_task, code_task_family, or code_task_family_v2")
 	cmd.Flags().BoolVar(&boundaryPrimary, "experimental-boundary-primary", false, "Tier pack output into a source-safe primary working set plus related context summary")
-	cmd.Flags().StringVar(&packScoutMode, "pack-scout", findPackScoutModeOff, "Beta scout preset for pack output: off or beta_v0")
+	cmd.Flags().StringVar(&packScoutMode, "pack-scout", findPackScoutModeOff, "Pack scout preset for pack output; defaults to beta_v0 for --pack unless set to off")
 	cmd.Flags().StringVar(&packCompanions, "pack-companion-mode", findPackCompanionModeAll, "Hidden scout flag: off, generic, generic_git, or all")
 	cmd.Flags().StringVar(&sourcePackMode, "experimental-source-pack-mode", findSourcePackModeOff, "Hidden source pack mode: off, compact_manifest_v0, compact_manifest_v1, or compact_manifest_v2")
 	cmd.Flags().StringVar(&sourceManifestCandidates, "source-manifest-candidates", "off", "Hidden scout flag: off, metadata, or window")
@@ -96,12 +96,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	if anchorMode == "" {
 		return fmt.Errorf("unknown --experimental-anchor-first-mode; valid values: %s", strings.Join(retrieval.ValidAnchorFirstModes(), ", "))
 	}
-	if !cmd.Flags().Changed("pack-scout") {
-		if env := strings.TrimSpace(os.Getenv("DEVSPECS_PACK_SCOUT_MODE")); env != "" {
-			packScoutMode = env
-		}
-	}
-	packScoutMode = normalizeFindPackScoutMode(packScoutMode)
+	packScoutMode = resolveFindPackScoutMode(packScoutMode, pack, cmd.Flags().Changed("pack-scout"), os.Getenv("DEVSPECS_PACK_SCOUT_MODE"))
 	if packScoutMode == "" {
 		return fmt.Errorf("unknown --pack-scout; valid values: %s", strings.Join(validFindPackScoutModes(), ", "))
 	}

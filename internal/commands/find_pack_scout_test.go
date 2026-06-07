@@ -26,6 +26,34 @@ func TestNormalizeFindPackScoutMode(t *testing.T) {
 	}
 }
 
+func TestResolveFindPackScoutModeDefaultsToBetaForPack(t *testing.T) {
+	got := resolveFindPackScoutMode(findPackScoutModeOff, true, false, "")
+	if got != findPackScoutModeBetaV0 {
+		t.Fatalf("default pack scout mode = %q", got)
+	}
+}
+
+func TestResolveFindPackScoutModeLeavesNonPackOff(t *testing.T) {
+	got := resolveFindPackScoutMode(findPackScoutModeOff, false, false, "")
+	if got != findPackScoutModeOff {
+		t.Fatalf("default non-pack scout mode = %q", got)
+	}
+}
+
+func TestResolveFindPackScoutModePreservesExplicitOff(t *testing.T) {
+	got := resolveFindPackScoutMode(findPackScoutModeOff, true, true, "")
+	if got != findPackScoutModeOff {
+		t.Fatalf("explicit off scout mode = %q", got)
+	}
+}
+
+func TestResolveFindPackScoutModePreservesEnvOverride(t *testing.T) {
+	got := resolveFindPackScoutMode(findPackScoutModeOff, true, false, "off")
+	if got != findPackScoutModeOff {
+		t.Fatalf("env override scout mode = %q", got)
+	}
+}
+
 func TestApplyFindPackScoutPresetSetsQ06Baseline(t *testing.T) {
 	opts := findPackScoutPresetOptions{}
 	applyFindPackScoutPreset(findPackScoutModeBetaV0, &opts)
