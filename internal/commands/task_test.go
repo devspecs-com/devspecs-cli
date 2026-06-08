@@ -764,6 +764,7 @@ func TestTask_BoundaryPrimitivesResolveOneTarget(t *testing.T) {
 		"must_not_implement",
 		"- A02",
 		"Do not implement sibling slices",
+		"Checklist edits are useful notes",
 	} {
 		if !strings.Contains(promptOut.Prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, promptOut.Prompt)
@@ -828,6 +829,131 @@ func TestTask_BoundaryPrimitivesResolveOneTarget(t *testing.T) {
 	}
 	if showOut.Target != "A02" || !strings.Contains(showOut.PlanBody, "second bounded slice") {
 		t.Fatalf("show output = %#v", showOut)
+	}
+}
+
+func TestTask_TargetAddressingResolvesUniqueSlice(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "target-address-test",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"--slice", "first target slice",
+		"--slice", "second target slice",
+		"task target addressing",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	showCmd := NewTaskCmd()
+	showCmd.SetArgs([]string{"show", "A02", "--json"})
+	showBuf := &bytes.Buffer{}
+	showCmd.SetOut(showBuf)
+	if err := showCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var showOut taskTargetOutput
+	if err := json.Unmarshal(showBuf.Bytes(), &showOut); err != nil {
+		t.Fatalf("show json: %v\n%s", err, showBuf.String())
+	}
+	if showOut.TaskID != "target-address-test" || showOut.Target != "A02" {
+		t.Fatalf("show resolved wrong target: %#v", showOut)
+	}
+	if !containsString(showOut.SiblingTargets, "A01") {
+		t.Fatalf("show sibling targets = %#v", showOut.SiblingTargets)
+	}
+
+	promptCmd := NewTaskCmd()
+	promptCmd.SetArgs([]string{"prompt", "A02", "--json"})
+	promptBuf := &bytes.Buffer{}
+	promptCmd.SetOut(promptBuf)
+	if err := promptCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var promptOut taskPromptOutput
+	if err := json.Unmarshal(promptBuf.Bytes(), &promptOut); err != nil {
+		t.Fatalf("prompt json: %v\n%s", err, promptBuf.String())
+	}
+	for _, want := range []string{
+		"task target-address-test target A02 only",
+		"Checklist edits are useful notes",
+	} {
+		if !strings.Contains(promptOut.Prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, promptOut.Prompt)
+		}
+	}
+
+	startTargetCmd := NewTaskCmd()
+	startTargetCmd.SetArgs([]string{"start", "A02", "--index=false", "--json"})
+	startTargetBuf := &bytes.Buffer{}
+	startTargetCmd.SetOut(startTargetBuf)
+	if err := startTargetCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var startTargetOut taskDecideOutput
+	if err := json.Unmarshal(startTargetBuf.Bytes(), &startTargetOut); err != nil {
+		t.Fatalf("start json: %v\n%s", err, startTargetBuf.String())
+	}
+	if startTargetOut.TaskID != "target-address-test" || startTargetOut.Target != "A02" || startTargetOut.Stage != "started" {
+		t.Fatalf("start resolved wrong target: %#v", startTargetOut)
+	}
+
+	finishCmd := NewTaskCmd()
+	finishCmd.SetArgs([]string{"finish", "A02", "--decision", "promote", "--index=false", "--json"})
+	finishBuf := &bytes.Buffer{}
+	finishCmd.SetOut(finishBuf)
+	if err := finishCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var finishOut taskDecideOutput
+	if err := json.Unmarshal(finishBuf.Bytes(), &finishOut); err != nil {
+		t.Fatalf("finish json: %v\n%s", err, finishBuf.String())
+	}
+	if finishOut.TaskID != "target-address-test" || finishOut.Target != "A02" || finishOut.Decision != "promote" {
+		t.Fatalf("finish resolved wrong target: %#v", finishOut)
+	}
+}
+
+func TestTask_TargetAddressingRequiresUnambiguousSlice(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	for _, taskID := range []string{"ambiguous-target-a", "ambiguous-target-b"} {
+		startCmd := NewTaskCmd()
+		startCmd.SetArgs([]string{
+			"--id", taskID,
+			"--no-refresh",
+			"--index=false",
+			"--json",
+			"--slice", "shared first slice",
+			"task target ambiguity",
+		})
+		startCmd.SetOut(&bytes.Buffer{})
+		if err := startCmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	showCmd := NewTaskCmd()
+	showCmd.SetArgs([]string{"show", "A01", "--json"})
+	showCmd.SetOut(&bytes.Buffer{})
+	err := showCmd.Execute()
+	if err == nil {
+		t.Fatal("expected ambiguous target error")
+	}
+	for _, want := range []string{
+		"ambiguous task target",
+		"ambiguous-target-a:A01",
+		"ambiguous-target-b:A01",
+		"use a task id with --target",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ambiguous error missing %q: %v", want, err)
+		}
 	}
 }
 
@@ -1224,13 +1350,16 @@ func ImproveCompanionRecallNew() {}
 	if staleCard == nil || !strings.Contains(strings.Join(staleCard.Evidence, "\n"), "internal/retrieval/companion_recall_new.go") {
 		t.Fatalf("expected stale-index risk card, got %#v", out.RiskCards)
 	}
+	if staleCard.Title != "On-disk paths matched the task but were not indexed" {
+		t.Fatalf("stale-index title = %q", staleCard.Title)
+	}
 
 	indexBody := mustReadFile(t, out.IndexPath)
 	for _, want := range []string{
 		"## Freshness Warnings",
 		"## Risk Cards",
 		"internal/retrieval/companion_recall_new.go",
-		"stale-index risk",
+		"On-disk paths matched the task but were not indexed",
 	} {
 		if !strings.Contains(indexBody, want) {
 			t.Fatalf("A00 missing freshness warning %q:\n%s", want, indexBody)

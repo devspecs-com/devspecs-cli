@@ -648,7 +648,7 @@ func newTaskShowCmd() *cobra.Command {
 	var opts taskTargetOptions
 	opts.Dir = defaultTaskWorkspaceDir
 	cmd := &cobra.Command{
-		Use:   "show <task-id>",
+		Use:   "show <task-id|target>",
 		Short: "Show exact context for one task target",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -665,7 +665,7 @@ func newTaskPromptCmd() *cobra.Command {
 	var opts taskTargetOptions
 	opts.Dir = defaultTaskWorkspaceDir
 	cmd := &cobra.Command{
-		Use:   "prompt <task-id>",
+		Use:   "prompt <task-id|target>",
 		Short: "Emit an agent prompt bounded to one task target",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -683,7 +683,7 @@ func newTaskStartTargetCmd() *cobra.Command {
 	opts.Dir = defaultTaskWorkspaceDir
 	opts.Index = true
 	cmd := &cobra.Command{
-		Use:   "start <task-id>",
+		Use:   "start <task-id|target>",
 		Short: "Mark one task target as started",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -702,7 +702,7 @@ func newTaskFinishCmd() *cobra.Command {
 	opts.Dir = defaultTaskWorkspaceDir
 	opts.Index = true
 	cmd := &cobra.Command{
-		Use:   "finish <task-id>",
+		Use:   "finish <task-id|target>",
 		Short: "Finish one task target with a decision gate",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -722,7 +722,7 @@ func newTaskAuditCmd() *cobra.Command {
 	var opts taskAuditOptions
 	opts.Dir = defaultTaskWorkspaceDir
 	cmd := &cobra.Command{
-		Use:   "audit <task-id>",
+		Use:   "audit <task-id|target>",
 		Short: "Audit whether observed edits stayed inside one task target",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -757,7 +757,7 @@ func newTaskDecideCmd() *cobra.Command {
 	opts.Dir = defaultTaskWorkspaceDir
 	opts.Index = true
 	cmd := &cobra.Command{
-		Use:   "decide <task-id>",
+		Use:   "decide <task-id|target>",
 		Short: "Update a task series, slice, or iteration decision gate",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -783,7 +783,7 @@ func newTaskCheckpointCmd() *cobra.Command {
 	opts.Index = true
 
 	cmd := &cobra.Command{
-		Use:   "checkpoint <task-id>",
+		Use:   "checkpoint <task-id|target>",
 		Short: "Record a task checkpoint and update the task result",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1138,7 +1138,7 @@ func runTaskNext(cmd *cobra.Command, taskID string, opts taskTargetOptions) erro
 }
 
 func runTaskShow(cmd *cobra.Command, taskID string, opts taskTargetOptions) error {
-	ctx, err := loadTaskTargetContext(opts.Dir, taskID, opts.Target)
+	ctx, err := loadResolvedTaskTargetContext(opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1152,7 +1152,7 @@ func runTaskShow(cmd *cobra.Command, taskID string, opts taskTargetOptions) erro
 }
 
 func runTaskPrompt(cmd *cobra.Command, taskID string, opts taskTargetOptions) error {
-	ctx, err := loadTaskTargetContext(opts.Dir, taskID, opts.Target)
+	ctx, err := loadResolvedTaskTargetContext(opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1177,11 +1177,11 @@ func runTaskPrompt(cmd *cobra.Command, taskID string, opts taskTargetOptions) er
 }
 
 func runTaskStartTarget(cmd *cobra.Command, taskID string, opts taskTargetStateOptions) error {
-	ctx, err := loadTaskTargetContext(opts.Dir, taskID, opts.Target)
+	ctx, err := loadResolvedTaskTargetContext(opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
-	return runTaskDecide(cmd, taskID, taskDecideOptions{
+	return runTaskDecide(cmd, ctx.Manifest.TaskID, taskDecideOptions{
 		Dir:      opts.Dir,
 		Target:   ctx.Slice.ID,
 		Stage:    "started",
@@ -1192,16 +1192,16 @@ func runTaskStartTarget(cmd *cobra.Command, taskID string, opts taskTargetStateO
 }
 
 func runTaskFinish(cmd *cobra.Command, taskID string, opts taskTargetStateOptions) error {
+	ctx, err := loadResolvedTaskTargetContext(opts.Dir, taskID, opts.Target)
+	if err != nil {
+		return err
+	}
 	decision := strings.TrimSpace(opts.Decision)
 	if decision == "" {
 		return fmt.Errorf("decision is required")
 	}
 	if !isAllowedValue(decision, taskDecisions) {
 		return fmt.Errorf("invalid decision %q; valid values: %s", decision, strings.Join(taskDecisions, ", "))
-	}
-	ctx, err := loadTaskTargetContext(opts.Dir, taskID, opts.Target)
-	if err != nil {
-		return err
 	}
 	stage := strings.TrimSpace(opts.Stage)
 	if stage == "" {
@@ -1214,7 +1214,7 @@ func runTaskFinish(cmd *cobra.Command, taskID string, opts taskTargetStateOption
 			stage = "implemented"
 		}
 	}
-	return runTaskDecide(cmd, taskID, taskDecideOptions{
+	return runTaskDecide(cmd, ctx.Manifest.TaskID, taskDecideOptions{
 		Dir:      opts.Dir,
 		Target:   ctx.Slice.ID,
 		Stage:    stage,
@@ -1225,7 +1225,7 @@ func runTaskFinish(cmd *cobra.Command, taskID string, opts taskTargetStateOption
 }
 
 func runTaskAudit(cmd *cobra.Command, taskID string, opts taskAuditOptions) error {
-	ctx, err := loadTaskTargetContext(opts.Dir, taskID, opts.Target)
+	ctx, err := loadResolvedTaskTargetContext(opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1346,7 +1346,14 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 }
 
 func runTaskDecide(cmd *cobra.Command, taskID string, opts taskDecideOptions) error {
-	taskID = strings.TrimSpace(taskID)
+	resolvedTaskID, resolvedTarget, err := resolveTaskTargetArgument(opts.Dir, taskID, opts.Target)
+	if err != nil {
+		return err
+	}
+	taskID = strings.TrimSpace(resolvedTaskID)
+	if strings.TrimSpace(opts.Target) == "" && resolvedTarget != "" {
+		opts.Target = resolvedTarget
+	}
 	if err := validateTaskID(taskID); err != nil {
 		return err
 	}
@@ -1456,6 +1463,116 @@ type taskTargetContext struct {
 	Slice             taskSliceArtifact
 	SiblingTargets    []string
 	ArtifactFreshness []taskArtifactFreshness
+}
+
+type taskTargetAddressMatch struct {
+	TaskID string
+	Target string
+	Title  string
+	Plan   string
+}
+
+func loadResolvedTaskTargetContext(baseDir, taskIDOrTarget, selector string) (taskTargetContext, error) {
+	taskID, target, err := resolveTaskTargetArgument(baseDir, taskIDOrTarget, selector)
+	if err != nil {
+		return taskTargetContext{}, err
+	}
+	return loadTaskTargetContext(baseDir, taskID, target)
+}
+
+func resolveTaskTargetArgument(baseDir, taskIDOrTarget, selector string) (string, string, error) {
+	taskIDOrTarget = strings.TrimSpace(taskIDOrTarget)
+	selector = strings.TrimSpace(selector)
+	if selector != "" {
+		return taskIDOrTarget, selector, nil
+	}
+	if taskIDOrTarget == "" {
+		return "", "", fmt.Errorf("task id is empty")
+	}
+	if validateTaskID(taskIDOrTarget) == nil {
+		if _, _, _, err := loadTaskWorkspaceManifest(baseDir, taskIDOrTarget); err == nil {
+			return taskIDOrTarget, "", nil
+		}
+	}
+	matches, err := findTaskTargetAddressMatches(baseDir, taskIDOrTarget)
+	if err != nil {
+		return "", "", err
+	}
+	switch len(matches) {
+	case 0:
+		return taskIDOrTarget, "", nil
+	case 1:
+		return matches[0].TaskID, matches[0].Target, nil
+	default:
+		var labels []string
+		for _, match := range matches {
+			label := match.TaskID + ":" + match.Target
+			if match.Title != "" {
+				label += " (" + match.Title + ")"
+			}
+			labels = append(labels, label)
+		}
+		return "", "", fmt.Errorf("ambiguous task target %q; matches: %s; use a task id with --target", taskIDOrTarget, strings.Join(labels, ", "))
+	}
+}
+
+func findTaskTargetAddressMatches(baseDir, selector string) ([]taskTargetAddressMatch, error) {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return nil, nil
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	repoRoot := canonicalRepoRoot(resolveRepoRootFromWd(wd))
+	parent := taskWorkspacePath(repoRoot, baseDir, "")
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read task workspaces: %w", err)
+	}
+	var matches []taskTargetAddressMatch
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		manifestPath := filepath.Join(parent, entry.Name(), taskManifestFilename)
+		if _, err := os.Stat(manifestPath); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		manifest, err := readTaskManifest(manifestPath)
+		if err != nil {
+			continue
+		}
+		taskID := strings.TrimSpace(manifest.TaskID)
+		if taskID == "" {
+			taskID = entry.Name()
+		}
+		for _, slice := range taskSyncSlices(manifest) {
+			if !taskSliceMatchesSelector(slice, selector) {
+				continue
+			}
+			matches = append(matches, taskTargetAddressMatch{
+				TaskID: taskID,
+				Target: slice.ID,
+				Title:  slice.Title,
+				Plan:   slice.Plan,
+			})
+		}
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].TaskID == matches[j].TaskID {
+			return matches[i].Target < matches[j].Target
+		}
+		return matches[i].TaskID < matches[j].TaskID
+	})
+	return matches, nil
 }
 
 func loadTaskTargetContext(baseDir, taskID, selector string) (taskTargetContext, error) {
@@ -1572,6 +1689,7 @@ func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput, prior
 	writeTaskPromptPriorSliceEvidence(&b, priorEvidence)
 	fmt.Fprintln(&b, "Do not implement sibling slices, future slices, or the full task track. Stop after this target's acceptance checks are satisfied.")
 	fmt.Fprintf(&b, "Record the outcome in `%s` or with `ds task checkpoint %s --slice %s`.\n", filepath.ToSlash(taskRelativePath(ctx.RepoRoot, target.ResultPath)), target.TaskID, target.Target)
+	fmt.Fprintln(&b, "Checklist edits are useful notes, but lifecycle state comes from `ds task checkpoint`, `ds task finish`, or `ds task decide`.")
 	fmt.Fprintln(&b, "At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.")
 	fmt.Fprintln(&b)
 	if target.PlanBody != "" {
@@ -2053,26 +2171,12 @@ func taskSliceForCheckpoint(manifest taskManifest, selector string) (taskSliceAr
 	if selector == "" {
 		return first, nil
 	}
-	matches := func(slice taskSliceArtifact) bool {
-		for _, candidate := range []string{
-			slice.ID,
-			slice.Title,
-			slice.Plan,
-			slice.Result,
-			sanitizeTaskFilename(slice.Title),
-		} {
-			if strings.EqualFold(strings.TrimSpace(candidate), selector) {
-				return true
-			}
-		}
-		return false
-	}
 	for _, slice := range manifest.Artifacts.Slices {
-		if matches(slice) {
+		if taskSliceMatchesSelector(slice, selector) {
 			return slice, nil
 		}
 	}
-	if matches(first) {
+	if taskSliceMatchesSelector(first, selector) {
 		return first, nil
 	}
 	var available []string
@@ -2090,6 +2194,25 @@ func taskSliceForCheckpoint(manifest taskManifest, selector string) (taskSliceAr
 		return taskSliceArtifact{}, fmt.Errorf("task has no slice artifacts")
 	}
 	return taskSliceArtifact{}, fmt.Errorf("unknown task slice %q; available: %s", selector, strings.Join(available, ", "))
+}
+
+func taskSliceMatchesSelector(slice taskSliceArtifact, selector string) bool {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return false
+	}
+	for _, candidate := range []string{
+		slice.ID,
+		slice.Title,
+		slice.Plan,
+		slice.Result,
+		sanitizeTaskFilename(slice.Title),
+	} {
+		if strings.EqualFold(strings.TrimSpace(candidate), selector) {
+			return true
+		}
+	}
+	return false
 }
 
 type taskPreflight struct {
@@ -2291,7 +2414,7 @@ func buildTaskRiskCardsFromFacts(query string, predicted taskPredictedContext, w
 		}
 		cards = appendTaskRiskCard(cards, taskRiskCard{
 			ID:         "stale-index",
-			Title:      "On-disk task anchors were not in the indexed candidate set",
+			Title:      "On-disk paths matched the task but were not indexed",
 			Severity:   "medium",
 			Source:     "freshness",
 			Evidence:   firstStrings(evidence, taskRiskEvidenceLimit),
@@ -3699,7 +3822,7 @@ func writeFreshnessWarnings(b *strings.Builder, warnings []taskFreshnessWarning)
 		return
 	}
 	fmt.Fprintln(b, "## Freshness Warnings")
-	fmt.Fprintln(b, "These on-disk paths look task-related but were not present in the indexed candidate set. Treat them as stale-index risk, not proof that the initial pack is wrong.")
+	fmt.Fprintln(b, "These on-disk paths match the task wording but were not present in the indexed candidate set. Treat them as stale-index risk, not proof that the initial pack is wrong.")
 	fmt.Fprintln(b)
 	for _, warning := range warnings {
 		fmt.Fprintf(b, "- `%s`", warning.Path)
@@ -3894,7 +4017,7 @@ func taskKnownUnknowns(manifest taskManifest) []string {
 		out = append(out, "Related Git receipts touched files that were not admitted to the initial context.")
 	}
 	if len(manifest.FreshnessWarnings) > 0 {
-		out = append(out, "On-disk task anchors may be missing from the indexed candidate set.")
+		out = append(out, "Task-related on-disk paths may be missing from the indexed candidate set.")
 	}
 	if manifest.Confidence.PackCompleteness != "high" {
 		if taskProfileIsGreenfield(manifest) {
@@ -3951,7 +4074,14 @@ func taskAdvisorySourceLeads(files []taskAdvisoryFile) []taskAdvisoryFile {
 }
 
 func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOptions) error {
-	taskID = strings.TrimSpace(taskID)
+	resolvedTaskID, resolvedSlice, err := resolveTaskTargetArgument(opts.Dir, taskID, opts.Slice)
+	if err != nil {
+		return err
+	}
+	taskID = strings.TrimSpace(resolvedTaskID)
+	if strings.TrimSpace(opts.Slice) == "" && resolvedSlice != "" {
+		opts.Slice = resolvedSlice
+	}
 	if err := validateTaskID(taskID); err != nil {
 		return err
 	}
@@ -4778,7 +4908,7 @@ func writeTaskStartHuman(out io.Writer, result taskStartOutput, confidence taskC
 		}
 	}
 	if len(result.FreshnessWarnings) > 0 {
-		fmt.Fprintf(out, "Freshness warnings: %d on-disk anchor(s) were not in the indexed candidate set\n", len(result.FreshnessWarnings))
+		fmt.Fprintf(out, "Freshness warnings: %d task-related on-disk path(s) were not in the indexed candidate set\n", len(result.FreshnessWarnings))
 		for _, warning := range firstTaskFreshnessWarnings(result.FreshnessWarnings, 3) {
 			fmt.Fprintf(out, "  - %s", warning.Path)
 			if warning.Reason != "" {
