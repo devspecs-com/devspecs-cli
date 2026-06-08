@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 )
 
@@ -491,6 +492,80 @@ func TestTask_AdvisoryFilesAreCappedAndPrioritized(t *testing.T) {
 	}
 	if got := taskAdvisoryFilesFromCheckpointFacts("fix discount rounding", strongPredicted, facts); len(got) != 0 {
 		t.Fatalf("strong predicted context should suppress checkpoint leads, got %#v", got)
+	}
+}
+
+func TestTask_PromptCarriesPriorSliceCheckpointEvidence(t *testing.T) {
+	setupTaskCommandRepo(t)
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "prior-slice-evidence-test",
+		"--no-refresh",
+		"--index=false",
+		"--slice", "trace test companion recall",
+		"--slice", "wire test companion recall",
+		"improve test companion recall",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	checkpointCmd := NewTaskCmd()
+	checkpointCmd.SetArgs([]string{
+		"checkpoint", "prior-slice-evidence-test",
+		"--slice", "A01",
+		"--stage", "validated",
+		"--decision", "promote",
+		"--file-read", "internal/retrieval/ranking.go",
+		"--test-read", "internal/retrieval/ranking_test.go",
+		"--missed-file", "internal/retrieval/ranking_test.go",
+		"--noise-file", ".devspecs/tasks/prior-slice-evidence-test/A00-index.md",
+		"--learning", "context_gap|trace found the companion test|high|A01|internal/retrieval/ranking_test.go",
+		"--json",
+	})
+	checkpointCmd.SetOut(&bytes.Buffer{})
+	if err := checkpointCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	promptCmd := NewTaskCmd()
+	promptCmd.SetArgs([]string{"prompt", "prior-slice-evidence-test", "--target", "A02", "--json"})
+	promptBuf := &bytes.Buffer{}
+	promptCmd.SetOut(promptBuf)
+	if err := promptCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var promptOut taskPromptOutput
+	if err := json.Unmarshal(promptBuf.Bytes(), &promptOut); err != nil {
+		t.Fatalf("prompt json: %v\n%s", err, promptBuf.String())
+	}
+	for _, want := range []string{
+		"Prior slice evidence:",
+		"checkpointed by earlier targets",
+		"internal/retrieval/ranking.go",
+		"internal/retrieval/ranking_test.go",
+	} {
+		if !strings.Contains(promptOut.Prompt, want) {
+			t.Fatalf("prompt missing prior evidence %q:\n%s", want, promptOut.Prompt)
+		}
+	}
+	if taskAdvisoryFileByPath(promptOut.PriorSliceEvidence, "internal/retrieval/ranking_test.go") == nil {
+		t.Fatalf("prompt json missing prior test evidence: %#v", promptOut.PriorSliceEvidence)
+	}
+	if taskAdvisoryFileByPath(promptOut.PriorSliceEvidence, ".devspecs/tasks/prior-slice-evidence-test/A00-index.md") != nil {
+		t.Fatalf("prompt evidence should filter task workspace paths: %#v", promptOut.PriorSliceEvidence)
+	}
+}
+
+func TestTask_PreflightFiltersTaskWorkspaceCandidates(t *testing.T) {
+	got := filterTaskPreflightCandidates([]retrieval.Candidate{
+		{Path: ".devspecs/tasks/task-one/A00-index.md"},
+		{Path: "internal/retrieval/ranking.go"},
+		{Path: "C:/repo/.devspecs/tasks/task-one/A01-plan.md"},
+	})
+	if len(got) != 1 || got[0].Path != "internal/retrieval/ranking.go" {
+		t.Fatalf("filtered candidates = %#v", got)
 	}
 }
 

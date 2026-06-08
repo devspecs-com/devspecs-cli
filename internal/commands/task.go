@@ -19,6 +19,7 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
+	"github.com/devspecs-com/devspecs-cli/internal/indexquery"
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/spf13/cobra"
@@ -287,11 +288,12 @@ type taskTargetOutput struct {
 }
 
 type taskPromptOutput struct {
-	TaskID         string           `json:"task_id"`
-	Target         string           `json:"target"`
-	Prompt         string           `json:"prompt"`
-	TargetContext  taskTargetOutput `json:"target_context"`
-	SiblingTargets []string         `json:"sibling_targets,omitempty"`
+	TaskID             string             `json:"task_id"`
+	Target             string             `json:"target"`
+	Prompt             string             `json:"prompt"`
+	TargetContext      taskTargetOutput   `json:"target_context"`
+	SiblingTargets     []string           `json:"sibling_targets,omitempty"`
+	PriorSliceEvidence []taskAdvisoryFile `json:"prior_slice_evidence,omitempty"`
 }
 
 type taskAuditOutput struct {
@@ -1155,13 +1157,15 @@ func runTaskPrompt(cmd *cobra.Command, taskID string, opts taskTargetOptions) er
 		return err
 	}
 	target := taskTargetOutputFromContext(ctx, true)
-	prompt := renderTaskAgentPrompt(ctx, target)
+	priorEvidence := taskPriorSliceEvidenceForPrompt(ctx.RepoRoot, ctx.Manifest.TaskID, ctx.Slice.ID)
+	prompt := renderTaskAgentPrompt(ctx, target, priorEvidence)
 	out := taskPromptOutput{
-		TaskID:         target.TaskID,
-		Target:         target.Target,
-		Prompt:         prompt,
-		TargetContext:  target,
-		SiblingTargets: target.SiblingTargets,
+		TaskID:             target.TaskID,
+		Target:             target.Target,
+		Prompt:             prompt,
+		TargetContext:      target,
+		SiblingTargets:     target.SiblingTargets,
+		PriorSliceEvidence: priorEvidence,
 	}
 	if opts.AsJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
@@ -1543,7 +1547,7 @@ func writeTaskTargetHuman(out io.Writer, title string, target taskTargetOutput, 
 	return nil
 }
 
-func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput) string {
+func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput, priorEvidence []taskAdvisoryFile) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are working on DevSpecs task %s target %s only.\n\n", target.TaskID, target.Target)
 	fmt.Fprintln(&b, "Boundary:")
@@ -1565,6 +1569,7 @@ func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput) strin
 	fmt.Fprintf(&b, "Goal: %s\n\n", target.Title)
 	writeTaskPromptRiskCards(&b, ctx.Manifest.RiskCards)
 	writeTaskPromptAdvisoryFiles(&b, ctx.Manifest.AdvisoryFiles)
+	writeTaskPromptPriorSliceEvidence(&b, priorEvidence)
 	fmt.Fprintln(&b, "Do not implement sibling slices, future slices, or the full task track. Stop after this target's acceptance checks are satisfied.")
 	fmt.Fprintf(&b, "Record the outcome in `%s` or with `ds task checkpoint %s --slice %s`.\n", filepath.ToSlash(taskRelativePath(ctx.RepoRoot, target.ResultPath)), target.TaskID, target.Target)
 	fmt.Fprintln(&b, "At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.")
@@ -1598,6 +1603,21 @@ func writeTaskPromptAdvisoryFiles(b *strings.Builder, files []taskAdvisoryFile) 
 	}
 	fmt.Fprintln(b, "Checkpoint leads:")
 	fmt.Fprintln(b, "The current pack is weak, so these prior checkpoint facts are verification leads only. They are not pack-ranked edit targets.")
+	for _, file := range files {
+		fmt.Fprintf(b, "- `%s` [%s]: %s\n", file.Path, file.Kind, file.AgentCheck)
+		if len(file.Evidence) > 0 {
+			fmt.Fprintf(b, "  Evidence: %s\n", strings.Join(firstStrings(file.Evidence, 2), "; "))
+		}
+	}
+	fmt.Fprintln(b)
+}
+
+func writeTaskPromptPriorSliceEvidence(b *strings.Builder, files []taskAdvisoryFile) {
+	if len(files) == 0 {
+		return
+	}
+	fmt.Fprintln(b, "Prior slice evidence:")
+	fmt.Fprintln(b, "These facts were checkpointed by earlier targets in this task. Verify them for continuity; they are not permission to widen this slice.")
 	for _, file := range files {
 		fmt.Fprintf(b, "- `%s` [%s]: %s\n", file.Path, file.Kind, file.AgentCheck)
 		if len(file.Evidence) > 0 {
@@ -2095,17 +2115,75 @@ func buildTaskPreflight(cmd *cobra.Command, repoRoot, query string, noRefresh bo
 	if err != nil {
 		return taskPreflight{}, fmt.Errorf("task preflight: %w", err)
 	}
-	candidates := loadResult.Candidates
+	baseCandidates := filterTaskPreflightCandidates(loadResult.Candidates)
+	packScoutMode := taskPackScoutMode()
+	if packScoutMode == "" {
+		return taskPreflight{}, fmt.Errorf("unknown task pack scout mode")
+	}
+	sourcePackMode := taskSourcePackMode()
+	sourcePackConfigured := strings.TrimSpace(taskSourcePackModeEnv()) != ""
+	packPresentationMode := taskPackPresentationMode()
+	packPresentationConfigured := strings.TrimSpace(taskPackPresentationModeEnv()) != ""
+	scoutPreset := findPackScoutPresetOptions{
+		SourcePackMode:             sourcePackMode,
+		SourcePackConfigured:       sourcePackConfigured,
+		PackPresentationMode:       packPresentationMode,
+		PackPresentationConfigured: packPresentationConfigured,
+	}
+	applyFindPackScoutPreset(packScoutMode, &scoutPreset)
+	sourcePackMode = normalizeFindSourcePackMode(scoutPreset.SourcePackMode)
+	if sourcePackMode == "" {
+		return taskPreflight{}, fmt.Errorf("unknown task source pack mode")
+	}
+	packPresentationMode = normalizeFindPackPresentationMode(scoutPreset.PackPresentationMode)
+	if packPresentationMode == "" {
+		return taskPreflight{}, fmt.Errorf("unknown task pack presentation mode")
+	}
+	sourceManifestMode := indexquery.SourceManifestCandidateModeOff
+	sourceManifestConsumption := false
+	switch sourcePackMode {
+	case findSourcePackModeCompactManifestV0, findSourcePackModeCompactManifestV1, findSourcePackModeCompactManifestV2:
+		sourceManifestMode = indexquery.SourceManifestCandidateModeWindow
+		sourceManifestConsumption = true
+	}
+	candidates := append([]retrieval.Candidate(nil), baseCandidates...)
+	if sourceManifestMode != indexquery.SourceManifestCandidateModeOff {
+		manifestCandidates, _, err := loadFindSourceManifestCandidates(db, fp, query, sourceManifestMode)
+		if err != nil {
+			return taskPreflight{}, fmt.Errorf("task source manifest candidates: %w", err)
+		}
+		candidates = append(candidates, filterTaskPreflightCandidates(manifestCandidates)...)
+	}
 	retriever := retrieval.WeightedFilesRetrieverV0{
 		AnchorFirstRanking: true,
 		AnchorFirstMode:    retrieval.DefaultAnchorFirstMode,
 	}
+	var baselineMatches []retrieval.Candidate
+	if sourcePackMode == findSourcePackModeCompactManifestV2 {
+		baselineMatches = retrieveFindMatches(retriever, baseCandidates, query)
+	}
 	matches := retrieveFindMatches(retriever, candidates, query)
+	if sourceManifestConsumption && sourceManifestMode != indexquery.SourceManifestCandidateModeOff {
+		if sourcePackMode == findSourcePackModeCompactManifestV2 {
+			if len(baselineMatches) > 0 {
+				baselineMatches = addFindPackCompanionCandidates(cmd.Context(), fp.RepoRoot, query, baselineMatches, baseCandidates, taskPackCompanionMode())
+			}
+			matches = applyFindSourceManifestConsumptionV2Scout(db, fp, query, baselineMatches, matches, candidates)
+		} else if sourcePackMode == findSourcePackModeCompactManifestV1 {
+			matches = applyFindSourceManifestConsumptionV1Scout(db, fp, query, matches, candidates)
+		} else {
+			matches = applyFindSourceManifestConsumptionScout(query, matches, candidates)
+		}
+	}
+	if packScoutMode == findPackScoutModeBetaV0 {
+		matches = retrieval.AddScoutAnchorAdmissionCandidates(matches, baseCandidates, query)
+	}
 	packResult, err := buildFindPackAssemblyFromMatches(cmd.Context(), db, fp, query, matches, candidates, findPackAssemblyOptions{
 		PackCompanions:       taskPackCompanionMode(),
 		SourceTestReceipts:   findSourceTestReceiptsModeOff,
 		GitReceipts:          true,
-		PackPresentationMode: taskPackPresentationMode(),
+		PackPresentationMode: packPresentationMode,
+		PackScoutMode:        packScoutMode,
 	})
 	if err != nil {
 		return taskPreflight{}, fmt.Errorf("task preflight pack assembly: %w", err)
@@ -2130,21 +2208,71 @@ func taskPackCompanionMode() string {
 	return findPackCompanionModeAll
 }
 
-func taskPackPresentationMode() string {
+func taskPackScoutMode() string {
+	envValue := strings.TrimSpace(os.Getenv("DEVSPECS_TASK_PACK_SCOUT_MODE"))
+	if envValue == "" {
+		envValue = strings.TrimSpace(os.Getenv("DEVSPECS_PACK_SCOUT_MODE"))
+	}
+	return resolveFindPackScoutMode("", true, false, envValue)
+}
+
+func taskSourcePackModeEnv() string {
+	if value := strings.TrimSpace(os.Getenv("DEVSPECS_TASK_EXPERIMENTAL_SOURCE_PACK_MODE")); value != "" {
+		return value
+	}
+	return strings.TrimSpace(os.Getenv("DEVSPECS_EXPERIMENTAL_SOURCE_PACK_MODE"))
+}
+
+func taskSourcePackMode() string {
+	if value := taskSourcePackModeEnv(); value != "" {
+		return value
+	}
+	return findSourcePackModeOff
+}
+
+func taskPackPresentationModeEnv() string {
 	if value := strings.TrimSpace(os.Getenv("DEVSPECS_TASK_PACK_PRESENTATION_MODE")); value != "" {
 		return value
 	}
-	if value := strings.TrimSpace(os.Getenv("DEVSPECS_PACK_PRESENTATION_MODE")); value != "" {
+	return strings.TrimSpace(os.Getenv("DEVSPECS_PACK_PRESENTATION_MODE"))
+}
+
+func taskPackPresentationMode() string {
+	if value := taskPackPresentationModeEnv(); value != "" {
 		return value
 	}
 	return findPackPresentationModeOff
 }
 
+func filterTaskPreflightCandidates(candidates []retrieval.Candidate) []retrieval.Candidate {
+	if len(candidates) == 0 {
+		return nil
+	}
+	out := make([]retrieval.Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if taskWorkspaceContextPath(candidate.Path) {
+			continue
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func taskWorkspaceContextPath(path string) bool {
+	path = normalizeSinglePath(path)
+	if path == "" {
+		return false
+	}
+	path = strings.TrimPrefix(path, "./")
+	return strings.HasPrefix(path, ".devspecs/tasks/") || strings.Contains(path, "/.devspecs/tasks/")
+}
+
 const (
-	taskRiskCardLimit     = 6
-	taskRiskEvidenceLimit = 4
-	taskRiskFactLimit     = 50
-	taskAdvisoryFileLimit = 5
+	taskRiskCardLimit      = 6
+	taskRiskEvidenceLimit  = 4
+	taskRiskFactLimit      = 50
+	taskAdvisoryFileLimit  = 5
+	taskPriorEvidenceLimit = 8
 )
 
 func buildTaskRiskCardsFromFacts(query string, predicted taskPredictedContext, warnings []taskFreshnessWarning, facts []store.TaskCheckpointFact) []taskRiskCard {
@@ -2282,6 +2410,150 @@ func recentTaskCheckpointFacts(db *store.DB, repoRoot string, limit int) []store
 		return nil
 	}
 	return facts
+}
+
+func taskCheckpointFactsForTask(repoRoot, taskID string) []store.TaskCheckpointFact {
+	repoRoot = strings.TrimSpace(repoRoot)
+	taskID = strings.TrimSpace(taskID)
+	if repoRoot == "" || taskID == "" {
+		return nil
+	}
+	db, err := openDB()
+	if err != nil {
+		return nil
+	}
+	defer db.Close()
+	var repoID string
+	err = db.QueryRow("SELECT id FROM repos WHERE root_path = ?", repoRoot).Scan(&repoID)
+	if err != nil {
+		return nil
+	}
+	facts, err := db.ListTaskCheckpointFacts(repoID, taskID)
+	if err != nil {
+		return nil
+	}
+	return facts
+}
+
+func taskPriorSliceEvidenceForPrompt(repoRoot, taskID, target string) []taskAdvisoryFile {
+	return taskPriorSliceEvidenceFromFacts(target, taskCheckpointFactsForTask(repoRoot, taskID))
+}
+
+func taskPriorSliceEvidenceFromFacts(target string, facts []store.TaskCheckpointFact) []taskAdvisoryFile {
+	target = strings.TrimSpace(target)
+	var files []taskAdvisoryFile
+	for _, fact := range facts {
+		if target != "" && strings.EqualFold(strings.TrimSpace(fact.Target), target) {
+			continue
+		}
+		actual := parseTaskCheckpointActualContextJSON(fact.ActualContextJSON)
+		feedback := parseTaskCheckpointFeedbackJSON(fact.FeedbackJSON)
+		learnings := parseTaskCheckpointLearningsJSON(fact.LearningsJSON)
+		for _, path := range appendNormalizedUnique(nil, actual.FilesRead...) {
+			files = appendTaskPriorSliceEvidence(files, fact, path, taskAdvisoryActualKind(path, false), "read")
+		}
+		for _, path := range appendNormalizedUnique(nil, actual.FilesEdited...) {
+			files = appendTaskPriorSliceEvidence(files, fact, path, taskAdvisoryActualKind(path, true), "edited")
+		}
+		for _, path := range appendNormalizedUnique(nil, actual.TestsRead...) {
+			files = appendTaskPriorSliceEvidence(files, fact, path, "prior-test", "read test")
+		}
+		for _, path := range appendNormalizedUnique(nil, feedback.CriticalMissed...) {
+			kind := "prior-missed-file"
+			if looksLikeTestPath(path) {
+				kind = "prior-missed-test"
+			}
+			files = appendTaskPriorSliceEvidence(files, fact, path, kind, "missed")
+		}
+		for _, path := range appendNormalizedUnique(nil, feedback.DistractingIncluded...) {
+			files = appendTaskPriorSliceEvidence(files, fact, path, "prior-noise", "called distracting")
+		}
+		for _, learning := range learnings {
+			for _, path := range appendNormalizedUnique(nil, learning.EvidenceRefs...) {
+				kind := "prior-evidence"
+				if looksLikeTestPath(path) {
+					kind = "prior-test-evidence"
+				}
+				if taskWorkspaceContextPath(path) {
+					continue
+				}
+				files = appendTaskAdvisoryFile(files, taskAdvisoryFile{
+					Path:       path,
+					Kind:       kind,
+					Source:     "checkpoint_fact",
+					Evidence:   []string{taskRiskFactLearningEvidence(fact, learning)},
+					AgentCheck: taskAdvisoryAgentCheck(kind),
+				})
+			}
+		}
+	}
+	return selectTaskPriorSliceEvidence(files)
+}
+
+func appendTaskPriorSliceEvidence(files []taskAdvisoryFile, fact store.TaskCheckpointFact, path, kind, verb string) []taskAdvisoryFile {
+	if taskWorkspaceContextPath(path) {
+		return files
+	}
+	return appendTaskAdvisoryFile(files, taskAdvisoryFile{
+		Path:       path,
+		Kind:       kind,
+		Source:     "checkpoint_fact",
+		Evidence:   []string{taskRiskFactPathEvidence(fact, verb, path)},
+		AgentCheck: taskAdvisoryAgentCheck(kind),
+	})
+}
+
+func selectTaskPriorSliceEvidence(files []taskAdvisoryFile) []taskAdvisoryFile {
+	if len(files) == 0 {
+		return nil
+	}
+	type bucket struct {
+		kinds []string
+		limit int
+	}
+	buckets := []bucket{
+		{kinds: []string{"prior-source", "prior-edited-source"}, limit: 2},
+		{kinds: []string{"prior-test", "prior-missed-test", "prior-test-evidence"}, limit: 4},
+		{kinds: []string{"prior-missed-file", "prior-evidence"}, limit: 1},
+		{kinds: []string{"prior-noise"}, limit: 1},
+	}
+	selected := make([]taskAdvisoryFile, 0, len(files))
+	usedPaths := map[string]bool{}
+	for _, bucket := range buckets {
+		count := 0
+		for _, kind := range bucket.kinds {
+			for _, file := range files {
+				path := normalizeSinglePath(file.Path)
+				if path == "" || usedPaths[path] || file.Kind != kind {
+					continue
+				}
+				selected = append(selected, file)
+				usedPaths[path] = true
+				count++
+				if count >= bucket.limit || len(selected) >= taskPriorEvidenceLimit {
+					break
+				}
+			}
+			if count >= bucket.limit || len(selected) >= taskPriorEvidenceLimit {
+				break
+			}
+		}
+		if len(selected) >= taskPriorEvidenceLimit {
+			return selected
+		}
+	}
+	for _, file := range files {
+		path := normalizeSinglePath(file.Path)
+		if path == "" || usedPaths[path] {
+			continue
+		}
+		selected = append(selected, file)
+		usedPaths[path] = true
+		if len(selected) >= taskPriorEvidenceLimit {
+			break
+		}
+	}
+	return selected
 }
 
 func taskRiskCardsFromCheckpointFacts(query string, predicted taskPredictedContext, facts []store.TaskCheckpointFact) []taskRiskCard {
