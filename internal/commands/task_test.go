@@ -941,6 +941,7 @@ func TestTask_TargetAddressingRequiresUnambiguousSlice(t *testing.T) {
 	showCmd := NewTaskCmd()
 	showCmd.SetArgs([]string{"show", "A01", "--json"})
 	showCmd.SetOut(&bytes.Buffer{})
+	showCmd.SetErr(&bytes.Buffer{})
 	err := showCmd.Execute()
 	if err == nil {
 		t.Fatal("expected ambiguous target error")
@@ -954,6 +955,41 @@ func TestTask_TargetAddressingRequiresUnambiguousSlice(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("ambiguous error missing %q: %v", want, err)
 		}
+	}
+}
+
+func TestTask_StartAutoRefreshesTaskSubstrate(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"--id", "task-substrate-refresh-test", "--json", "improve test companion recall"})
+	buf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(errBuf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repoID := taskTestRepoID(t, db, repoDir)
+	counts, err := db.CountSourceManifest(repoID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.Files == 0 {
+		t.Fatalf("expected task auto-refresh to populate source manifest, got %#v", counts)
+	}
+	var testCases int
+	if err := db.QueryRow("SELECT COUNT(DISTINCT artifact_id) FROM sources WHERE repo_id = ? AND source_type = 'test_case'", repoID).Scan(&testCases); err != nil {
+		t.Fatal(err)
+	}
+	if testCases == 0 {
+		t.Fatal("expected task auto-refresh to index test cases")
 	}
 }
 

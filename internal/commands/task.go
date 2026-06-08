@@ -2231,7 +2231,7 @@ func buildTaskPreflight(cmd *cobra.Command, repoRoot, query string, noRefresh bo
 	defer db.Close()
 
 	if !noRefresh {
-		ensureRepoIndexed(cmd, db, repoRoot)
+		ensureRepoIndexedForTask(cmd, db, repoRoot)
 	}
 	fp := store.FilterParams{RepoRoot: repoRoot}
 	loadResult, err := loadRetrievalCandidatesForQueryWithReport(db, fp, query)

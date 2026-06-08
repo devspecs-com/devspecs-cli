@@ -70,10 +70,65 @@ func ensureRepoIndexed(cmd *cobra.Command, db *store.DB, repoRoot string) {
 	runScanQuietAndNotify(cmd, db, repoRoot)
 }
 
+func ensureRepoIndexedForTask(cmd *cobra.Command, db *store.DB, repoRoot string) {
+	repoRoot = canonicalRepoRoot(repoRoot)
+	if repoRoot == "" {
+		return
+	}
+	status := freshness.Check(db, repoRoot)
+	substrateReady, substrateReason := taskIndexSubstrateReady(db, repoRoot)
+	if status != nil && !status.Stale && substrateReady {
+		debugLog("ensureRepoIndexedForTask: task substrate is fresh for %s", repoRoot)
+		return
+	}
+	if status == nil {
+		debugLog("ensureRepoIndexedForTask: no repo row for %s; triggering task auto-scan", repoRoot)
+	} else if status.Stale {
+		debugLog("ensureRepoIndexedForTask: stale reason=%s; triggering task auto-scan", status.Reason)
+	} else {
+		debugLog("ensureRepoIndexedForTask: substrate reason=%s; triggering task auto-scan", substrateReason)
+	}
+	runTaskScanQuietAndNotify(cmd, db, repoRoot)
+}
+
+func taskIndexSubstrateReady(db *store.DB, repoRoot string) (bool, string) {
+	meta := db.GetRepoByRoot(canonicalRepoRoot(repoRoot))
+	if meta == nil {
+		return false, "repo not indexed"
+	}
+	sourceContextCount := countRepoSourcesByType(db, meta.ID, "source_context")
+	if sourceContextCount == 0 {
+		return true, ""
+	}
+	counts, err := db.CountSourceManifest(meta.ID)
+	if err != nil {
+		return false, "source manifest count failed"
+	}
+	if counts.Files == 0 {
+		return false, "source manifest missing"
+	}
+	return true, ""
+}
+
+func countRepoSourcesByType(db *store.DB, repoID, sourceType string) int {
+	var count int
+	if err := db.QueryRow("SELECT COUNT(DISTINCT artifact_id) FROM sources WHERE repo_id = ? AND source_type = ?", repoID, sourceType).Scan(&count); err != nil {
+		return 0
+	}
+	return count
+}
+
 func runScanQuietAndNotify(cmd *cobra.Command, db *store.DB, repoRoot string) {
 	result := runScanQuiet(db, repoRoot)
 	if result != nil && (result.New > 0 || result.Updated > 0) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Index updated (%d new, %d updated)\n", result.New, result.Updated)
+	}
+}
+
+func runTaskScanQuietAndNotify(cmd *cobra.Command, db *store.DB, repoRoot string) {
+	result := runTaskScanQuiet(db, repoRoot)
+	if result != nil && (result.New > 0 || result.Updated > 0) {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Task index updated (%d new, %d updated)\n", result.New, result.Updated)
 	}
 }
 
@@ -127,6 +182,33 @@ func runScanQuiet(db *store.DB, repoRoot string) *scan.Result {
 	result, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, scanOpts)
 	if err != nil {
 		debugLog("runScanQuiet: scan error: %v", err)
+		return nil
+	}
+	return result
+}
+
+func runTaskScanQuiet(db *store.DB, repoRoot string) *scan.Result {
+	cfg, err := config.LoadRepoConfig(repoRoot)
+	if err != nil {
+		debugLog("runTaskScanQuiet: LoadRepoConfig error: %v", err)
+	}
+	cfg = config.WithDefaultIntentCandidateDiscovery(cfg, true)
+	cfg = config.WithTestCaseArtifacts(cfg, true)
+	ids := idgen.NewFactory()
+	adpts := []adapters.Adapter{&openspec.Adapter{}, &adr.Adapter{}, &markdown.Adapter{}, &sourcecontext.Adapter{}, &testcase.Adapter{}}
+	if cfg != nil && cfg.CodeCommentArtifactsEnabled(false) {
+		adpts = append(adpts, &codecomment.Adapter{})
+	}
+	scanner := scan.New(db, ids, adpts)
+	scanOpts, err := liveScanRunOptions(db, repoRoot)
+	if err != nil {
+		debugLog("runTaskScanQuiet: live scan option error: %v", err)
+		return nil
+	}
+	scanOpts.SourceManifest = true
+	result, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, scanOpts)
+	if err != nil {
+		debugLog("runTaskScanQuiet: scan error: %v", err)
 		return nil
 	}
 	return result
