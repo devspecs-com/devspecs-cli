@@ -39,6 +39,7 @@ go test -count=1 ./internal/evalharness
 | `testdata/samples/specify/` | Synthetic Spec Kit-style layout. | Keep public. |
 | `testdata/samples/false-positives/` | Negative examples for parser noise. | Keep public. |
 | `testdata/samples/bmad/_bmad-output/` | Synthetic BMAD output layout for format detection. | Keep public. Do not ship the full installed BMAD method bundle as a fixture. |
+| `TASK_WORKFLOW_EXAMPLE.md` | Public-safe normalized transcript from current `ds task` commands against a tiny synthetic repo. | Keep current with launch UX; do not replace it with raw local demo captures. |
 
 ## What Stays Private
 
@@ -66,6 +67,8 @@ Public demos should be described honestly:
 - captured demos should say they are captured;
 - generated transcripts should contain no local paths, private repo names,
   secrets, or stale behavior from older CLI builds.
+- public examples should point to [`TASK_WORKFLOW_EXAMPLE.md`](TASK_WORKFLOW_EXAMPLE.md)
+  when demonstrating bounded task/slice lifecycle behavior.
 
 ## Fixture Admission Rules
 

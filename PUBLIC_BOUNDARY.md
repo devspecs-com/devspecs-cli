@@ -8,8 +8,8 @@ research runs, private feedback notes, broad holdouts, and demo probes should
 live in a private research archive unless they have been deliberately
 graduated into a small public fixture or public example.
 
-No files were moved or deleted during this inventory pass. The goal is to make
-the next cleanup slice mechanical and reversible.
+This document began as an inventory pass and now records the public/private
+boundary plus completed cleanup actions.
 
 ## Repository Boundary
 
@@ -39,6 +39,7 @@ the next cleanup slice mechanical and reversible.
 | `internal/retrieval/pack*`, `internal/commands/task*` | `keep-public` | Core launch behavior for task packing and bounded slice flow. | Keep covered by product tests. |
 | `internal/classify/eval*`, `internal/evalharness/`, `internal/commands/eval*` | `keep-public` | Public harness code is acceptable when it is not bundled with private corpora. | Keep, but pair public claims with a small public eval corpus. |
 | `README.md`, `LICENSE`, `install.ps1`, `install.sh`, `.goreleaser.yml`, `.github/`, `.githooks/`, `Makefile` | `keep-public` | Product docs, install, release, and development hygiene. | Keep. |
+| `TASK_WORKFLOW_EXAMPLE.md` | `keep-public` | Public-safe normalized transcript that replaces raw local task workflow captures. | Keep current with the public CLI UX. |
 | `fixtures/agentic-saas-fragmented/` | `keep-public-review` | Small deterministic synthetic fixture for local intent-artifact behavior. | Keep if attribution/story text remains synthetic and claim-aligned. |
 | `testdata/samples/freetext/`, `testdata/samples/codex/`, `testdata/samples/cursor/`, `testdata/samples/claude/`, `testdata/samples/specify/`, `testdata/samples/false-positives/` | `keep-public` | Narrow parser and retrieval fixtures. | Keep. |
 | `testdata/samples/bmad/_bmad-output/**` | `keep-public` | Tiny synthetic BMAD output fixture for format detection. | Keep public; the larger installed BMAD method bundle was removed from the public fixture surface. |
@@ -61,12 +62,12 @@ Completed on 2026-06-09:
 - Added `EVALS.md` for the public eval and fixture boundary.
 - Shrunk the BMAD fixture to the synthetic `_bmad-output` files required by
   public adapter tests.
+- Added `TASK_WORKFLOW_EXAMPLE.md` as the public-safe replacement for raw task
+  workflow samples.
 
 Remaining:
 
-1. Replace raw samples with a small public transcript or example only if it is
-   generated from current public CLI commands and contains no local paths.
-2. Re-run the hygiene checks below before public push.
+1. Re-run the hygiene checks below before public push.
 
 ## Hygiene Checks
 

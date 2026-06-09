@@ -1,0 +1,216 @@
+# DevSpecs Task Workflow Example
+
+Status: public-safe transcript, generated from the current CLI on 2026-06-09.
+
+This example was captured from a tiny synthetic repo with:
+
+- `docs/plans/weekly-digest.md`
+- `services/notifications/digest.go`
+- `services/notifications/digest_test.go`
+
+The commands are real DevSpecs CLI commands. Local absolute path prefixes were
+normalized to `<repo>` and long output is shortened only where marked.
+
+## Create A Bounded Task
+
+```bash
+$ ds task "Add a weekly digest email for unread notifications" \
+  --id weekly-digest \
+  --slice "Trace existing digest behavior and tests" \
+  --slice "Add weekly digest scheduling contract"
+```
+
+```text
+Created task workspace: <repo>/.devspecs/tasks/weekly-digest
+Task ID: weekly-digest
+Series: A
+Profile: code-change
+A00: <repo>/.devspecs/tasks/weekly-digest/A00-index.md
+A01 plan: <repo>/.devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-plan.md
+A01 result: <repo>/.devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md
+A02 plan: <repo>/.devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-contract-plan.md
+A02 result: <repo>/.devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-contract-result.md
+Confidence: primary=medium tests=high completeness=low noise=low
+Indexed: .devspecs/tasks/weekly-digest/A00-index.md, .devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-plan.md, .devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-contract-plan.md
+Task index updated (4 new, 0 updated)
+```
+
+The generated `A00` index captured source, test, planning, and git-receipt
+context:
+
+```text
+## Likely Primary Files
+- `services/notifications/digest.go`
+  Evidence: query term match in path: digest; query term match in path: notifications; query term match in body: unread
+
+## Likely Tests
+- `services/notifications/digest_test.go`
+  Evidence: query term match in path: digest; query term match in path: notifications; query term match in body: unread
+- `services/notifications/digest_test.go#L12` - TestBuildWeeklyDigestIncludesWorkspaceSubject
+  Evidence: relationship expansion: source_manifest_loss_safe_preserved; query term match in path: digest; query term match in path: notifications
+- `services/notifications/digest_test.go#L5` - TestBuildWeeklyDigestSkipsEmptyDigest
+  Evidence: relationship expansion: source_manifest_loss_safe_preserved; query term match in path: digest; query term match in path: notifications
+
+## Likely Docs / Plans / Config
+- `docs/plans/weekly-digest.md` - Weekly Digest
+  Evidence: indexed section match: Goal lines 3-6; query term match in path: digest; query term match in path: weekly
+
+## Related Git Receipts
+- `4044bb9` 2026-06-09 - Seed notification digest example
+  Matched paths: `docs/plans/weekly-digest.md`, `services/notifications/digest.go`, `services/notifications/digest_test.go`
+
+## Confidence Summary
+- Primary file confidence: medium
+- Test coverage confidence: high
+- Docs/config coverage confidence: medium
+- Git receipt confidence: medium
+- Noise risk: low
+- Pack completeness: low
+```
+
+## Address One Slice
+
+```bash
+$ ds task show A01
+```
+
+```text
+Task target: A01
+Task ID: weekly-digest
+Series: A
+Profile: code-change
+Title: Trace existing digest behavior and tests
+Stage: -
+Decision: -
+Plan: <repo>/.devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-plan.md
+Result: <repo>/.devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md
+Out-of-scope sibling targets: A02
+
+Plan body:
+# Task weekly-digest A01 Plan
+
+## Goal
+Trace existing digest behavior and tests
+
+## Resources
+- `A00-index.md`
+- `A01-trace-existing-digest-behavior-and-tests-result.md`
+- `task.json`
+- `services/notifications/digest.go`
+- `services/notifications/digest_test.go`
+- `services/notifications/digest_test.go#L12`
+- `services/notifications/digest_test.go#L5`
+- `docs/plans/weekly-digest.md`
+
+## Starting Context
+### Files to Inspect First
+- `services/notifications/digest.go`
+
+### Tests to Inspect First
+- `services/notifications/digest_test.go`
+- `services/notifications/digest_test.go#L12`
+- `services/notifications/digest_test.go#L5`
+
+## Expected Change Surface
+- `services/notifications/digest.go`
+
+## Out-of-Scope Areas
+- Replanning the whole thread unless evidence says this slice should split or be superseded.
+- Treating the generated context as complete without verification.
+```
+
+## Emit A Bounded Agent Prompt
+
+```bash
+$ ds task prompt A01
+```
+
+````text
+You are working on DevSpecs task weekly-digest target A01 only.
+
+Boundary:
+```yaml
+devspecs:
+  task_id: weekly-digest
+  target: A01
+  allowed_scope: slice
+  plan: .devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-plan.md
+  result: .devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md
+  must_not_implement:
+    - A02
+```
+
+Goal: Trace existing digest behavior and tests
+
+Do not implement sibling slices, future slices, or the full task track. Stop after this target's acceptance checks are satisfied.
+Record the outcome in `.devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md` or with `ds task checkpoint weekly-digest --slice A01`.
+Checklist edits are useful notes, but lifecycle state comes from `ds task checkpoint`, `ds task finish`, or `ds task decide`.
+At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.
+````
+
+## Record The Decision Gate
+
+This example uses `--index=false` on lifecycle writes only to keep the transcript
+compact. Omitting it also recaptures the updated task artifacts into the local
+DevSpecs index.
+
+```bash
+$ ds task start A01 --index=false
+$ ds task checkpoint A01 \
+  --stage validated \
+  --decision promote \
+  --description "Verified the existing digest builder and focused tests before scheduling work." \
+  --file-read services/notifications/digest.go \
+  --test-read services/notifications/digest_test.go \
+  --test-run "go test ./services/notifications" \
+  --learning "test_surface|Digest behavior is covered by same-package Go tests.|high|weekly-digest|services/notifications/digest_test.go" \
+  --next-target A02 \
+  --next-decision promote \
+  --index=false
+```
+
+```text
+Updated A01: stage=started decision=continue
+Manifest: <repo>/.devspecs/tasks/weekly-digest/task.json
+Index: <repo>/.devspecs/tasks/weekly-digest/A00-index.md
+Recorded checkpoint: <repo>/.devspecs/tasks/weekly-digest/checkpoints/20260609-134754-validated.md
+Structured checkpoint: <repo>/.devspecs/tasks/weekly-digest/checkpoints/20260609-134754-validated.json
+Updated result: <repo>/.devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md
+```
+
+```bash
+$ ds task status weekly-digest
+$ ds task next weekly-digest
+```
+
+```text
+Task ID: weekly-digest
+Series: A
+Profile: code-change
+Status: packed
+Updated At: 2026-06-09T13:47:54Z
+A01: Trace existing digest behavior and tests [slice] stage=validated decision=promote checkpoint=checkpoints/20260609-134754-validated.md checkpoint_id=cp_20260609T134754Z_a01_validated
+A02: Add weekly digest scheduling contract [slice]
+
+Next task target: A02
+Task ID: weekly-digest
+Series: A
+Profile: code-change
+Title: Add weekly digest scheduling contract
+Stage: -
+Decision: -
+Plan: <repo>/.devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-contract-plan.md
+Result: <repo>/.devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-contract-result.md
+Out-of-scope sibling targets: A01
+```
+
+## What This Shows
+
+- `ds task` creates addressable task and slice artifacts.
+- The generated task index carries source, test, doc, and git-receipt evidence.
+- `ds task prompt A01` gives an agent a one-slice boundary instead of the whole
+  task track.
+- `ds task checkpoint` records the actual evidence and decision gate.
+- `ds task next` promotes the workflow to the next slice only.
+
+This is a small synthetic example. It is not a broad retrieval benchmark.

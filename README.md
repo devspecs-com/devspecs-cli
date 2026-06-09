@@ -58,6 +58,8 @@ ds task audit A02
 
 `ds task` creates a task index, slice plan/result artifacts, packed source/test context, and an explicit lifecycle. `show` and `prompt` address one slice at a time; `checkpoint` records what actually happened; `audit` checks whether the work stayed inside the intended target.
 
+See [`TASK_WORKFLOW_EXAMPLE.md`](TASK_WORKFLOW_EXAMPLE.md) for a current public-safe transcript of this flow.
+
 ## What it does
 
 - Scans **OpenSpec** changes, **ADR** paths, and **markdown** plans/specs (including common agent layouts such as `.cursor/plans`, BMAD `_bmad-output`, Spec Kit `specs/…/spec.md`).
