@@ -114,7 +114,7 @@ func TestTask_StartCreatesUncertaintyAwareWorkspace(t *testing.T) {
 	if out.TaskID != "spike-test" {
 		t.Fatalf("task id = %q", out.TaskID)
 	}
-	if !strings.HasPrefix(out.Workspace, filepath.Join(repoDir, ".devspecs", "tasks", "spike-test")) {
+	if !strings.HasPrefix(out.Workspace, filepath.Join(repoDir, "devspecs", "tasks", "spike-test")) {
 		t.Fatalf("workspace = %q", out.Workspace)
 	}
 	if len(out.Slices) != 1 {
@@ -561,8 +561,10 @@ func TestTask_PromptCarriesPriorSliceCheckpointEvidence(t *testing.T) {
 func TestTask_PreflightFiltersTaskWorkspaceCandidates(t *testing.T) {
 	got := filterTaskPreflightCandidates([]retrieval.Candidate{
 		{Path: ".devspecs/tasks/task-one/A00-index.md"},
+		{Path: "devspecs/tasks/task-one/A00-index.md"},
 		{Path: "internal/retrieval/ranking.go"},
 		{Path: "C:/repo/.devspecs/tasks/task-one/A01-plan.md"},
+		{Path: "C:/repo/devspecs/tasks/task-one/A01-plan.md"},
 	})
 	if len(got) != 1 || got[0].Path != "internal/retrieval/ranking.go" {
 		t.Fatalf("filtered candidates = %#v", got)
@@ -710,7 +712,7 @@ func TestTask_StartBootstrapsRepeatedSlices(t *testing.T) {
 			t.Fatalf("index missing %q:\n%s", want, indexBody)
 		}
 	}
-	if !strings.HasPrefix(out.Workspace, filepath.Join(repoDir, ".devspecs", "tasks", "multi-slice-test")) {
+	if !strings.HasPrefix(out.Workspace, filepath.Join(repoDir, "devspecs", "tasks", "multi-slice-test")) {
 		t.Fatalf("workspace = %q", out.Workspace)
 	}
 }
@@ -786,7 +788,7 @@ func TestTask_BoundaryPrimitivesResolveOneTarget(t *testing.T) {
 		t.Fatalf("start target output = %#v", startTargetOut)
 	}
 
-	indexPath := filepath.Join(repoDir, ".devspecs", "tasks", "boundary-test", "A00-index.md")
+	indexPath := filepath.Join(repoDir, "devspecs", "tasks", "boundary-test", "A00-index.md")
 	authoredIndexBody := mustReadFile(t, indexPath) + "\n## Human Master Notes\n\nKeep this richer A00 content intact.\n"
 	mustWriteFile(t, indexPath, authoredIndexBody)
 
@@ -1292,7 +1294,7 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 		t.Fatalf("iteration plan = %q", iterationOut.Slice.PlanPath)
 	}
 
-	workspace := filepath.Join(repoDir, ".devspecs", "tasks", "lifecycle-add-test")
+	workspace := filepath.Join(repoDir, "devspecs", "tasks", "lifecycle-add-test")
 	indexBody := mustReadFile(t, filepath.Join(workspace, "B00-index.md"))
 	for _, want := range []string{
 		"B02: second lifecycle slice",
@@ -1593,9 +1595,9 @@ func TestTask_StatusWarnsAndSyncRecapturesEditedArtifacts(t *testing.T) {
 		t.Fatalf("sync output = %#v", syncOut)
 	}
 	for _, want := range []string{
-		".devspecs/tasks/sync-freshness-test/A00-index.md",
-		".devspecs/tasks/sync-freshness-test/A01-improve-test-companion-recall-plan.md",
-		".devspecs/tasks/sync-freshness-test/A01-improve-test-companion-recall-result.md",
+		"devspecs/tasks/sync-freshness-test/A00-index.md",
+		"devspecs/tasks/sync-freshness-test/A01-improve-test-companion-recall-plan.md",
+		"devspecs/tasks/sync-freshness-test/A01-improve-test-companion-recall-result.md",
 	} {
 		if !containsPath(syncOut.IndexedPaths, want) {
 			t.Fatalf("sync indexed paths missing %q: %#v", want, syncOut.IndexedPaths)
@@ -1788,11 +1790,11 @@ func RootTask() {}
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
 		t.Fatalf("task json: %v\n%s", err, buf.String())
 	}
-	wantPrefix := filepath.Join(worktree, ".devspecs", "tasks", "worktree-root-test")
+	wantPrefix := filepath.Join(worktree, "devspecs", "tasks", "worktree-root-test")
 	if !strings.HasPrefix(out.Workspace, wantPrefix) {
 		t.Fatalf("workspace = %q, want prefix %q", out.Workspace, wantPrefix)
 	}
-	if strings.HasPrefix(out.Workspace, filepath.Join(mainRepo, ".devspecs")) {
+	if strings.HasPrefix(out.Workspace, filepath.Join(mainRepo, "devspecs")) {
 		t.Fatalf("workspace used main repo instead of worktree: %q", out.Workspace)
 	}
 }
@@ -2015,7 +2017,7 @@ func TestTask_CheckpointTargetsSelectedSlice(t *testing.T) {
 	if err := startCmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	workspace := filepath.Join(repoDir, ".devspecs", "tasks", "slice-target-test")
+	workspace := filepath.Join(repoDir, "devspecs", "tasks", "slice-target-test")
 	firstResult := filepath.Join(workspace, "A01-first-pass-result.md")
 	secondResult := filepath.Join(workspace, "A02-second-pass-result.md")
 
@@ -2082,7 +2084,7 @@ func TestTask_CheckpointTargetsSelectedSlice(t *testing.T) {
 func TestTask_EvaluateReportsStructuredEvidenceWithoutInflatingActualContext(t *testing.T) {
 	repoDir := setupTaskCommandRepo(t)
 	taskID := "json-evidence-test"
-	workspace := filepath.Join(repoDir, ".devspecs", "tasks", taskID)
+	workspace := filepath.Join(repoDir, "devspecs", "tasks", taskID)
 	mustMkdirAll(t, filepath.Join(workspace, "checkpoints"))
 	manifest := taskManifest{
 		TaskID:    taskID,
@@ -2269,7 +2271,7 @@ func TestTask_EvaluateExcludesTaskWorkspaceReadsFromMissMetrics(t *testing.T) {
 	}
 
 	evalCmd := NewTaskCmd()
-	evalCmd.SetArgs([]string{"evaluate", taskID, "--json"})
+	evalCmd.SetArgs([]string{"evaluate", taskID, "--dir", ".devspecs/tasks", "--json"})
 	evalBuf := &bytes.Buffer{}
 	evalCmd.SetOut(evalBuf)
 	if err := evalCmd.Execute(); err != nil {
@@ -2343,7 +2345,7 @@ func writeExistingTaskSeriesRange(t *testing.T, repoDir, last string) {
 
 func writeExistingTaskSeries(t *testing.T, repoDir, taskID, series string) {
 	t.Helper()
-	workspace := filepath.Join(repoDir, ".devspecs", "tasks", taskID)
+	workspace := filepath.Join(repoDir, "devspecs", "tasks", taskID)
 	mustMkdirAll(t, workspace)
 	manifest := taskManifest{
 		TaskID:    taskID,

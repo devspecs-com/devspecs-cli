@@ -166,8 +166,12 @@ flag surface.
 | --- | --- | --- |
 | `~/.devspecs/devspecs.db` | Local SQLite index and cache. | No. |
 | `.devspecs/config.yaml` | Repo discovery configuration. | Usually yes. |
-| `.devspecs/tasks/<task-id>/` | Current default generated task workspace. | Deliberately. |
-| `devspecs/tasks/<task-id>/` | Visible task workspace path via `--dir devspecs/tasks`. | Yes, when durable. |
+| `devspecs/tasks/<task-id>/` | Default generated task workspace. | Yes, when durable. |
+| `.devspecs/tasks/<task-id>/` | Legacy or explicitly local task workspace. | No, unless you chose it deliberately. |
+
+Commit task artifacts when they explain durable work, should be reviewed with a
+change, or are useful to the next person or agent. If a task is scratch-only,
+ignore `devspecs/tasks/<task-id>/` yourself or use an alternate workspace path.
 
 Telemetry is minimal and anonymous. It is used for install, init, scan, and
 query flow health, and excludes repository names, file paths, git remotes,

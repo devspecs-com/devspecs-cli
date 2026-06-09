@@ -21,17 +21,17 @@ $ ds task "Add a weekly digest email for unread notifications" \
 ```
 
 ```text
-Created task workspace: <repo>/.devspecs/tasks/weekly-digest
+Created task workspace: <repo>/devspecs/tasks/weekly-digest
 Task ID: weekly-digest
 Series: A
 Profile: code-change
-A00: <repo>/.devspecs/tasks/weekly-digest/A00-index.md
-A01 plan: <repo>/.devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-plan.md
-A01 result: <repo>/.devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md
-A02 plan: <repo>/.devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-contract-plan.md
-A02 result: <repo>/.devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-contract-result.md
+A00: <repo>/devspecs/tasks/weekly-digest/A00-index.md
+A01 plan: <repo>/devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-plan.md
+A01 result: <repo>/devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md
+A02 plan: <repo>/devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-contract-plan.md
+A02 result: <repo>/devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-contract-result.md
 Confidence: primary=medium tests=high completeness=low noise=low
-Indexed: .devspecs/tasks/weekly-digest/A00-index.md, .devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-plan.md, .devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-contract-plan.md
+Indexed: devspecs/tasks/weekly-digest/A00-index.md, devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-plan.md, devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-contract-plan.md
 Task index updated (4 new, 0 updated)
 ```
 
@@ -82,8 +82,8 @@ Profile: code-change
 Title: Trace existing digest behavior and tests
 Stage: -
 Decision: -
-Plan: <repo>/.devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-plan.md
-Result: <repo>/.devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md
+Plan: <repo>/devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-plan.md
+Result: <repo>/devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md
 Out-of-scope sibling targets: A02
 
 Plan body:
@@ -134,8 +134,8 @@ devspecs:
   task_id: weekly-digest
   target: A01
   allowed_scope: slice
-  plan: .devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-plan.md
-  result: .devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md
+  plan: devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-plan.md
+  result: devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md
   must_not_implement:
     - A02
 ```
@@ -143,7 +143,7 @@ devspecs:
 Goal: Trace existing digest behavior and tests
 
 Do not implement sibling slices, future slices, or the full task track. Stop after this target's acceptance checks are satisfied.
-Record the outcome in `.devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md` or with `ds task checkpoint weekly-digest --slice A01`.
+Record the outcome in `devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md` or with `ds task checkpoint weekly-digest --slice A01`.
 Checklist edits are useful notes, but lifecycle state comes from `ds task checkpoint`, `ds task finish`, or `ds task decide`.
 At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.
 ````
@@ -171,11 +171,11 @@ $ ds task checkpoint A01 \
 
 ```text
 Updated A01: stage=started decision=continue
-Manifest: <repo>/.devspecs/tasks/weekly-digest/task.json
-Index: <repo>/.devspecs/tasks/weekly-digest/A00-index.md
-Recorded checkpoint: <repo>/.devspecs/tasks/weekly-digest/checkpoints/20260609-134754-validated.md
-Structured checkpoint: <repo>/.devspecs/tasks/weekly-digest/checkpoints/20260609-134754-validated.json
-Updated result: <repo>/.devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md
+Manifest: <repo>/devspecs/tasks/weekly-digest/task.json
+Index: <repo>/devspecs/tasks/weekly-digest/A00-index.md
+Recorded checkpoint: <repo>/devspecs/tasks/weekly-digest/checkpoints/20260609-134754-validated.md
+Structured checkpoint: <repo>/devspecs/tasks/weekly-digest/checkpoints/20260609-134754-validated.json
+Updated result: <repo>/devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md
 ```
 
 ```bash
@@ -199,8 +199,8 @@ Profile: code-change
 Title: Add weekly digest scheduling contract
 Stage: -
 Decision: -
-Plan: <repo>/.devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-contract-plan.md
-Result: <repo>/.devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-contract-result.md
+Plan: <repo>/devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-contract-plan.md
+Result: <repo>/devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-contract-result.md
 Out-of-scope sibling targets: A01
 ```
 

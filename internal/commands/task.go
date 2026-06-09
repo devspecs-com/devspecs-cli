@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	defaultTaskWorkspaceDir = ".devspecs/tasks"
+	defaultTaskWorkspaceDir = "devspecs/tasks"
 	taskManifestFilename    = "task.json"
 	taskProfileCodeChange   = "code-change"
 	taskProfileGreenfield   = "greenfield"
@@ -2468,7 +2468,10 @@ func taskWorkspaceContextPath(path string) bool {
 		return false
 	}
 	path = strings.TrimPrefix(path, "./")
-	return strings.HasPrefix(path, ".devspecs/tasks/") || strings.Contains(path, "/.devspecs/tasks/")
+	path = strings.ToLower(strings.Trim(filepath.ToSlash(path), "/"))
+	return taskGeneratedWorkspaceRelPath(path) ||
+		strings.Contains(path, "/.devspecs/tasks/") ||
+		strings.Contains(path, "/devspecs/tasks/")
 }
 
 const (
@@ -3269,7 +3272,7 @@ func taskFreshnessSkipDir(rel string) bool {
 		rel == "vendor" || rel == "node_modules" || rel == "dist" || rel == "build" || rel == "coverage" {
 		return true
 	}
-	return rel == ".devspecs/tasks" || strings.HasPrefix(rel, ".devspecs/tasks/")
+	return taskGeneratedWorkspaceRelPath(rel)
 }
 
 func taskFreshnessSkipFile(rel string, entry os.DirEntry) bool {
@@ -3294,12 +3297,20 @@ func taskFreshnessSkipFile(rel string, entry os.DirEntry) bool {
 
 func taskFreshnessPathExcluded(rel string) bool {
 	rel = strings.Trim(filepath.ToSlash(rel), "/")
-	return strings.HasPrefix(rel, ".devspecs/tasks/") ||
+	return taskGeneratedWorkspaceRelPath(rel) ||
 		strings.HasPrefix(rel, "_ignore/") ||
 		strings.HasPrefix(rel, "fixtures/") ||
 		strings.HasPrefix(rel, "testdata/") ||
 		strings.Contains(rel, "/fixtures/") ||
 		strings.Contains(rel, "/testdata/")
+}
+
+func taskGeneratedWorkspaceRelPath(rel string) bool {
+	rel = strings.ToLower(strings.Trim(filepath.ToSlash(rel), "/"))
+	return rel == "devspecs/tasks" ||
+		strings.HasPrefix(rel, "devspecs/tasks/") ||
+		rel == ".devspecs/tasks" ||
+		strings.HasPrefix(rel, ".devspecs/tasks/")
 }
 
 func taskFreshnessAllowedExt(ext string) bool {
