@@ -4,7 +4,8 @@ Status: public eval boundary, 2026-06-09.
 
 This repo includes the public, claim-aligned test and fixture surface for the
 DevSpecs CLI. It is meant to prove deterministic product behavior and guard
-public claims. It is not the private research bench.
+public claims. It is not a dump of exploratory research material or unreduced
+evaluation runs.
 
 ## What The Public Eval Surface Covers
 
@@ -52,14 +53,14 @@ The public repo should not include:
 - raw demo capture folders and replay scripts;
 - local `.devspecs` task workspaces, raw output samples, DBs, or eval runs.
 
-Those belong in a private research archive until a narrow, current, public-safe
+Those should stay outside the public repo until a narrow, current, public-safe
 fixture or transcript is intentionally derived from them.
 
 ## Claim Boundary
 
 Public tests show that the CLI behavior is deterministic, documented, and
 regression-tested. They do not prove broad retrieval superiority or publish the
-full private research runway.
+full research runway.
 
 Public demos should be described honestly:
 

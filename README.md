@@ -190,9 +190,9 @@ Use `DEVSPECS_TELEMETRY=debug` to print the would-send event to stderr.
 ## Public Eval Boundary
 
 The public repo contains deterministic product tests and small synthetic
-fixtures. It does not publish the private research bench, raw holdouts, scout
-scripts, or paper trail. Public claims should stay tied to reproducible public
-fixtures and documented behavior.
+fixtures. It is the product claim surface, not a dump of exploratory research
+material or unreduced evaluation runs. Public claims should stay tied to
+reproducible public fixtures and documented behavior.
 
 See [EVALS.md](EVALS.md) for the current boundary.
 
