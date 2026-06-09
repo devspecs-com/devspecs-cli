@@ -493,6 +493,8 @@ Regression layouts under [`testdata/samples/`](testdata/samples/) (`bmad`, `spec
 
 [`testdata/samples/false-positives/`](testdata/samples/false-positives/) holds markdown (and similar) inputs that are useful regression targets when tightening todo extraction heuristics.
 
+The public eval and fixture boundary is documented in [`EVALS.md`](EVALS.md).
+
 - **Spec Kit:** [spec-kit](https://github.com/github/spec-kit) — `specify init …`, then copy `specs/` (and `.specify/` if needed) into `testdata/samples/specify/`.
 - **BMAD:** `npx bmad-method install`, run workflows, copy **`_bmad-output/planning-artifacts/`** into `testdata/samples/bmad/`.
 

@@ -41,14 +41,13 @@ the next cleanup slice mechanical and reversible.
 | `README.md`, `LICENSE`, `install.ps1`, `install.sh`, `.goreleaser.yml`, `.github/`, `.githooks/`, `Makefile` | `keep-public` | Product docs, install, release, and development hygiene. | Keep. |
 | `fixtures/agentic-saas-fragmented/` | `keep-public-review` | Small deterministic synthetic fixture for local intent-artifact behavior. | Keep if attribution/story text remains synthetic and claim-aligned. |
 | `testdata/samples/freetext/`, `testdata/samples/codex/`, `testdata/samples/cursor/`, `testdata/samples/claude/`, `testdata/samples/specify/`, `testdata/samples/false-positives/` | `keep-public` | Narrow parser and retrieval fixtures. | Keep. |
-| `testdata/samples/bmad/**` | `keep-public-review` | Larger third-party-shaped sample tree; useful coverage, but it deserves license and footprint review before launch. | Keep only if license/attribution is clean; otherwise replace with a smaller synthetic fixture. |
+| `testdata/samples/bmad/_bmad-output/**` | `keep-public` | Tiny synthetic BMAD output fixture for format detection. | Keep public; the larger installed BMAD method bundle was removed from the public fixture surface. |
 | `.devspecs/raw-output-samples/**` | `archived-private` plus `summarize-public` | Raw CLI UX captures include archives, generated task files, stale behavior, and absolute local paths. | Archived privately and removed from the public repo. Replace only with a short public transcript if needed. |
 | `.devspecs/tasks/ds-task-freshness-evaluation-clean/**` | `archived-private` plus `summarize-public` | Dogfood/eval workspace includes local paths and research conclusions that are not product docs. | Archived privately and removed from the public repo. Summarize durable product lessons elsewhere if useful. |
 | `.devspecs/eval-runs/**` | `keep-ignored` or `move-private` | Ignored local eval output. | Preserve privately if paper-relevant; otherwise leave ignored or clean locally. |
 | `.private/` | `keep-ignored` | Local private notes and scratch material. | Keep ignored. |
 | `_ignore/` | `keep-ignored` or `delete-after-backup` | Local scratch area. | Keep ignored; do not bulk-delete without an explicit backup decision. |
 | `ds.exe`, `coverage.out`, `.gotmp/`, `.xdg/` | `keep-ignored` or `delete-after-backup` | Local build, coverage, and runtime state. | Keep ignored; regenerate as needed. |
-| `testdata/samples/bmad/_bmad/custom/config.user.toml` | `keep-ignored` | Local user config under a public fixture tree. | Keep ignored and ensure it never becomes tracked. |
 
 ## Cleanup Sequence
 
@@ -59,16 +58,15 @@ Completed on 2026-06-09:
   research archive with their original paths and source commit.
 - Removed those tracked `.devspecs` paths from the public repo.
 - Added ignore coverage for raw `.devspecs` task/output folders.
+- Added `EVALS.md` for the public eval and fixture boundary.
+- Shrunk the BMAD fixture to the synthetic `_bmad-output` files required by
+  public adapter tests.
 
 Remaining:
 
 1. Replace raw samples with a small public transcript or example only if it is
    generated from current public CLI commands and contains no local paths.
-2. Add a public `EVALS.md` that explains the small public eval corpus and states
-   that private research runs are separate.
-3. Review `testdata/samples/bmad/**` for license, attribution, and footprint;
-   shrink or replace it if the public value is not worth the surface area.
-4. Re-run the hygiene checks below before public push.
+2. Re-run the hygiene checks below before public push.
 
 ## Hygiene Checks
 
