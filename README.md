@@ -172,6 +172,8 @@ flag surface.
 Commit task artifacts when they explain durable work, should be reviewed with a
 change, or are useful to the next person or agent. If a task is scratch-only,
 ignore `devspecs/tasks/<task-id>/` yourself or use an alternate workspace path.
+Lifecycle commands auto-detect legacy `.devspecs/tasks/<task-id>/` workspaces
+when the visible default path does not contain that task.
 
 Telemetry is minimal and anonymous. It is used for install, init, scan, and
 query flow health, and excludes repository names, file paths, git remotes,

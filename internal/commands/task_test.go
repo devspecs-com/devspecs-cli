@@ -571,6 +571,100 @@ func TestTask_PreflightFiltersTaskWorkspaceCandidates(t *testing.T) {
 	}
 }
 
+func TestTask_LifecycleAutoDetectsLegacyWorkspace(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--dir", ".devspecs/tasks",
+		"--id", "legacy-compat",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"--slice", "legacy first slice",
+		"legacy task compatibility",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	statusCmd := NewTaskCmd()
+	statusCmd.SetArgs([]string{"status", "legacy-compat", "--json"})
+	statusBuf := &bytes.Buffer{}
+	statusCmd.SetOut(statusBuf)
+	if err := statusCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var statusOut taskStatusOutput
+	if err := json.Unmarshal(statusBuf.Bytes(), &statusOut); err != nil {
+		t.Fatalf("status json: %v\n%s", err, statusBuf.String())
+	}
+	if statusOut.TaskID != "legacy-compat" || len(statusOut.Slices) != 1 {
+		t.Fatalf("legacy status output = %#v", statusOut)
+	}
+
+	showCmd := NewTaskCmd()
+	showCmd.SetArgs([]string{"show", "A01", "--json"})
+	showBuf := &bytes.Buffer{}
+	showCmd.SetOut(showBuf)
+	if err := showCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var showOut taskTargetOutput
+	if err := json.Unmarshal(showBuf.Bytes(), &showOut); err != nil {
+		t.Fatalf("show json: %v\n%s", err, showBuf.String())
+	}
+	if showOut.TaskID != "legacy-compat" || showOut.Target != "A01" {
+		t.Fatalf("legacy show target output = %#v", showOut)
+	}
+	if !strings.Contains(filepath.ToSlash(showOut.Workspace), ".devspecs/tasks/legacy-compat") {
+		t.Fatalf("legacy workspace was not resolved: %q", showOut.Workspace)
+	}
+
+	checkpointCmd := NewTaskCmd()
+	checkpointCmd.SetArgs([]string{
+		"checkpoint", "legacy-compat",
+		"--slice", "A01",
+		"--stage", "validated",
+		"--decision", "promote",
+		"--file-read", "internal/retrieval/ranking.go",
+		"--index=false",
+		"--json",
+	})
+	checkpointBuf := &bytes.Buffer{}
+	checkpointCmd.SetOut(checkpointBuf)
+	if err := checkpointCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var checkpointOut taskCheckpointOutput
+	if err := json.Unmarshal(checkpointBuf.Bytes(), &checkpointOut); err != nil {
+		t.Fatalf("checkpoint json: %v\n%s", err, checkpointBuf.String())
+	}
+	if !strings.Contains(filepath.ToSlash(checkpointOut.CheckpointPath), ".devspecs/tasks/legacy-compat") {
+		t.Fatalf("legacy checkpoint path was not resolved: %#v", checkpointOut)
+	}
+
+	evaluateCmd := NewTaskCmd()
+	evaluateCmd.SetArgs([]string{"evaluate", "legacy-compat", "--json"})
+	evaluateBuf := &bytes.Buffer{}
+	evaluateCmd.SetOut(evaluateBuf)
+	if err := evaluateCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var evaluateOut taskEvaluationOutput
+	if err := json.Unmarshal(evaluateBuf.Bytes(), &evaluateOut); err != nil {
+		t.Fatalf("evaluate json: %v\n%s", err, evaluateBuf.String())
+	}
+	if evaluateOut.TaskID != "legacy-compat" {
+		t.Fatalf("legacy evaluate output = %#v", evaluateOut)
+	}
+
+	if _, err := os.Stat(filepath.Join(repoDir, ".devspecs", "tasks", "legacy-compat", taskManifestFilename)); err != nil {
+		t.Fatalf("legacy manifest missing: %v", err)
+	}
+}
+
 func TestTask_StartSkipsUnrelatedCheckpointFactRiskCards(t *testing.T) {
 	repoDir := setupTaskCommandRepo(t)
 	db, err := openDB()
@@ -1020,6 +1114,45 @@ func TestTask_StartAutoIncrementsDefaultSeries(t *testing.T) {
 	}
 	if len(out.Slices) != 1 || out.Slices[0].ID != "B01" {
 		t.Fatalf("slices = %#v", out.Slices)
+	}
+}
+
+func TestTask_StartAutoSeriesSeesLegacyWorkspace(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	legacyCmd := NewTaskCmd()
+	legacyCmd.SetArgs([]string{
+		"--dir", ".devspecs/tasks",
+		"--id", "legacy-series-a",
+		"--series", "A",
+		"--no-refresh",
+		"--index=false",
+		"legacy series a",
+	})
+	legacyCmd.SetOut(&bytes.Buffer{})
+	if err := legacyCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "visible-series-b",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"visible series should skip legacy a",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out taskStartOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("task json: %v\n%s", err, buf.String())
+	}
+	if out.Series != "B" || filepath.Base(out.IndexPath) != "B00-index.md" {
+		t.Fatalf("expected B after legacy A, got %#v", out)
 	}
 }
 

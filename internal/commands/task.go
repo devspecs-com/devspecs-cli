@@ -27,6 +27,7 @@ import (
 
 const (
 	defaultTaskWorkspaceDir = "devspecs/tasks"
+	legacyTaskWorkspaceDir  = ".devspecs/tasks"
 	taskManifestFilename    = "task.json"
 	taskProfileCodeChange   = "code-change"
 	taskProfileGreenfield   = "greenfield"
@@ -1007,12 +1008,24 @@ func loadTaskWorkspaceManifest(baseDir, taskID string) (string, string, taskMani
 		return "", "", taskManifest{}, err
 	}
 	repoRoot := canonicalRepoRoot(resolveRepoRootFromWd(wd))
-	workspace := taskWorkspacePath(repoRoot, baseDir, taskID)
-	manifest, err := readTaskManifest(filepath.Join(workspace, taskManifestFilename))
-	if err != nil {
-		return "", "", taskManifest{}, err
+	var firstErr error
+	for _, workspace := range taskWorkspaceSearchPaths(repoRoot, baseDir, taskID) {
+		manifestPath := filepath.Join(workspace, taskManifestFilename)
+		manifest, err := readTaskManifest(manifestPath)
+		if err == nil {
+			return repoRoot, workspace, manifest, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", "", taskManifest{}, err
+		}
 	}
-	return repoRoot, workspace, manifest, nil
+	if firstErr == nil {
+		firstErr = fmt.Errorf("read task manifest: %s", filepath.Join(taskWorkspacePath(repoRoot, baseDir, taskID), taskManifestFilename))
+	}
+	return "", "", taskManifest{}, firstErr
 }
 
 func writeAddedTaskArtifact(cmd *cobra.Command, repoRoot, workspace string, manifest taskManifest, slice taskSliceArtifact, opts taskArtifactAddOptions) error {
@@ -1523,44 +1536,45 @@ func findTaskTargetAddressMatches(baseDir, selector string) ([]taskTargetAddress
 		return nil, err
 	}
 	repoRoot := canonicalRepoRoot(resolveRepoRootFromWd(wd))
-	parent := taskWorkspacePath(repoRoot, baseDir, "")
-	entries, err := os.ReadDir(parent)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read task workspaces: %w", err)
-	}
 	var matches []taskTargetAddressMatch
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		manifestPath := filepath.Join(parent, entry.Name(), taskManifestFilename)
-		if _, err := os.Stat(manifestPath); err != nil {
+	for _, parent := range taskWorkspaceSearchParents(repoRoot, baseDir) {
+		entries, err := os.ReadDir(parent)
+		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return nil, err
+			return nil, fmt.Errorf("read task workspaces: %w", err)
 		}
-		manifest, err := readTaskManifest(manifestPath)
-		if err != nil {
-			continue
-		}
-		taskID := strings.TrimSpace(manifest.TaskID)
-		if taskID == "" {
-			taskID = entry.Name()
-		}
-		for _, slice := range taskSyncSlices(manifest) {
-			if !taskSliceMatchesSelector(slice, selector) {
+		for _, entry := range entries {
+			if !entry.IsDir() {
 				continue
 			}
-			matches = append(matches, taskTargetAddressMatch{
-				TaskID: taskID,
-				Target: slice.ID,
-				Title:  slice.Title,
-				Plan:   slice.Plan,
-			})
+			manifestPath := filepath.Join(parent, entry.Name(), taskManifestFilename)
+			if _, err := os.Stat(manifestPath); err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				return nil, err
+			}
+			manifest, err := readTaskManifest(manifestPath)
+			if err != nil {
+				continue
+			}
+			taskID := strings.TrimSpace(manifest.TaskID)
+			if taskID == "" {
+				taskID = entry.Name()
+			}
+			for _, slice := range taskSyncSlices(manifest) {
+				if !taskSliceMatchesSelector(slice, selector) {
+					continue
+				}
+				matches = append(matches, taskTargetAddressMatch{
+					TaskID: taskID,
+					Target: slice.ID,
+					Title:  slice.Title,
+					Plan:   slice.Plan,
+				})
+			}
 		}
 	}
 	sort.Slice(matches, func(i, j int) bool {
@@ -2150,25 +2164,26 @@ func nextAvailableTaskSeries(repoRoot, baseDir string) (string, error) {
 
 func usedTaskAutoAlphaSeries(repoRoot, baseDir string) (map[string]bool, error) {
 	used := map[string]bool{}
-	parent := taskWorkspacePath(repoRoot, baseDir, "")
-	entries, err := os.ReadDir(parent)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return used, nil
-		}
-		return nil, fmt.Errorf("read task workspaces for series discovery: %w", err)
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		manifest, err := readTaskManifest(filepath.Join(parent, entry.Name(), taskManifestFilename))
+	for _, parent := range taskWorkspaceSearchParents(repoRoot, baseDir) {
+		entries, err := os.ReadDir(parent)
 		if err != nil {
-			continue
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("read task workspaces for series discovery: %w", err)
 		}
-		series := strings.ToUpper(strings.TrimSpace(manifest.Series))
-		if isTaskAutoAlphaSeries(series) {
-			used[series] = true
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			manifest, err := readTaskManifest(filepath.Join(parent, entry.Name(), taskManifestFilename))
+			if err != nil {
+				continue
+			}
+			series := strings.ToUpper(strings.TrimSpace(manifest.Series))
+			if isTaskAutoAlphaSeries(series) {
+				used[series] = true
+			}
 		}
 	}
 	return used, nil
@@ -4183,13 +4198,7 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	if opts.Decision != "" && !isAllowedValue(opts.Decision, taskDecisions) {
 		return fmt.Errorf("invalid decision %q; valid values: %s", opts.Decision, strings.Join(taskDecisions, ", "))
 	}
-	wd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	repoRoot := canonicalRepoRoot(resolveRepoRootFromWd(wd))
-	workspace := taskWorkspacePath(repoRoot, opts.Dir, taskID)
-	manifest, err := readTaskManifest(filepath.Join(workspace, taskManifestFilename))
+	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(opts.Dir, taskID)
 	if err != nil {
 		return err
 	}
@@ -5095,6 +5104,31 @@ func taskWorkspacePath(repoRoot, baseDir, taskID string) string {
 		return filepath.Join(baseDir, taskID)
 	}
 	return filepath.Join(repoRoot, filepath.FromSlash(baseDir), taskID)
+}
+
+func taskWorkspaceSearchPaths(repoRoot, baseDir, taskID string) []string {
+	var paths []string
+	for _, parent := range taskWorkspaceSearchParents(repoRoot, baseDir) {
+		paths = appendUniqueString(paths, filepath.Join(parent, taskID))
+	}
+	return paths
+}
+
+func taskWorkspaceSearchParents(repoRoot, baseDir string) []string {
+	baseDir = strings.TrimSpace(baseDir)
+	if baseDir == "" {
+		baseDir = defaultTaskWorkspaceDir
+	}
+	parents := []string{taskWorkspacePath(repoRoot, baseDir, "")}
+	if taskWorkspaceShouldSearchLegacy(baseDir) {
+		parents = append(parents, taskWorkspacePath(repoRoot, legacyTaskWorkspaceDir, ""))
+	}
+	return uniqueStrings(parents)
+}
+
+func taskWorkspaceShouldSearchLegacy(baseDir string) bool {
+	baseDir = strings.Trim(filepath.ToSlash(strings.TrimSpace(baseDir)), "/")
+	return baseDir == "" || baseDir == defaultTaskWorkspaceDir
 }
 
 func generatedTaskID(query string, now time.Time) string {

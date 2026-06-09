@@ -81,13 +81,7 @@ func runTaskEvaluate(cmd *cobra.Command, taskID string, opts taskEvaluateOptions
 	if err := validateTaskID(taskID); err != nil {
 		return err
 	}
-	wd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	repoRoot := canonicalRepoRoot(resolveRepoRootFromWd(wd))
-	workspace := taskWorkspacePath(repoRoot, opts.Dir, taskID)
-	manifest, err := readTaskManifest(filepath.Join(workspace, taskManifestFilename))
+	_, workspace, manifest, err := loadTaskWorkspaceManifest(opts.Dir, taskID)
 	if err != nil {
 		return err
 	}
