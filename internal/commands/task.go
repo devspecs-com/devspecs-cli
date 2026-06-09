@@ -531,7 +531,7 @@ templates for recording actual reads, edits, tests, misses, and noise.`,
 
 	cmd.Flags().StringVar(&opts.ID, "id", "", "Task ID to use instead of a generated slug")
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
-	cmd.Flags().StringVar(&opts.Series, "series", "A", "Series prefix for generated artifacts, e.g. A or B")
+	cmd.Flags().StringVar(&opts.Series, "series", "", "Series prefix for generated artifacts, e.g. A or B; defaults to the next available alphabetic series")
 	cmd.Flags().StringVar(&opts.Profile, "profile", taskProfileCodeChange, "Task generation profile: code-change or greenfield")
 	cmd.Flags().StringArrayVar(&opts.Slices, "slice", nil, "Task slice title to scaffold; may be repeated")
 	cmd.Flags().BoolVar(&opts.NoRefresh, "no-refresh", false, "Skip auto-scan freshness check")
@@ -838,16 +838,16 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 	if err := validateTaskID(taskID); err != nil {
 		return err
 	}
-	series, err := normalizeTaskSeries(opts.Series)
-	if err != nil {
-		return err
-	}
 	profile, err := normalizeTaskProfile(opts.Profile)
 	if err != nil {
 		return err
 	}
 
 	workspace := taskWorkspacePath(repoRoot, opts.Dir, taskID)
+	series, err := resolveTaskStartSeries(repoRoot, opts.Dir, taskID, opts.Series, opts.Force)
+	if err != nil {
+		return err
+	}
 	if err := prepareTaskWorkspace(workspace, opts.Force); err != nil {
 		return err
 	}
@@ -2120,6 +2120,90 @@ func firstTaskSliceArtifact(paths taskArtifactPaths) taskSliceArtifact {
 
 func taskSeriesIndexFilename(series string) string {
 	return fmt.Sprintf("%s00-index.md", defaultTaskSeries(series))
+}
+
+func resolveTaskStartSeries(repoRoot, baseDir, taskID, requested string, force bool) (string, error) {
+	requested = strings.TrimSpace(requested)
+	if requested != "" {
+		return normalizeTaskSeries(requested)
+	}
+	if force {
+		manifestPath := filepath.Join(taskWorkspacePath(repoRoot, baseDir, taskID), taskManifestFilename)
+		if manifest, err := readTaskManifest(manifestPath); err == nil && strings.TrimSpace(manifest.Series) != "" {
+			return normalizeTaskSeries(manifest.Series)
+		}
+	}
+	return nextAvailableTaskSeries(repoRoot, baseDir)
+}
+
+func nextAvailableTaskSeries(repoRoot, baseDir string) (string, error) {
+	used, err := usedTaskAutoAlphaSeries(repoRoot, baseDir)
+	if err != nil {
+		return "", err
+	}
+	series := "A"
+	for used[series] {
+		series = nextTaskAlphaSeries(series)
+	}
+	return series, nil
+}
+
+func usedTaskAutoAlphaSeries(repoRoot, baseDir string) (map[string]bool, error) {
+	used := map[string]bool{}
+	parent := taskWorkspacePath(repoRoot, baseDir, "")
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return used, nil
+		}
+		return nil, fmt.Errorf("read task workspaces for series discovery: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		manifest, err := readTaskManifest(filepath.Join(parent, entry.Name(), taskManifestFilename))
+		if err != nil {
+			continue
+		}
+		series := strings.ToUpper(strings.TrimSpace(manifest.Series))
+		if isTaskAutoAlphaSeries(series) {
+			used[series] = true
+		}
+	}
+	return used, nil
+}
+
+func isTaskAutoAlphaSeries(series string) bool {
+	if series == "" {
+		return false
+	}
+	for _, r := range series {
+		if r < 'A' || r > 'Z' {
+			return false
+		}
+	}
+	return true
+}
+
+func nextTaskAlphaSeries(series string) string {
+	series = strings.ToUpper(strings.TrimSpace(series))
+	if series == "" {
+		return "A"
+	}
+	letters := []byte(series)
+	for i := len(letters) - 1; i >= 0; i-- {
+		if letters[i] < 'A' || letters[i] > 'Z' {
+			return "A"
+		}
+		if letters[i] == 'Z' {
+			letters[i] = 'A'
+			continue
+		}
+		letters[i]++
+		return string(letters)
+	}
+	return strings.Repeat("A", len(letters)+1)
 }
 
 func defaultTaskSeries(series string) string {

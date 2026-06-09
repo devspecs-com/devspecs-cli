@@ -933,6 +933,7 @@ func TestTask_TargetAddressingRequiresUnambiguousSlice(t *testing.T) {
 		startCmd := NewTaskCmd()
 		startCmd.SetArgs([]string{
 			"--id", taskID,
+			"--series", "A",
 			"--no-refresh",
 			"--index=false",
 			"--json",
@@ -963,6 +964,123 @@ func TestTask_TargetAddressingRequiresUnambiguousSlice(t *testing.T) {
 			t.Fatalf("ambiguous error missing %q: %v", want, err)
 		}
 	}
+}
+
+func TestTask_NextTaskAlphaSeriesRollovers(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "", want: "A"},
+		{in: "A", want: "B"},
+		{in: "Y", want: "Z"},
+		{in: "Z", want: "AA"},
+		{in: "AA", want: "AB"},
+		{in: "AZ", want: "BA"},
+		{in: "ZZ", want: "AAA"},
+		{in: "AAA", want: "AAB"},
+	}
+	for _, tt := range tests {
+		if got := nextTaskAlphaSeries(tt.in); got != tt.want {
+			t.Fatalf("nextTaskAlphaSeries(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestTask_StartAutoIncrementsDefaultSeries(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	writeExistingTaskSeries(t, repoDir, "existing-a", "A")
+	writeExistingTaskSeries(t, repoDir, "explicit-r09", "R09")
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "auto-series-b",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"auto series chooses next alpha",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out taskStartOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("task json: %v\n%s", err, buf.String())
+	}
+	if out.Series != "B" {
+		t.Fatalf("series = %q", out.Series)
+	}
+	if filepath.Base(out.IndexPath) != "B00-index.md" {
+		t.Fatalf("index path = %q", out.IndexPath)
+	}
+	if len(out.Slices) != 1 || out.Slices[0].ID != "B01" {
+		t.Fatalf("slices = %#v", out.Slices)
+	}
+}
+
+func TestTask_StartAutoSeriesRollsPastZAndZZ(t *testing.T) {
+	t.Run("Z to AA", func(t *testing.T) {
+		repoDir := setupTaskCommandRepo(t)
+		writeExistingTaskSeriesRange(t, repoDir, "Z")
+
+		cmd := NewTaskCmd()
+		cmd.SetArgs([]string{
+			"--id", "auto-series-aa",
+			"--no-refresh",
+			"--index=false",
+			"--json",
+			"auto series rolls past z",
+		})
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+
+		var out taskStartOutput
+		if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+			t.Fatalf("task json: %v\n%s", err, buf.String())
+		}
+		if out.Series != "AA" || filepath.Base(out.IndexPath) != "AA00-index.md" {
+			t.Fatalf("expected AA rollover, got %#v", out)
+		}
+		if len(out.Slices) != 1 || out.Slices[0].ID != "AA01" {
+			t.Fatalf("slices = %#v", out.Slices)
+		}
+	})
+
+	t.Run("ZZ to AAA", func(t *testing.T) {
+		repoDir := setupTaskCommandRepo(t)
+		writeExistingTaskSeriesRange(t, repoDir, "ZZ")
+
+		cmd := NewTaskCmd()
+		cmd.SetArgs([]string{
+			"--id", "auto-series-aaa",
+			"--no-refresh",
+			"--index=false",
+			"--json",
+			"auto series rolls past zz",
+		})
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+
+		var out taskStartOutput
+		if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+			t.Fatalf("task json: %v\n%s", err, buf.String())
+		}
+		if out.Series != "AAA" || filepath.Base(out.IndexPath) != "AAA00-index.md" {
+			t.Fatalf("expected AAA rollover, got %#v", out)
+		}
+		if len(out.Slices) != 1 || out.Slices[0].ID != "AAA01" {
+			t.Fatalf("slices = %#v", out.Slices)
+		}
+	})
 }
 
 func TestTask_StartAutoRefreshesTaskSubstrate(t *testing.T) {
@@ -2208,6 +2326,44 @@ func mustReadFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+func writeExistingTaskSeriesRange(t *testing.T, repoDir, last string) {
+	t.Helper()
+	for series := "A"; ; series = nextTaskAlphaSeries(series) {
+		writeExistingTaskSeries(t, repoDir, "existing-series-"+strings.ToLower(series), series)
+		if series == last {
+			return
+		}
+		if series == "" || len(series) > 4 {
+			t.Fatalf("series range did not reach %q", last)
+		}
+	}
+}
+
+func writeExistingTaskSeries(t *testing.T, repoDir, taskID, series string) {
+	t.Helper()
+	workspace := filepath.Join(repoDir, ".devspecs", "tasks", taskID)
+	mustMkdirAll(t, workspace)
+	manifest := taskManifest{
+		TaskID:    taskID,
+		Series:    series,
+		Query:     "existing task series " + series,
+		Status:    "packed",
+		CreatedAt: "2026-06-09T00:00:00Z",
+		RepoRoot:  repoDir,
+		Workspace: filepath.ToSlash(workspace),
+		Artifacts: taskArtifactPaths{
+			Series: series,
+			Index:  taskSeriesIndexFilename(series),
+			Slices: []taskSliceArtifact{
+				taskSliceArtifactWithSlug(series+"01", "existing slice", "existing-slice", "slice", "", ""),
+			},
+		},
+	}
+	if err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), manifest); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func containsString(values []string, want string) bool {
