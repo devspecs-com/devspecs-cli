@@ -27,6 +27,8 @@ devspecs.db-journal
 devspecs.db-wal
 .devspecs/config.yaml
 .devspecs/eval-runs/
+.devspecs/raw-output-samples/
+.devspecs/tasks/
 
 .gocache*/
 .gotmp/
