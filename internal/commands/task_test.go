@@ -716,7 +716,7 @@ func TestTask_StartBootstrapsRepeatedSlices(t *testing.T) {
 }
 
 func TestTask_BoundaryPrimitivesResolveOneTarget(t *testing.T) {
-	setupTaskCommandRepo(t)
+	repoDir := setupTaskCommandRepo(t)
 
 	startCmd := NewTaskCmd()
 	startCmd.SetArgs([]string{
@@ -786,6 +786,10 @@ func TestTask_BoundaryPrimitivesResolveOneTarget(t *testing.T) {
 		t.Fatalf("start target output = %#v", startTargetOut)
 	}
 
+	indexPath := filepath.Join(repoDir, ".devspecs", "tasks", "boundary-test", "A00-index.md")
+	authoredIndexBody := mustReadFile(t, indexPath) + "\n## Human Master Notes\n\nKeep this richer A00 content intact.\n"
+	mustWriteFile(t, indexPath, authoredIndexBody)
+
 	finishCmd := NewTaskCmd()
 	finishCmd.SetArgs([]string{"finish", "boundary-test", "--decision", "promote", "--index=false", "--json"})
 	finishBuf := &bytes.Buffer{}
@@ -799,6 +803,9 @@ func TestTask_BoundaryPrimitivesResolveOneTarget(t *testing.T) {
 	}
 	if finishOut.Target != "A01" || finishOut.Stage != "completed" || finishOut.Decision != "promote" {
 		t.Fatalf("finish output = %#v", finishOut)
+	}
+	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
+		t.Fatalf("finish rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
 	}
 
 	nextAfterCmd := NewTaskCmd()
@@ -1177,6 +1184,9 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 			t.Fatalf("index missing %q:\n%s", want, indexBody)
 		}
 	}
+	indexPath := filepath.Join(workspace, "B00-index.md")
+	authoredIndexBody := indexBody + "\n## Human Master Notes\n\nKeep lifecycle state in task.json and result artifacts.\n"
+	mustWriteFile(t, indexPath, authoredIndexBody)
 
 	var manifest taskManifest
 	if err := json.Unmarshal([]byte(mustReadFile(t, filepath.Join(workspace, taskManifestFilename))), &manifest); err != nil {
@@ -1270,9 +1280,8 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 		t.Fatalf("manifest iteration checkpoint refs = %#v", manifestIteration)
 	}
 
-	indexBody = mustReadFile(t, filepath.Join(workspace, "B00-index.md"))
-	if !strings.Contains(indexBody, "B01-1: repair lifecycle status (iteration of B01, reason: improve) [stage: implemented, decision: promote, checkpoint: checkpoints/") {
-		t.Fatalf("index missing promoted iteration state:\n%s", indexBody)
+	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
+		t.Fatalf("checkpoint rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
 	}
 
 	decideSliceCmd := NewTaskCmd()
@@ -1345,14 +1354,8 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 		t.Fatalf("completed slice status = %#v", completedSlice)
 	}
 
-	indexBody = mustReadFile(t, filepath.Join(workspace, "B00-index.md"))
-	for _, want := range []string{
-		"## Status\ncompleted",
-		"B01: first lifecycle slice [stage: completed, decision: complete]",
-	} {
-		if !strings.Contains(indexBody, want) {
-			t.Fatalf("index missing decided state %q:\n%s", want, indexBody)
-		}
+	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
+		t.Fatalf("decide rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
 	}
 }
 

@@ -1400,9 +1400,6 @@ func runTaskDecide(cmd *cobra.Command, taskID string, opts taskDecideOptions) er
 		return err
 	}
 	indexPath := filepath.Join(workspace, manifest.Artifacts.Index)
-	if err := os.WriteFile(indexPath, []byte(renderTaskIndex(manifest)), 0o644); err != nil {
-		return fmt.Errorf("write task index: %w", err)
-	}
 
 	var indexed []string
 	if opts.Index {
@@ -4137,9 +4134,6 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 		return err
 	}
 	indexPath := filepath.Join(workspace, manifest.Artifacts.Index)
-	if err := os.WriteFile(indexPath, []byte(renderTaskIndex(manifest)), 0o644); err != nil {
-		return fmt.Errorf("write task index: %w", err)
-	}
 
 	var indexed []string
 	factIndexed := false
