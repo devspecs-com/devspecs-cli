@@ -1,6 +1,6 @@
 # DevSpecs CLI
 
-> Local-first CLI for indexing specs, plans, ADRs, and agent-ready engineering context.
+> Local-first CLI for intent artifacts and repo-grounded AI coding workflows.
 
 ## Why DevSpecs?
 
@@ -8,7 +8,7 @@ AI-assisted development makes it easy to create plans, specs, ADRs, task lists, 
 
 A feature can quickly produce an OpenSpec proposal, a Cursor plan, a markdown checklist, a PR description, and a follow-up design note. Those artifacts are useful, but they often stay scattered across repo folders, editor state, and ad-hoc files. When you come back later, it is not always obvious what exists, which plan is still active, what todos remain, or what context to hand to the next coding session.
 
-DevSpecs is a local-first CLI that indexes the planning/specification artifacts you already have and gives them stable references.
+DevSpecs is a local-first CLI that indexes the planning/specification artifacts you already have and helps start new AI-assisted work from bounded, repo-grounded task slices.
 
 It is useful when you want to:
 
@@ -18,8 +18,45 @@ It is useful when you want to:
 - extract todos from markdown checklists without creating a task board
 - export clean context for Cursor, Claude Code, Codex, or another coding agent
 - reference implementation intent from PRs, issues, commits, or future notes
+- create a bounded `ds task` workspace with packed source/test context for the next slice of AI coding work
 
 DevSpecs does **not** replace Git, markdown, OpenSpec, ADRs, GitHub, Linear, or your editor. Keep writing specs where they already belong. DevSpecs adds a lightweight local index over them so humans and agents can find, reference, and reuse the right context.
+
+## Workflows
+
+DevSpecs has two main jobs.
+
+**Brownfield: recover existing intent.**
+
+Use this when a repo already has plans, PRDs, RFCs, ADRs, specs, runbooks, eval cards, or agent notes, but they are scattered or hard to hand to an agent.
+
+```bash
+ds init
+ds scan
+ds map
+ds find "oauth redirect"
+ds find --pack "oauth redirect"
+```
+
+`ds scan` indexes existing intent artifacts, `ds map` summarizes useful repo areas and follow-up pack commands, and `ds find --pack` groups search results into agent-readable context with inclusion and exclusion receipts.
+
+**Greenfield: start bounded AI coding work.**
+
+Use this when you are starting new work and want a repo-grounded first slice instead of asking an agent to grab a whole roadmap.
+
+```bash
+ds task \
+  --slice "Trace Swagger UI OAuth2 redirect flow and tests" \
+  --slice "Wire custom docs redirect URL through FastAPI docs helpers" \
+  "Serve Swagger UI OAuth2 redirect from a custom docs redirect URL"
+ds task show A01
+ds task prompt A01
+ds task checkpoint A01 --stage validated --decision promote
+ds task prompt A02
+ds task audit A02
+```
+
+`ds task` creates a task index, slice plan/result artifacts, packed source/test context, and an explicit lifecycle. `show` and `prompt` address one slice at a time; `checkpoint` records what actually happened; `audit` checks whether the work stayed inside the intended target.
 
 ## What it does
 
@@ -28,6 +65,8 @@ DevSpecs does **not** replace Git, markdown, OpenSpec, ADRs, GitHub, Linear, or 
 - **Extracts markdown checklist todos** and **acceptance / success / OKR criteria** (under matching headings), stored per artifact revision (source files stay authoritative).
 - Surfaces **in progress**, **recently settled**, and **stale** artifacts with **`ds resume`**.
 - Exports **agent-ready context** with **`ds context`**.
+- Maps a repo with **`ds map`** and suggests concrete **`ds find --pack`** follow-ups.
+- Creates bounded agent workspaces with **`ds task`**, including packed source/test context, slice prompts, checkpoints, and audit output.
 - Keeps everything **local** in a SQLite index under your home directory (override with **`DEVSPECS_HOME`**).
 
 ## Install
@@ -99,7 +138,9 @@ $ ds show abcdef01
 Fast paths after indexing:
 
 ```bash
+ds map                      # repo areas and suggested context commands
 ds find auth                 # search indexed text
+ds find --pack auth          # role-grouped context pack for an agent
 ds todos                     # checklist items across artifacts
 ds criteria                  # acceptance / success / OKR checklist criteria
 ds context abcdef01          # paste-ready context for an agent
@@ -113,7 +154,9 @@ ds config show               # effective discovery paths
 3. **`ds list`** / **`ds find`** — Browse or search what was indexed.
 4. **`ds show <id>`** — Full detail; accepts full ID, **short ID**, or prefix.
 5. **`ds todos`** / **`ds criteria`** / **`ds resume`** — Triage checklist items, auditable criteria, and lifecycle-oriented “where was I?” views.
-6. **`ds context <id>`** — Export a single artifact’s context for tools or agents.
+6. **`ds map`** / **`ds find --pack <query>`** — Move from indexed intent to a repo-aware context pack.
+7. **`ds task <query>`** — Start a new bounded task workflow with packed source/test context and slice artifacts.
+8. **`ds context <id>`** — Export a single artifact’s context for tools or agents.
 
 ### Scan summaries (`ds scan`)
 
@@ -139,6 +182,12 @@ Summary (see subsections and `ds <cmd> --help` for flags):
 | `ds resume` | In progress / recently settled / stale groupings |
 | `ds list` / `ds ls` | List indexed artifacts |
 | `ds find <query>` | Search indexed artifacts |
+| `ds find --pack <query>` | Group results into an agent-readable context pack |
+| `ds map [area]` | Show repo areas and useful follow-up context commands |
+| `ds task <query>` | Create a repo-grounded task workspace with slice artifacts |
+| `ds task prompt <target>` | Emit an agent prompt bounded to one task target |
+| `ds task checkpoint <target>` | Record actual files, tests, misses, and next decision |
+| `ds task audit <target>` | Check whether observed edits stayed inside one target |
 | `ds show` / `ds get <id>` | Artifact details (tags, scanned-by when set) |
 | `ds resolve <id>` | Resolve ID to source path |
 | `ds context <id>` | Export agent-ready context |
@@ -160,6 +209,8 @@ ds
   list (ls)           List indexed artifacts
   show (get) <id>     Show artifact details
   find <query>        Search artifacts
+  map [area]          Show repo areas and suggested context commands
+  task <query>        Create a grounded task workspace
   resolve <id>        Resolve ID to source path
   context <id>        Export agent-ready context
   todos [id]          List extracted todos
