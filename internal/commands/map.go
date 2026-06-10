@@ -55,7 +55,7 @@ const (
 	mapSchemaVersion                   = "devspecs.map.v1"
 	mapRecentSchemaVersion             = "devspecs.map.recent.v1"
 	mapTraceReceiptMode                = "bounded_git_path_receipts_v0"
-	mapIndexRequiredCaveat             = "context packing requires an index; run ds scan before using suggested ds find --pack commands"
+	mapIndexRequiredCaveat             = "local index is not loaded yet; suggested ds find --pack commands will auto-index unless --no-refresh is set"
 	mapLowConfidence                   = "low"
 	mapMediumConfidence                = "medium"
 	mapHighConfidence                  = "high"
@@ -98,12 +98,13 @@ const (
 // NewMapCmd creates the ds map command.
 func NewMapCmd() *cobra.Command {
 	var (
-		path     string
-		asJSON   bool
-		verbose  bool
-		recent   bool
-		boundary bool
-		maxAreas int
+		path      string
+		asJSON    bool
+		verbose   bool
+		recent    bool
+		boundary  bool
+		noRefresh bool
+		maxAreas  int
 	)
 
 	cmd := &cobra.Command{
@@ -122,6 +123,7 @@ func NewMapCmd() *cobra.Command {
 				Verbose:   verbose,
 				Recent:    recent,
 				Boundary:  boundary,
+				NoRefresh: noRefresh,
 				MaxAreas:  maxAreas,
 			})
 		},
@@ -132,6 +134,7 @@ func NewMapCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show map diagnostics and extra evidence")
 	cmd.Flags().BoolVar(&recent, "recent", false, "Show recently active topics from local git history")
 	cmd.Flags().BoolVar(&boundary, "experimental-boundaries", false, "Build the map from path-primary system boundary candidates")
+	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	cmd.Flags().IntVar(&maxAreas, "max-areas", mapDefaultMaxAreas, "Maximum areas to show")
 	return cmd
 }
@@ -143,6 +146,7 @@ type mapOptions struct {
 	Verbose   bool
 	Recent    bool
 	Boundary  bool
+	NoRefresh bool
 	MaxAreas  int
 }
 
@@ -1331,6 +1335,7 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 		"verbose":    opts.Verbose,
 		"recent":     opts.Recent,
 		"boundary":   opts.Boundary,
+		"no_refresh": opts.NoRefresh,
 		"max_areas":  opts.MaxAreas,
 		"area_query": opts.AreaQuery != "",
 	}
@@ -1345,8 +1350,10 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := ensureMapRepoIndexed(cmd, repoRoot); err != nil {
-		return err
+	if !opts.NoRefresh {
+		if err := ensureMapRepoIndexed(cmd, repoRoot); err != nil {
+			return err
+		}
 	}
 	if opts.Boundary {
 		out := buildPathBoundaryMapOutput(cmd.Context(), repoRoot, opts)

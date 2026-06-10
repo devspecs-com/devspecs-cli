@@ -152,7 +152,12 @@ func runInit(cmd *cobra.Command, force, hooks, noDetect, yes, nonInteractive boo
 		installHook(cmd, repoRoot)
 	}
 
-	fmt.Fprintln(cmd.OutOrStdout(), "\nNext:\n  ds scan")
+	fmt.Fprintln(cmd.OutOrStdout(), "\nNext:")
+	fmt.Fprintln(cmd.OutOrStdout(), "  ds map")
+	fmt.Fprintln(cmd.OutOrStdout(), "  ds find \"<topic>\"")
+	fmt.Fprintln(cmd.OutOrStdout(), "  ds task quick \"<small change>\"")
+	fmt.Fprintln(cmd.OutOrStdout(), "\nManual refresh:")
+	fmt.Fprintln(cmd.OutOrStdout(), "  ds scan")
 	return nil
 }
 

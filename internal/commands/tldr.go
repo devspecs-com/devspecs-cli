@@ -63,6 +63,7 @@ func buildTLDRGuide() tldrOutput {
 		Purpose: "DevSpecs is a local-first CLI for turning repo intent into agent-usable context, bounded task slices, checkpoints, and handoff receipts.",
 		LLMRules: []string{
 			"Prefer one bounded target over the whole plan.",
+			"Workflow commands refresh the local index by default; use ds scan for explicit manual refresh or rebuild.",
 			"Use packed context before broad repo reading when starting a change.",
 			"Record evidence with checkpoint/finish instead of relying on chat memory.",
 			"Do not claim DevSpecs found every relevant file; verify source and tests.",
@@ -99,7 +100,6 @@ func buildTLDRGuide() tldrOutput {
 				Name:    "Incident / Triage",
 				UseWhen: "You need fast orientation, likely source/test context, and an evidence trail.",
 				Commands: []string{
-					"ds scan",
 					`ds find --pack "<symptom> <component>"`,
 					`ds task quick "triage <incident>"`,
 					"ds task checkpoint <task-id> --target <target> --stage validated --decision continue --file-read <path> --test-run <cmd>",
@@ -112,7 +112,6 @@ func buildTLDRGuide() tldrOutput {
 				UseWhen: "The repo already has plans, ADRs, PRDs, RFCs, runbooks, or agent notes.",
 				Commands: []string{
 					"ds init",
-					"ds scan",
 					"ds map",
 					"ds list --limit 20",
 					`ds find "<topic>"`,
@@ -120,6 +119,7 @@ func buildTLDRGuide() tldrOutput {
 				},
 				AgentRule: "Use IDs from list/find/context instead of pasting whole folders. Treat old artifacts as context, not instructions, unless current.",
 				Notes: []string{
+					"`ds map`, `ds find`, and `ds list` refresh the index by default.",
 					"`ds adopt` is planned, not shipped.",
 					"Use `ds scan --no-gitignore` only when intentionally inspecting ignored paths.",
 				},
@@ -142,7 +142,6 @@ func buildTLDRGuide() tldrOutput {
 				Name:    "Repo Deep Dive / Map To Pack",
 				UseWhen: "You need to understand a recognizable area before choosing task scope.",
 				Commands: []string{
-					"ds scan",
 					"ds map",
 					`ds find --pack "<area or task>"`,
 					"ds context <artifact-id>",

@@ -1485,6 +1485,33 @@ func TestMapAutoScanLeavesUsableIndexForFindPack(t *testing.T) {
 	}
 }
 
+func TestMapNoRefreshSkipsAutoScan(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	home := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", home)
+
+	writeMapTestFile(t, repoRoot, "plans/credentials-plan.md", "# Credentials Rotation\n\nRotate credentials for webhook ingestion.\n")
+	writeMapTestFile(t, repoRoot, "app/auth/credentials.go", "package auth\n\nfunc RotateCredentials() {}\n")
+	runGitForFindPack(t, repoRoot, "add", ".")
+	runGitForFindPack(t, repoRoot, "commit", "-m", "add credentials rotation context")
+
+	mapCmd := NewMapCmd()
+	mapCmd.SetArgs([]string{"--experimental-boundaries", "--path", repoRoot, "--max-areas", "4", "--no-refresh"})
+	mapOut := &bytes.Buffer{}
+	mapErr := &bytes.Buffer{}
+	mapCmd.SetOut(mapOut)
+	mapCmd.SetErr(mapErr)
+	if err := mapCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(mapErr.String(), "Index updated") {
+		t.Fatalf("map --no-refresh should not auto-scan, stderr: %s", mapErr.String())
+	}
+	if !strings.Contains(mapOut.String(), mapIndexRequiredCaveat) {
+		t.Fatalf("map --no-refresh should disclose missing local index:\n%s", mapOut.String())
+	}
+}
+
 func TestMapJSONAutoScanKeepsStdoutJSON(t *testing.T) {
 	repoRoot := setupGitRepo(t)
 	home := t.TempDir()

@@ -90,7 +90,8 @@ func runResume(cmd *cobra.Command, query string, fp store.FilterParams, repoName
 	}
 
 	if len(rows) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "No DevSpecs indexed yet. Run: ds scan")
+		fmt.Fprintln(cmd.OutOrStdout(), "No DevSpecs indexed yet. Try: ds map or ds find \"<topic>\"")
+		fmt.Fprintln(cmd.OutOrStdout(), "Manual refresh: ds scan")
 		success = true
 		props["result_count_bucket"] = telemetry.CountBucket(0)
 		return nil

@@ -120,17 +120,17 @@ agent.
 
 ```bash
 ds init
-ds scan
 ds map
 ds find "oauth redirect"
 ds find --pack "oauth redirect"
 ds context <id>
 ```
 
-`ds scan` builds the local index. `ds map` summarizes useful repo areas and
-follow-up pack commands. Plain `ds find` locates indexed artifacts. Packed find
-groups source, tests, docs, receipts, and exclusions into an agent-readable
-context pack.
+`ds map`, `ds find`, and `ds context` refresh the local index as needed. `ds map`
+summarizes useful repo areas and follow-up pack commands. Plain `ds find`
+locates indexed artifacts. Packed find groups source, tests, docs, receipts, and
+exclusions into an agent-readable context pack. Use `ds scan` when you want an
+explicit manual refresh or rebuild.
 
 `ds adopt` is planned, not shipped. Current brownfield workflows scan and query
 existing artifacts in place without mutating old files.
@@ -156,7 +156,7 @@ Source files remain authoritative. DevSpecs stores derived index state locally.
 | Command | Use |
 | --- | --- |
 | `ds init` | Create local index state and repo config. |
-| `ds scan` | Index configured intent-artifact paths. |
+| `ds scan` | Manually refresh or rebuild configured intent-artifact paths. |
 | `ds map` | Summarize repo areas and useful follow-up context commands. |
 | `ds find <query>` | Search indexed artifacts. |
 | `ds find --pack <query>` | Build agent-readable packed context. |

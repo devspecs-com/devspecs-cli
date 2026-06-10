@@ -65,6 +65,18 @@ func TestInit_CreatesRepoConfig(t *testing.T) {
 	if !strings.Contains(output, "Initialized DevSpecs.") {
 		t.Errorf("expected 'Initialized DevSpecs.' in output, got %q", output)
 	}
+	for _, want := range []string{
+		"Next:",
+		"ds map",
+		`ds find "<topic>"`,
+		`ds task quick "<small change>"`,
+		"Manual refresh:",
+		"ds scan",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("expected init output to contain %q, got %q", want, output)
+		}
+	}
 }
 
 func TestInit_NoDestructiveRerun(t *testing.T) {

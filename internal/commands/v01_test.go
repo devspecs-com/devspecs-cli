@@ -310,6 +310,9 @@ func TestResume_EmptyRepo(t *testing.T) {
 	if !containsStr(buf.String(), "No DevSpecs indexed yet") {
 		t.Error("expected 'No DevSpecs indexed yet' message")
 	}
+	if !containsStr(buf.String(), "ds map") || !containsStr(buf.String(), "Manual refresh: ds scan") {
+		t.Errorf("expected scanless resume guidance, got %q", buf.String())
+	}
 }
 
 func TestResume_LimitFlag(t *testing.T) {

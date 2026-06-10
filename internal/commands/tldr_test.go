@@ -23,6 +23,7 @@ func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 		"## Brownfield Intent Recovery (`brownfield`)",
 		"ds task quick",
 		"ds task checkpoint <task-id> --target <target>",
+		"Workflow commands refresh the local index by default",
 		"ds list --limit 20",
 	} {
 		if !strings.Contains(out, want) {
@@ -46,8 +47,12 @@ func TestTLDR_FilterAndJSON(t *testing.T) {
 	if len(out.Workflows) != 1 || out.Workflows[0].ID != "incident" {
 		t.Fatalf("expected only incident workflow, got %#v", out.Workflows)
 	}
-	if !strings.Contains(strings.Join(out.Workflows[0].Commands, "\n"), "ds find --pack") {
+	commands := strings.Join(out.Workflows[0].Commands, "\n")
+	if !strings.Contains(commands, "ds find --pack") {
 		t.Fatalf("incident workflow missing packed find command: %#v", out.Workflows[0])
+	}
+	if strings.Contains(commands, "ds scan") {
+		t.Fatalf("incident workflow should not require manual scan: %#v", out.Workflows[0])
 	}
 }
 
