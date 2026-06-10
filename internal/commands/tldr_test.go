@@ -48,7 +48,7 @@ func TestTLDR_FilterAndJSON(t *testing.T) {
 		t.Fatalf("expected only incident workflow, got %#v", out.Workflows)
 	}
 	commands := strings.Join(out.Workflows[0].Commands, "\n")
-	if !strings.Contains(commands, "ds find --pack") {
+	if !strings.Contains(commands, "ds find") {
 		t.Fatalf("incident workflow missing packed find command: %#v", out.Workflows[0])
 	}
 	if strings.Contains(commands, "ds scan") {

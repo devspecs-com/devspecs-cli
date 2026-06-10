@@ -81,14 +81,14 @@ func TestApplyFindPackScoutPresetPreservesExplicitOverrides(t *testing.T) {
 	}
 }
 
-func TestFindCommandExposesPackScoutFlag(t *testing.T) {
+func TestFindCommandKeepsPackScoutFlagInternal(t *testing.T) {
 	cmd := NewFindCmd()
 	flag := cmd.Flags().Lookup("pack-scout")
 	if flag == nil {
 		t.Fatal("missing --pack-scout flag")
 	}
-	if flag.Hidden {
-		t.Fatal("--pack-scout should be visible as the explicit beta surface")
+	if !flag.Hidden {
+		t.Fatal("--pack-scout should stay hidden from public find help")
 	}
 }
 

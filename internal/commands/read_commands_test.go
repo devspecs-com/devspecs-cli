@@ -432,7 +432,7 @@ func TestFind_JSONOutput(t *testing.T) {
 	setupReadEnv(t)
 
 	cmd := NewFindCmd()
-	cmd.SetArgs([]string{"Plan", "--json"})
+	cmd.SetArgs([]string{"Plan", "--json", "--plain"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	if err := cmd.Execute(); err != nil {
@@ -461,7 +461,7 @@ func TestFindPack_JSONOutputKeepsRankedResultsAndGroups(t *testing.T) {
 	setupReadEnv(t)
 
 	cmd := NewFindCmd()
-	cmd.SetArgs([]string{"Plan", "--json", "--pack"})
+	cmd.SetArgs([]string{"Plan", "--json"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	if err := cmd.Execute(); err != nil {
@@ -470,7 +470,7 @@ func TestFindPack_JSONOutputKeepsRankedResultsAndGroups(t *testing.T) {
 
 	var out FindPackOutput
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("find --json --pack invalid: %v\n%s", err, buf.String())
+		t.Fatalf("find --json default pack invalid: %v\n%s", err, buf.String())
 	}
 	if out.Mode != "role_grouped_pack_v0_family_primary_v1" {
 		t.Fatalf("pack mode = %q", out.Mode)
@@ -479,13 +479,13 @@ func TestFindPack_JSONOutputKeepsRankedResultsAndGroups(t *testing.T) {
 		t.Fatalf("scout mode = %q", out.ScoutMode)
 	}
 	if len(out.Groups) == 0 {
-		t.Fatalf("find --json --pack returned no groups: %#v", out)
+		t.Fatalf("find --json default pack returned no groups: %#v", out)
 	}
 	if out.Summary.IncludedCount == 0 || out.Summary.RoleDiversity == 0 {
 		t.Fatalf("find --json --pack missing summary: %#v", out.Summary)
 	}
 	if len(out.RankedResults) == 0 {
-		t.Fatalf("find --json --pack returned no ranked results: %#v", out)
+		t.Fatalf("find --json default pack returned no ranked results: %#v", out)
 	}
 }
 
@@ -493,7 +493,7 @@ func TestFindPack_HumanOutputShowsReceipt(t *testing.T) {
 	setupReadEnv(t)
 
 	cmd := NewFindCmd()
-	cmd.SetArgs([]string{"Plan", "--pack"})
+	cmd.SetArgs([]string{"Plan"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	if err := cmd.Execute(); err != nil {
@@ -502,13 +502,30 @@ func TestFindPack_HumanOutputShowsReceipt(t *testing.T) {
 	output := buf.String()
 	for _, want := range []string{"Working set: Plan", "Summary:", "Coverage:", "Evidence:"} {
 		if !strings.Contains(output, want) {
-			t.Fatalf("find --pack missing %q:\n%s", want, output)
+			t.Fatalf("find default pack missing %q:\n%s", want, output)
 		}
 	}
 	for _, notWant := range []string{"Retriever:", "Mode:", "Type:", "Why:", "Signals:"} {
 		if strings.Contains(output, notWant) {
-			t.Fatalf("find --pack should be concise and omit %q:\n%s", notWant, output)
+			t.Fatalf("find default pack should be concise and omit %q:\n%s", notWant, output)
 		}
+	}
+}
+
+func TestFindHelpShowsPlainInsteadOfPack(t *testing.T) {
+	cmd := NewFindCmd()
+	cmd.SetArgs([]string{"--help"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	output := buf.String()
+	if strings.Contains(output, "--pack") {
+		t.Fatalf("find help should not expose --pack:\n%s", output)
+	}
+	if !strings.Contains(output, "--plain") {
+		t.Fatalf("find help should expose --plain:\n%s", output)
 	}
 }
 
@@ -709,7 +726,7 @@ func TestFindGraphDiagnostics_AttachesTypedEdgeAndSuppressesSharedConcept(t *tes
 	seedGraphDiagnosticArtifacts(t, repoDir)
 
 	cmd := NewFindCmd()
-	cmd.SetArgs([]string{"--json", "--graph-diagnostics", "--no-refresh", "rotatetoken implementation"})
+	cmd.SetArgs([]string{"--json", "--plain", "--graph-diagnostics", "--no-refresh", "rotatetoken implementation"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	if err := cmd.Execute(); err != nil {
@@ -757,7 +774,7 @@ func TestFindGraphDiagnostics_RequiresSourceTestQueryIntent(t *testing.T) {
 	seedGraphDiagnosticArtifacts(t, repoDir)
 
 	cmd := NewFindCmd()
-	cmd.SetArgs([]string{"--json", "--graph-diagnostics", "--no-refresh", "rotatetoken"})
+	cmd.SetArgs([]string{"--json", "--plain", "--graph-diagnostics", "--no-refresh", "rotatetoken"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	if err := cmd.Execute(); err != nil {
@@ -784,7 +801,7 @@ func TestFind_JSONOutputIncludesLineScopedPath(t *testing.T) {
 	relPath := seedLineScopedTestArtifacts(t, repoDir)
 
 	cmd := NewFindCmd()
-	cmd.SetArgs([]string{"--json", "--no-refresh", "testputandgetexposedtool"})
+	cmd.SetArgs([]string{"--json", "--plain", "--no-refresh", "testputandgetexposedtool"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	if err := cmd.Execute(); err != nil {

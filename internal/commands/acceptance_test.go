@@ -570,7 +570,7 @@ func TestJSONStability(t *testing.T) {
 
 	t.Run("find_json", func(t *testing.T) {
 		cmd := NewFindCmd()
-		cmd.SetArgs([]string{"auth", "--json"})
+		cmd.SetArgs([]string{"auth", "--json", "--plain"})
 		buf := &bytes.Buffer{}
 		cmd.SetOut(buf)
 		if err := cmd.Execute(); err != nil {

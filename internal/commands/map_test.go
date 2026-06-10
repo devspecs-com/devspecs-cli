@@ -43,7 +43,7 @@ func TestMapTextHidesReviewerDiagnosticsByDefault(t *testing.T) {
 			t.Fatalf("default map output leaked reviewer diagnostic %q:\n%s", notWant, text)
 		}
 	}
-	for _, want := range []string{"Repo map: payments-api", "Candidate areas", "Type:", "Try: ds find --pack"} {
+	for _, want := range []string{"Repo map: payments-api", "Candidate areas", "Type:", "Try: ds find"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("default map output missing %q:\n%s", want, text)
 		}
@@ -159,7 +159,7 @@ func TestMapAreaDrilldownIsActionable(t *testing.T) {
 		"Key files:",
 		"apps/api/internal/submission/redaction.go",
 		"Pack this context:",
-		`ds find --pack "submission redaction"`,
+		`ds find "submission redaction"`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("area drilldown missing %q:\n%s", want, text)
@@ -194,7 +194,7 @@ func TestMapAreaDrilldownUsesMatchedDocTopicOverLocaleBucket(t *testing.T) {
 				"docs/es/docs/tutorial/background-tasks.md",
 				"docs/fr/docs/tutorial/background-tasks.md",
 			},
-			Try: "ds find --pack \"docs fr background\"",
+			Try: "ds find \"docs fr background\"",
 		}},
 	}
 	var buf bytes.Buffer
@@ -203,7 +203,7 @@ func TestMapAreaDrilldownUsesMatchedDocTopicOverLocaleBucket(t *testing.T) {
 	for _, want := range []string{
 		"Map area: Background Tasks",
 		"docs/en/docs/tutorial/background-tasks.md",
-		`ds find --pack "background tasks"`,
+		`ds find "background tasks"`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("doc drilldown missing %q:\n%s", want, text)
@@ -214,7 +214,7 @@ func TestMapAreaDrilldownUsesMatchedDocTopicOverLocaleBucket(t *testing.T) {
 		"docs/de/docs/tutorial/background-tasks.md",
 		"docs/es/docs/tutorial/background-tasks.md",
 		"docs/fr/docs/tutorial/background-tasks.md",
-		`ds find --pack "docs fr background"`,
+		`ds find "docs fr background"`,
 	} {
 		if strings.Contains(text, notWant) {
 			t.Fatalf("doc drilldown leaked %q:\n%s", notWant, text)
@@ -251,7 +251,7 @@ func TestMapRecentTopicsSkipNoiseAndBuildPackHandoff(t *testing.T) {
 	if topic.Label != "Public Form Endpoints" {
 		t.Fatalf("label = %q, want Public Form Endpoints", topic.Label)
 	}
-	if topic.Try != `ds find --pack "public form endpoints"` {
+	if topic.Try != `ds find "public form endpoints"` {
 		t.Fatalf("try = %q", topic.Try)
 	}
 	if topic.EvidenceCounts["source"] == 0 || topic.EvidenceCounts["config"] == 0 {
@@ -271,7 +271,7 @@ func TestFastMapFallbackAddsIndexRequiredCaveatForUnindexedRepo(t *testing.T) {
 			FileCount:      3,
 			EvidenceCounts: map[string]int{"source": 2, "test": 1},
 			KeyPaths:       []string{"apps/web/app/api/partner-profile/referrals/route.ts"},
-			Try:            `ds find --pack "partner commission"`,
+			Try:            `ds find "partner commission"`,
 		}},
 	}
 
@@ -898,13 +898,13 @@ func TestPathBoundaryMapDemotesFreshHoldoutShellBuckets(t *testing.T) {
 }
 
 func TestMapTryCommandDropsShellLabelsAndUsesSpecificCovers(t *testing.T) {
-	if got := mapTryCommand("Locales", []string{"Admin Console"}, nil, mapHighConfidence, nil); got != `ds find --pack "admin console"` {
+	if got := mapTryCommand("Locales", []string{"Admin Console"}, nil, mapHighConfidence, nil); got != `ds find "admin console"` {
 		t.Fatalf("locales try = %q", got)
 	}
-	if got := mapTryCommand("Javascript", []string{"Accordion"}, nil, mapHighConfidence, nil); got != `ds find --pack "accordion"` {
+	if got := mapTryCommand("Javascript", []string{"Accordion"}, nil, mapHighConfidence, nil); got != `ds find "accordion"` {
 		t.Fatalf("javascript try = %q", got)
 	}
-	if got := mapTryCommand("Files, Assets & Storage", []string{"Upload"}, nil, mapHighConfidence, []string{"web/src/components/MemoEditor/hooks/useFileUpload.ts"}); got != `ds find --pack "upload"` {
+	if got := mapTryCommand("Files, Assets & Storage", []string{"Upload"}, nil, mapHighConfidence, []string{"web/src/components/MemoEditor/hooks/useFileUpload.ts"}); got != `ds find "upload"` {
 		t.Fatalf("broad storage try should prefer the specific cover, got %q", got)
 	}
 }
@@ -917,7 +917,7 @@ func TestMapTryCommandPrefersSpecificCoverForParentLabel(t *testing.T) {
 		mapHighConfidence,
 		[]string{"apps/api/internal/submission/redaction.go"},
 	)
-	if got != `ds find --pack "submission redaction"` {
+	if got != `ds find "submission redaction"` {
 		t.Fatalf("parent label try = %q", got)
 	}
 }
@@ -938,7 +938,7 @@ func TestMapTryCommandPrefersHighQualityTraceTaskOverPathTokens(t *testing.T) {
 		},
 		mapBoundaryRoleProductCapability,
 	)
-	if got != `ds find --pack "map handoff query quality"` {
+	if got != `ds find "map handoff query quality"` {
 		t.Fatalf("trace task handoff = %q", got)
 	}
 }
@@ -955,7 +955,7 @@ func TestMapTryCommandKeepsSpecificCoverAboveUnrelatedTraceTask(t *testing.T) {
 		[]string{"apps/api/internal/submission/redaction.go"},
 		mapBoundaryRoleProductCapability,
 	)
-	if got != `ds find --pack "submission redaction"` {
+	if got != `ds find "submission redaction"` {
 		t.Fatalf("specific cover should beat unrelated trace task, got %q", got)
 	}
 }
@@ -1271,7 +1271,7 @@ func TestMapRecentTextAvoidsTaskStatusClaims(t *testing.T) {
 				SHA:     "df68f82",
 				Subject: "Add expedition enemy pressure phases A-D for Killer Slice 001.",
 			}},
-			Try: `ds find --pack "expedition enemy pressure"`,
+			Try: `ds find "expedition enemy pressure"`,
 		}},
 	}
 	var buf bytes.Buffer
@@ -1282,7 +1282,7 @@ func TestMapRecentTextAvoidsTaskStatusClaims(t *testing.T) {
 		"Expedition Enemy Pressure",
 		"Evidence: 1 commit, 2 files, source",
 		"Recent signal: df68f82 Add expedition enemy pressure phases A-D for Killer Slice 001.",
-		`Try: ds find --pack "expedition enemy pressure"`,
+		`Try: ds find "expedition enemy pressure"`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("recent output missing %q:\n%s", want, text)
@@ -1313,7 +1313,7 @@ func TestFastMapFallbackConvertsRecentTopicToMapArea(t *testing.T) {
 	if area.Label != "YAML Format Language" {
 		t.Fatalf("label = %q", area.Label)
 	}
-	if area.Try != `ds find --pack "yaml format language"` {
+	if area.Try != `ds find "yaml format language"` {
 		t.Fatalf("try = %q", area.Try)
 	}
 	if area.EvidenceCounts["source"] == 0 || area.EvidenceCounts["test"] == 0 {
@@ -1380,7 +1380,7 @@ func TestMapTryCommandAvoidsUnsupportedCommitVerb(t *testing.T) {
 		SHA:     "abc1234",
 		Subject: "Replace `main` branch in changelog link with tags (#19054)",
 	}}, mapMediumConfidence, nil)
-	if query != `ds find --pack "release publish npm"` {
+	if query != `ds find "release publish npm"` {
 		t.Fatalf("query = %q, want release publish npm", query)
 	}
 	commands := mapAreaPackCommands(mapArea{
@@ -1420,7 +1420,7 @@ func TestMapOutputCacheRoundTripsFreshMap(t *testing.T) {
 			Path:       repoRoot,
 			Confidence: mapMediumConfidence,
 		},
-		Areas: []mapArea{{Label: "Release", Try: `ds find --pack "release publish npm"`}},
+		Areas: []mapArea{{Label: "Release", Try: `ds find "release publish npm"`}},
 	}
 	if err := saveMapOutputCache(repoRoot, mapDefaultMaxAreas, out); err != nil {
 		t.Fatal(err)
@@ -1468,7 +1468,7 @@ func TestMapAutoScanLeavesUsableIndexForFindPack(t *testing.T) {
 	defer os.Chdir(oldWd)
 
 	findCmd := NewFindCmd()
-	findCmd.SetArgs([]string{"credentials rotation", "--pack", "--no-refresh"})
+	findCmd.SetArgs([]string{"credentials rotation", "--no-refresh"})
 	findOut := &bytes.Buffer{}
 	findErr := &bytes.Buffer{}
 	findCmd.SetOut(findOut)
@@ -1481,7 +1481,7 @@ func TestMapAutoScanLeavesUsableIndexForFindPack(t *testing.T) {
 	}
 	output := findOut.String()
 	if !strings.Contains(output, "Working set: credentials rotation") || !strings.Contains(output, "Credentials Rotation") {
-		t.Fatalf("find --pack did not use map-created index.\nOutput: %s\nStderr: %s", output, findErr.String())
+		t.Fatalf("find did not use map-created index.\nOutput: %s\nStderr: %s", output, findErr.String())
 	}
 }
 

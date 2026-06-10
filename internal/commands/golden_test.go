@@ -153,7 +153,7 @@ func TestGolden_ShowJSON(t *testing.T) {
 func TestGolden_FindJSON(t *testing.T) {
 	setupGoldenEnv(t)
 	cmd := NewFindCmd()
-	cmd.SetArgs([]string{"Golden", "--json"})
+	cmd.SetArgs([]string{"Golden", "--json", "--plain"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	if err := cmd.Execute(); err != nil {

@@ -739,7 +739,7 @@ func TestFind_ScopesToCurrentRepoByDefault(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(origWd) })
 
 	cmd := NewFindCmd()
-	cmd.SetArgs([]string{"ScopeBetaOnlyInB", "--no-refresh"})
+	cmd.SetArgs([]string{"ScopeBetaOnlyInB", "--no-refresh", "--plain"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	if err := cmd.Execute(); err != nil {
@@ -750,7 +750,7 @@ func TestFind_ScopesToCurrentRepoByDefault(t *testing.T) {
 	}
 
 	cmd2 := NewFindCmd()
-	cmd2.SetArgs([]string{"ScopeBetaOnlyInB", "--no-refresh", "--all"})
+	cmd2.SetArgs([]string{"ScopeBetaOnlyInB", "--no-refresh", "--all", "--plain"})
 	buf2 := &bytes.Buffer{}
 	cmd2.SetOut(buf2)
 	if err := cmd2.Execute(); err != nil {
@@ -761,7 +761,7 @@ func TestFind_ScopesToCurrentRepoByDefault(t *testing.T) {
 	}
 
 	cmd3 := NewFindCmd()
-	cmd3.SetArgs([]string{"ScopeAlphaOnlyInA", "--no-refresh"})
+	cmd3.SetArgs([]string{"ScopeAlphaOnlyInA", "--no-refresh", "--plain"})
 	buf3 := &bytes.Buffer{}
 	cmd3.SetOut(buf3)
 	if err := cmd3.Execute(); err != nil {

@@ -122,15 +122,14 @@ agent.
 ds init
 ds map
 ds find "oauth redirect"
-ds find --pack "oauth redirect"
 ds context <id>
 ```
 
 `ds map`, `ds find`, and `ds context` refresh the local index as needed. `ds map`
-summarizes useful repo areas and follow-up pack commands. Plain `ds find`
-locates indexed artifacts. Packed find groups source, tests, docs, receipts, and
-exclusions into an agent-readable context pack. Use `ds scan` when you want an
-explicit manual refresh or rebuild.
+summarizes useful repo areas and follow-up context commands. `ds find` groups
+source, tests, docs, receipts, and exclusions into an agent-readable context
+pack by default. Use `ds find --plain` when you want the older flat ranked
+result list. Use `ds scan` when you want an explicit manual refresh or rebuild.
 
 `ds adopt` is planned, not shipped. Current brownfield workflows scan and query
 existing artifacts in place without mutating old files.
@@ -158,8 +157,8 @@ Source files remain authoritative. DevSpecs stores derived index state locally.
 | `ds init` | Create local index state and repo config. |
 | `ds scan` | Manually refresh or rebuild configured intent-artifact paths. |
 | `ds map` | Summarize repo areas and useful follow-up context commands. |
-| `ds find <query>` | Search indexed artifacts. |
-| `ds find --pack <query>` | Build agent-readable packed context. |
+| `ds find <query>` | Build agent-readable packed context. |
+| `ds find --plain <query>` | Show the older flat ranked result list. |
 | `ds tldr [workflow]` | Show LLM-oriented workflow quickstarts for hotfixes, epics, incidents, brownfield recovery, handoff, and deep dives. |
 | `ds task <query>` | Create a bounded task workspace with slice artifacts. |
 | `ds task quick <query>` | Create a one-off task workspace with compact output. |

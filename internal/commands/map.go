@@ -55,7 +55,7 @@ const (
 	mapSchemaVersion                   = "devspecs.map.v1"
 	mapRecentSchemaVersion             = "devspecs.map.recent.v1"
 	mapTraceReceiptMode                = "bounded_git_path_receipts_v0"
-	mapIndexRequiredCaveat             = "local index is not loaded yet; suggested ds find --pack commands will auto-index unless --no-refresh is set"
+	mapIndexRequiredCaveat             = "local index is not loaded yet; suggested ds find commands will auto-index unless --no-refresh is set"
 	mapLowConfidence                   = "low"
 	mapMediumConfidence                = "medium"
 	mapHighConfidence                  = "high"
@@ -6208,7 +6208,7 @@ func mapFindPackCommand(query string) string {
 	if query == "" {
 		return ""
 	}
-	return fmt.Sprintf("ds find --pack %q", query)
+	return fmt.Sprintf("ds find %q", query)
 }
 
 func mapTraceQuery(label string, covers []string, subject string) string {

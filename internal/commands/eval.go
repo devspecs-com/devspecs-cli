@@ -423,7 +423,9 @@ func runFindForEval(spec evalharness.CaseSpec, candidatesByPath map[string]retri
 	cmd := NewFindCmd()
 	args := []string{"--json", "--no-refresh"}
 	if graphDiagnostics {
-		args = append(args, "--pack", "--graph-diagnostics")
+		args = append(args, "--graph-diagnostics")
+	} else {
+		args = append(args, "--plain")
 	}
 	if experimentalAnchorFirstRanking {
 		args = append(args, "--experimental-anchor-first-ranking")

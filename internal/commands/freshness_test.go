@@ -473,7 +473,7 @@ func TestFindAutoScan_TriggersWhenIndexMissing(t *testing.T) {
 	defer os.Chdir(oldWd)
 
 	findCmd := NewFindCmd()
-	findCmd.SetArgs([]string{"credentials rotation", "--pack"})
+	findCmd.SetArgs([]string{"credentials rotation"})
 	outBuf := &bytes.Buffer{}
 	errBuf := &bytes.Buffer{}
 	findCmd.SetOut(outBuf)
@@ -518,7 +518,7 @@ func TestFindAutoScan_SkippedWithNoRefreshWhenIndexMissing(t *testing.T) {
 	defer os.Chdir(oldWd)
 
 	findCmd := NewFindCmd()
-	findCmd.SetArgs([]string{"credentials rotation", "--pack", "--no-refresh"})
+	findCmd.SetArgs([]string{"credentials rotation", "--no-refresh"})
 	outBuf := &bytes.Buffer{}
 	errBuf := &bytes.Buffer{}
 	findCmd.SetOut(outBuf)

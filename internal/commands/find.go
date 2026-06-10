@@ -29,6 +29,7 @@ func NewFindCmd() *cobra.Command {
 		asJSON                    bool
 		noRefresh                 bool
 		pack                      bool
+		plain                     bool
 		verbose                   bool
 		graphDiag                 bool
 		gitReceipts               = true
@@ -53,7 +54,8 @@ func NewFindCmd() *cobra.Command {
 			if cmd.Flags().Changed("experimental-anchor-first-mode") && !cmd.Flags().Changed("experimental-anchor-first-ranking") {
 				anchorFirst = true
 			}
-			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, pack, verbose, graphDiag, gitReceipts, anchorFirst, anchorMode, boundaryPrimary, packCompanions, sourcePackMode, sourceManifestCandidates, sourceManifestConsumption, sourceTestReceipts, packPresentationMode, packScoutMode)
+			effectivePack := pack && !plain
+			return runFind(cmd, args[0], fp, repoName, allRepos, asJSON, noRefresh, effectivePack, verbose, graphDiag, gitReceipts, anchorFirst, anchorMode, boundaryPrimary, packCompanions, sourcePackMode, sourceManifestCandidates, sourceManifestConsumption, sourceTestReceipts, packPresentationMode, packScoutMode)
 		},
 	}
 
@@ -66,20 +68,27 @@ func NewFindCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&allRepos, "all", false, "Search artifacts in all indexed repos (ignore cwd scope)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
-	cmd.Flags().BoolVar(&pack, "pack", false, "Group results into a role-based context pack with inclusion and exclusion receipts")
+	cmd.Flags().BoolVar(&pack, "pack", true, "Group results into a role-based context pack with inclusion and exclusion receipts")
+	cmd.Flags().BoolVar(&plain, "plain", false, "Show flat ranked results instead of the default context pack")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show detailed human output for pack receipts and diagnostics")
 	cmd.Flags().BoolVar(&graphDiag, "graph-diagnostics", false, "Attach opt-in typed-edge graph diagnostics without changing ranked results")
 	cmd.Flags().BoolVar(&gitReceipts, "git-receipts", true, "Attach bounded local git commit receipts to pack output when available")
 	cmd.Flags().BoolVar(&anchorFirst, "experimental-anchor-first-ranking", true, "Use repo-local TF-IDF anchor-first ordering; pass false to disable")
 	cmd.Flags().StringVar(&anchorMode, "experimental-anchor-first-mode", retrieval.DefaultAnchorFirstMode, "Anchor-first tuning mode: v1, rerank_only, selected_only, strong_field, strict, code_task, code_task_family, or code_task_family_v2")
 	cmd.Flags().BoolVar(&boundaryPrimary, "experimental-boundary-primary", false, "Tier pack output into a source-safe primary working set plus related context summary")
-	cmd.Flags().StringVar(&packScoutMode, "pack-scout", findPackScoutModeOff, "Pack scout preset for pack output; defaults to beta_v0 for --pack unless set to off")
+	cmd.Flags().StringVar(&packScoutMode, "pack-scout", findPackScoutModeOff, "Pack scout preset for packed output; defaults to beta_v0 unless set to off")
 	cmd.Flags().StringVar(&packCompanions, "pack-companion-mode", findPackCompanionModeAll, "Hidden scout flag: off, generic, generic_git, or all")
 	cmd.Flags().StringVar(&sourcePackMode, "experimental-source-pack-mode", findSourcePackModeOff, "Hidden source pack mode: off, compact_manifest_v0, compact_manifest_v1, or compact_manifest_v2")
 	cmd.Flags().StringVar(&sourceManifestCandidates, "source-manifest-candidates", "off", "Hidden scout flag: off, metadata, or window")
 	cmd.Flags().BoolVar(&sourceManifestConsumption, "source-manifest-consumption", false, "Hidden scout flag: reserve/replace source manifest candidates in pack mode")
 	cmd.Flags().StringVar(&sourceTestReceipts, "source-test-receipts", findSourceTestReceiptsModeOff, "Hidden scout flag: off, receipt_v0, or related_files_receipt_v0")
 	cmd.Flags().StringVar(&packPresentationMode, "pack-presentation-mode", findPackPresentationModeOff, "Hidden scout flag: off, family_primary_v0, family_primary_v1, or family_primary_v2")
+	_ = cmd.Flags().MarkHidden("pack")
+	_ = cmd.Flags().MarkHidden("pack-scout")
+	_ = cmd.Flags().MarkHidden("experimental-anchor-first-ranking")
+	_ = cmd.Flags().MarkHidden("experimental-anchor-first-mode")
+	_ = cmd.Flags().MarkHidden("experimental-boundary-primary")
+	_ = cmd.Flags().MarkHidden("graph-diagnostics")
 	_ = cmd.Flags().MarkHidden("pack-companion-mode")
 	_ = cmd.Flags().MarkHidden("experimental-source-pack-mode")
 	_ = cmd.Flags().MarkHidden("source-manifest-candidates")
@@ -101,7 +110,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 		return fmt.Errorf("unknown --pack-scout; valid values: %s", strings.Join(validFindPackScoutModes(), ", "))
 	}
 	if packScoutMode != findPackScoutModeOff && !pack {
-		return fmt.Errorf("--pack-scout %s requires --pack", packScoutMode)
+		return fmt.Errorf("--pack-scout %s requires packed output; remove --plain", packScoutMode)
 	}
 	sourcePackConfigured := cmd.Flags().Changed("experimental-source-pack-mode")
 	if !sourcePackConfigured {
@@ -131,7 +140,7 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 		return fmt.Errorf("unknown --experimental-source-pack-mode; valid values: %s", strings.Join(validFindSourcePackModes(), ", "))
 	}
 	if sourcePackMode != findSourcePackModeOff && !pack {
-		return fmt.Errorf("--experimental-source-pack-mode %s requires --pack", sourcePackMode)
+		return fmt.Errorf("--experimental-source-pack-mode %s requires packed output; remove --plain", sourcePackMode)
 	}
 	if !cmd.Flags().Changed("source-test-receipts") {
 		if env := strings.TrimSpace(os.Getenv("DEVSPECS_SOURCE_TEST_RECEIPTS")); env != "" {
@@ -143,14 +152,14 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 		return fmt.Errorf("unknown --source-test-receipts; valid values: %s", strings.Join(validFindSourceTestReceiptsModes(), ", "))
 	}
 	if sourceTestReceipts != findSourceTestReceiptsModeOff && !pack {
-		return fmt.Errorf("--source-test-receipts %s requires --pack", sourceTestReceipts)
+		return fmt.Errorf("--source-test-receipts %s requires packed output; remove --plain", sourceTestReceipts)
 	}
 	packPresentationMode = normalizeFindPackPresentationMode(packPresentationMode)
 	if packPresentationMode == "" {
 		return fmt.Errorf("unknown --pack-presentation-mode; valid values: %s", strings.Join(validFindPackPresentationModes(), ", "))
 	}
 	if packPresentationMode != findPackPresentationModeOff && !pack {
-		return fmt.Errorf("--pack-presentation-mode %s requires --pack", packPresentationMode)
+		return fmt.Errorf("--pack-presentation-mode %s requires packed output; remove --plain", packPresentationMode)
 	}
 	if boundaryPrimary && packPresentationMode != findPackPresentationModeOff {
 		return fmt.Errorf("--experimental-boundary-primary cannot be combined with --pack-presentation-mode %s", packPresentationMode)

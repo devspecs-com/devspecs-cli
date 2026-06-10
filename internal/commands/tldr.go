@@ -100,7 +100,7 @@ func buildTLDRGuide() tldrOutput {
 				Name:    "Incident / Triage",
 				UseWhen: "You need fast orientation, likely source/test context, and an evidence trail.",
 				Commands: []string{
-					`ds find --pack "<symptom> <component>"`,
+					`ds find "<symptom> <component>"`,
 					`ds task quick "triage <incident>"`,
 					"ds task checkpoint <task-id> --target <target> --stage validated --decision continue --file-read <path> --test-run <cmd>",
 				},
@@ -143,10 +143,10 @@ func buildTLDRGuide() tldrOutput {
 				UseWhen: "You need to understand a recognizable area before choosing task scope.",
 				Commands: []string{
 					"ds map",
-					`ds find --pack "<area or task>"`,
+					`ds find "<area or task>"`,
 					"ds context <artifact-id>",
 				},
-				AgentRule: "Use map for orientation and find --pack for agent-ready context. Do not treat map as an implementation plan.",
+				AgentRule: "Use map for orientation and find for agent-ready packed context. Do not treat map as an implementation plan.",
 			},
 		},
 	}
