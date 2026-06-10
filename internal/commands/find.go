@@ -47,7 +47,7 @@ func NewFindCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "find <query>",
-		Short: "Search artifacts by title, path, or body",
+		Short: "Build packed context for a query",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fp := store.FilterParams{Kind: kind, Subtype: subtype, Tag: tag, Branch: branch, User: user}

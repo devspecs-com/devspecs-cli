@@ -26,9 +26,10 @@ func NewCriteriaCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "criteria [artifact-id]",
-		Short: "List extracted acceptance/success/OKR checklist criteria from artifacts",
-		Args:  cobra.MaximumNArgs(1),
+		Use:    "criteria [artifact-id]",
+		Short:  "List extracted acceptance/success/OKR checklist criteria from artifacts",
+		Hidden: true,
+		Args:   cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var artifactID string
 			if len(args) > 0 {

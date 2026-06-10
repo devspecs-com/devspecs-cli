@@ -129,7 +129,6 @@ func buildTLDRGuide() tldrOutput {
 				Name:    "Handoff / Resume After Context Loss",
 				UseWhen: "A new agent or compacted conversation needs the current state.",
 				Commands: []string{
-					"ds resume",
 					"ds task status <task-id>",
 					"ds task next <task-id>",
 					"ds task show <target>",

@@ -15,9 +15,10 @@ func NewResolveCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "resolve <id>",
-		Short: "Resolve an artifact ID to its source",
-		Args:  cobra.ExactArgs(1),
+		Use:    "resolve <id>",
+		Short:  "Resolve an artifact ID to its source",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runResolve(cmd, args[0], asJSON, noRefresh)
 		},

@@ -80,8 +80,16 @@ func TestRootCmd_PublicHelpHidesInternalCommands(t *testing.T) {
 
 	got := buf.String()
 	for _, hidden := range []string{
+		"  capture     ",
+		"  criteria    ",
 		"  eval        ",
 		"  link        ",
+		"  resolve     ",
+		"  resume      ",
+		"  status      ",
+		"  tag         ",
+		"  todos       ",
+		"  untag       ",
 	} {
 		if strings.Contains(got, hidden) {
 			t.Fatalf("public help should hide internal command %q, got:\n%s", strings.TrimSpace(hidden), got)

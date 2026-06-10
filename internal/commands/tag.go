@@ -10,9 +10,10 @@ import (
 // NewTagCmd creates the ds tag command group.
 func NewTagCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "tag <id> <tag> [tag...]",
-		Short: "Add tags to an artifact",
-		Args:  cobra.MinimumNArgs(2),
+		Use:    "tag <id> <tag> [tag...]",
+		Short:  "Add tags to an artifact",
+		Hidden: true,
+		Args:   cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTag(cmd, args[0], args[1:])
 		},
@@ -23,9 +24,10 @@ func NewTagCmd() *cobra.Command {
 // NewUntagCmd creates the ds untag command.
 func NewUntagCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "untag <id> <tag>",
-		Short: "Remove a tag from an artifact",
-		Args:  cobra.ExactArgs(2),
+		Use:    "untag <id> <tag>",
+		Short:  "Remove a tag from an artifact",
+		Hidden: true,
+		Args:   cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runUntag(cmd, args[0], args[1])
 		},

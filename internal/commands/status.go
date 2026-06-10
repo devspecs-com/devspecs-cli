@@ -15,10 +15,11 @@ var validStatuses = []string{
 // NewStatusCmd creates the ds status command.
 func NewStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "status <id> <status>",
-		Short: "Update artifact status",
-		Long:  fmt.Sprintf("Supported statuses: %v", validStatuses),
-		Args:  cobra.ExactArgs(2),
+		Use:    "status <id> <status>",
+		Short:  "Update artifact status",
+		Long:   fmt.Sprintf("Supported statuses: %v", validStatuses),
+		Hidden: true,
+		Args:   cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runStatus(cmd, args[0], args[1])
 		},

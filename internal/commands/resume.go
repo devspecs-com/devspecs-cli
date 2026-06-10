@@ -27,8 +27,9 @@ func NewResumeCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "resume [query]",
-		Short: "Show artifacts grouped by lifecycle phase — continue where you left off",
+		Use:    "resume [query]",
+		Short:  "Show artifacts grouped by lifecycle phase — continue where you left off",
+		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fp := store.FilterParams{Tag: tag, Branch: branch, User: user}
 			return runResume(cmd, strings.Join(args, " "), fp, repoName, asJSON, noRefresh, limit, all)

@@ -30,9 +30,10 @@ func NewCaptureCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "capture <path>",
-		Short: "Capture a specific file as an artifact",
-		Args:  cobra.ExactArgs(1),
+		Use:    "capture <path>",
+		Short:  "Capture a specific file as an artifact",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCapture(cmd, args[0], kind, title, status, asJSON)
 		},
