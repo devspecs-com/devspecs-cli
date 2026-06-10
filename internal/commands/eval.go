@@ -69,9 +69,10 @@ func NewEvalCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "eval <fixture-repo>",
-		Short: "Run deterministic context retrieval evals for a fixture repo",
-		Args:  cobra.ExactArgs(1),
+		Use:    "eval <fixture-repo>",
+		Short:  "Run deterministic context retrieval evals for a fixture repo",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if inputUSDPer1M < 0 {
 				return fmt.Errorf("--input-usd-per-1m must be non-negative")

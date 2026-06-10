@@ -67,3 +67,24 @@ func TestRootCmd_TLDRRegistered(t *testing.T) {
 		t.Fatalf("expected tldr hotfix output, got %q", got)
 	}
 }
+
+func TestRootCmd_PublicHelpHidesInternalCommands(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"--help"})
+
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := buf.String()
+	for _, hidden := range []string{
+		"  eval        ",
+		"  link        ",
+	} {
+		if strings.Contains(got, hidden) {
+			t.Fatalf("public help should hide internal command %q, got:\n%s", strings.TrimSpace(hidden), got)
+		}
+	}
+}

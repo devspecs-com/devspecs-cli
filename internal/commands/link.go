@@ -19,10 +19,11 @@ func NewLinkCmd() *cobra.Command {
 	var linkType string
 
 	cmd := &cobra.Command{
-		Use:   "link <id> <target>",
-		Short: "Add a link from an artifact to an external target",
-		Long:  fmt.Sprintf("Supported link types: %v", validLinkTypes),
-		Args:  cobra.ExactArgs(2),
+		Use:    "link <id> <target>",
+		Short:  "Add a link from an artifact to an external target",
+		Long:   fmt.Sprintf("Supported link types: %v", validLinkTypes),
+		Hidden: true,
+		Args:   cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runLink(cmd, args[0], args[1], linkType)
 		},
