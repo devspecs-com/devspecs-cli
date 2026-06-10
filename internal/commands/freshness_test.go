@@ -28,6 +28,8 @@ func setupGitRepo(t *testing.T) string {
 		}
 	}
 	run("init", "-b", "main")
+	run("config", "user.email", "test@example.com")
+	run("config", "user.name", "Test User")
 	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test"), 0o644)
 	run("add", ".")
 	run("commit", "-m", "init")
