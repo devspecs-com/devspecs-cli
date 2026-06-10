@@ -144,6 +144,66 @@ func TestScanIncludeTestsIndexesTestUnits(t *testing.T) {
 	}
 }
 
+func TestScanNoGitignoreIncludesIgnoredConfiguredPaths(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
+	repoDir := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(filepath.Join(repoDir, ".devspecs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repoDir, "ignored-plans"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, ".gitignore"), []byte("ignored-plans/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, ".devspecs", "config.yaml"), []byte("version: 1\nsources:\n  - type: markdown\n    paths:\n      - ignored-plans\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "ignored-plans", "one-off-runbook.md"), []byte("# One-off Runbook\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+
+	ignoredCmd := NewScanCmd()
+	ignoredCmd.SetArgs([]string{"--json"})
+	ignoredBuf := &bytes.Buffer{}
+	ignoredCmd.SetOut(ignoredBuf)
+	if err := ignoredCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var ignoredOut struct {
+		Found map[string]int `json:"Found"`
+	}
+	if err := json.Unmarshal(ignoredBuf.Bytes(), &ignoredOut); err != nil {
+		t.Fatal(err)
+	}
+	if ignoredOut.Found["markdown"] != 0 {
+		t.Fatalf("expected gitignored markdown path to be skipped, got: %s", ignoredBuf.String())
+	}
+
+	includeCmd := NewScanCmd()
+	includeCmd.SetArgs([]string{"--json", "--no-gitignore"})
+	includeBuf := &bytes.Buffer{}
+	includeCmd.SetOut(includeBuf)
+	if err := includeCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var includeOut struct {
+		Found map[string]int `json:"Found"`
+	}
+	if err := json.Unmarshal(includeBuf.Bytes(), &includeOut); err != nil {
+		t.Fatal(err)
+	}
+	if includeOut.Found["markdown"] != 1 {
+		t.Fatalf("expected --no-gitignore to include ignored configured path, got: %s", includeBuf.String())
+	}
+}
+
 func TestScanIncludeCodeCommentsIndexesIntentComments(t *testing.T) {
 	repoDir := setupE2ERepo(t)
 	srcDir := filepath.Join(repoDir, "services", "billing")

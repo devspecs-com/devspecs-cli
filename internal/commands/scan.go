@@ -49,13 +49,14 @@ func NewScanCmd() *cobra.Command {
 		experimentalSourceManifest     bool
 		includeTests                   bool
 		includeCodeComments            bool
+		noGitignore                    bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "scan",
 		Short: "Scan repository for specs, plans, and ADRs",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, experimentalSourceManifest, includeTests, includeCodeComments)
+			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, experimentalSourceManifest, includeTests, includeCodeComments, noGitignore)
 		},
 	}
 
@@ -76,6 +77,7 @@ func NewScanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Index executable test cases as behavioral intent artifacts")
 	cmd.Flags().BoolVar(&includeTests, "experimental-test-cases", false, "Deprecated alias for --include-tests")
 	cmd.Flags().BoolVar(&includeCodeComments, "include-code-comments", false, "Index high-signal code comments as implementation intent artifacts")
+	cmd.Flags().BoolVar(&noGitignore, "no-gitignore", false, "Do not apply .gitignore, .git/info/exclude, or .aiignore during scan walks")
 	_ = cmd.Flags().MarkDeprecated("experimental-test-cases", "use --include-tests")
 	_ = cmd.Flags().MarkHidden("experimental-recent-source-context")
 	_ = cmd.Flags().MarkHidden("experimental-first-party-source-context")
@@ -83,12 +85,13 @@ func NewScanCmd() *cobra.Command {
 	return cmd
 }
 
-func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, experimentalSourceManifest, includeTests, includeCodeComments bool) error {
+func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, experimentalSourceManifest, includeTests, includeCodeComments, noGitignore bool) error {
 	start := time.Now()
 	success := false
 	props := map[string]any{
 		"include_tests":                    includeTests,
 		"include_code_comments":            includeCodeComments,
+		"no_gitignore":                     noGitignore,
 		"experimental_git_evidence":        experimentalGitEvidence,
 		"experimental_workstream_evidence": experimentalWorkstreamEvidence,
 		"experimental_rich_typed_index":    experimentalRichTypedIndex,
@@ -166,7 +169,10 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	}
 
 	scanner := scan.New(db, ids, adpts)
-	if verbose && !quiet {
+	if verbose && !quiet && noGitignore {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Ignoring repo-root .gitignore, .git/info/exclude, and .aiignore during configured walks\n")
+	}
+	if verbose && !quiet && !noGitignore {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Respecting repo-root .gitignore, .git/info/exclude, and .aiignore during configured walks\n")
 	}
 	scanOpts, err := liveScanRunOptions(db, repoRoot)
@@ -182,6 +188,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	scanOpts.RecentSourceContext = experimentalRecentSource
 	scanOpts.FirstPartySourceContext = experimentalFirstPartySource
 	scanOpts.SourceManifest = experimentalSourceManifest
+	scanOpts.IgnoreRules = noGitignore
 	if verbose && !quiet && scanOpts.FreshIndex {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Using fresh-index scan path for empty/rebuilt index\n")
 	}
@@ -191,7 +198,10 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	}
 
 	if scanTotalFound(result) == 0 {
-		matcher, _ := ignore.NewMatcher(repoRoot)
+		var matcher *ignore.Matcher
+		if !noGitignore {
+			matcher, _ = ignore.NewMatcher(repoRoot)
+		}
 		attachScanHints(result, repoRoot, matcher)
 	}
 	totalFound := scanTotalFound(result)

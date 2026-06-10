@@ -143,7 +143,7 @@ devspecs:
 Goal: Trace existing digest behavior and tests
 
 Do not implement sibling slices, future slices, or the full task track. Stop after this target's acceptance checks are satisfied.
-Record the outcome in `devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md` or with `ds task checkpoint weekly-digest --slice A01`.
+Record the outcome in `devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md` or with `ds task checkpoint weekly-digest --target A01`.
 Checklist edits are useful notes, but lifecycle state comes from `ds task checkpoint`, `ds task finish`, or `ds task decide`.
 At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.
 ````
@@ -156,7 +156,8 @@ DevSpecs index.
 
 ```bash
 $ ds task start A01 --index=false
-$ ds task checkpoint A01 \
+$ ds task checkpoint weekly-digest \
+  --target A01 \
   --stage validated \
   --decision promote \
   --description "Verified the existing digest builder and focused tests before scheduling work." \

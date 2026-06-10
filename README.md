@@ -81,7 +81,7 @@ ds task "Serve Swagger UI OAuth2 redirect from a custom docs redirect URL" \
 
 ds task show A01
 ds task prompt A01
-ds task checkpoint A01 --stage validated --decision promote
+ds task checkpoint <task-id> --target A01 --stage validated --decision promote
 ds task finish A01 --decision promote
 ds task next <task-id>
 ```
@@ -94,6 +94,12 @@ What this gives you:
 - a one-slice agent prompt;
 - explicit decision gates: `promote`, `improve`, `rework`, `rollback`, `block`;
 - lifecycle state from `start`, `checkpoint`, `finish`, `decide`, and `sync`.
+
+For a small one-off change, use the lighter entrypoint:
+
+```bash
+ds task quick "Fix discount rounding in invoice totals"
+```
 
 See [TASK_WORKFLOW_EXAMPLE.md](TASK_WORKFLOW_EXAMPLE.md) for a public-safe
 transcript generated from current CLI output.
@@ -147,6 +153,7 @@ Source files remain authoritative. DevSpecs stores derived index state locally.
 | `ds find <query>` | Search indexed artifacts. |
 | `ds find --pack <query>` | Build agent-readable packed context. |
 | `ds task <query>` | Create a bounded task workspace with slice artifacts. |
+| `ds task quick <query>` | Create a one-off task workspace with compact output. |
 | `ds task show <target>` | Show exact context for one task target. |
 | `ds task prompt <target>` | Emit an agent prompt bounded to one target. |
 | `ds task checkpoint <target>` | Record files, tests, misses, noise, learnings, and next decision. |

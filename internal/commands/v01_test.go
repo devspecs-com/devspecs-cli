@@ -387,6 +387,39 @@ func TestShortID_DisplayInList(t *testing.T) {
 	}
 }
 
+func TestListLimitCapsHumanAndJSONOutput(t *testing.T) {
+	repoDir, db := setupV01Env(t)
+	seedV01Artifacts(t, db, repoDir)
+	db.Close()
+
+	cmd := NewListCmd()
+	cmd.SetArgs([]string{"--no-refresh", "--limit", "1", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &rows); err != nil {
+		t.Fatalf("list json: %v\n%s", err, buf.String())
+	}
+	if len(rows) != 1 {
+		t.Fatalf("list --limit json length = %d, want 1: %s", len(rows), buf.String())
+	}
+
+	humanCmd := NewListCmd()
+	humanCmd.SetArgs([]string{"--no-refresh", "--limit", "1"})
+	humanBuf := &bytes.Buffer{}
+	humanCmd.SetOut(humanBuf)
+	if err := humanCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(humanBuf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("list --limit human lines = %d, want header + 1 row:\n%s", len(lines), humanBuf.String())
+	}
+}
+
 func TestShortID_ResolveInShow(t *testing.T) {
 	repoDir, db := setupV01Env(t)
 	seedV01Artifacts(t, db, repoDir)

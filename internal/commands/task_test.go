@@ -163,10 +163,13 @@ func TestTask_StartCreatesUncertaintyAwareWorkspace(t *testing.T) {
 
 	resultTemplate := mustReadFile(t, out.ResultPath)
 	for _, want := range []string{
-		"## Files Actually Read",
-		"## Critical Files DevSpecs Missed",
-		"## Distracting Files DevSpecs Included",
-		"## Decision Gates",
+		"## Summary",
+		"## Changed Files",
+		"## Tests",
+		"## Decision",
+		"## Follow-up",
+		"## Checkpoints",
+		"ds task checkpoint spike-test --target A01",
 	} {
 		if !strings.Contains(resultTemplate, want) {
 			t.Fatalf("A01-1 missing %q:\n%s", want, resultTemplate)
@@ -198,6 +201,37 @@ func TestTask_StartCreatesUncertaintyAwareWorkspace(t *testing.T) {
 	}
 	if len(artifacts) < 2 {
 		t.Fatalf("expected A00/A01 to be captured, got %d", len(artifacts))
+	}
+}
+
+func TestTask_QuickCreatesOneOffWorkspaceWithCompactOutput(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"quick", "--id", "quick-fix", "--no-refresh", "--index=false", "fix small billing typo"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	output := buf.String()
+	for _, want := range []string{
+		"Created one-off task: quick-fix",
+		"Target: A01",
+		"Next:",
+		"ds task prompt A01",
+		"ds task checkpoint quick-fix --target A01",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("quick output missing %q:\n%s", want, output)
+		}
+	}
+	workspace := filepath.Join(repoDir, "devspecs", "tasks", "quick-fix")
+	if _, err := os.Stat(filepath.Join(workspace, taskManifestFilename)); err != nil {
+		t.Fatalf("quick task manifest missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "A01-fix-small-billing-typo-result.md")); err != nil {
+		t.Fatalf("quick result missing: %v", err)
 	}
 }
 
@@ -2157,7 +2191,7 @@ func TestTask_CheckpointTargetsSelectedSlice(t *testing.T) {
 	checkpointCmd := NewTaskCmd()
 	checkpointCmd.SetArgs([]string{
 		"checkpoint", "slice-target-test",
-		"--slice", "A02",
+		"--target", "A02",
 		"--stage", "implemented",
 		"--decision", "promote",
 		"--note", "targeted checkpoint",

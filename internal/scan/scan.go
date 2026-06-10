@@ -53,6 +53,7 @@ type RunOptions struct {
 	SourceManifest            bool
 	GitMaxCommits             int
 	GitMaxFilesPerCommit      int
+	IgnoreRules               bool
 	Progress                  func(ProgressEvent)
 	ProgressInterval          time.Duration
 }
@@ -82,8 +83,10 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 	now := time.Now().UTC().Format(time.RFC3339)
 	progress := newProgressReporter(opts.Progress, opts.ProgressInterval)
 
-	matcher, _ := ignore.NewMatcher(repoRoot)
-	ctx = ignore.WithContext(ctx, matcher)
+	if !opts.IgnoreRules {
+		matcher, _ := ignore.NewMatcher(repoRoot)
+		ctx = ignore.WithContext(ctx, matcher)
+	}
 
 	repoID, err := s.ensureRepo(repoRoot, now)
 	if err != nil {

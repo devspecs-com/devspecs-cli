@@ -75,6 +75,7 @@ type taskStartOptions struct {
 	AsJSON    bool
 	Force     bool
 	Index     bool
+	Quick     bool
 }
 
 type taskArtifactAddOptions struct {
@@ -129,6 +130,7 @@ type taskDecideOptions struct {
 type taskCheckpointOptions struct {
 	Dir          string
 	Slice        string
+	Target       string
 	Stage        string
 	Decision     string
 	Note         string
@@ -540,6 +542,7 @@ templates for recording actual reads, edits, tests, misses, and noise.`,
 	cmd.Flags().BoolVar(&opts.Force, "force", false, "Overwrite an existing task workspace")
 	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the series index and slice plans into the DevSpecs index")
 
+	cmd.AddCommand(newTaskQuickCmd())
 	cmd.AddCommand(newTaskSliceCmd())
 	cmd.AddCommand(newTaskIterationCmd())
 	cmd.AddCommand(newTaskSyncCmd())
@@ -553,6 +556,36 @@ templates for recording actual reads, edits, tests, misses, and noise.`,
 	cmd.AddCommand(newTaskDecideCmd())
 	cmd.AddCommand(newTaskCheckpointCmd())
 	cmd.AddCommand(newTaskEvaluateCmd())
+	return cmd
+}
+
+func newTaskQuickCmd() *cobra.Command {
+	var opts taskStartOptions
+	opts.Dir = defaultTaskWorkspaceDir
+	opts.Profile = taskProfileCodeChange
+	opts.Index = true
+	opts.Quick = true
+	cmd := &cobra.Command{
+		Use:   "quick <query>",
+		Short: "Create a one-off task workspace with compact output",
+		Long: `Create a one-off task workspace for a small change.
+
+This uses the normal task manifest, source/test pack, risk cards, and lifecycle
+commands, but prints a shorter handoff so tiny fixes do not start with a full
+multi-slice ceremony.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskStart(cmd, args[0], opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.ID, "id", "", "Task ID to use instead of a generated slug")
+	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
+	cmd.Flags().StringVar(&opts.Series, "series", "", "Series prefix for generated artifacts, e.g. A or B; defaults to the next available alphabetic series")
+	cmd.Flags().StringVar(&opts.Profile, "profile", taskProfileCodeChange, "Task generation profile: code-change or greenfield")
+	cmd.Flags().BoolVar(&opts.NoRefresh, "no-refresh", false, "Skip auto-scan freshness check")
+	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
+	cmd.Flags().BoolVar(&opts.Force, "force", false, "Overwrite an existing task workspace")
+	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the series index and slice plan into the DevSpecs index")
 	return cmd
 }
 
@@ -792,7 +825,8 @@ func newTaskCheckpointCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
-	cmd.Flags().StringVar(&opts.Slice, "slice", "", "Task slice ID/title/plan/result to append to; defaults to the first slice")
+	cmd.Flags().StringVar(&opts.Target, "target", "", "Task slice/iteration target ID/title/plan/result to append to; defaults to the first slice")
+	cmd.Flags().StringVar(&opts.Slice, "slice", "", "Deprecated alias for --target")
 	cmd.Flags().StringVar(&opts.Stage, "stage", opts.Stage, "Lifecycle stage: packed, planned, started, implemented, validated, done, blocked, completed, split, superseded, cancelled, rolled_back")
 	cmd.Flags().StringVar(&opts.Decision, "decision", opts.Decision, "Decision gate: promote, improve, rework, rollback, block, complete, split, supersede, cancel, continue")
 	cmd.Flags().StringVar(&opts.Note, "note", "", "Short checkpoint note")
@@ -944,6 +978,9 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)
+	}
+	if opts.Quick {
+		return writeTaskQuickStartHuman(cmd.OutOrStdout(), out, preflight.Confidence)
 	}
 	return writeTaskStartHuman(cmd.OutOrStdout(), out, preflight.Confidence)
 }
@@ -1699,7 +1736,7 @@ func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput, prior
 	writeTaskPromptAdvisoryFiles(&b, ctx.Manifest.AdvisoryFiles)
 	writeTaskPromptPriorSliceEvidence(&b, priorEvidence)
 	fmt.Fprintln(&b, "Do not implement sibling slices, future slices, or the full task track. Stop after this target's acceptance checks are satisfied.")
-	fmt.Fprintf(&b, "Record the outcome in `%s` or with `ds task checkpoint %s --slice %s`.\n", filepath.ToSlash(taskRelativePath(ctx.RepoRoot, target.ResultPath)), target.TaskID, target.Target)
+	fmt.Fprintf(&b, "Record the outcome in `%s` or with `ds task checkpoint %s --target %s`.\n", filepath.ToSlash(taskRelativePath(ctx.RepoRoot, target.ResultPath)), target.TaskID, target.Target)
 	fmt.Fprintln(&b, "Checklist edits are useful notes, but lifecycle state comes from `ds task checkpoint`, `ds task finish`, or `ds task decide`.")
 	fmt.Fprintln(&b, "At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.")
 	fmt.Fprintln(&b)
@@ -3818,85 +3855,32 @@ func renderTaskGreenfieldSlicePlan(manifest taskManifest, slice taskSliceArtifac
 func renderTaskSliceResultTemplate(manifest taskManifest, slice taskSliceArtifact) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Task %s %s Result\n\n", manifest.TaskID, slice.ID)
-	fmt.Fprintln(&b, "## Goal")
-	fmt.Fprintf(&b, "Record what happened for `%s`.\n\n", slice.Title)
-	fmt.Fprintln(&b, "## Description")
-	fmt.Fprintln(&b, "Fill this after the implementation attempt or use `ds task checkpoint` to append structured progress.")
+	fmt.Fprintln(&b, "## Summary")
+	fmt.Fprintf(&b, "- Target: `%s` - %s\n", slice.ID, slice.Title)
+	fmt.Fprintln(&b, "- Outcome: ")
 	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## Resources")
+	fmt.Fprintln(&b, "## Changed Files")
+	fmt.Fprintln(&b, "- ")
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "## Tests")
+	fmt.Fprintln(&b, "- ")
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "## Decision")
+	fmt.Fprintln(&b, "- ")
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "## Follow-up")
+	fmt.Fprintln(&b, "- ")
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "## References")
 	if manifest.Artifacts.Index != "" {
 		fmt.Fprintf(&b, "- `%s`\n", manifest.Artifacts.Index)
 	}
 	if slice.Plan != "" {
 		fmt.Fprintf(&b, "- `%s`\n", slice.Plan)
 	}
-	fmt.Fprintln(&b, "- `task.json`")
 	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## What Was Attempted")
-	fmt.Fprintln(&b, "- ")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## Files Actually Read")
-	fmt.Fprintln(&b, "- ")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## Files Actually Edited")
-	fmt.Fprintln(&b, "- ")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## Tests Actually Read")
-	fmt.Fprintln(&b, "- ")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## Tests Actually Run")
-	fmt.Fprintln(&b, "- ")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## Relevant Files DevSpecs Found")
-	for _, file := range predictedFilePaths(manifest.Predicted.PrimaryFiles) {
-		fmt.Fprintf(&b, "- `%s`\n", file)
-	}
-	for _, file := range predictedFilePaths(manifest.Predicted.Tests) {
-		fmt.Fprintf(&b, "- `%s`\n", file)
-	}
-	if len(manifest.Predicted.PrimaryFiles) == 0 && len(manifest.Predicted.Tests) == 0 {
-		fmt.Fprintln(&b, "- ")
-	}
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## Critical Files DevSpecs Missed")
-	fmt.Fprintln(&b, "- ")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## Distracting Files DevSpecs Included")
-	for _, file := range predictedFilePaths(manifest.Predicted.NoiseRisks) {
-		fmt.Fprintf(&b, "- `%s`\n", file)
-	}
-	if len(manifest.Predicted.NoiseRisks) == 0 {
-		fmt.Fprintln(&b, "- ")
-	}
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## Unexpected Discoveries")
-	fmt.Fprintln(&b, "- ")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## Outcome")
-	fmt.Fprintln(&b, "- ")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## Success Criteria")
-	fmt.Fprintln(&b, "- [ ] Primary file hit evaluated.")
-	fmt.Fprintln(&b, "- [ ] Critical-path recall evaluated.")
-	fmt.Fprintln(&b, "- [ ] Test companion recall evaluated.")
-	fmt.Fprintln(&b, "- [ ] Noise count evaluated.")
-	fmt.Fprintln(&b, "- [ ] Usefulness class assigned: A, B, C, or D.")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## Tasks")
-	fmt.Fprintln(&b, "- [ ] Classify hits, misses, noise, companion misses, receipt misses, and confidence mismatch.")
-	fmt.Fprintln(&b, "- [ ] Decide whether the next iteration should promote, improve, rework, or rollback.")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## Decision Gates")
-	fmt.Fprintln(&b, "- Promote")
-	fmt.Fprintln(&b, "- Improve")
-	fmt.Fprintln(&b, "- Rework")
-	fmt.Fprintln(&b, "- Rollback")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## Next Recommended Slice")
-	fmt.Fprintln(&b, "- ")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "## Checkpoint Notes")
-	fmt.Fprintln(&b, "- ")
+	fmt.Fprintln(&b, "## Checkpoints")
+	fmt.Fprintf(&b, "- Use `ds task checkpoint %s --target %s` to append structured evidence.\n", manifest.TaskID, slice.ID)
 	return b.String()
 }
 
@@ -4181,13 +4165,19 @@ func taskAdvisorySourceLeads(files []taskAdvisoryFile) []taskAdvisoryFile {
 }
 
 func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOptions) error {
-	resolvedTaskID, resolvedSlice, err := resolveTaskTargetArgument(opts.Dir, taskID, opts.Slice)
+	target, err := checkpointTargetFromOptions(opts)
+	if err != nil {
+		return err
+	}
+	resolvedTaskID, resolvedSlice, err := resolveTaskTargetArgument(opts.Dir, taskID, target)
 	if err != nil {
 		return err
 	}
 	taskID = strings.TrimSpace(resolvedTaskID)
-	if strings.TrimSpace(opts.Slice) == "" && resolvedSlice != "" {
+	if strings.TrimSpace(target) == "" && resolvedSlice != "" {
 		opts.Slice = resolvedSlice
+	} else {
+		opts.Slice = target
 	}
 	if err := validateTaskID(taskID); err != nil {
 		return err
@@ -4293,6 +4283,18 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 		fmt.Fprintf(cmd.OutOrStdout(), "Indexed: %s\n", strings.Join(indexed, ", "))
 	}
 	return nil
+}
+
+func checkpointTargetFromOptions(opts taskCheckpointOptions) (string, error) {
+	target := strings.TrimSpace(opts.Target)
+	slice := strings.TrimSpace(opts.Slice)
+	if target != "" && slice != "" && !strings.EqualFold(target, slice) {
+		return "", fmt.Errorf("use either --target or --slice for checkpoint target, not both")
+	}
+	if target != "" {
+		return target, nil
+	}
+	return slice, nil
 }
 
 func normalizeTaskCheckpointOptions(opts taskCheckpointOptions) taskCheckpointOptions {
@@ -5018,6 +5020,42 @@ func writeTaskStartHuman(out io.Writer, result taskStartOutput, confidence taskC
 	if len(result.IndexedPaths) > 0 {
 		fmt.Fprintf(out, "Indexed: %s\n", strings.Join(result.IndexedPaths, ", "))
 	}
+	return nil
+}
+
+func writeTaskQuickStartHuman(out io.Writer, result taskStartOutput, confidence taskConfidence) error {
+	target := defaultTaskSeries(result.Series) + "01"
+	planPath := result.FirstSlicePath
+	resultPath := result.ResultPath
+	if len(result.Slices) > 0 {
+		target = result.Slices[0].ID
+		planPath = result.Slices[0].PlanPath
+		resultPath = result.Slices[0].ResultPath
+	}
+	fmt.Fprintf(out, "Created one-off task: %s\n", result.TaskID)
+	fmt.Fprintf(out, "Target: %s\n", target)
+	fmt.Fprintf(out, "Plan: %s\n", planPath)
+	fmt.Fprintf(out, "Result: %s\n", resultPath)
+	fmt.Fprintf(out, "Confidence: primary=%s tests=%s completeness=%s\n",
+		confidence.PrimaryFileConfidence,
+		confidence.TestCoverageConfidence,
+		confidence.PackCompleteness,
+	)
+	if len(result.PrimaryFiles) > 0 {
+		fmt.Fprintf(out, "Packed source: %s\n", strings.Join(firstStrings(result.PrimaryFiles, 3), ", "))
+	}
+	if len(result.TestFiles) > 0 {
+		fmt.Fprintf(out, "Packed tests: %s\n", strings.Join(firstStrings(result.TestFiles, 3), ", "))
+	}
+	if len(result.RiskCards) > 0 {
+		fmt.Fprintf(out, "Risk cards: %d\n", len(result.RiskCards))
+	}
+	if len(result.FreshnessWarnings) > 0 {
+		fmt.Fprintf(out, "Freshness warnings: %d informational path(s); run `ds task show %s` for details\n", len(result.FreshnessWarnings), target)
+	}
+	fmt.Fprintf(out, "\nNext:\n")
+	fmt.Fprintf(out, "  ds task prompt %s\n", target)
+	fmt.Fprintf(out, "  ds task checkpoint %s --target %s --stage validated --decision promote\n", result.TaskID, target)
 	return nil
 }
 

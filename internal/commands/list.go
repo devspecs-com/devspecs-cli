@@ -24,6 +24,7 @@ func NewListCmd() *cobra.Command {
 		allRepos   bool
 		asJSON     bool
 		noRefresh  bool
+		limit      int
 	)
 
 	cmd := &cobra.Command{
@@ -35,7 +36,7 @@ func NewListCmd() *cobra.Command {
 				Kind: kind, Subtype: subtype, Status: status, SourceType: sourceType,
 				Tag: tag, Branch: branch, User: user,
 			}
-			return runList(cmd, fp, repoName, allRepos, asJSON, noRefresh)
+			return runList(cmd, fp, repoName, allRepos, asJSON, noRefresh, limit)
 		},
 	}
 
@@ -50,10 +51,14 @@ func NewListCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&allRepos, "all", false, "List artifacts from all indexed repos (ignore cwd scope)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
+	cmd.Flags().IntVar(&limit, "limit", 0, "Maximum artifacts to show (0 = unlimited)")
 	return cmd
 }
 
-func runList(cmd *cobra.Command, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh bool) error {
+func runList(cmd *cobra.Command, fp store.FilterParams, repoName string, allRepos, asJSON, noRefresh bool, limit int) error {
+	if limit < 0 {
+		return fmt.Errorf("limit must be >= 0")
+	}
 	db, err := openDB()
 	if err != nil {
 		return err
@@ -69,6 +74,9 @@ func runList(cmd *cobra.Command, fp store.FilterParams, repoName string, allRepo
 	artifacts, err := db.ListArtifacts(fp)
 	if err != nil {
 		return fmt.Errorf("list artifacts: %w", err)
+	}
+	if limit > 0 && len(artifacts) > limit {
+		artifacts = artifacts[:limit]
 	}
 
 	if asJSON {
