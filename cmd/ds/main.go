@@ -44,6 +44,7 @@ document text, or raw queries. Disable with DEVSPECS_TELEMETRY=0.`,
 	rootCmd.AddCommand(commands.NewFindCmd())
 	rootCmd.AddCommand(commands.NewMapCmd())
 	rootCmd.AddCommand(commands.NewTaskCmd())
+	rootCmd.AddCommand(commands.NewTLDRCmd())
 	rootCmd.AddCommand(commands.NewResolveCmd())
 	rootCmd.AddCommand(commands.NewContextCmd())
 	rootCmd.AddCommand(commands.NewTodosCmd())

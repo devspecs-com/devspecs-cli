@@ -72,6 +72,14 @@ go install github.com/devspecs-com/devspecs-cli/cmd/ds@latest
 Use `ds task` when you are about to ask an agent to make a repo change and want
 the first slice to be grounded before the agent grabs the whole roadmap.
 
+For agent-facing quick guidance, run:
+
+```bash
+ds tldr
+ds tldr hotfix
+ds tldr incident --json
+```
+
 ```bash
 ds task "Serve Swagger UI OAuth2 redirect from a custom docs redirect URL" \
   --profile code-change \
@@ -152,6 +160,7 @@ Source files remain authoritative. DevSpecs stores derived index state locally.
 | `ds map` | Summarize repo areas and useful follow-up context commands. |
 | `ds find <query>` | Search indexed artifacts. |
 | `ds find --pack <query>` | Build agent-readable packed context. |
+| `ds tldr [workflow]` | Show LLM-oriented workflow quickstarts for hotfixes, epics, incidents, brownfield recovery, handoff, and deep dives. |
 | `ds task <query>` | Create a bounded task workspace with slice artifacts. |
 | `ds task quick <query>` | Create a one-off task workspace with compact output. |
 | `ds task show <target>` | Show exact context for one task target. |

@@ -51,3 +51,19 @@ func TestRootCmd_HelpMentionsTelemetryPrivacy(t *testing.T) {
 		}
 	}
 }
+
+func TestRootCmd_TLDRRegistered(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"tldr", "hotfix"})
+
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := buf.String()
+	if !strings.Contains(got, "Hotfix / Small Bug") {
+		t.Fatalf("expected tldr hotfix output, got %q", got)
+	}
+}
