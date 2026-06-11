@@ -1415,6 +1415,11 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	workspace := filepath.Join(repoDir, "devspecs", "tasks", "lifecycle-add-test")
+	indexPath := filepath.Join(workspace, "B00-index.md")
+	authoredIndexBody := mustReadFile(t, indexPath) + "\n## Human Master Notes\n\nKeep lifecycle state in task.json and result artifacts.\n"
+	mustWriteFile(t, indexPath, authoredIndexBody)
+
 	sliceCmd := NewTaskCmd()
 	sliceCmd.SetArgs([]string{
 		"slice", "add", "lifecycle-add-test", "second lifecycle slice",
@@ -1435,6 +1440,9 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 	}
 	if filepath.Base(sliceOut.Slice.PlanPath) != "B02-second-lifecycle-slice-plan.md" {
 		t.Fatalf("slice plan = %q", sliceOut.Slice.PlanPath)
+	}
+	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
+		t.Fatalf("slice add rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
 	}
 
 	iterationCmd := NewTaskCmd()
@@ -1460,20 +1468,9 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 	if filepath.Base(iterationOut.Slice.PlanPath) != "B01-1-repair-lifecycle-status-plan.md" {
 		t.Fatalf("iteration plan = %q", iterationOut.Slice.PlanPath)
 	}
-
-	workspace := filepath.Join(repoDir, "devspecs", "tasks", "lifecycle-add-test")
-	indexBody := mustReadFile(t, filepath.Join(workspace, "B00-index.md"))
-	for _, want := range []string{
-		"B02: second lifecycle slice",
-		"B01-1: repair lifecycle status (iteration of B01, reason: improve)",
-	} {
-		if !strings.Contains(indexBody, want) {
-			t.Fatalf("index missing %q:\n%s", want, indexBody)
-		}
+	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
+		t.Fatalf("iteration add rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
 	}
-	indexPath := filepath.Join(workspace, "B00-index.md")
-	authoredIndexBody := indexBody + "\n## Human Master Notes\n\nKeep lifecycle state in task.json and result artifacts.\n"
-	mustWriteFile(t, indexPath, authoredIndexBody)
 
 	var manifest taskManifest
 	if err := json.Unmarshal([]byte(mustReadFile(t, filepath.Join(workspace, taskManifestFilename))), &manifest); err != nil {
@@ -1643,6 +1640,42 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 
 	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
 		t.Fatalf("decide rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
+	}
+}
+
+func TestTaskSliceAddRefusesExistingArtifactFile(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "slice-overwrite-test",
+		"--series", "B",
+		"--no-refresh",
+		"--index=false",
+		"--slice", "first lifecycle slice",
+		"task lifecycle flow",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	workspace := filepath.Join(repoDir, "devspecs", "tasks", "slice-overwrite-test")
+	existingPlan := filepath.Join(workspace, "B02-second-lifecycle-slice-plan.md")
+	mustWriteFile(t, existingPlan, "# Keep Me\n\nDo not replace this file.\n")
+
+	sliceCmd := NewTaskCmd()
+	sliceCmd.SetArgs([]string{
+		"slice", "add", "slice-overwrite-test", "second lifecycle slice",
+		"--index=false",
+	})
+	sliceCmd.SetOut(&bytes.Buffer{})
+	err := sliceCmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "refusing to overwrite existing task artifact") {
+		t.Fatalf("expected overwrite refusal, got %v", err)
+	}
+	if got := mustReadFile(t, existingPlan); !strings.Contains(got, "Do not replace this file") {
+		t.Fatalf("existing plan was overwritten:\n%s", got)
 	}
 }
 

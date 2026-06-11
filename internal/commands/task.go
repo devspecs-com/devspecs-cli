@@ -1070,12 +1070,11 @@ func writeAddedTaskArtifact(cmd *cobra.Command, repoRoot, workspace string, mani
 	planPath := filepath.Join(workspace, slice.Plan)
 	resultPath := filepath.Join(workspace, slice.Result)
 	files := map[string]string{
-		indexPath:  renderTaskIndex(manifest),
 		planPath:   renderTaskSlicePlan(manifest, slice),
 		resultPath: renderTaskSliceResultTemplate(manifest, slice),
 	}
 	for path, body := range files {
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		if err := writeNewTaskArtifactFile(path, body); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
 	}
@@ -1112,11 +1111,24 @@ func writeAddedTaskArtifact(cmd *cobra.Command, repoRoot, workspace string, mani
 	fmt.Fprintf(cmd.OutOrStdout(), "Added %s: %s\n", slice.ID, slice.Title)
 	fmt.Fprintf(cmd.OutOrStdout(), "%s plan: %s\n", slice.ID, planPath)
 	fmt.Fprintf(cmd.OutOrStdout(), "%s result: %s\n", slice.ID, resultPath)
-	fmt.Fprintf(cmd.OutOrStdout(), "Updated index: %s\n", indexPath)
+	fmt.Fprintf(cmd.OutOrStdout(), "Preserved index: %s\n", indexPath)
 	if len(indexed) > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "Indexed: %s\n", strings.Join(indexed, ", "))
 	}
 	return nil
+}
+
+func writeNewTaskArtifactFile(path, body string) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("refusing to overwrite existing task artifact")
+		}
+		return err
+	}
+	defer file.Close()
+	_, err = file.WriteString(body)
+	return err
 }
 
 func runTaskSync(cmd *cobra.Command, taskID string, opts taskSyncOptions) error {
@@ -4205,14 +4217,19 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	if err := os.MkdirAll(checkpointDir, 0o755); err != nil {
 		return fmt.Errorf("create checkpoint dir: %w", err)
 	}
-	checkpointStem := fmt.Sprintf("%s-%s", now.Format("20060102-150405"), sanitizeTaskFilename(opts.Stage))
+	checkpointStemBase := fmt.Sprintf("%s-%s", now.Format("20060102-150405"), sanitizeTaskFilename(opts.Stage))
+	checkpointStem, checkpointPath, checkpointJSONPath, err := nextTaskCheckpointPaths(checkpointDir, checkpointStemBase)
+	if err != nil {
+		return err
+	}
 	checkpointID := taskCheckpointID(selectedSlice.ID, opts.Stage, now)
-	checkpointPath := filepath.Join(checkpointDir, checkpointStem+".md")
-	checkpointJSONPath := filepath.Join(checkpointDir, checkpointStem+".json")
+	if checkpointStem != checkpointStemBase {
+		checkpointID += "-" + strings.TrimPrefix(checkpointStem, checkpointStemBase+"-")
+	}
 	record := buildTaskCheckpointRecord(manifest, opts, selectedSlice, checkpointID, now, repoRoot)
 	jsonRel := taskRelativePath(workspace, checkpointJSONPath)
 	body := renderTaskCheckpoint(manifest, selectedSlice, opts, now, checkpointID, jsonRel)
-	if err := os.WriteFile(checkpointPath, []byte(body), 0o644); err != nil {
+	if err := writeNewTaskArtifactFile(checkpointPath, body); err != nil {
 		return fmt.Errorf("write checkpoint: %w", err)
 	}
 	if err := writeTaskCheckpointRecord(checkpointJSONPath, record); err != nil {
@@ -4333,6 +4350,29 @@ func taskCheckpointID(target, stage string, now time.Time) string {
 		}
 	}
 	return strings.Join(kept, "_")
+}
+
+func nextTaskCheckpointPaths(dir, stem string) (string, string, string, error) {
+	for i := 0; i < 1000; i++ {
+		candidateStem := stem
+		if i > 0 {
+			candidateStem = fmt.Sprintf("%s-%d", stem, i+1)
+		}
+		checkpointPath := filepath.Join(dir, candidateStem+".md")
+		checkpointJSONPath := filepath.Join(dir, candidateStem+".json")
+		if _, err := os.Stat(checkpointPath); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", "", "", err
+		}
+		if _, err := os.Stat(checkpointJSONPath); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", "", "", err
+		}
+		return candidateStem, checkpointPath, checkpointJSONPath, nil
+	}
+	return "", "", "", fmt.Errorf("could not allocate checkpoint path for %s", stem)
 }
 
 func taskCheckpointParentSlice(slice taskSliceArtifact) string {
@@ -4699,7 +4739,7 @@ func writeTaskCheckpointRecord(path string, record taskCheckpointRecord) error {
 		return err
 	}
 	data = append(data, '\n')
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := writeNewTaskArtifactFile(path, string(data)); err != nil {
 		return fmt.Errorf("write checkpoint JSON: %w", err)
 	}
 	return nil
