@@ -5,7 +5,7 @@
   "query": "Task freshness and sync trust repair",
   "status": "packed",
   "created_at": "2026-06-12T07:39:45Z",
-  "updated_at": "2026-06-12T07:46:04Z",
+  "updated_at": "2026-06-12T11:21:26Z",
   "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
   "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/task-freshness-sync-trust",
   "artifacts": {
@@ -19,7 +19,13 @@
         "title": "Add explicit task refresh mode that updates index freshness without rewriting authored task docs",
         "plan": "B01-add-explicit-task-refresh-mode-that-updates-inde-plan.md",
         "result": "B01-add-explicit-task-refresh-mode-that-updates-inde-result.md",
-        "kind": "slice"
+        "kind": "slice",
+        "stage": "validated",
+        "decision": "promote",
+        "updated_at": "2026-06-12T11:18:12Z",
+        "latest_checkpoint_id": "cp_20260612T111812Z_b01_validated",
+        "latest_checkpoint": "checkpoints/20260612-111812-validated.md",
+        "latest_checkpoint_json": "checkpoints/20260612-111812-validated.json"
       },
       {
         "id": "B02",

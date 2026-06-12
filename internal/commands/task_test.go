@@ -1851,6 +1851,83 @@ func TestTask_StatusWarnsAndSyncRecapturesEditedArtifacts(t *testing.T) {
 	}
 }
 
+func TestTask_RefreshRecapturesEditedArtifactsWithClearOutput(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "refresh-freshness-test",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"improve test companion recall",
+	})
+	startBuf := &bytes.Buffer{}
+	startCmd.SetOut(startBuf)
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var startOut taskStartOutput
+	if err := json.Unmarshal(startBuf.Bytes(), &startOut); err != nil {
+		t.Fatalf("start json: %v\n%s", err, startBuf.String())
+	}
+
+	manifest, err := readTaskManifest(startOut.ManifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.UpdatedAt = "2026-01-01T00:00:00Z"
+	if err := writeTaskManifest(startOut.ManifestPath, manifest); err != nil {
+		t.Fatal(err)
+	}
+	editedPlan := mustReadFile(t, startOut.FirstSlicePath) + "\n\n## Dogfood Notes\n- manual readability patch to preserve\n"
+	mustWriteFile(t, startOut.FirstSlicePath, editedPlan)
+
+	refreshCmd := NewTaskCmd()
+	refreshCmd.SetArgs([]string{"refresh", "refresh-freshness-test", "--json"})
+	refreshBuf := &bytes.Buffer{}
+	refreshCmd.SetOut(refreshBuf)
+	if err := refreshCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var refreshOut taskSyncOutput
+	if err := json.Unmarshal(refreshBuf.Bytes(), &refreshOut); err != nil {
+		t.Fatalf("refresh json: %v\n%s", err, refreshBuf.String())
+	}
+	if refreshOut.TaskID != "refresh-freshness-test" || refreshOut.ManifestPath == "" {
+		t.Fatalf("refresh output = %#v", refreshOut)
+	}
+	if len(refreshOut.ArtifactFreshness) != 0 {
+		t.Fatalf("refresh should not return stale warnings as artifact_freshness: %#v", refreshOut.ArtifactFreshness)
+	}
+	if !taskArtifactRefreshContainsPath(refreshOut.RefreshedArtifacts, "A01-improve-test-companion-recall-plan.md") {
+		t.Fatalf("refresh should report refreshed plan artifact, got %#v", refreshOut.RefreshedArtifacts)
+	}
+	for _, artifact := range refreshOut.RefreshedArtifacts {
+		if strings.Contains(artifact.Reason, "run ds task sync") {
+			t.Fatalf("refresh receipt should not ask user to run sync: %#v", artifact)
+		}
+	}
+	if got := mustReadFile(t, startOut.FirstSlicePath); got != editedPlan {
+		t.Fatalf("refresh rewrote authored plan:\nwant:\n%s\n\ngot:\n%s", editedPlan, got)
+	}
+
+	statusCmd := NewTaskCmd()
+	statusCmd.SetArgs([]string{"status", "refresh-freshness-test", "--json"})
+	statusBuf := &bytes.Buffer{}
+	statusCmd.SetOut(statusBuf)
+	if err := statusCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var statusOut taskStatusOutput
+	if err := json.Unmarshal(statusBuf.Bytes(), &statusOut); err != nil {
+		t.Fatalf("status json: %v\n%s", err, statusBuf.String())
+	}
+	if len(statusOut.ArtifactFreshness) != 0 {
+		t.Fatalf("expected refresh to clear stale warnings, got %#v", statusOut.ArtifactFreshness)
+	}
+}
+
 func TestTask_AuditReportsPassAndDrift(t *testing.T) {
 	setupTaskCommandRepo(t)
 
@@ -2619,6 +2696,16 @@ func taskArtifactFreshnessContainsPath(warnings []taskArtifactFreshness, want st
 	want = filepath.ToSlash(want)
 	for _, warning := range warnings {
 		if filepath.ToSlash(warning.Path) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func taskArtifactRefreshContainsPath(artifacts []taskArtifactRefresh, want string) bool {
+	want = filepath.ToSlash(want)
+	for _, artifact := range artifacts {
+		if filepath.ToSlash(artifact.Path) == want {
 			return true
 		}
 	}

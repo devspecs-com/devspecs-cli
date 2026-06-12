@@ -166,7 +166,7 @@ Source files remain authoritative. DevSpecs stores derived index state locally.
 | `ds task prompt <target>` | Emit an agent prompt bounded to one target. |
 | `ds task checkpoint <target>` | Record files, tests, misses, noise, learnings, and next decision. |
 | `ds task finish <target>` | Finish a target with a decision gate. |
-| `ds task sync <task-id>` | Recapture edited task artifacts into the local index. |
+| `ds task refresh <task-id>` | Recapture edited task artifacts into the local index without rewriting task docs. |
 | `ds context <id>` | Export one artifact as paste-ready agent context. |
 | `ds config show` | Inspect effective repo discovery config. |
 

@@ -92,8 +92,9 @@ type taskStatusOptions struct {
 }
 
 type taskSyncOptions struct {
-	Dir    string
-	AsJSON bool
+	Dir     string
+	AsJSON  bool
+	Refresh bool
 }
 
 type taskTargetOptions struct {
@@ -252,13 +253,14 @@ type taskCheckpointOutput struct {
 }
 
 type taskSyncOutput struct {
-	TaskID            string                  `json:"task_id"`
-	Series            string                  `json:"series"`
-	Profile           string                  `json:"profile,omitempty"`
-	Workspace         string                  `json:"workspace"`
-	ManifestPath      string                  `json:"manifest_path"`
-	IndexedPaths      []string                `json:"indexed_paths,omitempty"`
-	ArtifactFreshness []taskArtifactFreshness `json:"artifact_freshness,omitempty"`
+	TaskID             string                  `json:"task_id"`
+	Series             string                  `json:"series"`
+	Profile            string                  `json:"profile,omitempty"`
+	Workspace          string                  `json:"workspace"`
+	ManifestPath       string                  `json:"manifest_path"`
+	IndexedPaths       []string                `json:"indexed_paths,omitempty"`
+	RefreshedArtifacts []taskArtifactRefresh   `json:"refreshed_artifacts,omitempty"`
+	ArtifactFreshness  []taskArtifactFreshness `json:"artifact_freshness,omitempty"`
 }
 
 type taskArtifactFreshness struct {
@@ -267,6 +269,15 @@ type taskArtifactFreshness struct {
 	ModifiedAt     string `json:"modified_at"`
 	StateUpdatedAt string `json:"state_updated_at"`
 	Reason         string `json:"reason"`
+}
+
+type taskArtifactRefresh struct {
+	Path                   string `json:"path"`
+	Kind                   string `json:"kind,omitempty"`
+	ModifiedAt             string `json:"modified_at"`
+	PreviousStateUpdatedAt string `json:"previous_state_updated_at,omitempty"`
+	RefreshedAt            string `json:"refreshed_at"`
+	Reason                 string `json:"reason"`
 }
 
 type taskTargetOutput struct {
@@ -546,6 +557,7 @@ templates for recording actual reads, edits, tests, misses, and noise.`,
 	cmd.AddCommand(newTaskSliceCmd())
 	cmd.AddCommand(newTaskIterationCmd())
 	cmd.AddCommand(newTaskSyncCmd())
+	cmd.AddCommand(newTaskRefreshCmd())
 	cmd.AddCommand(newTaskNextCmd())
 	cmd.AddCommand(newTaskShowCmd())
 	cmd.AddCommand(newTaskPromptCmd())
@@ -652,6 +664,23 @@ func newTaskSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sync <task-id>",
 		Short: "Recapture task workspace artifacts into the DevSpecs index",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskSync(cmd, args[0], opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
+	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
+	return cmd
+}
+
+func newTaskRefreshCmd() *cobra.Command {
+	var opts taskSyncOptions
+	opts.Dir = defaultTaskWorkspaceDir
+	opts.Refresh = true
+	cmd := &cobra.Command{
+		Use:   "refresh <task-id>",
+		Short: "Refresh task artifacts in the DevSpecs index without rewriting task docs",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskSync(cmd, args[0], opts)
@@ -1158,20 +1187,28 @@ func runTaskSync(cmd *cobra.Command, taskID string, opts taskSyncOptions) error 
 	}
 
 	out := taskSyncOutput{
-		TaskID:            manifest.TaskID,
-		Series:            defaultTaskSeries(manifest.Series),
-		Profile:           defaultTaskProfile(manifest.Profile),
-		Workspace:         workspace,
-		ManifestPath:      manifestPath,
-		IndexedPaths:      indexed,
-		ArtifactFreshness: before,
+		TaskID:       manifest.TaskID,
+		Series:       defaultTaskSeries(manifest.Series),
+		Profile:      defaultTaskProfile(manifest.Profile),
+		Workspace:    workspace,
+		ManifestPath: manifestPath,
+		IndexedPaths: indexed,
+	}
+	if opts.Refresh {
+		out.RefreshedArtifacts = taskArtifactRefreshes(before, manifest.UpdatedAt)
+	} else {
+		out.ArtifactFreshness = before
 	}
 	if opts.AsJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Synced task workspace: %s\n", workspace)
+	verb := "Synced"
+	if opts.Refresh {
+		verb = "Refreshed"
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "%s task workspace: %s\n", verb, workspace)
 	fmt.Fprintf(cmd.OutOrStdout(), "Task ID: %s\n", out.TaskID)
 	fmt.Fprintf(cmd.OutOrStdout(), "Series: %s\n", out.Series)
 	fmt.Fprintf(cmd.OutOrStdout(), "Profile: %s\n", out.Profile)
@@ -1379,7 +1416,7 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 	if len(status.ArtifactFreshness) > 0 {
 		fmt.Fprintln(out, "Stale task artifacts:")
 		for _, warning := range status.ArtifactFreshness {
-			fmt.Fprintf(out, "  - %s changed after task state; run `ds task sync %s`.\n", warning.Path, status.TaskID)
+			fmt.Fprintf(out, "  - %s changed after task state; run `ds task refresh %s`.\n", warning.Path, status.TaskID)
 		}
 	}
 	for _, slice := range status.Slices {
@@ -1713,7 +1750,7 @@ func writeTaskTargetHuman(out io.Writer, title string, target taskTargetOutput, 
 	if len(target.ArtifactFreshness) > 0 {
 		fmt.Fprintln(out, "Stale task artifacts:")
 		for _, warning := range target.ArtifactFreshness {
-			fmt.Fprintf(out, "  - %s changed after task state; run `ds task sync %s`.\n", warning.Path, target.TaskID)
+			fmt.Fprintf(out, "  - %s changed after task state; run `ds task refresh %s`.\n", warning.Path, target.TaskID)
 		}
 	}
 	if includePlanBody && target.PlanBody != "" {
@@ -5423,10 +5460,28 @@ func taskArtifactFreshnessWarnings(workspace string, manifest taskManifest) []ta
 			Kind:           candidate.Kind,
 			ModifiedAt:     modified.Format(time.RFC3339),
 			StateUpdatedAt: stateText,
-			Reason:         "task artifact changed after the task state was last captured; run ds task sync",
+			Reason:         "task artifact changed after the task state was last captured; run ds task refresh",
 		})
 	}
 	return warnings
+}
+
+func taskArtifactRefreshes(warnings []taskArtifactFreshness, refreshedAt string) []taskArtifactRefresh {
+	if len(warnings) == 0 {
+		return nil
+	}
+	out := make([]taskArtifactRefresh, 0, len(warnings))
+	for _, warning := range warnings {
+		out = append(out, taskArtifactRefresh{
+			Path:                   warning.Path,
+			Kind:                   warning.Kind,
+			ModifiedAt:             warning.ModifiedAt,
+			PreviousStateUpdatedAt: warning.StateUpdatedAt,
+			RefreshedAt:            refreshedAt,
+			Reason:                 "task artifact recaptured without rewriting authored task docs",
+		})
+	}
+	return out
 }
 
 func taskFreshnessCandidates(manifest taskManifest) []taskSyncArtifactCandidate {
