@@ -1,0 +1,80 @@
+{
+  "task_id": "profile-gallery-publishing-trust",
+  "series": "E",
+  "profile": "greenfield",
+  "query": "Profile gallery and publishing trust",
+  "status": "packed",
+  "created_at": "2026-06-12T07:40:31Z",
+  "updated_at": "2026-06-12T07:44:49Z",
+  "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
+  "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/profile-gallery-publishing-trust",
+  "artifacts": {
+    "series": "E",
+    "index": "E00-index.md",
+    "first_slice": "E01-define-curated-free-profile-gallery-contract-wit-plan.md",
+    "result": "E01-define-curated-free-profile-gallery-contract-wit-result.md",
+    "slices": [
+      {
+        "id": "E01",
+        "title": "Define curated free profile gallery contract with pinned versions and inspectable files",
+        "plan": "E01-define-curated-free-profile-gallery-contract-wit-plan.md",
+        "result": "E01-define-curated-free-profile-gallery-contract-wit-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "E02",
+        "title": "Add explicit profile install update and audit UX without background sync",
+        "plan": "E02-add-explicit-profile-install-update-and-audit-ux-plan.md",
+        "result": "E02-add-explicit-profile-install-update-and-audit-ux-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "E03",
+        "title": "Separate profile sharing from specs.place publishing so local trust stays primary",
+        "plan": "E03-separate-profile-sharing-from-specs-place-publis-plan.md",
+        "result": "E03-separate-profile-sharing-from-specs-place-publis-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "E04",
+        "title": "Decide marketplace timing after first-party profiles prove repeatable value",
+        "plan": "E04-decide-marketplace-timing-after-first-party-prof-plan.md",
+        "result": "E04-decide-marketplace-timing-after-first-party-prof-result.md",
+        "kind": "slice"
+      }
+    ]
+  },
+  "predicted_context": {},
+  "freshness_warnings": [
+    {
+      "path": "internal/profiles/profiles_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: profile"
+    }
+  ],
+  "risk_cards": [
+    {
+      "id": "stale-index",
+      "title": "On-disk paths matched the task but were not indexed",
+      "severity": "medium",
+      "source": "freshness",
+      "evidence": [
+        "`internal/profiles/profiles_test.go` - on-disk path matched task terms but was not in the indexed candidate set: profile"
+      ],
+      "agent_check": "Inspect the warned files or refresh the index before trusting missing context.",
+      "count": 1
+    }
+  ],
+  "confidence": {
+    "primary_file_confidence": "low",
+    "test_coverage_confidence": "low",
+    "docs_config_confidence": "low",
+    "git_receipt_confidence": "low",
+    "noise_risk": "low",
+    "pack_completeness": "low",
+    "why": [
+      "no clear primary implementation file was found",
+      "test companion coverage was not evident from the initial pack"
+    ],
+    "agent_instruction": "Validate the test and integration surface before editing. Record critical misses and distracting inclusions in the slice result or a task checkpoint."
+  }
+}

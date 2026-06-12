@@ -1,0 +1,17 @@
+# DevSpecs Task Roadmap
+
+This folder holds versionable intent artifacts for launch-facing and post-launch DevSpecs CLI work.
+
+## Current Tracks
+
+| Series | Track | Timing | Purpose |
+| --- | --- | --- | --- |
+| A | `scanless-workflow-ux` | Launch polish | Remove the required manual `ds scan` step from common onboarding workflows. |
+| B | `task-freshness-sync-trust` | Immediate / patch-level | Make task sync, refresh, and stale warnings trust-preserving after manual task doc edits. |
+| C | `workflow-profile-templates` | Near-term v2 | Let teams define safe local workflow profiles and task templates without arbitrary hooks. |
+| D | `evidence-lanes-domain-extractors` | Mid-term v2 | Generalize domain evidence through built-in lanes and extractor contracts. |
+| E | `profile-gallery-publishing-trust` | Later v2+ | Explore curated profile sharing only after local profile value is proven. |
+
+## Ordering Principle
+
+Fix local trust and workflow smoothness before adding extensibility. Profiles should come before domain extractors, and both should come before any public gallery or publishing surface.

@@ -1,0 +1,88 @@
+{
+  "task_id": "task-freshness-sync-trust",
+  "series": "B",
+  "profile": "greenfield",
+  "query": "Task freshness and sync trust repair",
+  "status": "packed",
+  "created_at": "2026-06-12T07:39:45Z",
+  "updated_at": "2026-06-12T07:46:04Z",
+  "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
+  "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/task-freshness-sync-trust",
+  "artifacts": {
+    "series": "B",
+    "index": "B00-index.md",
+    "first_slice": "B01-add-explicit-task-refresh-mode-that-updates-inde-plan.md",
+    "result": "B01-add-explicit-task-refresh-mode-that-updates-inde-result.md",
+    "slices": [
+      {
+        "id": "B01",
+        "title": "Add explicit task refresh mode that updates index freshness without rewriting authored task docs",
+        "plan": "B01-add-explicit-task-refresh-mode-that-updates-inde-plan.md",
+        "result": "B01-add-explicit-task-refresh-mode-that-updates-inde-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "B02",
+        "title": "Clarify stale warnings so task.json state and captured artifact freshness are reported separately",
+        "plan": "B02-clarify-stale-warnings-so-task-json-state-and-ca-plan.md",
+        "result": "B02-clarify-stale-warnings-so-task-json-state-and-ca-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "B03",
+        "title": "Preserve manual readability edits while letting the CLI refresh captured corpus state",
+        "plan": "B03-preserve-manual-readability-edits-while-letting-plan.md",
+        "result": "B03-preserve-manual-readability-edits-while-letting-result.md",
+        "kind": "slice"
+      }
+    ]
+  },
+  "predicted_context": {},
+  "freshness_warnings": [
+    {
+      "path": "internal/commands/freshness_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: freshness"
+    },
+    {
+      "path": "internal/commands/task_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: task"
+    },
+    {
+      "path": "internal/freshness/freshness_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: freshness"
+    },
+    {
+      "path": "internal/store/task_checkpoint_facts_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: task"
+    }
+  ],
+  "risk_cards": [
+    {
+      "id": "stale-index",
+      "title": "On-disk paths matched the task but were not indexed",
+      "severity": "medium",
+      "source": "freshness",
+      "evidence": [
+        "`internal/commands/freshness_test.go` - on-disk path matched task terms but was not in the indexed candidate set: freshness",
+        "`internal/commands/task_test.go` - on-disk path matched task terms but was not in the indexed candidate set: task",
+        "`internal/freshness/freshness_test.go` - on-disk path matched task terms but was not in the indexed candidate set: freshness",
+        "`internal/store/task_checkpoint_facts_test.go` - on-disk path matched task terms but was not in the indexed candidate set: task"
+      ],
+      "agent_check": "Inspect the warned files or refresh the index before trusting missing context.",
+      "count": 4
+    }
+  ],
+  "confidence": {
+    "primary_file_confidence": "low",
+    "test_coverage_confidence": "low",
+    "docs_config_confidence": "low",
+    "git_receipt_confidence": "low",
+    "noise_risk": "low",
+    "pack_completeness": "low",
+    "why": [
+      "no clear primary implementation file was found",
+      "test companion coverage was not evident from the initial pack"
+    ],
+    "agent_instruction": "Validate the test and integration surface before editing. Record critical misses and distracting inclusions in the slice result or a task checkpoint."
+  }
+}
