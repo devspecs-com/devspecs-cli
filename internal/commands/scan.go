@@ -112,6 +112,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	if err != nil {
 		return err
 	}
+	rootWarning := maybeWarnWorkspaceRoot(cmd, repoRoot)
 
 	cfg, err := config.LoadRepoConfig(repoRoot)
 	if err != nil {
@@ -196,6 +197,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
+	result.RootWarning = rootWarning
 
 	if scanTotalFound(result) == 0 {
 		var matcher *ignore.Matcher

@@ -1,0 +1,82 @@
+{
+  "schema_version": 2,
+  "checkpoint_id": "cp_20260615T184733Z_h01_implemented",
+  "task_id": "workspace-root-monorepo-guardrails",
+  "target": "H01",
+  "series": "H",
+  "query": "Workspace root and monorepo guardrails for scan/map/find/task commands",
+  "slice": "H01",
+  "slice_title": "Detect likely workspace roots and recommend repo selection before expensive scans",
+  "parent_slice": "H01",
+  "stage": "implemented",
+  "decision": "continue",
+  "created_at": "2026-06-15T18:47:33Z",
+  "goal": "Record progress for `Workspace root and monorepo guardrails for scan/map/find/task commands`.",
+  "description": "Added conservative workspace-root detection for scan and auto-refresh paths. Explicit scan JSON now includes root_warning; auto-refresh warnings go to stderr so JSON stdout stays valid.",
+  "resources": [
+    "../H00-index.md",
+    "../H01-detect-likely-workspace-roots-and-recommend-repo-plan.md",
+    "../H01-detect-likely-workspace-roots-and-recommend-repo-result.md",
+    "../task.json"
+  ],
+  "files_read": [
+    "internal/commands/refresh.go",
+    "internal/commands/scan.go",
+    "internal/scan/result.go"
+  ],
+  "files_edited": [
+    "internal/commands/workspace_root.go",
+    "internal/commands/refresh.go",
+    "internal/commands/scan.go",
+    "internal/scan/result.go"
+  ],
+  "tests_read": [
+    "internal/commands/workspace_root_test.go"
+  ],
+  "tests_run": [
+    "go test ./internal/commands -run TestWorkspaceRootWarning|TestScanJSONIncludesWorkspaceRootWarning|TestMapJSONAutoScanWarnsForWorkspaceRootWithoutBreakingStdout|TestMapJSONAutoScanKeepsStdoutJSON|TestScan_QuietWithJSON"
+  ],
+  "actual_context": {
+    "files_read": [
+      "internal/commands/refresh.go",
+      "internal/commands/scan.go",
+      "internal/scan/result.go"
+    ],
+    "files_edited": [
+      "internal/commands/workspace_root.go",
+      "internal/commands/refresh.go",
+      "internal/commands/scan.go",
+      "internal/scan/result.go"
+    ],
+    "tests_read": [
+      "internal/commands/workspace_root_test.go"
+    ],
+    "tests_run": [
+      "go test ./internal/commands -run TestWorkspaceRootWarning|TestScanJSONIncludesWorkspaceRootWarning|TestMapJSONAutoScanWarnsForWorkspaceRootWithoutBreakingStdout|TestMapJSONAutoScanKeepsStdoutJSON|TestScan_QuietWithJSON"
+    ]
+  },
+  "predicted_context_feedback": {},
+  "evidence": {
+    "plan_refs": [
+      "../H00-index.md",
+      "../H01-detect-likely-workspace-roots-and-recommend-repo-plan.md",
+      "../H01-detect-likely-workspace-roots-and-recommend-repo-result.md",
+      "../task.json"
+    ]
+  },
+  "learnings": [
+    {
+      "learning_type": "implementation",
+      "summary": "Workspace-root warnings should print to stderr for hidden auto-scans and attach structured root_warning only to explicit scan JSON so machine stdout remains parseable.",
+      "evidence_refs": [
+        "internal/commands/workspace_root.go"
+      ],
+      "applies_to": "H01",
+      "confidence": "high"
+    }
+  ],
+  "next": {
+    "recommended_target": "H02",
+    "recommended_decision": "promote"
+  }
+}

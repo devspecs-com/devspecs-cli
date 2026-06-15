@@ -49,6 +49,7 @@ func ensureFresh(cmd *cobra.Command, db *store.DB) {
 	}
 
 	debugLog("ensureFresh: stale — reason=%s, triggering auto-scan", status.Reason)
+	maybeWarnWorkspaceRoot(cmd, repoRoot)
 	runScanQuietAndNotify(cmd, db, repoRoot)
 }
 
@@ -67,6 +68,7 @@ func ensureRepoIndexed(cmd *cobra.Command, db *store.DB, repoRoot string) {
 	} else {
 		debugLog("ensureRepoIndexed: stale reason=%s; triggering auto-scan", status.Reason)
 	}
+	maybeWarnWorkspaceRoot(cmd, repoRoot)
 	runScanQuietAndNotify(cmd, db, repoRoot)
 }
 
@@ -88,6 +90,7 @@ func ensureRepoIndexedForTask(cmd *cobra.Command, db *store.DB, repoRoot string)
 	} else {
 		debugLog("ensureRepoIndexedForTask: substrate reason=%s; triggering task auto-scan", substrateReason)
 	}
+	maybeWarnWorkspaceRoot(cmd, repoRoot)
 	runTaskScanQuietAndNotify(cmd, db, repoRoot)
 }
 

@@ -21,6 +21,16 @@ type ScanHint struct {
 	SuggestCommand string `json:"suggest_command,omitempty"`
 }
 
+// RootSelectionWarning explains when a command appears to be running from a
+// broad workspace root rather than a focused project root.
+type RootSelectionWarning struct {
+	Kind              string   `json:"kind"`
+	Path              string   `json:"path"`
+	Message           string   `json:"message"`
+	CandidateRoots    []string `json:"candidate_roots,omitempty"`
+	SuggestedCommands []string `json:"suggested_commands,omitempty"`
+}
+
 // SourceCompanionAdmissionDiagnostics summarizes bounded source files admitted
 // because indexed tests pointed at likely implementation companions.
 type SourceCompanionAdmissionDiagnostics struct {
@@ -118,6 +128,7 @@ type Result struct {
 	Updated            int                                  `json:"Updated"`
 	Unchanged          int                                  `json:"Unchanged"`
 	Hints              []ScanHint                           `json:"hints,omitempty"`
+	RootWarning        *RootSelectionWarning                `json:"root_warning,omitempty"`
 	OpenSpec           *openspecmetrics.Metrics             `json:"openspec,omitempty"`
 	EvidenceGraph      *EvidenceGraphDiagnostics            `json:"evidence_graph,omitempty"`
 	GitEvidence        *GitEvidenceDiagnostics              `json:"git_evidence,omitempty"`

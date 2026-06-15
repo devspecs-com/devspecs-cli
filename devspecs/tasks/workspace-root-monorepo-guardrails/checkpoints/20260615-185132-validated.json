@@ -1,0 +1,56 @@
+{
+  "schema_version": 2,
+  "checkpoint_id": "cp_20260615T185132Z_h01_validated",
+  "task_id": "workspace-root-monorepo-guardrails",
+  "target": "H01",
+  "series": "H",
+  "query": "Workspace root and monorepo guardrails for scan/map/find/task commands",
+  "slice": "H01",
+  "slice_title": "Detect likely workspace roots and recommend repo selection before expensive scans",
+  "parent_slice": "H01",
+  "stage": "validated",
+  "decision": "promote",
+  "created_at": "2026-06-15T18:51:32Z",
+  "goal": "Record progress for `Workspace root and monorepo guardrails for scan/map/find/task commands`.",
+  "description": "Validated H01 workspace-root guardrails. Focused map/scan JSON tests and internal scan package pass with clean exit codes.",
+  "resources": [
+    "../H00-index.md",
+    "../H01-detect-likely-workspace-roots-and-recommend-repo-plan.md",
+    "../H01-detect-likely-workspace-roots-and-recommend-repo-result.md",
+    "../task.json"
+  ],
+  "tests_run": [
+    "go test ./internal/commands -run TestWorkspaceRootWarning|TestScanJSONIncludesWorkspaceRootWarning|TestMapJSONAutoScanWarnsForWorkspaceRootWithoutBreakingStdout|TestMapJSONAutoScanKeepsStdoutJSON|TestScan_QuietWithJSON",
+    "go test ./internal/scan"
+  ],
+  "actual_context": {
+    "tests_run": [
+      "go test ./internal/commands -run TestWorkspaceRootWarning|TestScanJSONIncludesWorkspaceRootWarning|TestMapJSONAutoScanWarnsForWorkspaceRootWithoutBreakingStdout|TestMapJSONAutoScanKeepsStdoutJSON|TestScan_QuietWithJSON",
+      "go test ./internal/scan"
+    ]
+  },
+  "predicted_context_feedback": {},
+  "evidence": {
+    "plan_refs": [
+      "../H00-index.md",
+      "../H01-detect-likely-workspace-roots-and-recommend-repo-plan.md",
+      "../H01-detect-likely-workspace-roots-and-recommend-repo-result.md",
+      "../task.json"
+    ]
+  },
+  "learnings": [
+    {
+      "learning_type": "validation",
+      "summary": "H01 keeps JSON stdout clean while surfacing workspace-root guidance through stderr and scan JSON metadata.",
+      "evidence_refs": [
+        "internal/commands/workspace_root_test.go"
+      ],
+      "applies_to": "H01",
+      "confidence": "high"
+    }
+  ],
+  "next": {
+    "recommended_target": "H02",
+    "recommended_decision": "promote"
+  }
+}
