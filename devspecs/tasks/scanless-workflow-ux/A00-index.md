@@ -26,9 +26,15 @@ Fold ds scan into workflow commands so onboarding starts with map, find, and tas
 - `task.json`
 - `A01-fold-ds-scan-into-workflow-commands-so-onboardin-plan.md`
 - `A01-fold-ds-scan-into-workflow-commands-so-onboardin-result.md`
+- `A02-document-tldr-first-launch-workflow-and-two-laye-plan.md`
+- `A02-document-tldr-first-launch-workflow-and-two-laye-result.md`
+- `A03-clarify-find-before-task-workflow-and-task-conte-plan.md`
+- `A03-clarify-find-before-task-workflow-and-task-conte-result.md`
 
 ## Task Slices
 - A01: Fold ds scan into workflow commands so onboarding starts with map, find, and task instead of a required manual scan. Plan: `A01-fold-ds-scan-into-workflow-commands-so-onboardin-plan.md`. Result: `A01-fold-ds-scan-into-workflow-commands-so-onboardin-result.md`.
+- A02: Document tldr-first launch workflow and two-layer PLAN-to-task model [stage: validated, decision: promote]. Plan: `A02-document-tldr-first-launch-workflow-and-two-laye-plan.md`. Result: `A02-document-tldr-first-launch-workflow-and-two-laye-result.md`.
+- A03: Clarify find-before-task workflow and task context packing. Plan: `A03-clarify-find-before-task-workflow-and-task-conte-plan.md`. Result: `A03-clarify-find-before-task-workflow-and-task-conte-result.md`.
 
 ## Relevant Map Areas
 - `internal/commands`

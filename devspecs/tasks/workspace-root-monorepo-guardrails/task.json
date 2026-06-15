@@ -1,0 +1,139 @@
+{
+  "task_id": "workspace-root-monorepo-guardrails",
+  "series": "H",
+  "profile": "code-change",
+  "query": "Workspace root and monorepo guardrails for scan/map/find/task commands",
+  "status": "packed",
+  "created_at": "2026-06-15T15:37:17Z",
+  "updated_at": "2026-06-15T16:54:39Z",
+  "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
+  "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/workspace-root-monorepo-guardrails",
+  "artifacts": {
+    "series": "H",
+    "index": "H00-index.md",
+    "first_slice": "H01-detect-likely-workspace-roots-and-recommend-repo-plan.md",
+    "result": "H01-detect-likely-workspace-roots-and-recommend-repo-result.md",
+    "slices": [
+      {
+        "id": "H01",
+        "title": "Detect likely workspace roots and recommend repo selection before expensive scans",
+        "plan": "H01-detect-likely-workspace-roots-and-recommend-repo-plan.md",
+        "result": "H01-detect-likely-workspace-roots-and-recommend-repo-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "H02",
+        "title": "Add traversal budgets, progress output, and ignored-directory explanations for scan map find and task",
+        "plan": "H02-add-traversal-budgets-progress-output-and-ignore-plan.md",
+        "result": "H02-add-traversal-budgets-progress-output-and-ignore-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "H03",
+        "title": "Evaluate bounded high-level root grouping and parallel scan after deterministic root detection",
+        "plan": "H03-evaluate-bounded-high-level-root-grouping-and-pa-plan.md",
+        "result": "H03-evaluate-bounded-high-level-root-grouping-and-pa-result.md",
+        "kind": "slice"
+      }
+    ]
+  },
+  "predicted_context": {},
+  "advisory_files": [
+    {
+      "path": "internal/commands/task.go",
+      "kind": "prior-source",
+      "source": "checkpoint_fact",
+      "evidence": [
+        "task task-freshness-sync-trust checkpoint cp_20260612T111812Z_b01_validated read `internal/commands/task.go`",
+        "task task-freshness-sync-trust checkpoint cp_20260612T111812Z_b01_validated edited `internal/commands/task.go`",
+        "task task-freshness-sync-trust checkpoint cp_20260612T111812Z_b01_validated learned: Use ds task refresh as the visible command for non-destructive task artifact recapture; keep sync available but stop making stale warnings point users at sync."
+      ],
+      "agent_check": "Verify this prior source lead before choosing an edit target."
+    },
+    {
+      "path": "internal/commands/task_test.go",
+      "kind": "prior-test",
+      "source": "checkpoint_fact",
+      "evidence": [
+        "task task-freshness-sync-trust checkpoint cp_20260612T111812Z_b01_validated read `internal/commands/task_test.go`",
+        "task task-freshness-sync-trust checkpoint cp_20260612T111812Z_b01_validated edited `internal/commands/task_test.go`",
+        "task task-freshness-sync-trust checkpoint cp_20260612T111812Z_b01_validated read test `internal/commands/task_test.go`",
+        "task task-freshness-sync-trust checkpoint cp_20260612T111812Z_b01_validated learned: Use ds task refresh as the visible command for non-destructive task artifact recapture; keep sync available but stop making stale warnings point users at sync."
+      ],
+      "agent_check": "Verify this prior test lead before editing."
+    },
+    {
+      "path": "README.md",
+      "kind": "prior-source",
+      "source": "checkpoint_fact",
+      "evidence": [
+        "task task-freshness-sync-trust checkpoint cp_20260612T111812Z_b01_validated read `README.md`",
+        "task task-freshness-sync-trust checkpoint cp_20260612T111812Z_b01_validated edited `README.md`"
+      ],
+      "agent_check": "Verify this prior source lead before choosing an edit target."
+    }
+  ],
+  "freshness_warnings": [
+    {
+      "path": "internal/commands/find_pack_companions_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: find, commands"
+    },
+    {
+      "path": "internal/commands/find_pack_presentation_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: find, commands"
+    },
+    {
+      "path": "internal/commands/find_pack_scout_evidence_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: find, commands"
+    },
+    {
+      "path": "internal/commands/find_pack_scout_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: find, commands"
+    },
+    {
+      "path": "internal/commands/find_pack_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: find, commands"
+    },
+    {
+      "path": "internal/commands/find_source_manifest_consumption_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: find, commands"
+    },
+    {
+      "path": "internal/commands/find_source_manifest_recovery_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: find, commands"
+    },
+    {
+      "path": "internal/commands/find_source_pack_mode_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: find, commands"
+    }
+  ],
+  "risk_cards": [
+    {
+      "id": "stale-index",
+      "title": "On-disk paths matched the task but were not indexed",
+      "severity": "medium",
+      "source": "freshness",
+      "evidence": [
+        "`internal/commands/find_pack_companions_test.go` - on-disk path matched task terms but was not in the indexed candidate set: find, commands",
+        "`internal/commands/find_pack_presentation_test.go` - on-disk path matched task terms but was not in the indexed candidate set: find, commands",
+        "`internal/commands/find_pack_scout_evidence_test.go` - on-disk path matched task terms but was not in the indexed candidate set: find, commands",
+        "`internal/commands/find_pack_scout_test.go` - on-disk path matched task terms but was not in the indexed candidate set: find, commands"
+      ],
+      "agent_check": "Inspect the warned files or refresh the index before trusting missing context.",
+      "count": 8
+    }
+  ],
+  "confidence": {
+    "primary_file_confidence": "low",
+    "test_coverage_confidence": "low",
+    "docs_config_confidence": "low",
+    "git_receipt_confidence": "low",
+    "noise_risk": "low",
+    "pack_completeness": "low",
+    "why": [
+      "no clear primary implementation file was found",
+      "test companion coverage was not evident from the initial pack"
+    ],
+    "agent_instruction": "Validate the test and integration surface before editing. Record critical misses and distracting inclusions in the slice result or a task checkpoint."
+  }
+}
