@@ -1,0 +1,94 @@
+{
+  "schema_version": 2,
+  "checkpoint_id": "cp_20260615T152127Z_a02_validated",
+  "task_id": "scanless-workflow-ux",
+  "target": "A02",
+  "series": "A",
+  "query": "Fold ds scan into workflow commands so onboarding starts with map, find, and task instead of a required manual scan",
+  "slice": "A02",
+  "slice_title": "Document tldr-first launch workflow and two-layer PLAN-to-task model",
+  "parent_slice": "A02",
+  "stage": "validated",
+  "decision": "promote",
+  "created_at": "2026-06-15T15:21:27Z",
+  "goal": "Record progress for `Fold ds scan into workflow commands so onboarding starts with map, find, and task instead of a required manual scan`.",
+  "description": "Updated launch docs to make ds tldr the agent front door, document the canonical PLAN/spec versus devspecs/tasks execution workspace model, clarify full ds task versus ds task quick, and add restart shell or IDE install guidance.",
+  "resources": [
+    "../A00-index.md",
+    "../A02-document-tldr-first-launch-workflow-and-two-laye-plan.md",
+    "../A02-document-tldr-first-launch-workflow-and-two-laye-result.md",
+    "../task.json"
+  ],
+  "files_read": [
+    "README.md",
+    "TASK_WORKFLOW_EXAMPLE.md",
+    "devspecs/tasks/scanless-workflow-ux/A02-document-tldr-first-launch-workflow-and-two-laye-plan.md"
+  ],
+  "files_edited": [
+    "README.md",
+    "TASK_WORKFLOW_EXAMPLE.md"
+  ],
+  "tests_run": [
+    "docs-only; git diff --check"
+  ],
+  "actual_context": {
+    "files_read": [
+      "README.md",
+      "TASK_WORKFLOW_EXAMPLE.md",
+      "devspecs/tasks/scanless-workflow-ux/A02-document-tldr-first-launch-workflow-and-two-laye-plan.md"
+    ],
+    "files_edited": [
+      "README.md",
+      "TASK_WORKFLOW_EXAMPLE.md"
+    ],
+    "tests_run": [
+      "docs-only; git diff --check"
+    ]
+  },
+  "predicted_context_feedback": {},
+  "evidence": {
+    "git_diff": {
+      "command": "git diff --stat; git diff --name-only; git diff --cached --name-only; git ls-files --others --exclude-standard",
+      "stat": " README.md                                          | 50 +++++++++++++++++++---\n TASK_WORKFLOW_EXAMPLE.md                           | 16 ++++++-\n ...dr-first-launch-workflow-and-two-laye-result.md | 16 +++++++\n devspecs/tasks/scanless-workflow-ux/task.json      | 10 ++++-\n 4 files changed, 83 insertions(+), 9 deletions(-)\n",
+      "changed_files": [
+        "README.md",
+        "TASK_WORKFLOW_EXAMPLE.md",
+        "devspecs/tasks/scanless-workflow-ux/A02-document-tldr-first-launch-workflow-and-two-laye-result.md",
+        "devspecs/tasks/scanless-workflow-ux/task.json",
+        "devspecs/tasks/scanless-workflow-ux/checkpoints/20260615-151917-validated.json",
+        "devspecs/tasks/scanless-workflow-ux/checkpoints/20260615-151917-validated.md"
+      ],
+      "max_bytes": 12000,
+      "truncated": false
+    },
+    "git_diff_paths": [
+      "README.md",
+      "TASK_WORKFLOW_EXAMPLE.md",
+      "devspecs/tasks/scanless-workflow-ux/A02-document-tldr-first-launch-workflow-and-two-laye-result.md",
+      "devspecs/tasks/scanless-workflow-ux/task.json",
+      "devspecs/tasks/scanless-workflow-ux/checkpoints/20260615-151917-validated.json",
+      "devspecs/tasks/scanless-workflow-ux/checkpoints/20260615-151917-validated.md"
+    ],
+    "plan_refs": [
+      "../A00-index.md",
+      "../A02-document-tldr-first-launch-workflow-and-two-laye-plan.md",
+      "../A02-document-tldr-first-launch-workflow-and-two-laye-result.md",
+      "../task.json"
+    ]
+  },
+  "learnings": [
+    {
+      "learning_type": "launch-docs",
+      "summary": "Lead with ds tldr and explain PLAN/spec artifacts as canonical intent while devspecs/tasks is the execution slice and receipt layer.",
+      "evidence_refs": [
+        "README.md",
+        "TASK_WORKFLOW_EXAMPLE.md"
+      ],
+      "applies_to": "launch onboarding",
+      "confidence": "0.88"
+    }
+  ],
+  "next": {
+    "recommended_decision": "promote"
+  }
+}

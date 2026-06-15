@@ -67,18 +67,49 @@ irm https://raw.githubusercontent.com/devspecs-com/devspecs-cli/main/install.ps1
 go install github.com/devspecs-com/devspecs-cli/cmd/ds@latest
 ```
 
-## Greenfield: bounded task slices
+After installing or upgrading, restart your shell or IDE terminal if `ds` is not
+found. Verify the active binary with:
 
-Use `ds task` when you are about to ask an agent to make a repo change and want
-the first slice to be grounded before the agent grabs the whole roadmap.
+```bash
+ds version
+```
 
-For agent-facing quick guidance, run:
+## Agent quickstart
+
+Start agent sessions with `ds tldr`. It is the shortest way to remind an LLM to
+work on one bounded target, checkpoint evidence, and avoid claiming full repo
+coverage.
 
 ```bash
 ds tldr
 ds tldr hotfix
 ds tldr incident --json
 ```
+
+## Intent artifacts and task workspaces
+
+DevSpecs has a two-layer model:
+
+- **Canonical intent artifacts** are the repo's existing `PLAN-*` files, ADRs,
+  PRDs, RFCs, decision memos, north-star docs, OpenSpec changes, and runbooks.
+  Humans still own these. DevSpecs should route agents to them, not replace
+  reading them.
+- **Task workspaces** under `devspecs/tasks/<task-id>/` are execution slices:
+  bounded plans, prompts, checkpoints, result receipts, and decision gates for
+  one implementation thread.
+
+When a repo already has an owner decision doc, link or reference it from the task
+workspace instead of duplicating the canonical gate. A good pattern is:
+`PLAN-*` says what/why; `devspecs/tasks/*` says what the next agent should do
+now and records what actually happened.
+
+## Greenfield: bounded task slices
+
+Use `ds task` when you are about to ask an agent to make a repo change and want
+the first slice to be grounded before the agent grabs the whole roadmap.
+
+For multi-slice features, epics, migrations, or architecture work, use full
+`ds task`:
 
 ```bash
 ds task "Serve Swagger UI OAuth2 redirect from a custom docs redirect URL" \
@@ -101,13 +132,16 @@ What this gives you:
 - packed source, test, docs, and receipt context;
 - a one-slice agent prompt;
 - explicit decision gates: `promote`, `improve`, `rework`, `rollback`, `block`;
-- lifecycle state from `start`, `checkpoint`, `finish`, `decide`, and `sync`.
+- lifecycle state from `start`, `checkpoint`, `finish`, `decide`, and `refresh`.
 
-For a small one-off change, use the lighter entrypoint:
+For a small one-off change, bugfix, or doc spike, use the lighter entrypoint:
 
 ```bash
 ds task quick "Fix discount rounding in invoice totals"
 ```
+
+Use full `ds task` when you want durable slices and handoff receipts. Use
+`ds task quick` when the cost of a full task workspace would exceed the change.
 
 See [TASK_WORKFLOW_EXAMPLE.md](TASK_WORKFLOW_EXAMPLE.md) for a public-safe
 transcript generated from current CLI output.
@@ -130,6 +164,10 @@ summarizes useful repo areas and follow-up context commands. `ds find` groups
 source, tests, docs, receipts, and exclusions into an agent-readable context
 pack by default. Use `ds find --plain` when you want the older flat ranked
 result list. Use `ds scan` when you want an explicit manual refresh or rebuild.
+
+`ds find` is a routing layer, not a replacement for owner decision docs. When it
+surfaces a current decision memo, north-star doc, or `Status: next` plan, read
+that artifact before asking an agent to implement.
 
 `ds adopt` is planned, not shipped. Current brownfield workflows scan and query
 existing artifacts in place without mutating old files.

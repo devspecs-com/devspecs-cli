@@ -11,7 +11,19 @@ This example was captured from a tiny synthetic repo with:
 The commands are real DevSpecs CLI commands. Local absolute path prefixes were
 normalized to `<repo>` and long output is shortened only where marked.
 
+Before handing work to an agent, run `ds tldr`. It gives the agent-facing rules:
+one bounded target, read the relevant artifacts, checkpoint actual evidence, and
+stop at the decision gate.
+
+DevSpecs does not replace canonical repo plans. Existing `PLAN-*` files, ADRs,
+PRDs, RFCs, decision memos, and runbooks remain the source of truth. A task
+workspace is the execution layer on top: it turns that intent into addressable
+slices and records what happened.
+
 ## Create A Bounded Task
+
+Use full `ds task` for multi-slice work where handoff and receipts matter. For a
+small bugfix or doc spike, `ds task quick` is usually enough.
 
 ```bash
 $ ds task "Add a weekly digest email for unread notifications" \
@@ -214,4 +226,6 @@ Out-of-scope sibling targets: A01
 - `ds task checkpoint` records the actual evidence and decision gate.
 - `ds task next` promotes the workflow to the next slice only.
 
-This is a small synthetic example. It is not a broad retrieval benchmark.
+This is a small synthetic example. It is not a broad retrieval benchmark. In a
+real brownfield repo, use `ds find` and `ds map` to route to the current owner
+decision docs, then use `devspecs/tasks/*` for bounded execution and receipts.

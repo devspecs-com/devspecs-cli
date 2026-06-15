@@ -5,7 +5,7 @@
   "query": "Fold ds scan into workflow commands so onboarding starts with map, find, and task instead of a required manual scan",
   "status": "packed",
   "created_at": "2026-06-10T13:27:53Z",
-  "updated_at": "2026-06-15T15:14:46Z",
+  "updated_at": "2026-06-15T15:24:55Z",
   "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
   "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/scanless-workflow-ux",
   "artifacts": {
@@ -32,7 +32,13 @@
         "title": "Document tldr-first launch workflow and two-layer PLAN-to-task model",
         "plan": "A02-document-tldr-first-launch-workflow-and-two-laye-plan.md",
         "result": "A02-document-tldr-first-launch-workflow-and-two-laye-result.md",
-        "kind": "slice"
+        "kind": "slice",
+        "stage": "validated",
+        "decision": "promote",
+        "updated_at": "2026-06-15T15:21:27Z",
+        "latest_checkpoint_id": "cp_20260615T152127Z_a02_validated",
+        "latest_checkpoint": "checkpoints/20260615-152127-validated.md",
+        "latest_checkpoint_json": "checkpoints/20260615-152127-validated.json"
       }
     ]
   },
