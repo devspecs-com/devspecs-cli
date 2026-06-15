@@ -1,0 +1,80 @@
+{
+  "schema_version": 2,
+  "checkpoint_id": "cp_20260615T185505Z_b04_validated",
+  "task_id": "task-freshness-sync-trust",
+  "target": "B04",
+  "series": "B",
+  "query": "Task freshness and sync trust repair",
+  "slice": "B04",
+  "slice_title": "Explain sandboxed database-open failures with approval and DEVSPECS_HOME guidance",
+  "parent_slice": "B04",
+  "stage": "validated",
+  "decision": "promote",
+  "created_at": "2026-06-15T18:55:05Z",
+  "goal": "Record progress for `Task freshness and sync trust repair`.",
+  "description": "Added a shared DB-open error wrapper that explains sandbox/access failures with filesystem approval and DEVSPECS_HOME guidance while preserving SQLite busy/locked messaging. Routed explicit ds scan through the same helper.",
+  "resources": [
+    "../B00-index.md",
+    "../B04-explain-sandboxed-database-open-failures-with-ap-plan.md",
+    "../B04-explain-sandboxed-database-open-failures-with-ap-result.md",
+    "../task.json"
+  ],
+  "files_read": [
+    "internal/commands/list.go",
+    "internal/commands/scan.go",
+    "internal/store/store.go"
+  ],
+  "files_edited": [
+    "internal/commands/list.go",
+    "internal/commands/scan.go",
+    "internal/commands/db_error_test.go"
+  ],
+  "tests_read": [
+    "internal/commands/db_error_test.go"
+  ],
+  "tests_run": [
+    "go test ./internal/commands -run TestFriendlyDBOpenError|TestScan_QuietWithJSON|TestScanJSONIncludesWorkspaceRootWarning"
+  ],
+  "actual_context": {
+    "files_read": [
+      "internal/commands/list.go",
+      "internal/commands/scan.go",
+      "internal/store/store.go"
+    ],
+    "files_edited": [
+      "internal/commands/list.go",
+      "internal/commands/scan.go",
+      "internal/commands/db_error_test.go"
+    ],
+    "tests_read": [
+      "internal/commands/db_error_test.go"
+    ],
+    "tests_run": [
+      "go test ./internal/commands -run TestFriendlyDBOpenError|TestScan_QuietWithJSON|TestScanJSONIncludesWorkspaceRootWarning"
+    ]
+  },
+  "predicted_context_feedback": {},
+  "evidence": {
+    "plan_refs": [
+      "../B00-index.md",
+      "../B04-explain-sandboxed-database-open-failures-with-ap-plan.md",
+      "../B04-explain-sandboxed-database-open-failures-with-ap-result.md",
+      "../task.json"
+    ]
+  },
+  "learnings": [
+    {
+      "learning_type": "implementation",
+      "summary": "Do not silently fall back to repo-local DBs for sandboxed agents; explain approval and DEVSPECS_HOME so trust and index semantics stay explicit.",
+      "evidence_refs": [
+        "internal/commands/list.go"
+      ],
+      "applies_to": "B04",
+      "confidence": "high"
+    }
+  ],
+  "next": {
+    "recommended_target": "B02",
+    "recommended_decision": "promote"
+  }
+}

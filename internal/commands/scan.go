@@ -153,7 +153,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 		}
 	}
 
-	db, err := store.Open(dbPath)
+	db, err := openDBAtPath(dbPath)
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}

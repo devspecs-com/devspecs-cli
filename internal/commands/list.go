@@ -3,6 +3,7 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/devspecs-com/devspecs-cli/internal/config"
@@ -109,9 +110,36 @@ func openDB() (*store.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve db path: %w", err)
 	}
+	return openDBAtPath(dbPath)
+}
+
+func openDBAtPath(dbPath string) (*store.DB, error) {
 	db, err := store.Open(dbPath)
 	if err != nil {
-		return nil, store.FriendlySQLiteBusyError(err)
+		return nil, friendlyDBOpenError(dbPath, err)
 	}
 	return db, nil
+}
+
+func friendlyDBOpenError(dbPath string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if store.IsSQLiteBusyError(err) {
+		return store.FriendlySQLiteBusyError(err)
+	}
+	if !looksLikeDBAccessError(err) {
+		return err
+	}
+	return fmt.Errorf("cannot open local DevSpecs index at %s. If this command is running inside a filesystem sandbox, rerun it with filesystem approval or set DEVSPECS_HOME to a writable gitignored directory for this workspace: %w", dbPath, err)
+}
+
+func looksLikeDBAccessError(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "permission denied") ||
+		strings.Contains(message, "access is denied") ||
+		strings.Contains(message, "operation not permitted") ||
+		strings.Contains(message, "unable to open database file") ||
+		strings.Contains(message, "create db dir") ||
+		strings.Contains(message, "read-only file system")
 }

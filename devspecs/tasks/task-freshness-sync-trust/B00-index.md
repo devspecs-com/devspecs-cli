@@ -55,11 +55,14 @@ Immediate / patch-level. This should land before we ask more teams to rely on ta
 - `B02-clarify-stale-warnings-so-task-json-state-and-ca-result.md`
 - `B03-preserve-manual-readability-edits-while-letting-plan.md`
 - `B03-preserve-manual-readability-edits-while-letting-result.md`
+- `B04-explain-sandboxed-database-open-failures-with-ap-plan.md`
+- `B04-explain-sandboxed-database-open-failures-with-ap-result.md`
 
 ## Task Slices
 - B01: Add explicit task refresh mode that updates index freshness without rewriting authored task docs. Plan: `B01-add-explicit-task-refresh-mode-that-updates-inde-plan.md`. Result: `B01-add-explicit-task-refresh-mode-that-updates-inde-result.md`.
 - B02: Clarify stale warnings so task.json state and captured artifact freshness are reported separately. Plan: `B02-clarify-stale-warnings-so-task-json-state-and-ca-plan.md`. Result: `B02-clarify-stale-warnings-so-task-json-state-and-ca-result.md`.
 - B03: Preserve manual readability edits while letting the CLI refresh captured corpus state. Plan: `B03-preserve-manual-readability-edits-while-letting-plan.md`. Result: `B03-preserve-manual-readability-edits-while-letting-result.md`.
+- B04: Explain sandboxed database-open failures with approval and DEVSPECS_HOME guidance. Plan: `B04-explain-sandboxed-database-open-failures-with-ap-plan.md`. Result: `B04-explain-sandboxed-database-open-failures-with-ap-result.md`.
 
 ## Relevant Map Areas
 No strong map area was inferred from the initial pack.
