@@ -1,0 +1,170 @@
+{
+  "task_id": "v1-1-command-surface-realignment",
+  "series": "I",
+  "profile": "code-change",
+  "query": "v1.1 command surface realignment: task-first launch story, ds recent, and real architecture map",
+  "status": "packed",
+  "created_at": "2026-06-16T08:09:52Z",
+  "updated_at": "2026-06-16T08:14:44Z",
+  "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
+  "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/v1-1-command-surface-realignment",
+  "artifacts": {
+    "series": "I",
+    "index": "I00-index.md",
+    "first_slice": "I01-rename-current-ds-map-orientation-flow-to-ds-rec-plan.md",
+    "result": "I01-rename-current-ds-map-orientation-flow-to-ds-rec-result.md",
+    "slices": [
+      {
+        "id": "I01",
+        "title": "Rename current ds map orientation flow to ds recent with compatibility and docs",
+        "plan": "I01-rename-current-ds-map-orientation-flow-to-ds-rec-plan.md",
+        "result": "I01-rename-current-ds-map-orientation-flow-to-ds-rec-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "I02",
+        "title": "Reclaim ds map for architecture and system boundary output using boundary evidence",
+        "plan": "I02-reclaim-ds-map-for-architecture-and-system-bound-plan.md",
+        "result": "I02-reclaim-ds-map-for-architecture-and-system-bound-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "I03",
+        "title": "Make task workflows the main launch story across tldr help README and docs",
+        "plan": "I03-make-task-workflows-the-main-launch-story-across-plan.md",
+        "result": "I03-make-task-workflows-the-main-launch-story-across-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "I04",
+        "title": "Harden rich task result completion contract for promote improve iteration loops",
+        "plan": "I04-harden-rich-task-result-completion-contract-for-plan.md",
+        "result": "I04-harden-rich-task-result-completion-contract-for-result.md",
+        "kind": "slice"
+      }
+    ]
+  },
+  "predicted_context": {},
+  "advisory_files": [
+    {
+      "path": "internal/commands/tldr.go",
+      "kind": "prior-source",
+      "source": "checkpoint_fact",
+      "evidence": [
+        "task scanless-workflow-ux checkpoint cp_20260616T075433Z_a03_validated read `internal/commands/tldr.go`",
+        "task scanless-workflow-ux checkpoint cp_20260616T075433Z_a03_validated edited `internal/commands/tldr.go`",
+        "task scanless-workflow-ux checkpoint cp_20260616T075433Z_a03_validated learned: Known work should start with ds task or ds task quick; map/find are discovery steps before a target is concrete, not mandatory pre-task setup."
+      ],
+      "agent_check": "Verify this prior source lead before choosing an edit target."
+    },
+    {
+      "path": "internal/commands/tldr_test.go",
+      "kind": "prior-test",
+      "source": "checkpoint_fact",
+      "evidence": [
+        "task scanless-workflow-ux checkpoint cp_20260616T075433Z_a03_validated edited `internal/commands/tldr_test.go`"
+      ],
+      "agent_check": "Verify this prior test lead before editing."
+    },
+    {
+      "path": "README.md",
+      "kind": "prior-source",
+      "source": "checkpoint_fact",
+      "evidence": [
+        "task scanless-workflow-ux checkpoint cp_20260616T075433Z_a03_validated read `README.md`",
+        "task scanless-workflow-ux checkpoint cp_20260616T075433Z_a03_validated edited `README.md`",
+        "task scanless-workflow-ux checkpoint cp_20260615T152127Z_a02_validated read `README.md`",
+        "task scanless-workflow-ux checkpoint cp_20260615T152127Z_a02_validated edited `README.md`",
+        "task scanless-workflow-ux checkpoint cp_20260615T152127Z_a02_validated learned: Lead with ds tldr and explain PLAN/spec artifacts as canonical intent while devspecs/tasks is the execution slice and receipt layer.",
+        "task task-freshness-sync-trust checkpoint cp_20260612T111812Z_b01_validated read `README.md`",
+        "task task-freshness-sync-trust checkpoint cp_20260612T111812Z_b01_validated edited `README.md`"
+      ],
+      "agent_check": "Verify this prior source lead before choosing an edit target."
+    },
+    {
+      "path": "TASK_WORKFLOW_EXAMPLE.md",
+      "kind": "prior-source",
+      "source": "checkpoint_fact",
+      "evidence": [
+        "task scanless-workflow-ux checkpoint cp_20260616T075433Z_a03_validated read `TASK_WORKFLOW_EXAMPLE.md`",
+        "task scanless-workflow-ux checkpoint cp_20260616T075433Z_a03_validated edited `TASK_WORKFLOW_EXAMPLE.md`",
+        "task scanless-workflow-ux checkpoint cp_20260615T152127Z_a02_validated read `TASK_WORKFLOW_EXAMPLE.md`",
+        "task scanless-workflow-ux checkpoint cp_20260615T152127Z_a02_validated edited `TASK_WORKFLOW_EXAMPLE.md`",
+        "task scanless-workflow-ux checkpoint cp_20260615T152127Z_a02_validated learned: Lead with ds tldr and explain PLAN/spec artifacts as canonical intent while devspecs/tasks is the execution slice and receipt layer."
+      ],
+      "agent_check": "Verify this prior source lead before choosing an edit target."
+    },
+    {
+      "path": "devspecs/tasks/scanless-workflow-ux/A02-document-tldr-first-launch-workflow-and-two-laye-plan.md",
+      "kind": "prior-source",
+      "source": "checkpoint_fact",
+      "evidence": [
+        "task scanless-workflow-ux checkpoint cp_20260615T152127Z_a02_validated read `devspecs/tasks/scanless-workflow-ux/A02-document-tldr-first-launch-workflow-and-two-laye-plan.md`"
+      ],
+      "agent_check": "Verify this prior source lead before choosing an edit target."
+    }
+  ],
+  "freshness_warnings": [
+    {
+      "path": "internal/commands/map_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: command, map"
+    },
+    {
+      "path": "internal/commands/task_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: command, task"
+    },
+    {
+      "path": "internal/commands/acceptance_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: command"
+    },
+    {
+      "path": "internal/commands/db_error_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: command"
+    },
+    {
+      "path": "internal/commands/eval_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: command"
+    },
+    {
+      "path": "internal/commands/find_pack_companions_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: command"
+    },
+    {
+      "path": "internal/commands/find_pack_presentation_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: command"
+    },
+    {
+      "path": "internal/commands/find_pack_scout_evidence_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: command"
+    }
+  ],
+  "risk_cards": [
+    {
+      "id": "stale-index",
+      "title": "On-disk paths matched the task but were not indexed",
+      "severity": "medium",
+      "source": "freshness",
+      "evidence": [
+        "`internal/commands/map_test.go` - on-disk path matched task terms but was not in the indexed candidate set: command, map",
+        "`internal/commands/task_test.go` - on-disk path matched task terms but was not in the indexed candidate set: command, task",
+        "`internal/commands/acceptance_test.go` - on-disk path matched task terms but was not in the indexed candidate set: command",
+        "`internal/commands/db_error_test.go` - on-disk path matched task terms but was not in the indexed candidate set: command"
+      ],
+      "agent_check": "Inspect the warned files or refresh the index before trusting missing context.",
+      "count": 8
+    }
+  ],
+  "confidence": {
+    "primary_file_confidence": "low",
+    "test_coverage_confidence": "low",
+    "docs_config_confidence": "low",
+    "git_receipt_confidence": "low",
+    "noise_risk": "low",
+    "pack_completeness": "low",
+    "why": [
+      "no clear primary implementation file was found",
+      "test companion coverage was not evident from the initial pack"
+    ],
+    "agent_instruction": "Validate the test and integration surface before editing. Record critical misses and distracting inclusions in the slice result or a task checkpoint."
+  }
+}

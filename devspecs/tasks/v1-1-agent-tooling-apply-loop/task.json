@@ -1,0 +1,97 @@
+{
+  "task_id": "v1-1-agent-tooling-apply-loop",
+  "series": "J",
+  "profile": "code-change",
+  "query": "v1.1 agent tooling init and apply loop surfaces",
+  "status": "packed",
+  "created_at": "2026-06-16T08:10:03Z",
+  "updated_at": "2026-06-16T08:14:49Z",
+  "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
+  "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/v1-1-agent-tooling-apply-loop",
+  "artifacts": {
+    "series": "J",
+    "index": "J00-index.md",
+    "first_slice": "J01-extend-ds-init-with-interactive-tooling-selectio-plan.md",
+    "result": "J01-extend-ds-init-with-interactive-tooling-selectio-result.md",
+    "slices": [
+      {
+        "id": "J01",
+        "title": "Extend ds init with interactive tooling selection and background indexing",
+        "plan": "J01-extend-ds-init-with-interactive-tooling-selectio-plan.md",
+        "result": "J01-extend-ds-init-with-interactive-tooling-selectio-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "J02",
+        "title": "Generate Codex Cursor Claude and Windsurf slash command or skill files",
+        "plan": "J02-generate-codex-cursor-claude-and-windsurf-slash-plan.md",
+        "result": "J02-generate-codex-cursor-claude-and-windsurf-slash-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "J03",
+        "title": "Add ds apply prompt surface for next or explicit slice identifiers",
+        "plan": "J03-add-ds-apply-prompt-surface-for-next-or-explicit-plan.md",
+        "result": "J03-add-ds-apply-prompt-surface-for-next-or-explicit-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "J04",
+        "title": "Add slash command wrappers for ds task and ds apply workflows",
+        "plan": "J04-add-slash-command-wrappers-for-ds-task-and-ds-ap-plan.md",
+        "result": "J04-add-slash-command-wrappers-for-ds-task-and-ds-ap-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "J05",
+        "title": "Validate apply loop respects series index slice iteration and decision gates",
+        "plan": "J05-validate-apply-loop-respects-series-index-slice-plan.md",
+        "result": "J05-validate-apply-loop-respects-series-index-slice-result.md",
+        "kind": "slice"
+      }
+    ]
+  },
+  "predicted_context": {},
+  "freshness_warnings": [
+    {
+      "path": "internal/commands/init_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: init"
+    },
+    {
+      "path": "internal/evalharness/agent_metrics_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: agent"
+    },
+    {
+      "path": "internal/initflow/initflow_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: init"
+    }
+  ],
+  "risk_cards": [
+    {
+      "id": "stale-index",
+      "title": "On-disk paths matched the task but were not indexed",
+      "severity": "medium",
+      "source": "freshness",
+      "evidence": [
+        "`internal/commands/init_test.go` - on-disk path matched task terms but was not in the indexed candidate set: init",
+        "`internal/evalharness/agent_metrics_test.go` - on-disk path matched task terms but was not in the indexed candidate set: agent",
+        "`internal/initflow/initflow_test.go` - on-disk path matched task terms but was not in the indexed candidate set: init"
+      ],
+      "agent_check": "Inspect the warned files or refresh the index before trusting missing context.",
+      "count": 3
+    }
+  ],
+  "confidence": {
+    "primary_file_confidence": "low",
+    "test_coverage_confidence": "low",
+    "docs_config_confidence": "low",
+    "git_receipt_confidence": "low",
+    "noise_risk": "low",
+    "pack_completeness": "low",
+    "why": [
+      "no clear primary implementation file was found",
+      "test companion coverage was not evident from the initial pack"
+    ],
+    "agent_instruction": "Validate the test and integration surface before editing. Record critical misses and distracting inclusions in the slice result or a task checkpoint."
+  }
+}
