@@ -66,6 +66,7 @@ func TestRootCmd_HelpCentersTaskWorkflow(t *testing.T) {
 	for _, want := range []string{
 		"Default workflow:",
 		"use ds task to create bounded task workspaces",
+		"Use ds apply next or ds apply",
 		"Diagnostic layer:",
 		"use ds map, ds recent, and ds find",
 	} {
@@ -88,6 +89,27 @@ func TestRootCmd_TLDRRegistered(t *testing.T) {
 	got := buf.String()
 	if !strings.Contains(got, "Hotfix / Small Bug") {
 		t.Fatalf("expected tldr hotfix output, got %q", got)
+	}
+}
+
+func TestRootCmd_ApplyRegistered(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"apply", "--help"})
+
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := buf.String()
+	for _, want := range []string{
+		"Emit an agent prompt for exactly one DevSpecs task target.",
+		"apply <next|task-id|target>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected apply help to contain %q, got:\n%s", want, got)
+		}
 	}
 }
 

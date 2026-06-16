@@ -27,7 +27,8 @@ issues, and future workflows.
 
 Default workflow: use ds task to create bounded task workspaces with packed
 source/test/docs context, one-slice prompts, checkpoints, result receipts, and
-decision gates for AI-assisted coding work.
+decision gates for AI-assisted coding work. Use ds apply next or ds apply
+<target> to emit the next bounded one-slice agent prompt.
 
 Diagnostic layer: use ds map, ds recent, and ds find when the target is unclear
 or you need to verify existing plans, specs, ADRs, recent commits, source files,
@@ -47,6 +48,7 @@ document text, or raw queries. Disable with DEVSPECS_TELEMETRY=0.`,
 	rootCmd.AddCommand(commands.NewRecentCmd())
 	rootCmd.AddCommand(commands.NewMapCmd())
 	rootCmd.AddCommand(commands.NewTaskCmd())
+	rootCmd.AddCommand(commands.NewApplyCmd())
 	rootCmd.AddCommand(commands.NewTLDRCmd())
 	rootCmd.AddCommand(commands.NewUpdateCmd())
 	rootCmd.AddCommand(commands.NewResolveCmd())
