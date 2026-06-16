@@ -1,0 +1,61 @@
+{
+  "schema_version": 2,
+  "checkpoint_id": "cp_20260616T163342Z_j04_validated",
+  "task_id": "v1-1-agent-tooling-apply-loop",
+  "target": "J04",
+  "series": "J",
+  "query": "v1.1 agent tooling init and apply loop surfaces",
+  "slice": "J04",
+  "slice_title": "Add slash command wrappers for ds task and ds apply workflows",
+  "parent_slice": "J04",
+  "stage": "validated",
+  "decision": "promote",
+  "created_at": "2026-06-16T16:33:42Z",
+  "goal": "Record progress for `v1.1 agent tooling init and apply loop surfaces`.",
+  "description": "Generated agent adapters now route existing slice work through ds apply, keep ds recent/ds find as diagnostics, and preserve one-slice decision gates.",
+  "note": "Portable command wrappers stay slash/skill-file friendly while the copy teaches the requested /ds task and apply loop behavior.",
+  "resources": [
+    "../J00-index.md",
+    "../J04-add-slash-command-wrappers-for-ds-task-and-ds-ap-plan.md",
+    "../J04-add-slash-command-wrappers-for-ds-task-and-ds-ap-result.md",
+    "../task.json",
+    "devspecs/tasks/v1-1-agent-tooling-apply-loop/J04-add-slash-command-wrappers-for-ds-task-and-ds-ap-result.md"
+  ],
+  "files_edited": [
+    "internal/initflow/agent_tools.go",
+    "internal/initflow/initflow_test.go",
+    "README.md"
+  ],
+  "tests_run": [
+    "go test ./internal/initflow -run TestGenerateAgentToolFiles -count=1",
+    "go test ./internal/commands -run TestInit -count=1",
+    "go test ./internal/initflow -count=1",
+    "go test ./cmd/ds -count=1"
+  ],
+  "actual_context": {
+    "files_edited": [
+      "internal/initflow/agent_tools.go",
+      "internal/initflow/initflow_test.go",
+      "README.md"
+    ],
+    "tests_run": [
+      "go test ./internal/initflow -run TestGenerateAgentToolFiles -count=1",
+      "go test ./internal/commands -run TestInit -count=1",
+      "go test ./internal/initflow -count=1",
+      "go test ./cmd/ds -count=1"
+    ]
+  },
+  "predicted_context_feedback": {},
+  "evidence": {
+    "plan_refs": [
+      "../J00-index.md",
+      "../J04-add-slash-command-wrappers-for-ds-task-and-ds-ap-plan.md",
+      "../J04-add-slash-command-wrappers-for-ds-task-and-ds-ap-result.md",
+      "../task.json",
+      "devspecs/tasks/v1-1-agent-tooling-apply-loop/J04-add-slash-command-wrappers-for-ds-task-and-ds-ap-result.md"
+    ]
+  },
+  "next": {
+    "recommended_target": "J05"
+  }
+}

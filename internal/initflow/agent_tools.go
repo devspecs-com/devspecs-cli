@@ -367,18 +367,19 @@ func taskAdapterBody(goalPhrase, taskCommand string) string {
 	return fmt.Sprintf("Use this adapter when the user wants to start or continue a DevSpecs task.\n\n"+
 		"1. Treat %s as the bounded work goal.\n"+
 		"2. Prefer `%s \"<bounded-goal>\"` for known work. Use `ds task quick \"<bounded-goal>\"` only for a tiny one-off.\n"+
-		"3. If a task or slice already exists, run `ds task show <task-id|target>` and `ds task prompt <task-id|target>` instead of creating a duplicate task.\n"+
-		"4. Work exactly one slice at a time. Do not implement an entire track when the current target is a slice like A01.\n"+
-		"5. End with a DevSpecs decision gate: `promote`, `improve`, `rework`, `rollback`, or `block`.\n"+
-		"6. Record evidence with `ds task checkpoint <task-id|target> --stage validated --decision <gate>` before claiming the slice is done.\n\n"+
+		"3. If a task or slice already exists, run `ds apply <task-id|target>` or `ds apply next` instead of creating a duplicate task.\n"+
+		"4. If the target is unclear, run `ds recent` and `ds find \"<topic>\"` as diagnostics, then return to one bounded task.\n"+
+		"5. Work exactly one slice at a time. Do not implement an entire track when the current target is a slice like A01.\n"+
+		"6. End with a DevSpecs decision gate: `promote`, `improve`, `rework`, `rollback`, or `block`.\n"+
+		"7. Record evidence with `ds task checkpoint <task-id|target> --stage validated --decision <gate>` before claiming the slice is done.\n\n"+
 		"Keep `M00` or `A00` as the index, `M01`/`A01` as planned slices, and `M01-1`/`A01-1` as improvement iterations.", goalPhrase, taskCommand)
 }
 
 func applyAdapterBody(targetPhrase, applyCommand string) string {
 	return fmt.Sprintf("Use this adapter when the user asks to apply the next DevSpecs slice or a specific task target.\n\n"+
 		"1. Resolve %s. If no target is provided, use `next`.\n"+
-		"2. First try `%s <target>` or `%s next` when the installed CLI supports it.\n"+
-		"3. If `ds apply` is not available yet, use `ds task next <task-id>`, `ds task show <target>`, and `ds task prompt <target>` to emit the bounded one-slice prompt.\n"+
+		"2. Run `%s <target>` or `%s next`, then follow the emitted DevSpecs prompt exactly.\n"+
+		"3. If the target is unclear, run `ds recent` and `ds find \"<topic>\"` as diagnostics, then rerun `ds apply` with one target.\n"+
 		"4. Implement only the resolved slice. Do not continue into sibling slices unless the decision gate explicitly promotes to them.\n"+
 		"5. Record what changed, files read/edited, tests run, misses, noise, and the next gate using `ds task checkpoint`.\n"+
 		"6. Stop after the decision gate. Recommend `promote`, `improve`, `rework`, `rollback`, or `block`.\n\n"+

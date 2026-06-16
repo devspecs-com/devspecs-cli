@@ -194,15 +194,31 @@ func TestGenerateAgentToolFilesCreatesExpectedFiles(t *testing.T) {
 	}
 
 	taskSkill := readGeneratedFile(t, root, ".agents/skills/ds-task/SKILL.md")
-	for _, wantText := range []string{"name: ds-task", "ds task", "Work exactly one slice", "decision gate"} {
+	for _, wantText := range []string{"name: ds-task", "ds task", "ds apply next", "ds recent", "ds find", "Work exactly one slice", "decision gate"} {
 		if !strings.Contains(taskSkill, wantText) {
 			t.Fatalf("codex task skill missing %q:\n%s", wantText, taskSkill)
 		}
 	}
 	applyWorkflow := readGeneratedFile(t, root, ".windsurf/workflows/ds-apply.md")
-	for _, wantText := range []string{"ds apply", "ds task next", "Stop after the decision gate"} {
+	for _, wantText := range []string{"ds apply", "ds apply next", "ds recent", "ds find", "Stop after the decision gate"} {
 		if !strings.Contains(applyWorkflow, wantText) {
 			t.Fatalf("windsurf apply workflow missing %q:\n%s", wantText, applyWorkflow)
+		}
+	}
+	if strings.Contains(applyWorkflow, "not available yet") || strings.Contains(applyWorkflow, "ds task next") {
+		t.Fatalf("apply workflow should use the real ds apply surface without fallback language:\n%s", applyWorkflow)
+	}
+	for _, rel := range []string{
+		".agents/skills/ds-apply/SKILL.md",
+		".cursor/commands/ds-apply.md",
+		".claude/skills/ds-apply/SKILL.md",
+		".windsurf/workflows/ds-apply.md",
+	} {
+		body := readGeneratedFile(t, root, rel)
+		for _, wantText := range []string{"ds apply", "promote", "improve", "rework", "rollback", "block"} {
+			if !strings.Contains(body, wantText) {
+				t.Fatalf("%s missing %q:\n%s", rel, wantText, body)
+			}
 		}
 	}
 	claudeSkill := readGeneratedFile(t, root, ".claude/skills/ds-task/SKILL.md")

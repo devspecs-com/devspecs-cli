@@ -235,6 +235,7 @@ Source files remain authoritative. DevSpecs stores derived index state locally.
 | `ds task quick <query>` | Create a one-off task workspace with compact output. |
 | `ds task show <target>` | Show exact context for one task target. |
 | `ds task prompt <target>` | Emit an agent prompt bounded to one target. |
+| `ds apply <next\|task-id\|target>` | Emit the next bounded one-slice agent prompt without mutating task state. |
 | `ds task checkpoint <target>` | Record files, tests, misses, noise, learnings, decision evidence, and next iteration. |
 | `ds task finish <target>` | Finish a target with a decision gate. |
 | `ds task refresh <task-id>` | Recapture edited task artifacts into the local index without rewriting task docs. |
