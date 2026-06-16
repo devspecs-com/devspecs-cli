@@ -5,7 +5,7 @@
   "query": "v1.1 agent tooling init and apply loop surfaces",
   "status": "packed",
   "created_at": "2026-06-16T08:10:03Z",
-  "updated_at": "2026-06-16T14:11:06Z",
+  "updated_at": "2026-06-16T16:12:47Z",
   "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
   "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/v1-1-agent-tooling-apply-loop",
   "artifacts": {
@@ -32,7 +32,13 @@
         "title": "Generate Codex Cursor Claude and Windsurf slash command or skill files",
         "plan": "J02-generate-codex-cursor-claude-and-windsurf-slash-plan.md",
         "result": "J02-generate-codex-cursor-claude-and-windsurf-slash-result.md",
-        "kind": "slice"
+        "kind": "slice",
+        "stage": "validated",
+        "decision": "promote",
+        "updated_at": "2026-06-16T16:11:58Z",
+        "latest_checkpoint_id": "cp_20260616T161158Z_j02_validated",
+        "latest_checkpoint": "checkpoints/20260616-161158-validated.md",
+        "latest_checkpoint_json": "checkpoints/20260616-161158-validated.json"
       },
       {
         "id": "J03",

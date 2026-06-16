@@ -647,6 +647,8 @@ func TestInferKind(t *testing.T) {
 		{"docs/product-specs/course-visit-analytics.md", "requirements"},
 		{"calm-suite/calm-studio/docs/REQ_fluxnova_aigf_integration.md", "requirements"},
 		{".codex/skills/query-plan-snapshot-cli/SKILL.md", "markdown_artifact"},
+		{".cursor/commands/ds-task.md", "markdown_artifact"},
+		{".windsurf/workflows/ds-apply.md", "markdown_artifact"},
 		{"agents/implementation-plan.agent.md", "markdown_artifact"},
 		{"contributingGuides/PROPOSAL_TEMPLATE.md", "markdown_artifact"},
 		{"GOVERNANCE.md", "markdown_artifact"},
@@ -666,11 +668,23 @@ func TestInferKind(t *testing.T) {
 	}
 }
 
+func TestInferKindSubtype_AgentCommandFiles(t *testing.T) {
+	for _, path := range []string{
+		".cursor/commands/ds-task.md",
+		".windsurf/workflows/ds-apply.md",
+	} {
+		kind, subtype := inferKindSubtype(path)
+		if kind != config.KindMarkdownArtifact || subtype != config.SubtypeAgentInstruction {
+			t.Fatalf("inferKindSubtype(%q) = %q/%q, want %q/%q", path, kind, subtype, config.KindMarkdownArtifact, config.SubtypeAgentInstruction)
+		}
+	}
+}
+
 func TestDefaultPaths_NarrowDocs(t *testing.T) {
 	paths := defaultPaths()
 	required := []string{
 		".claude/notes", ".claude/plans", ".codex/plans", ".codex/notes",
-		".claude/skills", ".codex/skills", "agents",
+		".agents/skills", ".claude/skills", ".codex/skills", ".cursor/commands", ".windsurf/workflows", "agents",
 		"docs/specs", "docs/plans", "docs/prd", "docs/product-specs", "docs/requirements", "docs/rfcs", "docs/RFCS", "rfcs", "RFCS",
 		"roadmaps", "docs/roadmaps",
 		"docs/design", "docs/design-docs", "design-docs", "docs/technical",

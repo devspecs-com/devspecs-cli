@@ -58,7 +58,7 @@ func DefaultRepoConfig() *RepoConfig {
 			{Type: "markdown", Paths: []string{
 				"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans",
 				".claude/notes", ".claude/plans", ".codex/plans", ".codex/notes",
-				".claude/skills", ".codex/skills", "agents",
+				".agents/skills", ".claude/skills", ".codex/skills", ".cursor/commands", ".windsurf/workflows", "agents",
 				"docs/prd", "docs/product-specs", "product-specs", "docs/requirements", "requirements",
 				"rfcs", "rfc", "RFCS", "docs/rfcs", "docs/rfc", "docs/RFCS",
 				"roadmaps", "docs/roadmaps",

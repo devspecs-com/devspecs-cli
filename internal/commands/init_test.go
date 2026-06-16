@@ -112,6 +112,8 @@ func TestInit_DetectsAgentToolingSurfaces(t *testing.T) {
 		"Cursor (detected:",
 		"Claude (detected:",
 		"prepares:",
+		"Generated files:",
+		`/ds-task "goal"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected %q in init output:\n%s", want, out)
@@ -119,6 +121,16 @@ func TestInit_DetectsAgentToolingSurfaces(t *testing.T) {
 	}
 	if strings.Contains(out, "Windsurf (") {
 		t.Fatalf("did not expect undetected Windsurf to be selected by default:\n%s", out)
+	}
+	for _, rel := range []string{
+		".agents/skills/ds-task/SKILL.md",
+		".agents/skills/ds-apply/SKILL.md",
+		".cursor/commands/ds-task.md",
+		".cursor/commands/ds-apply.md",
+		".claude/skills/ds-task/SKILL.md",
+		".claude/skills/ds-apply/SKILL.md",
+	} {
+		assertInitFileExists(t, repoDir, rel)
 	}
 }
 
@@ -144,10 +156,18 @@ func TestInit_ToolFlagSelectsUndetectedTooling(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	for _, want := range []string{"Codex (not detected)", "Windsurf (not detected)"} {
+	for _, want := range []string{"Codex (not detected)", "Windsurf (not detected)", "Generated files:", `/ds-task "goal"`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected %q in init output:\n%s", want, out)
 		}
+	}
+	for _, rel := range []string{
+		".agents/skills/ds-task/SKILL.md",
+		".agents/skills/ds-apply/SKILL.md",
+		".windsurf/workflows/ds-task.md",
+		".windsurf/workflows/ds-apply.md",
+	} {
+		assertInitFileExists(t, repoDir, rel)
 	}
 }
 
@@ -244,8 +264,9 @@ func TestInit_NoDestructiveRerun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Second init without --force
+	// Second init without --force may still add explicitly requested tooling.
 	cmd2 := NewInitCmd()
+	cmd2.SetArgs([]string{"--tool", "cursor"})
 	buf := &bytes.Buffer{}
 	cmd2.SetOut(buf)
 	if err := cmd2.Execute(); err != nil {
@@ -265,6 +286,10 @@ func TestInit_NoDestructiveRerun(t *testing.T) {
 	if !strings.Contains(output, "already initialized") {
 		t.Errorf("expected 'already initialized' message, got %q", output)
 	}
+	if !strings.Contains(output, "Generated files:") {
+		t.Errorf("expected generated tooling files in output, got %q", output)
+	}
+	assertInitFileExists(t, repoDir, ".cursor/commands/ds-task.md")
 }
 
 func TestInit_DiscoveryMergesDenseDocs(t *testing.T) {
@@ -417,4 +442,11 @@ func sliceContains(ss []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func assertInitFileExists(t *testing.T, root, relPath string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(relPath))); err != nil {
+		t.Fatalf("expected %s to exist: %v", relPath, err)
+	}
 }

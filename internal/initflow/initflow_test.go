@@ -154,6 +154,142 @@ func TestMergeSelectedProfiles_nilBaseUsesDefaults(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Agent tooling file generation
+// ---------------------------------------------------------------------------
+
+func TestGenerateAgentToolFilesCreatesExpectedFiles(t *testing.T) {
+	root := t.TempDir()
+	tools, err := SelectAgentTools(root, []string{"all"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := GenerateAgentToolFiles(root, tools, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 8 {
+		t.Fatalf("generated %d files, want 8: %+v", len(files), files)
+	}
+	want := map[string]string{
+		".agents/skills/ds-task/SKILL.md":  "$ds-task",
+		".agents/skills/ds-apply/SKILL.md": "$ds-apply",
+		".cursor/commands/ds-task.md":      "/ds-task",
+		".cursor/commands/ds-apply.md":     "/ds-apply",
+		".claude/skills/ds-task/SKILL.md":  "/ds-task",
+		".claude/skills/ds-apply/SKILL.md": "/ds-apply",
+		".windsurf/workflows/ds-task.md":   "/ds-task",
+		".windsurf/workflows/ds-apply.md":  "/ds-apply",
+	}
+	for _, file := range files {
+		if file.Status != "created" {
+			t.Fatalf("%s status = %q, want created", file.Path, file.Status)
+		}
+		if got, ok := want[file.Path]; !ok {
+			t.Fatalf("unexpected generated file: %+v", file)
+		} else if file.Invocation != got {
+			t.Fatalf("%s invocation = %q, want %q", file.Path, file.Invocation, got)
+		}
+		assertGeneratedFileContains(t, root, file.Path, "DevSpecs")
+	}
+
+	taskSkill := readGeneratedFile(t, root, ".agents/skills/ds-task/SKILL.md")
+	for _, wantText := range []string{"name: ds-task", "ds task", "Work exactly one slice", "decision gate"} {
+		if !strings.Contains(taskSkill, wantText) {
+			t.Fatalf("codex task skill missing %q:\n%s", wantText, taskSkill)
+		}
+	}
+	applyWorkflow := readGeneratedFile(t, root, ".windsurf/workflows/ds-apply.md")
+	for _, wantText := range []string{"ds apply", "ds task next", "Stop after the decision gate"} {
+		if !strings.Contains(applyWorkflow, wantText) {
+			t.Fatalf("windsurf apply workflow missing %q:\n%s", wantText, applyWorkflow)
+		}
+	}
+	claudeSkill := readGeneratedFile(t, root, ".claude/skills/ds-task/SKILL.md")
+	if strings.Contains(claudeSkill, "allowed-tools") {
+		t.Fatalf("claude skill should not include speculative allowed-tools metadata:\n%s", claudeSkill)
+	}
+}
+
+func TestGenerateAgentToolFilesPreservesExistingWithoutForce(t *testing.T) {
+	root := t.TempDir()
+	custom := filepath.Join(root, ".cursor", "commands", "ds-task.md")
+	if err := os.MkdirAll(filepath.Dir(custom), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(custom, []byte("# custom\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tools, err := SelectAgentTools(root, []string{"cursor"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := GenerateAgentToolFiles(root, tools, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := generatedStatus(files, ".cursor/commands/ds-task.md"); got != "skipped-existing" {
+		t.Fatalf("status = %q, want skipped-existing; files=%+v", got, files)
+	}
+	if data := readGeneratedFile(t, root, ".cursor/commands/ds-task.md"); data != "# custom\n" {
+		t.Fatalf("existing command was overwritten without force:\n%s", data)
+	}
+	if got := generatedStatus(files, ".cursor/commands/ds-apply.md"); got != "created" {
+		t.Fatalf("apply status = %q, want created; files=%+v", got, files)
+	}
+}
+
+func TestGenerateAgentToolFilesForceOverwritesExisting(t *testing.T) {
+	root := t.TempDir()
+	custom := filepath.Join(root, ".cursor", "commands", "ds-task.md")
+	if err := os.MkdirAll(filepath.Dir(custom), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(custom, []byte("# custom\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tools, err := SelectAgentTools(root, []string{"cursor"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := GenerateAgentToolFiles(root, tools, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := generatedStatus(files, ".cursor/commands/ds-task.md"); got != "overwritten" {
+		t.Fatalf("status = %q, want overwritten; files=%+v", got, files)
+	}
+	assertGeneratedFileContains(t, root, ".cursor/commands/ds-task.md", "Work exactly one slice")
+}
+
+func generatedStatus(files []AgentToolFile, relPath string) string {
+	for _, file := range files {
+		if file.Path == relPath {
+			return file.Status
+		}
+	}
+	return ""
+}
+
+func assertGeneratedFileContains(t *testing.T, root, relPath, want string) {
+	t.Helper()
+	data := readGeneratedFile(t, root, relPath)
+	if !strings.Contains(data, want) {
+		t.Fatalf("%s missing %q:\n%s", relPath, want, data)
+	}
+}
+
+func readGeneratedFile(t *testing.T, root, relPath string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relPath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
 func TestMergeSelectedProfiles_adrAddsPaths(t *testing.T) {
 	base := config.DefaultRepoConfig()
 	out, err := MergeSelectedProfiles(base, []string{"adr"}, nil, nil)

@@ -21,6 +21,15 @@ type AgentTool struct {
 	Planned     []string
 }
 
+// AgentToolFile describes one generated adapter file.
+type AgentToolFile struct {
+	ToolID     string
+	ToolLabel  string
+	Path       string
+	Status     string
+	Invocation string
+}
+
 type agentToolDefinition struct {
 	ID          string
 	Label       string
@@ -29,12 +38,18 @@ type agentToolDefinition struct {
 	Planned     []string
 }
 
+type agentToolFileSpec struct {
+	RelPath    string
+	Invocation string
+	Content    string
+}
+
 var agentToolDefinitions = []agentToolDefinition{
 	{
 		ID:          "codex",
 		Label:       "Codex",
 		Description: "Codex slash/skill entry points",
-		DetectPaths: []string{".codex", ".codex/skills", "AGENTS.md"},
+		DetectPaths: []string{".agents/skills", ".codex", ".codex/skills", "AGENTS.md"},
 		Planned:     []string{"Codex command or skill files for ds task/apply"},
 	},
 	{
@@ -137,7 +152,7 @@ func RunAgentToolPick(repoRoot string) ([]AgentTool, error) {
 		huh.NewGroup(
 			huh.NewMultiSelect[string]().
 				Title("Select agent tooling to prepare").
-				Description("Detected tools are pre-selected. File generation happens only after confirmation in the next setup step.").
+				Description("Detected tools are pre-selected. DevSpecs will write small command or skill files for the selected tools.").
 				Options(opts...).
 				Value(&selected),
 		),
@@ -201,4 +216,171 @@ func hasAgentToolSelection(values []string, want string) bool {
 func pathExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// GenerateAgentToolFiles writes deterministic adapter files for selected tools.
+// Existing non-matching files are left untouched unless force is true.
+func GenerateAgentToolFiles(repoRoot string, tools []AgentTool, force bool) ([]AgentToolFile, error) {
+	var files []AgentToolFile
+	for _, tool := range tools {
+		for _, spec := range agentToolFileSpecs(tool) {
+			status, err := writeAgentToolFile(repoRoot, spec, force)
+			if err != nil {
+				return files, err
+			}
+			files = append(files, AgentToolFile{
+				ToolID:     tool.ID,
+				ToolLabel:  tool.Label,
+				Path:       spec.RelPath,
+				Status:     status,
+				Invocation: spec.Invocation,
+			})
+		}
+	}
+	return files, nil
+}
+
+func writeAgentToolFile(repoRoot string, spec agentToolFileSpec, force bool) (string, error) {
+	rel := filepath.ToSlash(strings.TrimSpace(spec.RelPath))
+	if rel == "" {
+		return "", fmt.Errorf("empty agent tool path")
+	}
+	target := filepath.Join(repoRoot, filepath.FromSlash(rel))
+	content := normalizeGeneratedContent(spec.Content)
+	if existing, err := os.ReadFile(target); err == nil {
+		if string(existing) == content {
+			return "unchanged", nil
+		}
+		if !force {
+			return "skipped-existing", nil
+		}
+		if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+			return "", fmt.Errorf("write %s: %w", rel, err)
+		}
+		return "overwritten", nil
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("read %s: %w", rel, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return "", fmt.Errorf("create %s: %w", filepath.ToSlash(filepath.Dir(target)), err)
+	}
+	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+		return "", fmt.Errorf("write %s: %w", rel, err)
+	}
+	return "created", nil
+}
+
+func normalizeGeneratedContent(content string) string {
+	return strings.TrimSpace(strings.ReplaceAll(content, "\r\n", "\n")) + "\n"
+}
+
+func agentToolFileSpecs(tool AgentTool) []agentToolFileSpec {
+	switch tool.ID {
+	case "codex":
+		return []agentToolFileSpec{
+			{
+				RelPath:    ".agents/skills/ds-task/SKILL.md",
+				Invocation: "$ds-task",
+				Content:    codexSkillContent("ds-task", "Start or continue one bounded DevSpecs task from the user's goal.", taskAdapterBody("the user's requested goal", "ds task")),
+			},
+			{
+				RelPath:    ".agents/skills/ds-apply/SKILL.md",
+				Invocation: "$ds-apply",
+				Content:    codexSkillContent("ds-apply", "Apply exactly one DevSpecs task slice or the next available slice with decision gates.", applyAdapterBody("the user's requested target", "ds apply")),
+			},
+		}
+	case "cursor":
+		return []agentToolFileSpec{
+			{
+				RelPath:    ".cursor/commands/ds-task.md",
+				Invocation: "/ds-task",
+				Content:    slashCommandContent("ds-task", "Start or continue one bounded DevSpecs task from the user's goal.", taskAdapterBody("the user's command arguments", "ds task")),
+			},
+			{
+				RelPath:    ".cursor/commands/ds-apply.md",
+				Invocation: "/ds-apply",
+				Content:    slashCommandContent("ds-apply", "Apply exactly one DevSpecs task slice or the next available slice with decision gates.", applyAdapterBody("the user's command arguments", "ds apply")),
+			},
+		}
+	case "claude":
+		return []agentToolFileSpec{
+			{
+				RelPath:    ".claude/skills/ds-task/SKILL.md",
+				Invocation: "/ds-task",
+				Content:    claudeSkillContent("ds-task", "Start or continue one bounded DevSpecs task from the user's goal.", taskAdapterBody("the user's slash-command arguments", "ds task")),
+			},
+			{
+				RelPath:    ".claude/skills/ds-apply/SKILL.md",
+				Invocation: "/ds-apply",
+				Content:    claudeSkillContent("ds-apply", "Apply exactly one DevSpecs task slice or the next available slice with decision gates.", applyAdapterBody("the user's slash-command arguments", "ds apply")),
+			},
+		}
+	case "windsurf":
+		return []agentToolFileSpec{
+			{
+				RelPath:    ".windsurf/workflows/ds-task.md",
+				Invocation: "/ds-task",
+				Content:    slashCommandContent("ds-task", "Start or continue one bounded DevSpecs task from the user's goal.", taskAdapterBody("the user's workflow arguments", "ds task")),
+			},
+			{
+				RelPath:    ".windsurf/workflows/ds-apply.md",
+				Invocation: "/ds-apply",
+				Content:    slashCommandContent("ds-apply", "Apply exactly one DevSpecs task slice or the next available slice with decision gates.", applyAdapterBody("the user's workflow arguments", "ds apply")),
+			},
+		}
+	default:
+		return nil
+	}
+}
+
+func codexSkillContent(name, description, body string) string {
+	return fmt.Sprintf(`---
+name: %s
+description: %s
+---
+
+# DevSpecs %s
+
+%s`, name, description, name, body)
+}
+
+func claudeSkillContent(name, description, body string) string {
+	return fmt.Sprintf(`---
+name: %s
+description: %s
+---
+
+# DevSpecs %s
+
+%s`, name, description, name, body)
+}
+
+func slashCommandContent(name, description, body string) string {
+	return fmt.Sprintf(`# %s
+
+%s
+
+%s`, name, description, body)
+}
+
+func taskAdapterBody(goalPhrase, taskCommand string) string {
+	return fmt.Sprintf("Use this adapter when the user wants to start or continue a DevSpecs task.\n\n"+
+		"1. Treat %s as the bounded work goal.\n"+
+		"2. Prefer `%s \"<bounded-goal>\"` for known work. Use `ds task quick \"<bounded-goal>\"` only for a tiny one-off.\n"+
+		"3. If a task or slice already exists, run `ds task show <task-id|target>` and `ds task prompt <task-id|target>` instead of creating a duplicate task.\n"+
+		"4. Work exactly one slice at a time. Do not implement an entire track when the current target is a slice like A01.\n"+
+		"5. End with a DevSpecs decision gate: `promote`, `improve`, `rework`, `rollback`, or `block`.\n"+
+		"6. Record evidence with `ds task checkpoint <task-id|target> --stage validated --decision <gate>` before claiming the slice is done.\n\n"+
+		"Keep `M00` or `A00` as the index, `M01`/`A01` as planned slices, and `M01-1`/`A01-1` as improvement iterations.", goalPhrase, taskCommand)
+}
+
+func applyAdapterBody(targetPhrase, applyCommand string) string {
+	return fmt.Sprintf("Use this adapter when the user asks to apply the next DevSpecs slice or a specific task target.\n\n"+
+		"1. Resolve %s. If no target is provided, use `next`.\n"+
+		"2. First try `%s <target>` or `%s next` when the installed CLI supports it.\n"+
+		"3. If `ds apply` is not available yet, use `ds task next <task-id>`, `ds task show <target>`, and `ds task prompt <target>` to emit the bounded one-slice prompt.\n"+
+		"4. Implement only the resolved slice. Do not continue into sibling slices unless the decision gate explicitly promotes to them.\n"+
+		"5. Record what changed, files read/edited, tests run, misses, noise, and the next gate using `ds task checkpoint`.\n"+
+		"6. Stop after the decision gate. Recommend `promote`, `improve`, `rework`, `rollback`, or `block`.\n\n"+
+		"The adapter is a thin wrapper over the DevSpecs CLI. Do not invent a separate task system.", targetPhrase, applyCommand, applyCommand)
 }

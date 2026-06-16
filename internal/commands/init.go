@@ -42,7 +42,7 @@ func NewInitCmd() *cobra.Command {
 
 Layout detection runs by default (unless --no-detect). In an interactive terminal, a workflow profile picker runs first to merge common source paths and rules; use --yes or --non-interactive to skip it (CI and scripts).
 
-Agent tooling detection can preselect Codex, Cursor, Claude, or Windsurf setup targets. File generation is handled by the follow-up tooling setup flow; init only detects and reports the selection today.`,
+Agent tooling detection can preselect Codex, Cursor, Claude, or Windsurf setup targets. When selected, init writes small repo-local skill, command, or workflow files that route agents back through ds task and ds apply.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			start := time.Now()
 			opts := initOptions{
@@ -164,7 +164,19 @@ func runInit(cmd *cobra.Command, opts initOptions) error {
 		if opts.Hooks {
 			installHook(cmd, repoRoot)
 		}
-		printInitNext(cmd)
+		var generated []initflow.AgentToolFile
+		if len(opts.AgentTools) > 0 || opts.NoTools {
+			agentSelection, err := resolveInitAgentTools(repoRoot, opts, interactive)
+			if err != nil {
+				return err
+			}
+			generated, err = initflow.GenerateAgentToolFiles(repoRoot, agentSelection, opts.Force)
+			if err != nil {
+				return err
+			}
+			printInitAgentTools(cmd, agentSelection, generated, opts.NoTools)
+		}
+		printInitNext(cmd, generated)
 		return nil
 	}
 
@@ -193,6 +205,10 @@ func runInit(cmd *cobra.Command, opts initOptions) error {
 	if err != nil {
 		return err
 	}
+	generatedAgentFiles, err := initflow.GenerateAgentToolFiles(repoRoot, agentSelection, opts.Force)
+	if err != nil {
+		return err
+	}
 
 	if err := config.WriteRepoConfig(repoRoot, cfg); err != nil {
 		return fmt.Errorf("write repo config: %w", err)
@@ -215,9 +231,9 @@ func runInit(cmd *cobra.Command, opts initOptions) error {
 		installHook(cmd, repoRoot)
 	}
 
-	printInitAgentTools(cmd, agentSelection, opts.NoTools)
+	printInitAgentTools(cmd, agentSelection, generatedAgentFiles, opts.NoTools)
 	printInitIndexResult(cmd, runInitIndex(cmd, repoRoot, indexMode, interactive))
-	printInitNext(cmd)
+	printInitNext(cmd, generatedAgentFiles)
 	return nil
 }
 
@@ -228,7 +244,7 @@ func resolveInitAgentTools(repoRoot string, opts initOptions, interactive bool) 
 	return initflow.SelectAgentTools(repoRoot, opts.AgentTools, opts.NoTools)
 }
 
-func printInitAgentTools(cmd *cobra.Command, tools []initflow.AgentTool, skipped bool) {
+func printInitAgentTools(cmd *cobra.Command, tools []initflow.AgentTool, files []initflow.AgentToolFile, skipped bool) {
 	out := cmd.OutOrStdout()
 	fmt.Fprintln(out, "\nAgent tooling:")
 	if skipped {
@@ -237,7 +253,7 @@ func printInitAgentTools(cmd *cobra.Command, tools []initflow.AgentTool, skipped
 	}
 	if len(tools) == 0 {
 		fmt.Fprintln(out, "  No Codex/Cursor/Claude/Windsurf project surfaces detected.")
-		fmt.Fprintln(out, "  To choose explicitly later: ds init --force --tool codex --tool cursor")
+		fmt.Fprintln(out, "  To choose explicitly later: ds init --tool codex --tool cursor")
 		return
 	}
 	for _, tool := range tools {
@@ -248,6 +264,16 @@ func printInitAgentTools(cmd *cobra.Command, tools []initflow.AgentTool, skipped
 		fmt.Fprintf(out, "  - %s (%s)\n", tool.Label, detected)
 		for _, planned := range tool.Planned {
 			fmt.Fprintf(out, "    prepares: %s\n", planned)
+		}
+	}
+	if len(files) > 0 {
+		fmt.Fprintln(out, "  Generated files:")
+		for _, file := range files {
+			fmt.Fprintf(out, "    - %s [%s", file.Path, file.Status)
+			if file.Invocation != "" {
+				fmt.Fprintf(out, ", %s", file.Invocation)
+			}
+			fmt.Fprintln(out, "]")
 		}
 	}
 }
@@ -325,9 +351,41 @@ func printInitIndexResult(cmd *cobra.Command, result initIndexResult) {
 	fmt.Fprintf(out, "  %s\n", result.Message)
 }
 
-func printInitNext(cmd *cobra.Command) {
+func printInitNext(cmd *cobra.Command, files []initflow.AgentToolFile) {
 	fmt.Fprintln(cmd.OutOrStdout(), "\nNext:")
-	fmt.Fprintln(cmd.OutOrStdout(), "  ds task \"goal\"")
+	fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", initNextCommand(files))
+}
+
+func initNextCommand(files []initflow.AgentToolFile) string {
+	for _, file := range files {
+		if !isUsableGeneratedAgentFile(file) {
+			continue
+		}
+		if file.Invocation == "/ds-task" {
+			return `/ds-task "goal"`
+		}
+	}
+	for _, file := range files {
+		if !isUsableGeneratedAgentFile(file) {
+			continue
+		}
+		if file.Invocation == "$ds-task" {
+			return `$ds-task "goal"`
+		}
+	}
+	return `ds task "goal"`
+}
+
+func isUsableGeneratedAgentFile(file initflow.AgentToolFile) bool {
+	if file.Invocation != "/ds-task" && file.Invocation != "$ds-task" {
+		return false
+	}
+	switch file.Status {
+	case "created", "unchanged", "overwritten":
+		return true
+	default:
+		return false
+	}
 }
 
 func startBackgroundScan(repoRoot string) (int, error) {

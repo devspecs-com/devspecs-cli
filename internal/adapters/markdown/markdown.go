@@ -265,7 +265,7 @@ func defaultPaths() []string {
 	return []string{
 		"specs", "docs/specs", "plans", "docs/plans", ".cursor/plans",
 		".claude/notes", ".claude/plans", ".codex/plans", ".codex/notes",
-		".claude/skills", ".codex/skills", "agents",
+		".agents/skills", ".claude/skills", ".codex/skills", ".cursor/commands", ".windsurf/workflows", "agents",
 		"docs/prd", "docs/product-specs", "product-specs", "docs/requirements", "requirements",
 		"rfcs", "rfc", "RFCS", "docs/rfcs", "docs/rfc", "docs/RFCS",
 		"roadmaps", "docs/roadmaps",
@@ -1143,9 +1143,12 @@ func isDefaultNestedMarkdownDir(rel string) bool {
 	for _, suffix := range []string{
 		"docs/specs",
 		"docs/plans",
+		".agents/skills",
 		".claude/notes",
 		".claude/skills",
 		".codex/skills",
+		".cursor/commands",
+		".windsurf/workflows",
 		"agents",
 		"docs/prd",
 		"docs/product-specs",
@@ -1318,7 +1321,9 @@ func isAgentInstructionPath(relPath string) bool {
 		return true
 	default:
 		return strings.HasSuffix(stem, ".agent") ||
-			strings.Contains(relPath, "/agents/")
+			strings.Contains(relPath, "/agents/") ||
+			strings.Contains(relPath, ".cursor/commands/") ||
+			strings.Contains(relPath, ".windsurf/workflows/")
 	}
 }
 
