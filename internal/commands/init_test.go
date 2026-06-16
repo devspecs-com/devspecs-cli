@@ -67,14 +67,152 @@ func TestInit_CreatesRepoConfig(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Next:",
-		"ds recent",
-		`ds find "<topic>"`,
-		`ds task quick "<small change>"`,
-		"Manual refresh:",
+		`ds task "goal"`,
+		"Agent tooling:",
+		"No Codex/Cursor/Claude/Windsurf project surfaces detected.",
+		"Indexing:",
+		"Not started automatically.",
 		"ds scan",
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("expected init output to contain %q, got %q", want, output)
+		}
+	}
+}
+
+func TestInit_DetectsAgentToolingSurfaces(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
+
+	repoDir := filepath.Join(tmp, "repo")
+	for _, dir := range []string{filepath.Join(repoDir, ".cursor", "plans"), filepath.Join(repoDir, ".codex", "skills")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "CLAUDE.md"), []byte("# Claude\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"Codex (detected:",
+		"Cursor (detected:",
+		"Claude (detected:",
+		"prepares:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in init output:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Windsurf (") {
+		t.Fatalf("did not expect undetected Windsurf to be selected by default:\n%s", out)
+	}
+}
+
+func TestInit_ToolFlagSelectsUndetectedTooling(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
+	repoDir := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewInitCmd()
+	cmd.SetArgs([]string{"--tool", "codex,windsurf"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{"Codex (not detected)", "Windsurf (not detected)"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in init output:\n%s", want, out)
+		}
+	}
+}
+
+func TestInit_NoToolsSkipsAgentTooling(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
+	repoDir := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(filepath.Join(repoDir, ".cursor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewInitCmd()
+	cmd.SetArgs([]string{"--no-tools"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if out := buf.String(); !strings.Contains(out, "Skipped (--no-tools).") {
+		t.Fatalf("expected no-tools output, got:\n%s", out)
+	}
+}
+
+func TestInit_IndexBackgroundUsesStarter(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
+	repoDir := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	origStarter := startInitBackgroundScan
+	var startedRoot string
+	startInitBackgroundScan = func(repoRoot string) (int, error) {
+		startedRoot = repoRoot
+		return 1234, nil
+	}
+	defer func() { startInitBackgroundScan = origStarter }()
+
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewInitCmd()
+	cmd.SetArgs([]string{"--index", "background"})
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if startedRoot != repoDir {
+		t.Fatalf("background scan root = %q, want %q", startedRoot, repoDir)
+	}
+	out := buf.String()
+	for _, want := range []string{"Started background index refresh.", "pid 1234"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in init output:\n%s", want, out)
 		}
 	}
 }
