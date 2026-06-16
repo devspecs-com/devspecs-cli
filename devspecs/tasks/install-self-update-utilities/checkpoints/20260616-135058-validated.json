@@ -1,0 +1,96 @@
+{
+  "schema_version": 2,
+  "checkpoint_id": "cp_20260616T135058Z_g01_validated",
+  "task_id": "install-self-update-utilities",
+  "target": "G01",
+  "series": "G",
+  "query": "Install and self-update utilities",
+  "slice": "G01",
+  "slice_title": "Add ds update as an explicit self-update command with package-manager-aware guidance",
+  "parent_slice": "G01",
+  "stage": "validated",
+  "decision": "promote",
+  "created_at": "2026-06-16T13:50:58Z",
+  "goal": "Add ds update as explicit self-update guidance",
+  "description": "Implemented guidance-only ds update with install-source detection for Homebrew, Scoop, Go install, local development builds, and manual installs. Added text and JSON output plus focused detection/output tests.",
+  "resources": [
+    "../G00-index.md",
+    "../G01-add-ds-update-as-an-explicit-self-update-command-plan.md",
+    "../G01-add-ds-update-as-an-explicit-self-update-command-result.md",
+    "../task.json"
+  ],
+  "files_read": [
+    "devspecs/tasks/install-self-update-utilities/G01-add-ds-update-as-an-explicit-self-update-command-plan.md",
+    "internal/commands/version.go",
+    "cmd/ds/main.go",
+    "README.md"
+  ],
+  "files_edited": [
+    "cmd/ds/main.go",
+    "internal/commands/update.go",
+    "internal/commands/update_test.go",
+    "devspecs/tasks/install-self-update-utilities/G01-add-ds-update-as-an-explicit-self-update-command-result.md"
+  ],
+  "tests_read": [
+    "internal/commands/update_test.go"
+  ],
+  "tests_run": [
+    "go test ./internal/commands -run TestDetectInstallSource|TestUpdateReport|TestOutputUpdateReport -count=1",
+    "go test ./cmd/ds -count=1",
+    "go test ./internal/commands -run TestDetectInstallSource|TestUpdateReport|TestOutputUpdateReport|TestDOD_01_Install -count=1",
+    "go build -ldflags ... -o .devspecs/bin/ds.exe ./cmd/ds",
+    ".devspecs/bin/ds.exe update",
+    ".devspecs/bin/ds.exe update --json",
+    ".devspecs/bin/ds.exe --help"
+  ],
+  "actual_context": {
+    "files_read": [
+      "devspecs/tasks/install-self-update-utilities/G01-add-ds-update-as-an-explicit-self-update-command-plan.md",
+      "internal/commands/version.go",
+      "cmd/ds/main.go",
+      "README.md"
+    ],
+    "files_edited": [
+      "cmd/ds/main.go",
+      "internal/commands/update.go",
+      "internal/commands/update_test.go",
+      "devspecs/tasks/install-self-update-utilities/G01-add-ds-update-as-an-explicit-self-update-command-result.md"
+    ],
+    "tests_read": [
+      "internal/commands/update_test.go"
+    ],
+    "tests_run": [
+      "go test ./internal/commands -run TestDetectInstallSource|TestUpdateReport|TestOutputUpdateReport -count=1",
+      "go test ./cmd/ds -count=1",
+      "go test ./internal/commands -run TestDetectInstallSource|TestUpdateReport|TestOutputUpdateReport|TestDOD_01_Install -count=1",
+      "go build -ldflags ... -o .devspecs/bin/ds.exe ./cmd/ds",
+      ".devspecs/bin/ds.exe update",
+      ".devspecs/bin/ds.exe update --json",
+      ".devspecs/bin/ds.exe --help"
+    ]
+  },
+  "predicted_context_feedback": {},
+  "evidence": {
+    "plan_refs": [
+      "../G00-index.md",
+      "../G01-add-ds-update-as-an-explicit-self-update-command-plan.md",
+      "../G01-add-ds-update-as-an-explicit-self-update-command-result.md",
+      "../task.json"
+    ]
+  },
+  "learnings": [
+    {
+      "learning_type": "product",
+      "summary": "ds update should stay guidance-only for v1; users get a safe command to run without DevSpecs mutating package-manager state.",
+      "evidence_refs": [
+        "internal/commands/update.go"
+      ],
+      "applies_to": "G02,J,K",
+      "confidence": "high"
+    }
+  ],
+  "next": {
+    "recommended_target": "G02",
+    "recommended_decision": "promote"
+  }
+}
