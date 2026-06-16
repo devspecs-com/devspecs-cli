@@ -33,6 +33,37 @@ func TestWorkspaceRootWarningDetectsMultipleChildProjects(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRootWarningSuppressesNormalGitRepoRoot(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceRootTestFile(t, root, ".git/HEAD", "ref: refs/heads/main\n")
+	writeWorkspaceRootTestFile(t, root, "api/package.json", `{"name":"api"}`)
+	writeWorkspaceRootTestFile(t, root, "signer/go.mod", "module example.com/signer\n")
+	writeWorkspaceRootTestFile(t, root, "web/package.json", `{"name":"web"}`)
+
+	warning := detectWorkspaceRootWarning(root, "map")
+	if warning != nil {
+		t.Fatalf("normal selected git repo root should not warn: %#v", warning)
+	}
+}
+
+func TestWorkspaceRootWarningKeepsNestedGitRepoWarning(t *testing.T) {
+	root := t.TempDir()
+	writeWorkspaceRootTestFile(t, root, ".git/HEAD", "ref: refs/heads/main\n")
+	writeWorkspaceRootTestFile(t, root, "repos/api/.git/HEAD", "ref: refs/heads/main\n")
+	writeWorkspaceRootTestFile(t, root, "repos/web/.git/HEAD", "ref: refs/heads/main\n")
+
+	warning := detectWorkspaceRootWarning(root, "map")
+	if warning == nil {
+		t.Fatal("expected warning for root containing multiple nested git repos")
+	}
+	joined := strings.Join(warning.CandidateRoots, "\n")
+	for _, want := range []string{"repos/api", "repos/web"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing nested git candidate %q in %#v", want, warning.CandidateRoots)
+		}
+	}
+}
+
 func TestScanJSONIncludesWorkspaceRootWarning(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DEVSPECS_HOME", filepath.Join(t.TempDir(), "home"))
@@ -75,8 +106,8 @@ func TestScanJSONIncludesWorkspaceRootWarning(t *testing.T) {
 func TestMapJSONAutoScanWarnsForWorkspaceRootWithoutBreakingStdout(t *testing.T) {
 	root := setupGitRepo(t)
 	t.Setenv("DEVSPECS_HOME", filepath.Join(t.TempDir(), "home"))
-	writeWorkspaceRootTestFile(t, root, "apps/api/package.json", `{"name":"api"}`)
-	writeWorkspaceRootTestFile(t, root, "apps/web/package.json", `{"name":"web"}`)
+	writeWorkspaceRootTestFile(t, root, "repos/api/.git/HEAD", "ref: refs/heads/main\n")
+	writeWorkspaceRootTestFile(t, root, "repos/web/.git/HEAD", "ref: refs/heads/main\n")
 	writeWorkspaceRootTestFile(t, root, "plans/credentials-plan.md", "# Credentials Rotation\n\nRotate credentials.\n")
 
 	cmd := NewMapCmd()

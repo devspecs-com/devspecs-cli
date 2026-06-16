@@ -79,6 +79,9 @@ func detectWorkspaceRootWarning(repoRoot, commandName string) *scan.RootSelectio
 	if len(candidates) < 2 {
 		return nil
 	}
+	if hasWorkspaceGitMarker(repoRoot) && workspaceRootGitCandidateCount(repoRoot, candidates) < 2 {
+		return nil
+	}
 	if len(candidates) > workspaceRootCandidateLimit {
 		candidates = candidates[:workspaceRootCandidateLimit]
 	}
@@ -156,6 +159,21 @@ func hasWorkspaceRootMarker(dir string) bool {
 		}
 	}
 	return false
+}
+
+func hasWorkspaceGitMarker(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
+}
+
+func workspaceRootGitCandidateCount(repoRoot string, candidates []string) int {
+	count := 0
+	for _, rel := range candidates {
+		if hasWorkspaceGitMarker(filepath.Join(repoRoot, filepath.FromSlash(rel))) {
+			count++
+		}
+	}
+	return count
 }
 
 func workspaceCommandName(cmd *cobra.Command) string {
