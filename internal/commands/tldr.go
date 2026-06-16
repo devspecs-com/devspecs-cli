@@ -60,15 +60,15 @@ documentation.`,
 
 func buildTLDRGuide() tldrOutput {
 	return tldrOutput{
-		Purpose: "DevSpecs is a local-first CLI for turning repo intent into agent-usable context, bounded task slices, checkpoints, and handoff receipts.",
+		Purpose: "DevSpecs is a local-first CLI for turning repo intent into bounded task slices, packed context, checkpoints, and handoff receipts.",
 		LLMRules: []string{
+			"Default to ds task for known work; it creates the execution boundary and packs source/test/doc context.",
 			"Prefer one bounded target over the whole plan.",
 			"Workflow commands refresh the local index by default; use ds scan for explicit manual refresh or rebuild.",
-			"If the work item is known, start with ds task or ds task quick; task creation already packs source/test/doc context.",
-			"Use ds map, ds recent, or ds find first when you are still discovering system boundaries, recent activity, repo intent, current plans, or likely scope.",
+			"Use ds task quick for small work and full ds task slices for multi-step work.",
+			"Use ds map, ds recent, and ds find as diagnostic/evidence tools when the target is unclear or needs trust checks.",
 			"Record evidence with checkpoint/finish instead of relying on chat memory.",
 			"Do not claim DevSpecs found every relevant file; verify source and tests.",
-			"Use ds task quick for small work and full ds task slices for multi-step work.",
 		},
 		Workflows: []tldrWorkflow{
 			{
@@ -101,11 +101,11 @@ func buildTLDRGuide() tldrOutput {
 				Name:    "Incident / Triage",
 				UseWhen: "You need fast orientation, likely source/test context, and an evidence trail.",
 				Commands: []string{
-					`ds find "<symptom> <component>"`,
 					`ds task quick "triage <incident>"`,
+					`ds find "<symptom> <component>"`,
 					"ds task checkpoint <task-id> --target <target> --stage validated --decision continue --file-read <path> --test-run <cmd>",
 				},
-				AgentRule: "Separate observed facts from guesses. Record commands, changed files, and unresolved risks.",
+				AgentRule: "Create the triage boundary first when the incident is actionable. Use find/map/recent as evidence checks, then record facts, commands, changed files, and unresolved risks.",
 			},
 			{
 				ID:      "brownfield",
@@ -115,14 +115,14 @@ func buildTLDRGuide() tldrOutput {
 					"ds init",
 					"ds map",
 					"ds recent",
-					"ds list",
 					`ds find "<topic>"`,
 					"ds context <artifact-id>",
+					`ds task "implement <bounded target>"`,
 				},
-				AgentRule: "Use IDs from list/find/context instead of pasting whole folders. Treat old artifacts as context, not instructions, unless current.",
+				AgentRule: "Use map/recent/find/context to locate trustworthy owner artifacts, then create or continue a bounded task. Treat old artifacts as context, not instructions, unless current.",
 				Notes: []string{
-					"`ds map`, `ds recent`, `ds find`, and `ds list` refresh the index by default.",
-					"Once the work item is known, switch to `ds task`; it will pack context again for bounded execution.",
+					"`ds map`, `ds recent`, `ds find`, and `ds context` refresh the index by default.",
+					"`ds task` packs context again for bounded execution, so diagnostics do not need to be perfect.",
 					"`ds adopt` is planned, not shipped.",
 					"Use `ds scan --no-gitignore` only when intentionally inspecting ignored paths.",
 				},
@@ -148,8 +148,9 @@ func buildTLDRGuide() tldrOutput {
 					"ds recent",
 					`ds find "<area or task>"`,
 					"ds context <artifact-id>",
+					`ds task "modify <bounded area>"`,
 				},
-				AgentRule: "Use map for subsystem boundaries, recent for local activity orientation, and find for agent-ready packed context. Do not treat any of them as an implementation plan.",
+				AgentRule: "Use map for subsystem boundaries, recent for local activity orientation, and find for agent-ready packed context. Convert the result into a bounded task before implementing.",
 			},
 		},
 	}

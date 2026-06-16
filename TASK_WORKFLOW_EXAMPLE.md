@@ -18,6 +18,8 @@ stop at the decision gate.
 This example starts with `ds task` because the work item is already known. In a
 brownfield repo where the target is unclear, start with `ds map`, `ds recent`,
 or `ds find`, then switch to `ds task` once the execution target is concrete.
+Those diagnostic commands are trust/evidence layers, not prerequisites for
+known work.
 
 DevSpecs does not replace canonical repo plans. Existing `PLAN-*` files, ADRs,
 PRDs, RFCs, decision memos, and runbooks remain the source of truth. A task

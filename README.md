@@ -23,12 +23,12 @@ repo folders, editor state, pull requests, and ad-hoc files.
 DevSpecs gives those artifacts stable local identity and makes them useful to
 the next human or agent session.
 
-It has two launch jobs:
+Its launch workflow is task-first:
 
-- **Greenfield:** start new AI coding work with packed repo context and one
-  bounded next slice.
-- **Brownfield:** recover existing intent artifacts and turn them into
-  searchable, agent-usable context.
+- **Known work:** start `ds task` or `ds task quick` to create a bounded agent
+  workspace with packed source/test/doc context and decision gates.
+- **Unclear work:** use `ds map`, `ds recent`, and `ds find` as
+  diagnostic/evidence tools, then convert the result into a bounded task.
 
 DevSpecs is not an autonomous agent, task manager, SaaS workspace, or hosted
 memory layer. The CLI is the product; editors, agents, and MCP/slash surfaces
@@ -88,9 +88,9 @@ ds tldr incident --json
 
 If the work item is already known, start with `ds task` or `ds task quick`.
 Task creation refreshes the local index and packs source, test, docs, and
-receipt context for the generated slice. Use `ds recent` or `ds find` first
-when the agent is still discovering recent activity, repo intent, current
-plans, or likely scope.
+receipt context for the generated slice. Use `ds map`, `ds recent`, or
+`ds find` first only when the agent is still discovering system boundaries,
+recent activity, repo intent, current plans, or likely scope.
 
 ## Intent artifacts and task workspaces
 
@@ -109,7 +109,7 @@ workspace instead of duplicating the canonical gate. A good pattern is:
 `PLAN-*` says what/why; `devspecs/tasks/*` says what the next agent should do
 now and records what actually happened.
 
-## Greenfield: bounded task slices
+## Bounded Task Slices
 
 Use `ds task` when you are about to ask an agent to make a repo change and want
 the first slice to be grounded before the agent grabs the whole roadmap.
@@ -152,12 +152,12 @@ Use full `ds task` when you want durable slices and handoff receipts. Use
 See [TASK_WORKFLOW_EXAMPLE.md](TASK_WORKFLOW_EXAMPLE.md) for a public-safe
 transcript generated from current CLI output.
 
-## Brownfield: recover existing intent
+## Diagnostics: recover existing intent
 
-Use scan/recent/find when a repo already has plans, PRDs, RFCs, ADRs, specs,
-runbooks, eval cards, recent commits, or agent notes, but they are hard to find
-or hand to an agent. Once the target is known, switch to `ds task` for bounded
-execution; `ds task` packs context again for the actual slice.
+Use map/recent/find when a repo already has plans, PRDs, RFCs, ADRs, specs,
+runbooks, eval cards, recent commits, or agent notes, but the target is unclear
+or needs a trust check. Once the target is known, switch to `ds task` for
+bounded execution; `ds task` packs context again for the actual slice.
 
 ```bash
 ds init
@@ -165,6 +165,7 @@ ds map
 ds recent
 ds find "oauth redirect"
 ds context <id>
+ds task "Serve Swagger UI OAuth2 redirect from a custom docs redirect URL"
 ```
 
 `ds map`, `ds recent`, `ds find`, and `ds context` refresh the local index as
@@ -177,7 +178,8 @@ refresh or rebuild.
 
 `ds find` is a routing layer, not a replacement for owner decision docs. When it
 surfaces a current decision memo, north-star doc, or `Status: next` plan, read
-that artifact before asking an agent to implement.
+that artifact before asking an agent to implement. Diagnostics are optional for
+known work; they are there to build trust when scope is unclear.
 
 `ds adopt` is planned, not shipped. Current brownfield workflows scan and query
 existing artifacts in place without mutating old files.
@@ -203,11 +205,6 @@ Source files remain authoritative. DevSpecs stores derived index state locally.
 | Command | Use |
 | --- | --- |
 | `ds init` | Create local index state and repo config. |
-| `ds scan` | Manually refresh or rebuild configured intent-artifact paths. |
-| `ds recent` | Show recently active local git topics and useful follow-up context commands. |
-| `ds map` | Show architecture/system boundaries with evidence and useful follow-up commands. |
-| `ds find <query>` | Build agent-readable packed context. |
-| `ds find --plain <query>` | Show the older flat ranked result list. |
 | `ds tldr [workflow]` | Show LLM-oriented workflow quickstarts for hotfixes, epics, incidents, brownfield recovery, handoff, and deep dives. |
 | `ds task <query>` | Create a bounded task workspace with slice artifacts. |
 | `ds task quick <query>` | Create a one-off task workspace with compact output. |
@@ -216,7 +213,12 @@ Source files remain authoritative. DevSpecs stores derived index state locally.
 | `ds task checkpoint <target>` | Record files, tests, misses, noise, learnings, and next decision. |
 | `ds task finish <target>` | Finish a target with a decision gate. |
 | `ds task refresh <task-id>` | Recapture edited task artifacts into the local index without rewriting task docs. |
+| `ds map` | Show architecture/system boundaries with evidence and useful follow-up commands. |
+| `ds recent` | Show recently active local git topics and useful follow-up context commands. |
+| `ds find <query>` | Build agent-readable packed context. |
+| `ds find --plain <query>` | Show the older flat ranked result list. |
 | `ds context <id>` | Export one artifact as paste-ready agent context. |
+| `ds scan` | Manually refresh or rebuild configured intent-artifact paths. |
 | `ds config show` | Inspect effective repo discovery config. |
 
 Most read commands support `--json`. Run `ds <command> --help` for the current

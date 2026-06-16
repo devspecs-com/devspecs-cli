@@ -1,0 +1,86 @@
+{
+  "schema_version": 2,
+  "checkpoint_id": "cp_20260616T092341Z_i03_validated",
+  "task_id": "v1-1-command-surface-realignment",
+  "target": "I03",
+  "series": "I",
+  "query": "v1.1 command surface realignment: task-first launch story, ds recent, and real architecture map",
+  "slice": "I03",
+  "slice_title": "Make task workflows the main launch story across tldr help README and docs",
+  "parent_slice": "I03",
+  "stage": "validated",
+  "decision": "promote",
+  "created_at": "2026-06-16T09:23:41Z",
+  "goal": "Record progress for `v1.1 command surface realignment: task-first launch story, ds recent, and real architecture map`.",
+  "description": "Recentered public CLI/help/docs copy around ds task as the default workflow, with map/recent/find positioned as diagnostic and evidence layers before or around bounded tasks.",
+  "resources": [
+    "../I00-index.md",
+    "../I03-make-task-workflows-the-main-launch-story-across-plan.md",
+    "../I03-make-task-workflows-the-main-launch-story-across-result.md",
+    "../task.json"
+  ],
+  "files_read": [
+    "internal/commands/tldr.go",
+    "README.md"
+  ],
+  "files_edited": [
+    "cmd/ds/main.go",
+    "cmd/ds/main_test.go",
+    "internal/commands/task.go",
+    "internal/commands/tldr.go",
+    "internal/commands/tldr_test.go",
+    "README.md",
+    "TASK_WORKFLOW_EXAMPLE.md"
+  ],
+  "tests_run": [
+    "go test ./cmd/ds ./internal/commands -run TestRootCmd_HelpCentersTaskWorkflow|TestRootCmd_HelpMentionsTelemetryPrivacy|TestRootCmd_TLDRRegistered|TestRootCmd_PublicHelpHidesInternalCommands|TestTLDR_HumanOutputGroupsWorkflows|TestTLDR_FilterAndJSON|TestTLDR_UnknownWorkflowErrorsWithValidIDs -count=1",
+    "go run ./cmd/ds --help",
+    "go run ./cmd/ds tldr",
+    "go run ./cmd/ds task --help"
+  ],
+  "actual_context": {
+    "files_read": [
+      "internal/commands/tldr.go",
+      "README.md"
+    ],
+    "files_edited": [
+      "cmd/ds/main.go",
+      "cmd/ds/main_test.go",
+      "internal/commands/task.go",
+      "internal/commands/tldr.go",
+      "internal/commands/tldr_test.go",
+      "README.md",
+      "TASK_WORKFLOW_EXAMPLE.md"
+    ],
+    "tests_run": [
+      "go test ./cmd/ds ./internal/commands -run TestRootCmd_HelpCentersTaskWorkflow|TestRootCmd_HelpMentionsTelemetryPrivacy|TestRootCmd_TLDRRegistered|TestRootCmd_PublicHelpHidesInternalCommands|TestTLDR_HumanOutputGroupsWorkflows|TestTLDR_FilterAndJSON|TestTLDR_UnknownWorkflowErrorsWithValidIDs -count=1",
+      "go run ./cmd/ds --help",
+      "go run ./cmd/ds tldr",
+      "go run ./cmd/ds task --help"
+    ]
+  },
+  "predicted_context_feedback": {},
+  "evidence": {
+    "plan_refs": [
+      "../I00-index.md",
+      "../I03-make-task-workflows-the-main-launch-story-across-plan.md",
+      "../I03-make-task-workflows-the-main-launch-story-across-result.md",
+      "../task.json"
+    ]
+  },
+  "learnings": [
+    {
+      "learning_type": "command_surface",
+      "summary": "The launch story should say ds task is the default for known work; map/recent/find are diagnostic/evidence/trust tools when scope is unclear.",
+      "evidence_refs": [
+        "README.md"
+      ],
+      "applies_to": "I03",
+      "confidence": "high"
+    }
+  ],
+  "next": {
+    "recommended_target": "I04",
+    "recommended_decision": "promote"
+  }
+}

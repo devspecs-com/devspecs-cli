@@ -20,16 +20,18 @@ func main() {
 func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "ds",
-		Short: "DevSpecs - index intent and start grounded AI coding tasks",
+		Short: "DevSpecs - start bounded AI coding tasks from repo intent",
 		Long: `DevSpecs indexes planning and specification artifacts in your repository,
 assigns stable IDs, and makes them easy to reference from agents, PRs,
 issues, and future workflows.
 
-Brownfield: scan, recent, map, and find existing plans, specs, ADRs, and other
-intent artifacts so humans and agents can recover the right context.
+Default workflow: use ds task to create bounded task workspaces with packed
+source/test/docs context, one-slice prompts, checkpoints, result receipts, and
+decision gates for AI-assisted coding work.
 
-Greenfield: create bounded task workspaces with packed source/test context,
-slice prompts, checkpoints, and audit output for AI-assisted coding work.
+Diagnostic layer: use ds map, ds recent, and ds find when the target is unclear
+or you need to verify existing plans, specs, ADRs, recent commits, source files,
+tests, and owner decision docs before creating or continuing a task.
 
 Telemetry: DevSpecs sends minimal anonymous usage counts for install, init,
 scan, and query flows. It never sends repo names, file paths, git remotes,

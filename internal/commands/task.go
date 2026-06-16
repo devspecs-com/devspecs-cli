@@ -535,7 +535,7 @@ func NewTaskCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "task <query>",
-		Short: "Create a grounded task workspace",
+		Short: "Create a bounded task workspace with packed context",
 		Long: `Create a local task workspace from a repo-grounded query.
 
 The workspace is intentionally uncertainty-aware: it separates evidence from
@@ -583,7 +583,7 @@ func newTaskQuickCmd() *cobra.Command {
 	opts.Quick = true
 	cmd := &cobra.Command{
 		Use:   "quick <query>",
-		Short: "Create a one-off task workspace with compact output",
+		Short: "Create a compact one-off task workspace",
 		Long: `Create a one-off task workspace for a small change.
 
 This uses the normal task manifest, source/test pack, risk cards, and lifecycle

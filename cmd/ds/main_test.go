@@ -52,6 +52,29 @@ func TestRootCmd_HelpMentionsTelemetryPrivacy(t *testing.T) {
 	}
 }
 
+func TestRootCmd_HelpCentersTaskWorkflow(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"--help"})
+
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := buf.String()
+	for _, want := range []string{
+		"Default workflow:",
+		"use ds task to create bounded task workspaces",
+		"Diagnostic layer:",
+		"use ds map, ds recent, and ds find",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected help output to contain %q, got %q", want, got)
+		}
+	}
+}
+
 func TestRootCmd_TLDRRegistered(t *testing.T) {
 	cmd := newRootCmd()
 	cmd.SetArgs([]string{"tldr", "hotfix"})

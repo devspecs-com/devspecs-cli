@@ -23,19 +23,21 @@ func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 		"## Brownfield Intent Recovery (`brownfield`)",
 		"ds task quick",
 		"ds task checkpoint <task-id> --target <target>",
+		"Default to ds task for known work",
 		"Workflow commands refresh the local index by default",
-		"If the work item is known, start with ds task or ds task quick",
-		"Use ds map, ds recent, or ds find first when you are still discovering system boundaries",
-		"ds list",
+		"Use ds map, ds recent, and ds find as diagnostic/evidence tools",
 		"ds map",
 		"ds recent",
+		`ds task "implement <bounded target>"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("tldr output missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "ds list --limit") {
-		t.Fatalf("tldr output should not advertise unsupported list limit flag:\n%s", out)
+	for _, notWant := range []string{"ds list", "ds list --limit"} {
+		if strings.Contains(out, notWant) {
+			t.Fatalf("tldr output should not advertise %q:\n%s", notWant, out)
+		}
 	}
 }
 
