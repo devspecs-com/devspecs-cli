@@ -1,0 +1,61 @@
+{
+  "task_id": "hierarchical-map-navigation",
+  "series": "L",
+  "profile": "code-change",
+  "query": "Plan hierarchical ds map navigation so users can move from ds map to ds map Storage to ds map Storage.Providers to ds map Storage.Providers.GCS.",
+  "status": "planned",
+  "created_at": "2026-06-16T13:36:17Z",
+  "updated_at": "2026-06-16T13:40:02Z",
+  "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
+  "workspace": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli\\devspecs\\tasks\\hierarchical-map-navigation",
+  "artifacts": {
+    "series": "L",
+    "index": "L00-index.md",
+    "first_slice": "L01-define-map-path-model-and-cli-contract-plan.md",
+    "result": "L01-define-map-path-model-and-cli-contract-result.md",
+    "slices": [
+      {
+        "id": "L01",
+        "title": "Define map path model naming rules and compatible CLI contract",
+        "plan": "L01-define-map-path-model-and-cli-contract-plan.md",
+        "result": "L01-define-map-path-model-and-cli-contract-result.md",
+        "kind": "slice",
+        "stage": "planned"
+      },
+      {
+        "id": "L02",
+        "title": "Build hierarchy generation from boundary areas children aliases and evidence",
+        "plan": "L02-build-hierarchy-generation-from-boundary-areas-plan.md",
+        "result": "L02-build-hierarchy-generation-from-boundary-areas-result.md",
+        "kind": "slice",
+        "stage": "planned"
+      },
+      {
+        "id": "L03",
+        "title": "Add dot path resolution tests and real repo demo fixtures",
+        "plan": "L03-add-dot-path-resolution-tests-and-demo-fixtures-plan.md",
+        "result": "L03-add-dot-path-resolution-tests-and-demo-fixtures-result.md",
+        "kind": "slice",
+        "stage": "planned"
+      },
+      {
+        "id": "L04",
+        "title": "Polish onboarding output fallback states and docs placement",
+        "plan": "L04-polish-onboarding-output-and-fallback-states-plan.md",
+        "result": "L04-polish-onboarding-output-and-fallback-states-result.md",
+        "kind": "slice",
+        "stage": "planned"
+      }
+    ]
+  },
+  "predicted_context": {},
+  "confidence": {
+    "primary_file_confidence": "",
+    "test_coverage_confidence": "",
+    "docs_config_confidence": "",
+    "git_receipt_confidence": "",
+    "noise_risk": "",
+    "pack_completeness": "",
+    "agent_instruction": ""
+  }
+}
