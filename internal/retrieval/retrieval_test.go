@@ -1788,6 +1788,88 @@ func TestWeightedFilesRetrieverV0_RanksActiveIntentAboveBlockedHistoricalPlan(t 
 	}
 }
 
+func TestWeightedFilesRetrieverV0_ExactPlanIDKeepsDirectArtifactAndLinkedNeighborAheadOfHistoricalAnalog(t *testing.T) {
+	query := "EV-R1 external validity bridge"
+	candidates := []Candidate{
+		{
+			Path:   "docs/plans/PLAN-EV-R1-external-validity-bridge.md",
+			Kind:   "plan",
+			Title:  "PLAN-EV-R1: external validity bridge",
+			Status: "next",
+			Body:   "Status: next\nImplement the EV-R1 external validity bridge.",
+		},
+		{
+			Path:   "docs/plans/PLAN-EV00-index.md",
+			Kind:   "plan",
+			Title:  "PLAN-EV00: external validity index",
+			Status: "current",
+			Body:   "Direct next slice: EV-R1. Follow with EV-R2 only after EV-R1 promotes.",
+		},
+		{
+			Path:  "docs/plans/PLAN-008.1-synthetic-repo-world.md",
+			Kind:  "plan",
+			Title: "PLAN-008.1 synthetic repo world bridge",
+			Body:  strings.Repeat("external validity bridge historical synthetic repo world context.\n", 12),
+		},
+		{
+			Path:  "docs/plans/external-validity-bridge-notes.md",
+			Kind:  "plan",
+			Title: "External validity bridge notes",
+			Body:  strings.Repeat("external validity bridge notes and operational context.\n", 8),
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true}).Retrieve(candidates, query)
+	paths := CandidatePaths(got)
+	direct := candidatePathIndex(got, "docs/plans/PLAN-EV-R1-external-validity-bridge.md")
+	neighbor := candidatePathIndex(got, "docs/plans/PLAN-EV00-index.md")
+	historical := candidatePathIndex(got, "docs/plans/PLAN-008.1-synthetic-repo-world.md")
+	if direct != 0 {
+		t.Fatalf("direct exact ID artifact should rank first, got %#v", paths)
+	}
+	if neighbor < 0 {
+		t.Fatalf("explicit EV-R1 neighbor should be retained, got %#v", paths)
+	}
+	if historical >= 0 && historical < neighbor {
+		t.Fatalf("historical analog outranked explicit neighbor: %#v", paths)
+	}
+	if historical >= 0 && got[historical].Metadata["pack_tier"] != PackTierRelated {
+		t.Fatalf("historical analog should be related in exact ID mode, metadata=%#v", got[historical].Metadata)
+	}
+	reasons := ExplainCandidates([]Candidate{got[direct]}, query)
+	if len(reasons) == 0 || !reasonContainsPrefix(reasons[0].Reasons, "exact intent ID:") {
+		t.Fatalf("missing exact intent ID reason: %#v", reasons)
+	}
+}
+
+func TestWeightedFilesRetrieverV0_ExactPlanIDModeDoesNotDampenWhenIDAbsent(t *testing.T) {
+	query := "EV-R9 external validity bridge"
+	candidates := []Candidate{
+		{
+			Path:  "docs/plans/external-validity-bridge-notes.md",
+			Kind:  "plan",
+			Title: "External validity bridge notes",
+			Body:  "Current external validity bridge notes without the requested artifact.",
+		},
+		{
+			Path:  "docs/plans/PLAN-008.1-synthetic-repo-world.md",
+			Kind:  "plan",
+			Title: "PLAN-008.1 synthetic repo world",
+			Body:  "Historical external validity bridge context.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true}).Retrieve(candidates, query)
+	if len(got) == 0 {
+		t.Fatal("expected useful results even when the exact ID is absent")
+	}
+	for _, candidate := range got {
+		if candidate.Metadata["exact_intent_id_score"] != "" {
+			t.Fatalf("exact ID mode should not mark candidates when no exact ID exists, got %#v", candidate.Metadata)
+		}
+	}
+}
+
 func TestExplainCandidatesIncludesAuthorityPriorReason(t *testing.T) {
 	candidates := []Candidate{
 		{

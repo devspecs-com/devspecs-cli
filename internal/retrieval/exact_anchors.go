@@ -21,6 +21,24 @@ type exactAnchorScore struct {
 	genericMatches []string
 }
 
+type exactIntentIDProfile struct {
+	IDs []exactIntentID
+}
+
+type exactIntentID struct {
+	Display string
+	Norm    string
+	Compact string
+	Parts   []string
+}
+
+type exactIntentIDMatch struct {
+	PathTitle bool
+	Body      bool
+	PartsOnly bool
+	Matched   []string
+}
+
 var exactAnchorGenericTerms = map[string]bool{
 	"call": true, "case": true, "cases": true, "checker": true, "cookie": true, "cookies": true,
 	"engine": true, "file": true, "files": true,
@@ -60,6 +78,11 @@ func applyExactAnchorDiscipline(candidates []scoredCandidate, universe []Candida
 		candidates = append(candidates, backfills...)
 		changed = true
 	}
+	intentChanged := false
+	candidates, intentChanged = applyExactIntentIDDiscipline(candidates, universe, query)
+	if intentChanged {
+		changed = true
+	}
 	if changed {
 		sort.SliceStable(candidates, func(i, j int) bool {
 			if candidates[i].score == candidates[j].score {
@@ -69,6 +92,241 @@ func applyExactAnchorDiscipline(candidates []scoredCandidate, universe []Candida
 		})
 	}
 	return candidates
+}
+
+func applyExactIntentIDDiscipline(candidates []scoredCandidate, universe []Candidate, query string) ([]scoredCandidate, bool) {
+	profile := buildExactIntentIDProfile(query)
+	if len(profile.IDs) == 0 || len(candidates) == 0 || !exactIntentIDPresent(universe, profile) {
+		return candidates, false
+	}
+	changed := false
+	for i := range candidates {
+		match := exactIntentIDCandidateMatch(candidates[i].candidate, profile)
+		delta := 0.0
+		tier := ""
+		tierReason := ""
+		var reasons []string
+		switch {
+		case match.PathTitle:
+			delta = 18.0
+			tier = PackTierPrimary
+			tierReason = "direct exact plan/track ID match"
+			reasons = append(reasons, "direct path/title match")
+		case match.Body:
+			delta = 8.0
+			tier = PackTierRelated
+			tierReason = "explicit exact plan/track ID reference"
+			reasons = append(reasons, "explicit body reference")
+		case exactIntentIDDampensCandidate(candidates[i], match):
+			delta = -18.0
+			tier = PackTierRelated
+			tierReason = "query contains exact plan/track ID but this artifact does not"
+			reasons = append(reasons, "no direct ID match")
+			if match.PartsOnly {
+				reasons = append(reasons, "partial ID-token overlap only")
+			}
+		default:
+			continue
+		}
+		candidates[i].score += delta
+		candidates[i].candidate = withExactIntentIDMetadata(candidates[i].candidate, delta, match, tier, tierReason, reasons)
+		changed = true
+	}
+	return candidates, changed
+}
+
+func buildExactIntentIDProfile(query string) exactIntentIDProfile {
+	seen := map[string]bool{}
+	var profile exactIntentIDProfile
+	for _, raw := range tokenizeAnchorOriginal(query) {
+		id, ok := exactIntentIDFromToken(raw)
+		if !ok || seen[id.Norm] {
+			continue
+		}
+		seen[id.Norm] = true
+		profile.IDs = append(profile.IDs, id)
+	}
+	return profile
+}
+
+func exactIntentIDFromToken(raw string) (exactIntentID, bool) {
+	display := strings.Trim(raw, "`'\".,:;()[]{}")
+	norm := normalizeExactIntentID(display)
+	if norm == "" || !looksLikeExactIntentID(display, norm) {
+		return exactIntentID{}, false
+	}
+	parts := exactIntentIDParts(norm)
+	return exactIntentID{
+		Display: display,
+		Norm:    norm,
+		Compact: compactExactIntentID(norm),
+		Parts:   parts,
+	}, true
+}
+
+func looksLikeExactIntentID(raw, norm string) bool {
+	if len(norm) < 2 || len(norm) > 28 {
+		return false
+	}
+	if strings.ContainsAny(raw, "/\\") {
+		return false
+	}
+	hasLetter := false
+	hasDigit := false
+	for _, r := range norm {
+		if unicode.IsLetter(r) {
+			hasLetter = true
+		}
+		if unicode.IsDigit(r) {
+			hasDigit = true
+		}
+	}
+	if !hasLetter || !hasDigit {
+		return false
+	}
+	if strings.ContainsAny(norm, "-_.") {
+		return len(exactIntentIDParts(norm)) >= 2
+	}
+	runes := []rune(norm)
+	if len(runes) < 3 || len(runes) > 8 {
+		return false
+	}
+	letterPrefix := 0
+	for _, r := range runes {
+		if unicode.IsLetter(r) {
+			letterPrefix++
+			continue
+		}
+		break
+	}
+	if letterPrefix == 0 || letterPrefix > 4 || letterPrefix == len(runes) {
+		return false
+	}
+	for _, r := range runes[letterPrefix:] {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func exactIntentIDPresent(candidates []Candidate, profile exactIntentIDProfile) bool {
+	for _, candidate := range candidates {
+		match := exactIntentIDCandidateMatch(candidate, profile)
+		if match.PathTitle || match.Body {
+			return true
+		}
+	}
+	return false
+}
+
+func exactIntentIDCandidateMatch(c Candidate, profile exactIntentIDProfile) exactIntentIDMatch {
+	pathTitle := normalizeExactIntentIDText(c.Path + "\n" + c.Title)
+	pathTitleCompact := compactExactIntentID(pathTitle)
+	body := normalizeExactIntentIDText(c.Body)
+	var match exactIntentIDMatch
+	for _, id := range profile.IDs {
+		if id.Norm == "" {
+			continue
+		}
+		switch {
+		case strings.Contains(pathTitle, id.Norm) || (id.Compact != "" && strings.Contains(pathTitleCompact, id.Compact)):
+			match.PathTitle = true
+			match.Matched = appendUniqueString(match.Matched, id.Display)
+		case strings.Contains(body, id.Norm):
+			match.Body = true
+			match.Matched = appendUniqueString(match.Matched, id.Display)
+		case exactIntentIDPartsMatch(pathTitle+"\n"+body, id.Parts):
+			match.PartsOnly = true
+		}
+	}
+	return match
+}
+
+func exactIntentIDDampensCandidate(candidate scoredCandidate, match exactIntentIDMatch) bool {
+	if match.PathTitle || match.Body {
+		return false
+	}
+	role := candidate.role
+	if isIntentAuthorityRole(role) || IsPlanningIntentPath(candidate.candidate.Path) || isMarkdownCandidatePath(candidate.candidate.Path) {
+		return true
+	}
+	return false
+}
+
+func withExactIntentIDMetadata(c Candidate, delta float64, match exactIntentIDMatch, tier, tierReason string, reasons []string) Candidate {
+	if c.Metadata == nil {
+		c.Metadata = map[string]string{}
+	} else {
+		c.Metadata = copyMetadata(c.Metadata)
+	}
+	c.Metadata["exact_intent_id_score"] = fmt.Sprintf("%.3f", delta)
+	if len(match.Matched) > 0 {
+		c.Metadata["exact_intent_id_matches_json"] = jsonStringList(match.Matched)
+	}
+	if len(reasons) > 0 {
+		c.Metadata["exact_intent_id_reasons"] = strings.Join(uniqueStrings(reasons), "\n")
+	}
+	if tier != "" {
+		c.Metadata["pack_tier"] = tier
+	}
+	if tierReason != "" {
+		c.Metadata["pack_tier_reason"] = tierReason
+	}
+	return c
+}
+
+func normalizeExactIntentID(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.Trim(value, "`'\".,:;()[]{}")
+	value = strings.ReplaceAll(value, "_", "-")
+	for strings.Contains(value, "--") {
+		value = strings.ReplaceAll(value, "--", "-")
+	}
+	return value
+}
+
+func normalizeExactIntentIDText(value string) string {
+	value = strings.ToLower(value)
+	value = strings.ReplaceAll(value, "_", "-")
+	value = strings.ReplaceAll(value, "\\", "/")
+	return value
+}
+
+func compactExactIntentID(value string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(value) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func exactIntentIDParts(value string) []string {
+	parts := splitIdentifierParts(value)
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = normalizeAnchorTerm(part)
+		if len(part) < 2 {
+			continue
+		}
+		out = append(out, part)
+	}
+	return uniqueStrings(out)
+}
+
+func exactIntentIDPartsMatch(text string, parts []string) bool {
+	if len(parts) == 0 {
+		return false
+	}
+	matched := 0
+	for _, part := range parts {
+		if strings.Contains(text, part) {
+			matched++
+		}
+	}
+	return matched > 0 && matched < len(parts)
 }
 
 func exactAnchorBackfillCandidates(universe []Candidate, seen map[string]bool, profile exactQueryAnchorProfile, queryLower string, terms map[string]float64) []scoredCandidate {

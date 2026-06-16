@@ -5666,6 +5666,9 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 			reasons = append(reasons, "query hygiene: "+strings.Join(parts, "; "))
 		}
 	}
+	if c.Metadata != nil && c.Metadata["exact_intent_id_reasons"] != "" {
+		reasons = append(reasons, "exact intent ID: "+strings.ReplaceAll(c.Metadata["exact_intent_id_reasons"], "\n", "; "))
+	}
 	if c.Metadata != nil && c.Metadata["anchor_first_score"] != "" {
 		parts := []string{"score " + c.Metadata["anchor_first_score"]}
 		if matches := metadataJSONList(c, "anchor_matches_json"); len(matches) > 0 {

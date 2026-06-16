@@ -5,7 +5,7 @@
   "query": "Brownfield active intent ranking and scoped find packs",
   "status": "packed",
   "created_at": "2026-06-15T15:09:12Z",
-  "updated_at": "2026-06-16T11:22:41Z",
+  "updated_at": "2026-06-16T11:36:05Z",
   "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
   "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/brownfield-active-intent-ranking",
   "artifacts": {
@@ -32,7 +32,13 @@
         "title": "Tighten exact plan ID and track ID find packs so direct neighbors beat tangential historical plans",
         "plan": "F02-tighten-exact-plan-id-and-track-id-find-packs-so-plan.md",
         "result": "F02-tighten-exact-plan-id-and-track-id-find-packs-so-result.md",
-        "kind": "slice"
+        "kind": "slice",
+        "stage": "validated",
+        "decision": "promote",
+        "updated_at": "2026-06-16T11:36:05Z",
+        "latest_checkpoint_id": "cp_20260616T113605Z_f02_validated",
+        "latest_checkpoint": "checkpoints/20260616-113605-validated.md",
+        "latest_checkpoint_json": "checkpoints/20260616-113605-validated.json"
       },
       {
         "id": "F03",
