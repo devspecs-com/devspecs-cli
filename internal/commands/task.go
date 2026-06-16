@@ -1884,15 +1884,130 @@ func taskNextSlice(manifest taskManifest) (taskSliceArtifact, error) {
 			return slice, nil
 		}
 	}
-	for _, slice := range slices {
-		if !taskTargetTerminal(slice) {
-			return slice, nil
+	for _, group := range taskSliceProgressionGroups(manifest) {
+		if len(group) == 0 {
+			continue
+		}
+		base := group[0]
+		if !taskTargetTerminal(base) {
+			return base, nil
+		}
+		lastTerminal := base
+		for _, iteration := range group[1:] {
+			if !taskTargetTerminal(iteration) {
+				return iteration, nil
+			}
+			lastTerminal = iteration
+		}
+		if !taskDecisionAllowsSiblingAdvance(lastTerminal) {
+			return taskSliceArtifact{}, taskNextBlockedByDecisionError(manifest, lastTerminal)
 		}
 	}
 	if len(slices) == 0 {
 		return taskSliceArtifact{}, fmt.Errorf("task has no slice targets")
 	}
 	return taskSliceArtifact{}, fmt.Errorf("all task targets are terminal")
+}
+
+func taskSliceProgressionGroups(manifest taskManifest) [][]taskSliceArtifact {
+	slices := taskSyncSlices(manifest)
+	byID := make(map[string]taskSliceArtifact, len(slices))
+	for _, slice := range slices {
+		byID[strings.ToUpper(strings.TrimSpace(slice.ID))] = slice
+	}
+	childByParent := map[string][]taskSliceArtifact{}
+	var groups [][]taskSliceArtifact
+	for _, slice := range slices {
+		if taskSliceIsIteration(slice) {
+			parentID := strings.ToUpper(strings.TrimSpace(firstNonEmptyTaskString(slice.ParentID, taskSliceParentIDFromIteration(slice.ID))))
+			childByParent[parentID] = append(childByParent[parentID], slice)
+			continue
+		}
+		groups = append(groups, []taskSliceArtifact{slice})
+	}
+	for i := range groups {
+		parentID := strings.ToUpper(strings.TrimSpace(groups[i][0].ID))
+		children := childByParent[parentID]
+		sort.SliceStable(children, func(a, b int) bool {
+			return taskIterationOrdinal(children[a]) < taskIterationOrdinal(children[b])
+		})
+		groups[i] = append(groups[i], children...)
+		delete(childByParent, parentID)
+	}
+	var orphanParents []string
+	for parentID := range childByParent {
+		if _, ok := byID[parentID]; ok {
+			continue
+		}
+		orphanParents = append(orphanParents, parentID)
+	}
+	sort.Strings(orphanParents)
+	for _, parentID := range orphanParents {
+		children := childByParent[parentID]
+		sort.SliceStable(children, func(a, b int) bool {
+			return taskIterationOrdinal(children[a]) < taskIterationOrdinal(children[b])
+		})
+		groups = append(groups, children)
+	}
+	return groups
+}
+
+func taskSliceIsIteration(slice taskSliceArtifact) bool {
+	return strings.TrimSpace(slice.ParentID) != "" || strings.Contains(strings.TrimSpace(slice.ID), "-")
+}
+
+func taskSliceParentIDFromIteration(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+	if before, _, ok := strings.Cut(id, "-"); ok {
+		return before
+	}
+	return ""
+}
+
+func taskIterationOrdinal(slice taskSliceArtifact) int {
+	id := strings.TrimSpace(slice.ID)
+	if _, suffix, ok := strings.Cut(id, "-"); ok {
+		if ordinal, parsed := parseTaskOrdinal(suffix); parsed {
+			return ordinal
+		}
+	}
+	return 0
+}
+
+func taskDecisionAllowsSiblingAdvance(slice taskSliceArtifact) bool {
+	decision := strings.ToLower(strings.TrimSpace(slice.Decision))
+	switch decision {
+	case "promote", "complete", "completed":
+		return true
+	case "":
+		switch strings.ToLower(strings.TrimSpace(slice.Stage)) {
+		case "done", "completed":
+			return true
+		}
+	}
+	return false
+}
+
+func taskNextBlockedByDecisionError(manifest taskManifest, slice taskSliceArtifact) error {
+	decision := strings.ToLower(strings.TrimSpace(slice.Decision))
+	if decision == "" {
+		decision = strings.ToLower(strings.TrimSpace(slice.Stage))
+	}
+	taskID := strings.TrimSpace(manifest.TaskID)
+	if taskID == "" {
+		taskID = "task"
+	}
+	switch decision {
+	case "improve", "rework":
+		return fmt.Errorf("task target %s ended with %s; add or choose an iteration before advancing, for example `ds task iteration add %s \"<title>\" --slice %s --reason %s` or `ds apply %s --target %s-1`", slice.ID, decision, taskID, slice.ID, decision, taskID, slice.ID)
+	case "rollback", "rolled_back", "block", "blocked":
+		return fmt.Errorf("task target %s ended with %s; automatic next is blocked until the gate is resolved, use `ds task decide %s --target %s --decision promote` or choose an explicit target", slice.ID, decision, taskID, slice.ID)
+	default:
+		return fmt.Errorf("task target %s ended with %s; automatic next is blocked until the gate is resolved or an explicit target is chosen", slice.ID, firstNonEmptyTaskString(decision, "a terminal state"))
+	}
 }
 
 func taskTargetTerminal(slice taskSliceArtifact) bool {

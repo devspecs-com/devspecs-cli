@@ -135,12 +135,22 @@ func applyCommandLabel(identifier, selector string) string {
 }
 
 func resolveApplyNextTaskID(baseDir string) (string, error) {
-	candidates, err := findApplyNextTaskCandidates(baseDir)
+	candidates, blocked, err := findApplyNextTaskCandidates(baseDir)
 	if err != nil {
 		return "", err
 	}
 	switch len(candidates) {
 	case 0:
+		if len(blocked) == 1 {
+			return "", blocked[0]
+		}
+		if len(blocked) > 1 {
+			var labels []string
+			for _, err := range blocked {
+				labels = append(labels, err.Error())
+			}
+			return "", fmt.Errorf("multiple DevSpecs tasks are blocked from automatic next: %s; use `ds apply <task-id> --target <target>`", strings.Join(labels, "; "))
+		}
 		return "", fmt.Errorf("no non-terminal DevSpecs task targets found; run `ds task \"goal\"` or use `ds apply <task-id>`")
 	case 1:
 		return candidates[0].TaskID, nil
@@ -157,19 +167,20 @@ func resolveApplyNextTaskID(baseDir string) (string, error) {
 	}
 }
 
-func findApplyNextTaskCandidates(baseDir string) ([]applyTaskCandidate, error) {
+func findApplyNextTaskCandidates(baseDir string) ([]applyTaskCandidate, []error, error) {
 	repoRoot, err := applyRepoRoot()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var candidates []applyTaskCandidate
+	var blocked []error
 	for _, parent := range taskWorkspaceSearchParents(repoRoot, baseDir) {
 		entries, err := os.ReadDir(parent)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return nil, fmt.Errorf("read task workspaces: %w", err)
+			return nil, nil, fmt.Errorf("read task workspaces: %w", err)
 		}
 		for _, entry := range entries {
 			if !entry.IsDir() {
@@ -180,7 +191,7 @@ func findApplyNextTaskCandidates(baseDir string) ([]applyTaskCandidate, error) {
 				if os.IsNotExist(err) {
 					continue
 				}
-				return nil, err
+				return nil, nil, err
 			}
 			manifest, err := readTaskManifest(manifestPath)
 			if err != nil {
@@ -188,6 +199,9 @@ func findApplyNextTaskCandidates(baseDir string) ([]applyTaskCandidate, error) {
 			}
 			slice, err := taskNextSlice(manifest)
 			if err != nil {
+				if applyNextErrorBlocksAutomaticNext(err) {
+					blocked = append(blocked, err)
+				}
 				continue
 			}
 			taskID := strings.TrimSpace(manifest.TaskID)
@@ -207,7 +221,16 @@ func findApplyNextTaskCandidates(baseDir string) ([]applyTaskCandidate, error) {
 		}
 		return candidates[i].TaskID < candidates[j].TaskID
 	})
-	return candidates, nil
+	return candidates, blocked, nil
+}
+
+func applyNextErrorBlocksAutomaticNext(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return !strings.Contains(msg, "all task targets are terminal") &&
+		!strings.Contains(msg, "task has no slice targets")
 }
 
 func resolveApplySeriesTarget(baseDir, selector string) (string, string, error) {
@@ -220,6 +243,7 @@ func resolveApplySeriesTarget(baseDir, selector string) (string, string, error) 
 		return "", "", err
 	}
 	var matches []applyTaskCandidate
+	var blocked []error
 	for _, parent := range taskWorkspaceSearchParents(repoRoot, baseDir) {
 		entries, err := os.ReadDir(parent)
 		if err != nil {
@@ -245,6 +269,9 @@ func resolveApplySeriesTarget(baseDir, selector string) (string, string, error) 
 			}
 			slice, err := taskNextSlice(manifest)
 			if err != nil {
+				if applyNextErrorBlocksAutomaticNext(err) {
+					blocked = append(blocked, err)
+				}
 				continue
 			}
 			taskID := strings.TrimSpace(manifest.TaskID)
@@ -262,6 +289,16 @@ func resolveApplySeriesTarget(baseDir, selector string) (string, string, error) 
 	})
 	switch len(matches) {
 	case 0:
+		if len(blocked) == 1 {
+			return "", "", blocked[0]
+		}
+		if len(blocked) > 1 {
+			var labels []string
+			for _, err := range blocked {
+				labels = append(labels, err.Error())
+			}
+			return "", "", fmt.Errorf("multiple DevSpecs task series matches are blocked from automatic next: %s; use a task id with --target", strings.Join(labels, "; "))
+		}
 		return "", "", fmt.Errorf("no task series matched %q", selector)
 	case 1:
 		return matches[0].TaskID, matches[0].Target, nil
@@ -294,8 +331,7 @@ func shouldPreferApplySeriesError(identifier string, resolvedErr error) bool {
 	if !strings.HasSuffix(strings.ToUpper(identifier), "00") {
 		return false
 	}
-	return strings.Contains(resolvedErr.Error(), "task has no slice targets") ||
-		strings.Contains(resolvedErr.Error(), "target")
+	return true
 }
 
 func applyRepoRoot() (string, error) {

@@ -108,6 +108,94 @@ func TestApplyExplicitIdentifiersResolveOneTarget(t *testing.T) {
 	}
 }
 
+func TestApplyNextRespectsDecisionGateProgression(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		decision   string
+		iteration  bool
+		wantTarget string
+		wantErr    []string
+	}{
+		{name: "promote-advances-to-next-slice", decision: "promote", wantTarget: "A02"},
+		{name: "improve-selects-existing-iteration", decision: "improve", iteration: true, wantTarget: "A01-1"},
+		{name: "rework-selects-existing-iteration", decision: "rework", iteration: true, wantTarget: "A01-1"},
+		{name: "improve-without-iteration-stops-before-sibling", decision: "improve", wantErr: []string{"A01 ended with improve", "ds task iteration add", "--slice A01", "--reason improve"}},
+		{name: "rollback-blocks-automatic-next", decision: "rollback", wantErr: []string{"A01 ended with rollback", "automatic next is blocked", "choose an explicit target"}},
+		{name: "block-blocks-automatic-next", decision: "block", wantErr: []string{"A01 ended with block", "automatic next is blocked", "choose an explicit target"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupTaskCommandRepo(t)
+			taskID := "apply-gate-" + sanitizeTaskFilename(tc.name)
+			createApplyTestTask(t, taskID, "first gate slice", "second gate slice")
+			if tc.iteration {
+				addApplyTestIteration(t, taskID, "repair first gate slice", "A01", tc.decision)
+			}
+			decideApplyTestTarget(t, taskID, "A01", tc.decision)
+
+			out, err := runApplyJSON(t, []string{"next", "--json"})
+			if len(tc.wantErr) > 0 {
+				if err == nil {
+					t.Fatalf("expected apply next error, got output %#v", out)
+				}
+				for _, want := range tc.wantErr {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("apply next error missing %q: %v", want, err)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.TaskID != taskID || out.Target != tc.wantTarget {
+				t.Fatalf("apply next resolved wrong target: %#v", out)
+			}
+			if !strings.Contains(out.Prompt, "target "+tc.wantTarget+" only") {
+				t.Fatalf("apply prompt not bounded to %s:\n%s", tc.wantTarget, out.Prompt)
+			}
+		})
+	}
+}
+
+func TestApplyNextReportsCompletedTrack(t *testing.T) {
+	setupTaskCommandRepo(t)
+	taskID := "apply-completed-track"
+	createApplyTestTask(t, taskID, "only slice")
+	decideApplyTestTarget(t, taskID, "A01", "promote")
+
+	out, err := runApplyJSON(t, []string{"next", "--json"})
+	if err == nil {
+		t.Fatalf("expected completed track error, got output %#v", out)
+	}
+	if !strings.Contains(err.Error(), "no non-terminal DevSpecs task targets found") {
+		t.Fatalf("completed track error was not useful: %v", err)
+	}
+}
+
+func TestApplySeriesIndexRequiresUnambiguousTrack(t *testing.T) {
+	setupTaskCommandRepo(t)
+	createApplyTestTask(t, "apply-series-a", "first shared series")
+	createApplyTestTask(t, "apply-series-b", "second shared series")
+
+	applyCmd := NewApplyCmd()
+	applyCmd.SetArgs([]string{"A00", "--json"})
+	applyCmd.SetOut(&bytes.Buffer{})
+	err := applyCmd.Execute()
+	if err == nil {
+		t.Fatal("expected ambiguous series error")
+	}
+	for _, want := range []string{
+		"ambiguous task series",
+		"apply-series-a:A01",
+		"apply-series-b:A01",
+		"use a task id with --target",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ambiguous series error missing %q: %v", want, err)
+		}
+	}
+}
+
 func TestApplyNextRequiresUnambiguousTask(t *testing.T) {
 	setupTaskCommandRepo(t)
 
@@ -144,6 +232,76 @@ func TestApplyNextRequiresUnambiguousTask(t *testing.T) {
 			t.Fatalf("ambiguous error missing %q: %v", want, err)
 		}
 	}
+}
+
+func createApplyTestTask(t *testing.T, taskID string, slices ...string) {
+	t.Helper()
+	args := []string{
+		"--id", taskID,
+		"--series", "A",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+	}
+	for _, slice := range slices {
+		args = append(args, "--slice", slice)
+	}
+	args = append(args, "apply gate workflow")
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs(args)
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func addApplyTestIteration(t *testing.T, taskID, title, parent, reason string) {
+	t.Helper()
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"iteration", "add", taskID, title,
+		"--slice", parent,
+		"--reason", reason,
+		"--index=false",
+		"--json",
+	})
+	cmd.SetOut(&bytes.Buffer{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func decideApplyTestTarget(t *testing.T, taskID, target, decision string) {
+	t.Helper()
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"decide", taskID,
+		"--target", target,
+		"--decision", decision,
+		"--index=false",
+		"--json",
+	})
+	cmd.SetOut(&bytes.Buffer{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runApplyJSON(t *testing.T, args []string) (applyPromptOutput, error) {
+	t.Helper()
+	applyCmd := NewApplyCmd()
+	applyCmd.SetArgs(args)
+	buf := &bytes.Buffer{}
+	applyCmd.SetOut(buf)
+	err := applyCmd.Execute()
+	if err != nil {
+		return applyPromptOutput{}, err
+	}
+	var out applyPromptOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("apply json: %v\n%s", err, buf.String())
+	}
+	return out, nil
 }
 
 func TestApplyExplicitSliceRequiresUnambiguousTarget(t *testing.T) {

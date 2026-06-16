@@ -5,7 +5,7 @@
   "query": "v1.1 agent tooling init and apply loop surfaces",
   "status": "packed",
   "created_at": "2026-06-16T08:10:03Z",
-  "updated_at": "2026-06-16T16:33:42Z",
+  "updated_at": "2026-06-16T17:31:02Z",
   "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
   "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/v1-1-agent-tooling-apply-loop",
   "artifacts": {
@@ -71,7 +71,13 @@
         "title": "Validate apply loop respects series index slice iteration and decision gates",
         "plan": "J05-validate-apply-loop-respects-series-index-slice-plan.md",
         "result": "J05-validate-apply-loop-respects-series-index-slice-result.md",
-        "kind": "slice"
+        "kind": "slice",
+        "stage": "validated",
+        "decision": "promote",
+        "updated_at": "2026-06-16T17:31:02Z",
+        "latest_checkpoint_id": "cp_20260616T173102Z_j05_validated",
+        "latest_checkpoint": "checkpoints/20260616-173102-validated.md",
+        "latest_checkpoint_json": "checkpoints/20260616-173102-validated.json"
       }
     ]
   },
