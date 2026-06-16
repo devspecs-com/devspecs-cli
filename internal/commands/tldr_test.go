@@ -25,8 +25,9 @@ func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 		"ds task checkpoint <task-id> --target <target>",
 		"Workflow commands refresh the local index by default",
 		"If the work item is known, start with ds task or ds task quick",
-		"Use ds map or ds find first when you are still discovering repo intent",
+		"Use ds recent or ds find first when you are still discovering recent activity",
 		"ds list",
+		"ds recent",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("tldr output missing %q:\n%s", want, out)

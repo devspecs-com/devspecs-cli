@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1292,6 +1293,90 @@ func TestMapRecentTextAvoidsTaskStatusClaims(t *testing.T) {
 		if strings.Contains(text, notWant) {
 			t.Fatalf("recent output made task-status claim %q:\n%s", notWant, text)
 		}
+	}
+}
+
+func TestRecentCommandShowsRecentTopics(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	t.Setenv("DEVSPECS_HOME", t.TempDir())
+	mustMkdirAll(t, filepath.Join(repoRoot, "internal", "security"))
+	mustWriteFile(t, filepath.Join(repoRoot, "internal", "security", "credentials.go"), "package security\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "internal", "security", "credentials_test.go"), "package security\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "feat: credentials rotation context")
+
+	cmd := NewRecentCmd()
+	cmd.SetArgs([]string{"--path", repoRoot, "--no-refresh"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	text := buf.String()
+	for _, want := range []string{
+		"Recently active topics",
+		"Credentials Rotation",
+		"Try: ds find",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("recent output missing %q:\n%s", want, text)
+		}
+	}
+
+	jsonCmd := NewRecentCmd()
+	jsonCmd.SetArgs([]string{"credentials", "--path", repoRoot, "--no-refresh", "--json"})
+	jsonBuf := &bytes.Buffer{}
+	jsonCmd.SetOut(jsonBuf)
+	if err := jsonCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out mapRecentOutput
+	if err := json.Unmarshal(jsonBuf.Bytes(), &out); err != nil {
+		t.Fatalf("recent json: %v\n%s", err, jsonBuf.String())
+	}
+	if out.Schema != mapRecentSchemaVersion || len(out.Topics) != 1 {
+		t.Fatalf("recent json output = %#v", out)
+	}
+	if !strings.Contains(out.Topics[0].Query, "credentials") {
+		t.Fatalf("recent topic query = %q", out.Topics[0].Query)
+	}
+}
+
+func TestMapRecentFlagRemainsCompatibilityPath(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	t.Setenv("DEVSPECS_HOME", t.TempDir())
+	mustMkdirAll(t, filepath.Join(repoRoot, "internal", "billing"))
+	mustWriteFile(t, filepath.Join(repoRoot, "internal", "billing", "refunds.go"), "package billing\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "fix: refund retry receipts")
+
+	cmd := NewMapCmd()
+	cmd.SetArgs([]string{"--recent", "--path", repoRoot, "--no-refresh"})
+	buf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(errBuf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	text := buf.String()
+	if !strings.Contains(text, "Recently active topics") || !strings.Contains(text, "Refund Retry") {
+		t.Fatalf("map --recent compatibility output missing recent topics:\nstdout:\n%s\nstderr:\n%s", text, errBuf.String())
+	}
+}
+
+func mapTestGit(t *testing.T, repoRoot string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repoRoot
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=test@test.com",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
 	}
 }
 

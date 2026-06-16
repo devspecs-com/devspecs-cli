@@ -25,8 +25,8 @@ func newRootCmd() *cobra.Command {
 assigns stable IDs, and makes them easy to reference from agents, PRs,
 issues, and future workflows.
 
-Brownfield: scan, map, and find existing plans, specs, ADRs, and other intent
-artifacts so humans and agents can recover the right context.
+Brownfield: scan, recent, map, and find existing plans, specs, ADRs, and other
+intent artifacts so humans and agents can recover the right context.
 
 Greenfield: create bounded task workspaces with packed source/test context,
 slice prompts, checkpoints, and audit output for AI-assisted coding work.
@@ -42,6 +42,7 @@ document text, or raw queries. Disable with DEVSPECS_TELEMETRY=0.`,
 	rootCmd.AddCommand(commands.NewListCmd())
 	rootCmd.AddCommand(commands.NewShowCmd())
 	rootCmd.AddCommand(commands.NewFindCmd())
+	rootCmd.AddCommand(commands.NewRecentCmd())
 	rootCmd.AddCommand(commands.NewMapCmd())
 	rootCmd.AddCommand(commands.NewTaskCmd())
 	rootCmd.AddCommand(commands.NewTLDRCmd())

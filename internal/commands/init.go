@@ -153,7 +153,7 @@ func runInit(cmd *cobra.Command, force, hooks, noDetect, yes, nonInteractive boo
 	}
 
 	fmt.Fprintln(cmd.OutOrStdout(), "\nNext:")
-	fmt.Fprintln(cmd.OutOrStdout(), "  ds map")
+	fmt.Fprintln(cmd.OutOrStdout(), "  ds recent")
 	fmt.Fprintln(cmd.OutOrStdout(), "  ds find \"<topic>\"")
 	fmt.Fprintln(cmd.OutOrStdout(), "  ds task quick \"<small change>\"")
 	fmt.Fprintln(cmd.OutOrStdout(), "\nManual refresh:")

@@ -16,7 +16,7 @@ one bounded target, read the relevant artifacts, checkpoint actual evidence, and
 stop at the decision gate.
 
 This example starts with `ds task` because the work item is already known. In a
-brownfield repo where the target is unclear, start with `ds map` or `ds find`,
+brownfield repo where the target is unclear, start with `ds recent` or `ds find`,
 then switch to `ds task` once the execution target is concrete.
 
 DevSpecs does not replace canonical repo plans. Existing `PLAN-*` files, ADRs,
@@ -231,5 +231,5 @@ Out-of-scope sibling targets: A01
 - `ds task next` promotes the workflow to the next slice only.
 
 This is a small synthetic example. It is not a broad retrieval benchmark. In a
-real brownfield repo, use `ds find` and `ds map` to route to the current owner
+real brownfield repo, use `ds find` and `ds recent` to route to the current owner
 decision docs, then use `devspecs/tasks/*` for bounded execution and receipts.

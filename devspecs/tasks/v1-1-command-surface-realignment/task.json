@@ -5,7 +5,7 @@
   "query": "v1.1 command surface realignment: task-first launch story, ds recent, and real architecture map",
   "status": "packed",
   "created_at": "2026-06-16T08:09:52Z",
-  "updated_at": "2026-06-16T08:22:53Z",
+  "updated_at": "2026-06-16T08:49:10Z",
   "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
   "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/v1-1-command-surface-realignment",
   "artifacts": {
@@ -19,7 +19,13 @@
         "title": "Rename current ds map orientation flow to ds recent with compatibility and docs",
         "plan": "I01-rename-current-ds-map-orientation-flow-to-ds-rec-plan.md",
         "result": "I01-rename-current-ds-map-orientation-flow-to-ds-rec-result.md",
-        "kind": "slice"
+        "kind": "slice",
+        "stage": "validated",
+        "decision": "promote",
+        "updated_at": "2026-06-16T08:47:31Z",
+        "latest_checkpoint_id": "cp_20260616T084731Z_i01_validated",
+        "latest_checkpoint": "checkpoints/20260616-084731-validated.md",
+        "latest_checkpoint_json": "checkpoints/20260616-084731-validated.json"
       },
       {
         "id": "I02",

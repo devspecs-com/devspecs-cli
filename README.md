@@ -88,8 +88,9 @@ ds tldr incident --json
 
 If the work item is already known, start with `ds task` or `ds task quick`.
 Task creation refreshes the local index and packs source, test, docs, and
-receipt context for the generated slice. Use `ds map` or `ds find` first when
-the agent is still discovering repo intent, current plans, or likely scope.
+receipt context for the generated slice. Use `ds recent` or `ds find` first
+when the agent is still discovering recent activity, repo intent, current
+plans, or likely scope.
 
 ## Intent artifacts and task workspaces
 
@@ -153,23 +154,24 @@ transcript generated from current CLI output.
 
 ## Brownfield: recover existing intent
 
-Use scan/map/find when a repo already has plans, PRDs, RFCs, ADRs, specs,
-runbooks, eval cards, or agent notes, but they are hard to find or hand to an
-agent. Once the target is known, switch to `ds task` for bounded execution;
-`ds task` packs context again for the actual slice.
+Use scan/recent/find when a repo already has plans, PRDs, RFCs, ADRs, specs,
+runbooks, eval cards, recent commits, or agent notes, but they are hard to find
+or hand to an agent. Once the target is known, switch to `ds task` for bounded
+execution; `ds task` packs context again for the actual slice.
 
 ```bash
 ds init
-ds map
+ds recent
 ds find "oauth redirect"
 ds context <id>
 ```
 
-`ds map`, `ds find`, and `ds context` refresh the local index as needed. `ds map`
-summarizes useful repo areas and follow-up context commands. `ds find` groups
-source, tests, docs, receipts, and exclusions into an agent-readable context
-pack by default. Use `ds find --plain` when you want the older flat ranked
-result list. Use `ds scan` when you want an explicit manual refresh or rebuild.
+`ds recent`, `ds find`, and `ds context` refresh the local index as needed.
+`ds recent` summarizes recently active local git topics and follow-up context
+commands. `ds find` groups source, tests, docs, receipts, and exclusions into
+an agent-readable context pack by default. Use `ds find --plain` when you want
+the older flat ranked result list. Use `ds scan` when you want an explicit
+manual refresh or rebuild.
 
 `ds find` is a routing layer, not a replacement for owner decision docs. When it
 surfaces a current decision memo, north-star doc, or `Status: next` plan, read
@@ -200,6 +202,7 @@ Source files remain authoritative. DevSpecs stores derived index state locally.
 | --- | --- |
 | `ds init` | Create local index state and repo config. |
 | `ds scan` | Manually refresh or rebuild configured intent-artifact paths. |
+| `ds recent` | Show recently active local git topics and useful follow-up context commands. |
 | `ds map` | Summarize repo areas and useful follow-up context commands. |
 | `ds find <query>` | Build agent-readable packed context. |
 | `ds find --plain <query>` | Show the older flat ranked result list. |

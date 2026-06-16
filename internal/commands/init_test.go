@@ -67,7 +67,7 @@ func TestInit_CreatesRepoConfig(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Next:",
-		"ds map",
+		"ds recent",
 		`ds find "<topic>"`,
 		`ds task quick "<small change>"`,
 		"Manual refresh:",

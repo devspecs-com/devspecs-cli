@@ -1,0 +1,98 @@
+{
+  "schema_version": 2,
+  "checkpoint_id": "cp_20260616T084731Z_i01_validated",
+  "task_id": "v1-1-command-surface-realignment",
+  "target": "I01",
+  "series": "I",
+  "query": "v1.1 command surface realignment: task-first launch story, ds recent, and real architecture map",
+  "slice": "I01",
+  "slice_title": "Rename current ds map orientation flow to ds recent with compatibility and docs",
+  "parent_slice": "I01",
+  "stage": "validated",
+  "decision": "promote",
+  "created_at": "2026-06-16T08:47:31Z",
+  "goal": "Record progress for `v1.1 command surface realignment: task-first launch story, ds recent, and real architecture map`.",
+  "description": "Added ds recent as the first-class recent-activity orientation command and hid/deprecated ds map --recent as a compatibility path.",
+  "resources": [
+    "../I00-index.md",
+    "../I01-rename-current-ds-map-orientation-flow-to-ds-rec-plan.md",
+    "../I01-rename-current-ds-map-orientation-flow-to-ds-rec-result.md",
+    "../task.json"
+  ],
+  "files_read": [
+    "internal/commands/map.go",
+    "internal/commands/map_test.go",
+    "internal/commands/tldr.go",
+    "README.md"
+  ],
+  "files_edited": [
+    "cmd/ds/main.go",
+    "internal/commands/map.go",
+    "internal/commands/map_test.go",
+    "internal/commands/tldr.go",
+    "internal/commands/tldr_test.go",
+    "internal/commands/init.go",
+    "internal/commands/init_test.go",
+    "internal/commands/resume.go",
+    "internal/commands/v01_test.go",
+    "README.md",
+    "TASK_WORKFLOW_EXAMPLE.md"
+  ],
+  "tests_run": [
+    "go test ./internal/commands -run TestRecentCommandShowsRecentTopics|TestMapRecentFlagRemainsCompatibilityPath|TestMapRecentTextAvoidsTaskStatusClaims|TestTLDR_HumanOutputGroupsWorkflows|TestInitCreatesConfig|TestResume_EmptyRepoGuidance -count=1",
+    "go run ./cmd/ds --help",
+    "go run ./cmd/ds recent --no-refresh --max-areas 2",
+    "go run ./cmd/ds map --help"
+  ],
+  "actual_context": {
+    "files_read": [
+      "internal/commands/map.go",
+      "internal/commands/map_test.go",
+      "internal/commands/tldr.go",
+      "README.md"
+    ],
+    "files_edited": [
+      "cmd/ds/main.go",
+      "internal/commands/map.go",
+      "internal/commands/map_test.go",
+      "internal/commands/tldr.go",
+      "internal/commands/tldr_test.go",
+      "internal/commands/init.go",
+      "internal/commands/init_test.go",
+      "internal/commands/resume.go",
+      "internal/commands/v01_test.go",
+      "README.md",
+      "TASK_WORKFLOW_EXAMPLE.md"
+    ],
+    "tests_run": [
+      "go test ./internal/commands -run TestRecentCommandShowsRecentTopics|TestMapRecentFlagRemainsCompatibilityPath|TestMapRecentTextAvoidsTaskStatusClaims|TestTLDR_HumanOutputGroupsWorkflows|TestInitCreatesConfig|TestResume_EmptyRepoGuidance -count=1",
+      "go run ./cmd/ds --help",
+      "go run ./cmd/ds recent --no-refresh --max-areas 2",
+      "go run ./cmd/ds map --help"
+    ]
+  },
+  "predicted_context_feedback": {},
+  "evidence": {
+    "plan_refs": [
+      "../I00-index.md",
+      "../I01-rename-current-ds-map-orientation-flow-to-ds-rec-plan.md",
+      "../I01-rename-current-ds-map-orientation-flow-to-ds-rec-result.md",
+      "../task.json"
+    ]
+  },
+  "learnings": [
+    {
+      "learning_type": "command_surface",
+      "summary": "Recent local git orientation is now a first-class ds recent command; ds map --recent remains hidden/deprecated compatibility until map is reclaimed.",
+      "evidence_refs": [
+        "internal/commands/map.go"
+      ],
+      "applies_to": "I01",
+      "confidence": "high"
+    }
+  ],
+  "next": {
+    "recommended_target": "I02",
+    "recommended_decision": "promote"
+  }
+}

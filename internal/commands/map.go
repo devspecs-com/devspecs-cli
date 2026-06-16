@@ -136,6 +136,53 @@ func NewMapCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&boundary, "experimental-boundaries", false, "Build the map from path-primary system boundary candidates")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	cmd.Flags().IntVar(&maxAreas, "max-areas", mapDefaultMaxAreas, "Maximum areas to show")
+	_ = cmd.Flags().MarkHidden("recent")
+	_ = cmd.Flags().MarkDeprecated("recent", "use `ds recent` instead")
+	return cmd
+}
+
+// NewRecentCmd creates the ds recent command.
+func NewRecentCmd() *cobra.Command {
+	var (
+		path      string
+		asJSON    bool
+		verbose   bool
+		noRefresh bool
+		maxAreas  int
+	)
+
+	cmd := &cobra.Command{
+		Use:   "recent [topic]",
+		Short: "Show recently active local git topics and follow-up context commands",
+		Long: `Show recently active topics from local git history.
+
+Use this as a diagnostic/evidence layer when you need to see what changed
+recently before choosing a task or context query. Once the target is known,
+use ds task for bounded execution or ds find for an agent-readable context
+pack.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			areaQuery := ""
+			if len(args) > 0 {
+				areaQuery = args[0]
+			}
+			return runRecent(cmd, mapOptions{
+				Path:      path,
+				AreaQuery: areaQuery,
+				JSON:      asJSON,
+				Verbose:   verbose,
+				Recent:    true,
+				NoRefresh: noRefresh,
+				MaxAreas:  maxAreas,
+			})
+		},
+	}
+
+	cmd.Flags().StringVar(&path, "path", ".", "Repository path to inspect")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
+	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show diagnostics and extra evidence")
+	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
+	cmd.Flags().IntVar(&maxAreas, "max-areas", mapDefaultMaxAreas, "Maximum topics to show")
 	return cmd
 }
 
@@ -1470,6 +1517,44 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 		return nil
 	}
 	writeMapText(cmd.OutOrStdout(), out, opts.Verbose)
+	return nil
+}
+
+func runRecent(cmd *cobra.Command, opts mapOptions) error {
+	start := time.Now()
+	success := false
+	props := map[string]any{
+		"json":       opts.JSON,
+		"verbose":    opts.Verbose,
+		"no_refresh": opts.NoRefresh,
+		"max_areas":  opts.MaxAreas,
+		"area_query": opts.AreaQuery != "",
+	}
+	defer func() {
+		telemetry.RecordCommand("recent", success, time.Since(start), props)
+	}()
+
+	if opts.MaxAreas <= 0 {
+		opts.MaxAreas = mapDefaultMaxAreas
+	}
+	repoRoot, err := resolveRepoRoot(opts.Path)
+	if err != nil {
+		return err
+	}
+	if !opts.NoRefresh {
+		if err := ensureMapRepoIndexed(cmd, repoRoot); err != nil {
+			return err
+		}
+	}
+	out := buildMapRecentOutput(cmd.Context(), repoRoot, opts)
+	success = true
+	props["recent_topic_count_bucket"] = telemetry.CountBucket(len(out.Topics))
+	if opts.JSON {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	writeMapRecentText(cmd.OutOrStdout(), out, opts.Verbose)
 	return nil
 }
 
