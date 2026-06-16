@@ -264,11 +264,15 @@ type taskSyncOutput struct {
 }
 
 type taskArtifactFreshness struct {
-	Path           string `json:"path"`
-	Kind           string `json:"kind,omitempty"`
-	ModifiedAt     string `json:"modified_at"`
-	StateUpdatedAt string `json:"state_updated_at"`
-	Reason         string `json:"reason"`
+	Path                 string `json:"path"`
+	Kind                 string `json:"kind,omitempty"`
+	ModifiedAt           string `json:"modified_at"`
+	StateUpdatedAt       string `json:"state_updated_at"`
+	LastTaskStateAt      string `json:"last_task_state_at,omitempty"`
+	TaskJSONState        string `json:"task_json_state,omitempty"`
+	ArtifactCaptureState string `json:"artifact_capture_state,omitempty"`
+	NextCommand          string `json:"next_command,omitempty"`
+	Reason               string `json:"reason"`
 }
 
 type taskArtifactRefresh struct {
@@ -1414,10 +1418,7 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 		fmt.Fprintf(out, "Latest Checkpoint JSON: %s\n", status.LatestCheckpointJSON)
 	}
 	if len(status.ArtifactFreshness) > 0 {
-		fmt.Fprintln(out, "Stale task artifacts:")
-		for _, warning := range status.ArtifactFreshness {
-			fmt.Fprintf(out, "  - %s changed after task state; run `ds task refresh %s`.\n", warning.Path, status.TaskID)
-		}
+		writeTaskArtifactFreshnessHuman(out, status.TaskID, status.ArtifactFreshness)
 	}
 	for _, slice := range status.Slices {
 		fmt.Fprintf(out, "%s: %s", slice.ID, slice.Title)
@@ -1442,6 +1443,25 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 		fmt.Fprintln(out)
 	}
 	return nil
+}
+
+func writeTaskArtifactFreshnessHuman(out io.Writer, taskID string, warnings []taskArtifactFreshness) {
+	if len(warnings) == 0 {
+		return
+	}
+	fmt.Fprintln(out, "Task artifact capture refresh needed:")
+	for _, warning := range warnings {
+		next := strings.TrimSpace(warning.NextCommand)
+		if next == "" {
+			next = "ds task refresh " + taskID
+		}
+		fmt.Fprintf(out, "  - %s was edited after the last task state/capture timestamp", warning.Path)
+		if warning.StateUpdatedAt != "" {
+			fmt.Fprintf(out, " (%s)", warning.StateUpdatedAt)
+		}
+		fmt.Fprintln(out, ".")
+		fmt.Fprintf(out, "    task.json lifecycle state is still usable; run `%s` to recapture edited docs without rewriting them.\n", next)
+	}
 }
 
 func runTaskDecide(cmd *cobra.Command, taskID string, opts taskDecideOptions) error {
@@ -1748,10 +1768,7 @@ func writeTaskTargetHuman(out io.Writer, title string, target taskTargetOutput, 
 		fmt.Fprintf(out, "Out-of-scope sibling targets: %s\n", strings.Join(target.SiblingTargets, ", "))
 	}
 	if len(target.ArtifactFreshness) > 0 {
-		fmt.Fprintln(out, "Stale task artifacts:")
-		for _, warning := range target.ArtifactFreshness {
-			fmt.Fprintf(out, "  - %s changed after task state; run `ds task refresh %s`.\n", warning.Path, target.TaskID)
-		}
+		writeTaskArtifactFreshnessHuman(out, target.TaskID, target.ArtifactFreshness)
 	}
 	if includePlanBody && target.PlanBody != "" {
 		fmt.Fprintln(out)
@@ -5455,12 +5472,17 @@ func taskArtifactFreshnessWarnings(workspace string, manifest taskManifest) []ta
 		if !modified.After(stateTime.Add(2 * time.Second)) {
 			continue
 		}
+		nextCommand := "ds task refresh " + manifest.TaskID
 		warnings = append(warnings, taskArtifactFreshness{
-			Path:           relPath,
-			Kind:           candidate.Kind,
-			ModifiedAt:     modified.Format(time.RFC3339),
-			StateUpdatedAt: stateText,
-			Reason:         "task artifact changed after the task state was last captured; run ds task refresh",
+			Path:                 relPath,
+			Kind:                 candidate.Kind,
+			ModifiedAt:           modified.Format(time.RFC3339),
+			StateUpdatedAt:       stateText,
+			LastTaskStateAt:      stateText,
+			TaskJSONState:        "current",
+			ArtifactCaptureState: "needs_refresh",
+			NextCommand:          nextCommand,
+			Reason:               "captured task artifact is newer than task.json's last state/capture timestamp; task.json lifecycle state is still usable; refresh recaptures edited docs without rewriting them",
 		})
 	}
 	return warnings

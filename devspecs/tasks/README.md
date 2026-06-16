@@ -22,6 +22,16 @@ This folder holds versionable intent artifacts for launch-facing and post-launch
 
 Fix local trust and workflow smoothness before adding extensibility. Profiles should come before domain extractors, and both should come before any public gallery or publishing surface.
 
+## Launch Priority Stack
+
+Use this list to reconstruct the current cross-track order. For each track, run `ds task next <track>` to get the bounded slice.
+
+1. `B` / `task-freshness-sync-trust`: finish stale-warning clarity before relying on task state across more dogfood.
+2. `I` / `v1-1-command-surface-realignment`: split `ds recent` from architecture `ds map`, then update launch copy and result contracts.
+3. `F` / `brownfield-active-intent-ranking`: make active decision docs and exact plan IDs trustworthy enough for the diagnostic layer.
+4. `J` / `v1-1-agent-tooling-apply-loop`: add agent setup and prompt-only apply loops after command semantics are stable.
+5. `K` / `v1-1-release-readiness-tag-gate`: smoke, docs, and tag `v1.1.0` only after the prerequisite gates pass.
+
 ## ScopeLab Dogfood Placement
 
 - `A02` owns docs/onboarding polish: `ds tldr` first, two-layer PLAN/spec-to-task model, and launch docs language.

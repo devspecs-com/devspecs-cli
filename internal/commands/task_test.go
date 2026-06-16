@@ -1779,6 +1779,37 @@ func TestTask_StatusWarnsAndSyncRecapturesEditedArtifacts(t *testing.T) {
 	if !taskArtifactFreshnessContainsPath(statusOut.ArtifactFreshness, "A01-improve-test-companion-recall-plan.md") {
 		t.Fatalf("expected stale plan warning, got %#v", statusOut.ArtifactFreshness)
 	}
+	freshness := taskArtifactFreshnessByPath(statusOut.ArtifactFreshness, "A01-improve-test-companion-recall-plan.md")
+	if freshness == nil {
+		t.Fatalf("expected freshness warning, got %#v", statusOut.ArtifactFreshness)
+	}
+	if freshness.TaskJSONState != "current" || freshness.ArtifactCaptureState != "needs_refresh" {
+		t.Fatalf("freshness states did not distinguish lifecycle and capture freshness: %#v", freshness)
+	}
+	if freshness.NextCommand != "ds task refresh sync-freshness-test" {
+		t.Fatalf("freshness next command = %q", freshness.NextCommand)
+	}
+
+	humanStatusCmd := NewTaskCmd()
+	humanStatusCmd.SetArgs([]string{"status", "sync-freshness-test"})
+	humanStatusBuf := &bytes.Buffer{}
+	humanStatusCmd.SetOut(humanStatusBuf)
+	if err := humanStatusCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	humanStatus := humanStatusBuf.String()
+	for _, want := range []string{
+		"Task artifact capture refresh needed:",
+		"task.json lifecycle state is still usable",
+		"ds task refresh sync-freshness-test",
+	} {
+		if !strings.Contains(humanStatus, want) {
+			t.Fatalf("human status missing %q:\n%s", want, humanStatus)
+		}
+	}
+	if strings.Contains(humanStatus, "changed after task state") {
+		t.Fatalf("human status should separate lifecycle state from capture freshness:\n%s", humanStatus)
+	}
 
 	syncCmd := NewTaskCmd()
 	syncCmd.SetArgs([]string{"sync", "sync-freshness-test", "--json"})
@@ -2693,13 +2724,18 @@ func taskWarningsContainPath(warnings []taskFreshnessWarning, want string) bool 
 }
 
 func taskArtifactFreshnessContainsPath(warnings []taskArtifactFreshness, want string) bool {
+	return taskArtifactFreshnessByPath(warnings, want) != nil
+}
+
+func taskArtifactFreshnessByPath(warnings []taskArtifactFreshness, want string) *taskArtifactFreshness {
 	want = filepath.ToSlash(want)
-	for _, warning := range warnings {
+	for i := range warnings {
+		warning := &warnings[i]
 		if filepath.ToSlash(warning.Path) == want {
-			return true
+			return warning
 		}
 	}
-	return false
+	return nil
 }
 
 func taskArtifactRefreshContainsPath(artifacts []taskArtifactRefresh, want string) bool {
