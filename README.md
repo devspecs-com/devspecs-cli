@@ -156,18 +156,27 @@ transcript generated from current CLI output.
 
 ## Diagnostics: recover existing intent
 
-Use map/recent/find when a repo already has plans, PRDs, RFCs, ADRs, specs,
-runbooks, eval cards, recent commits, or agent notes, but the target is unclear
-or needs a trust check. Once the target is known, switch to `ds task` for
-bounded execution; `ds task` packs context again for the actual slice.
+When a repo already has plans, PRDs, RFCs, ADRs, specs, runbooks, eval cards,
+recent commits, or agent notes, the fastest path is still `ds task` if the work
+is actionable. Task creation refreshes the index and packs source, test, docs,
+and owner-artifact context for the slice.
 
 ```bash
 ds init
+ds task "Serve Swagger UI OAuth2 redirect from a custom docs redirect URL"
+ds task show A01
+ds task prompt A01
+```
+
+Use map/recent/find/context as the trust layer around the task when the target
+is unclear, when you need to recover owner intent, or when stale history might
+confuse the agent.
+
+```bash
 ds map
 ds recent
 ds find "oauth redirect"
 ds context <id>
-ds task "Serve Swagger UI OAuth2 redirect from a custom docs redirect URL"
 ```
 
 `ds map`, `ds recent`, `ds find`, and `ds context` refresh the local index as
@@ -180,8 +189,8 @@ refresh or rebuild.
 
 `ds find` is a routing layer, not a replacement for owner decision docs. When it
 surfaces a current decision memo, north-star doc, or `Status: next` plan, read
-that artifact before asking an agent to implement. Diagnostics are optional for
-known work; they are there to build trust when scope is unclear.
+that artifact while creating or continuing the bounded task. Diagnostics are
+optional for known work; they are there to build trust when scope is unclear.
 
 `ds adopt` is planned, not shipped. Current brownfield workflows scan and query
 existing artifacts in place without mutating old files.

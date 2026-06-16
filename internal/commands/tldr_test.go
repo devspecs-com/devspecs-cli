@@ -23,9 +23,9 @@ func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 		"## Brownfield Intent Recovery (`brownfield`)",
 		"ds task quick",
 		"ds task checkpoint <task-id> --target <target>",
-		"Default to ds task for known work",
+		"Fastest path for known work",
 		"Workflow commands refresh the local index by default",
-		"Use ds map, ds recent, and ds find as diagnostic/evidence tools",
+		"Use ds map, ds recent, ds find, and ds context as diagnostic/evidence tools around a task",
 		"Record the completion contract with checkpoint/finish",
 		"ds map",
 		"ds recent",
@@ -39,6 +39,11 @@ func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 		if strings.Contains(out, notWant) {
 			t.Fatalf("tldr output should not advertise %q:\n%s", notWant, out)
 		}
+	}
+	taskIndex := strings.Index(out, "`ds task \"implement <bounded target>\"`")
+	mapIndex := strings.Index(out, "`ds map`")
+	if taskIndex < 0 || mapIndex < 0 || taskIndex > mapIndex {
+		t.Fatalf("brownfield workflow should put ds task before diagnostics:\n%s", out)
 	}
 }
 

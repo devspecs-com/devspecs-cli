@@ -54,3 +54,20 @@
   - `go run ./cmd/ds --help`
   - `go run ./cmd/ds tldr`
   - `go run ./cmd/ds task --help`
+
+### Checkpoint
+- Created At: 2026-06-16T13:17:30Z
+- Stage: validated
+- Decision: promote
+- Source: `checkpoints/20260616-131730-validated.md`
+- Structured Evidence: `checkpoints/20260616-131730-validated.json`
+- What changed: Refined the launch-story placement so brownfield workflows show ds task immediately after init when work is actionable, with map/recent/find/context positioned as optional trust checks around the task instead of a mandatory preflight.
+- Evidence for decision: 3 file(s) edited; 1 test command(s)
+- What remains: -
+- Next iteration: promote to the next slice
+- Files edited:
+  - `internal/commands/tldr.go`
+  - `internal/commands/tldr_test.go`
+  - `README.md`
+- Tests run:
+  - `go test ./cmd/ds ./internal/commands -run TestRootCmd_TLDRRegistered|TestTLDR_HumanOutputGroupsWorkflows|TestTLDR_FilterAndJSON|TestTLDR_UnknownWorkflowErrorsWithValidIDs -count=1`
