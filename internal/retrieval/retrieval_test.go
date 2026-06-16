@@ -1735,6 +1735,59 @@ func TestWeightedFilesRetrieverV0_AuthorityPriorRanksCanonicalCurrentArtifacts(t
 	}
 }
 
+func TestWeightedFilesRetrieverV0_RanksActiveIntentAboveBlockedHistoricalPlan(t *testing.T) {
+	query := "epoch 4 external validity bridge"
+	candidates := []Candidate{
+		{
+			Path:   "docs/plans/D4.2-blocked-external-validity-bridge.md",
+			Kind:   "plan",
+			Title:  "D4.2 blocked external validity bridge",
+			Status: "blocked",
+			Body:   "Status: blocked\nExternal validity bridge plan from an older epoch.",
+		},
+		{
+			Path:   "docs/notes/next_epoch_decision_memo.md",
+			Kind:   "plan",
+			Title:  "Epoch 4 external validity bridge decision memo",
+			Status: "next",
+			Body:   "Status: next\nOwner decision: Epoch 4 external validity bridge is the active work.",
+		},
+		{
+			Path:  "docs/north_star.md",
+			Kind:  "plan",
+			Title: "Research north star",
+			Body:  "Active phase: Epoch 4 external validity bridge. Route current implementation slices here.",
+		},
+		{
+			Path:  "docs/plans/PLAN-008.1-synthetic-repo-world.md",
+			Kind:  "plan",
+			Title: "PLAN-008.1 synthetic repo world",
+			Body:  "Historical external validity analogy for synthetic repo world experiments.",
+		},
+	}
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, query)
+	if len(got) == 0 {
+		t.Fatal("expected matches")
+	}
+	topTwo := CandidatePaths(got)
+	if len(topTwo) > 2 {
+		topTwo = topTwo[:2]
+	}
+	if !containsString(topTwo, "docs/notes/next_epoch_decision_memo.md") || !containsString(topTwo, "docs/north_star.md") {
+		t.Fatalf("active decision docs should outrank historical plans, got %#v", CandidatePaths(got))
+	}
+	blockedIndex := candidatePathIndex(got, "docs/plans/D4.2-blocked-external-validity-bridge.md")
+	activeIndex := candidatePathIndex(got, "docs/notes/next_epoch_decision_memo.md")
+	if blockedIndex >= 0 && activeIndex >= 0 && blockedIndex < activeIndex {
+		t.Fatalf("blocked historical plan outranked active intent: %#v", CandidatePaths(got))
+	}
+	reasons := ExplainCandidates([]Candidate{candidates[1]}, query)
+	if len(reasons) == 0 || !reasonContains(reasons[0].Reasons, "authority prior: owner decision record") {
+		t.Fatalf("missing owner decision authority reason: %#v", reasons)
+	}
+}
+
 func TestExplainCandidatesIncludesAuthorityPriorReason(t *testing.T) {
 	candidates := []Candidate{
 		{

@@ -706,7 +706,7 @@ func isStaleArchiveCandidate(c Candidate) bool {
 	if isActivePackStatus(statusLower) {
 		return false
 	}
-	if containsAny(statusLower, "archived", "deprecated", "superseded", "obsolete", "stale") {
+	if containsAny(statusLower, "archived", "deprecated", "superseded", "obsolete", "stale", "blocked", "closed", "cancelled", "canceled", "abandoned", "rejected") {
 		return true
 	}
 	for _, value := range []string{
@@ -715,7 +715,7 @@ func isStaleArchiveCandidate(c Candidate) bool {
 		packMetadataValue(c, "lifecycle"),
 		packMetadataValue(c, "status"),
 	} {
-		if containsAny(strings.ToLower(value), "archived", "deprecated", "superseded", "obsolete", "stale") {
+		if containsAny(strings.ToLower(value), "archived", "deprecated", "superseded", "obsolete", "stale", "blocked", "closed", "cancelled", "canceled", "abandoned", "rejected") {
 			return true
 		}
 	}
@@ -740,7 +740,7 @@ func hasExplicitStalePathOrStatus(c Candidate) bool {
 	if isActivePackStatus(statusLower) {
 		return false
 	}
-	if containsAny(statusLower, "archived", "deprecated", "superseded", "obsolete", "stale") {
+	if containsAny(statusLower, "archived", "deprecated", "superseded", "obsolete", "stale", "blocked", "closed", "cancelled", "canceled", "abandoned", "rejected") {
 		return true
 	}
 	pathLower := strings.ToLower(filepath.ToSlash(c.Path))
@@ -760,12 +760,7 @@ func hasExplicitStalePathOrStatus(c Candidate) bool {
 }
 
 func isActivePackStatus(statusLower string) bool {
-	switch statusLower {
-	case "active", "accepted", "approved", "current", "implementing", "in_progress", "in-progress", "proposed":
-		return true
-	default:
-		return false
-	}
+	return isActiveIntentStatus(statusLower)
 }
 
 func isGeneratedOrVendorCandidate(c Candidate) bool {
@@ -909,7 +904,7 @@ func queryRequestsProtocol(queryLower string) bool {
 }
 
 func queryRequestsStaleOrHistory(queryLower string) bool {
-	return containsAny(queryLower, "stale", "archive", "archived", "deprecated", "superseded", "history", "old behavior", "drift")
+	return containsAny(queryLower, "stale", "archive", "archived", "deprecated", "superseded", "blocked", "closed", "cancelled", "canceled", "abandoned", "rejected", "history", "old behavior", "drift")
 }
 
 func queryRequestsGeneratedOrVendor(queryLower string) bool {

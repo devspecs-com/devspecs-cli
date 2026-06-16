@@ -78,3 +78,48 @@ func TestApplyDemotionOnlyNegativeEvidenceKeepsNormalTests(t *testing.T) {
 		t.Fatalf("expected normal test to remain: %#v", got.Groups)
 	}
 }
+
+func TestApplyDemotionOnlyNegativeEvidenceDemotesBlockedIntentWhenCurrentDecisionExists(t *testing.T) {
+	pack := RoleGroupedPack{
+		Groups: []PackGroup{
+			{
+				Role:   PackRoleOpenWork,
+				Title:  PackRoleTitle(PackRoleOpenWork),
+				Budget: 3,
+				Items: []PackItem{
+					{
+						OriginalRank: 1,
+						ID:           "active",
+						Path:         "docs/notes/next_epoch_decision_memo.md",
+						Title:        "Epoch 4 external validity bridge decision memo",
+						Status:       "next",
+						Role:         PackRoleOpenWork,
+						Reasons:      []string{"authority prior: owner decision record", "authority prior: active/next intent status"},
+					},
+					{
+						OriginalRank: 2,
+						ID:           "blocked",
+						Path:         "docs/plans/D4.2-blocked-external-validity-bridge.md",
+						Title:        "D4.2 blocked external validity bridge",
+						Status:       "blocked",
+						Role:         PackRoleOpenWork,
+					},
+				},
+			},
+		},
+	}
+
+	got := ApplyDemotionOnlyNegativeEvidence(pack, "epoch 4 external validity bridge")
+	if len(got.Groups) != 1 || len(got.Groups[0].Items) != 1 {
+		t.Fatalf("expected one active item in the working set, got %#v", got.Groups)
+	}
+	if got.Groups[0].Items[0].Path != "docs/notes/next_epoch_decision_memo.md" {
+		t.Fatalf("kept wrong active row: %#v", got.Groups[0].Items)
+	}
+	if len(got.ExcludedNoise) != 1 || got.ExcludedNoise[0].Path != "docs/plans/D4.2-blocked-external-validity-bridge.md" {
+		t.Fatalf("expected blocked plan to be downgraded, got %#v", got.ExcludedNoise)
+	}
+	if got.ExcludedNoise[0].RoleReason == "" {
+		t.Fatalf("expected downgrade reason, got %#v", got.ExcludedNoise[0])
+	}
+}

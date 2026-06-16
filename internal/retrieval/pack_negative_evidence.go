@@ -14,12 +14,13 @@ const packNegativeEvidenceCountKey = "negative_evidence_count"
 // scout/beta pack modes, not default pack behavior.
 func ApplyDemotionOnlyNegativeEvidence(pack RoleGroupedPack, query string) RoleGroupedPack {
 	queryLower := strings.ToLower(query)
+	hasActiveIntent := packHasActiveIntentAuthority(pack)
 	var demoted []PackItem
 	var groups []PackGroup
 	for _, group := range pack.Groups {
 		kept := group.Items[:0]
 		for _, item := range group.Items {
-			reason := demotionOnlyNegativeEvidenceReason(item, queryLower)
+			reason := demotionOnlyNegativeEvidenceReason(item, queryLower, hasActiveIntent)
 			if reason == "" {
 				kept = append(kept, item)
 				continue
@@ -55,7 +56,10 @@ func ApplyDemotionOnlyNegativeEvidence(pack RoleGroupedPack, query string) RoleG
 	return pack
 }
 
-func demotionOnlyNegativeEvidenceReason(item PackItem, queryLower string) string {
+func demotionOnlyNegativeEvidenceReason(item PackItem, queryLower string, hasActiveIntent bool) string {
+	if hasActiveIntent && packItemHasInactiveIntentSignal(item) && !queryRequestsStaleOrHistory(queryLower) {
+		return "blocked, closed, stale, or superseded intent; current decision context is present"
+	}
 	category := lowSignalPathFamily(item.Path)
 	if category == "" || queryRequestsLowSignalFamily(queryLower, category) {
 		return ""
@@ -77,6 +81,50 @@ func demotionOnlyNegativeEvidenceReason(item PackItem, queryLower string) string
 	default:
 		return ""
 	}
+}
+
+func packHasActiveIntentAuthority(pack RoleGroupedPack) bool {
+	for _, group := range pack.Groups {
+		for _, item := range group.Items {
+			if packItemHasActiveIntentSignal(item) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func packItemHasActiveIntentSignal(item PackItem) bool {
+	if isForwardIntentStatus(strings.ToLower(strings.TrimSpace(item.Status))) {
+		return true
+	}
+	for _, cue := range item.AuthorityCues {
+		cueLower := strings.ToLower(cue)
+		if cueLower == "active intent" || cueLower == "current intent" {
+			return true
+		}
+	}
+	for _, reason := range item.Reasons {
+		reasonLower := strings.ToLower(reason)
+		if containsAny(reasonLower, "owner decision record", "active phase marker", "active/next intent status", "classifier high-current intent") {
+			return true
+		}
+	}
+	descriptor := strings.ToLower(item.Path + "\n" + item.Title)
+	return containsAny(descriptor, "decision memo", "decision record", "owner decision", "next_epoch_decision_memo", "next-epoch-decision-memo", "north_star", "north-star", "north star")
+}
+
+func packItemHasInactiveIntentSignal(item PackItem) bool {
+	if isInactiveIntentStatus(strings.ToLower(strings.TrimSpace(item.Status))) {
+		return true
+	}
+	for _, cue := range item.AuthorityCues {
+		if isInactiveIntentStatus(strings.ToLower(strings.TrimSpace(cue))) {
+			return true
+		}
+	}
+	descriptor := strings.ToLower(item.Path + "\n" + item.Title + "\n" + item.RoleReason + "\n" + strings.Join(item.Reasons, "\n"))
+	return containsAny(descriptor, "blocked", "closed", "cancelled", "canceled", "abandoned", "rejected", "superseded", "stale", "deprecated", "obsolete", "archived")
 }
 
 func lowSignalPathFamily(path string) string {

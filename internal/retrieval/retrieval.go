@@ -2593,9 +2593,16 @@ func AuthorityCues(c Candidate) []string {
 		status = metadataLower(c, "classifier_status")
 	}
 	lifecycle := metadataLower(c, "classifier_lifecycle")
+	if isForwardIntentStatus(status) || bodyHasStatus(c.Body, "next", "active", "current", "ready") {
+		cues = append(cues, "active intent")
+	}
 	switch {
 	case status == "accepted":
 		cues = append(cues, "accepted")
+	case status == "blocked" || lifecycle == "blocked":
+		cues = append(cues, "blocked")
+	case status == "closed" || lifecycle == "closed":
+		cues = append(cues, "closed")
 	case status == "superseded" || lifecycle == "superseded":
 		cues = append(cues, "superseded")
 	case status == "stale" || lifecycle == "stale":
@@ -2715,6 +2722,21 @@ func authorityPrior(c Candidate, role, queryLower string) authorityPriorResult {
 			add(0.45, "authority prior: implementation rationale signal")
 		}
 	}
+	if isIntentAuthorityRole(role) {
+		for _, signal := range activeIntentAuthoritySignals(c) {
+			switch signal {
+			case "owner decision record":
+				add(1.4, "authority prior: owner decision record")
+			case "active phase marker":
+				add(1.2, "authority prior: active phase marker")
+			case "active intent status":
+				add(1.1, "authority prior: active/next intent status")
+			}
+		}
+		if inactiveIntentSignal(c) && !hasLifecycleIntent(queryLower) {
+			add(-1.4, "authority prior: blocked, closed, stale, or superseded")
+		}
+	}
 
 	if conf := classifierConfidence(c); conf >= 0.75 {
 		add(0.7, "authority prior: high classifier confidence")
@@ -2787,6 +2809,120 @@ func classifierConfidence(c Candidate) float64 {
 		return 0
 	}
 	return confidence
+}
+
+func isIntentAuthorityRole(role string) bool {
+	switch role {
+	case "adr", "prd", "rfc", "design", "plan", "agent_note",
+		"openspec_bundle", "openspec_design", "openspec_tasks", "openspec_spec", "openspec_proposal":
+		return true
+	default:
+		return false
+	}
+}
+
+func activeIntentAuthoritySignals(c Candidate) []string {
+	descriptor := strings.ToLower(strings.Join([]string{
+		c.Path,
+		c.Source,
+		c.Title,
+		c.Status,
+		metadataLower(c, "classifier_status"),
+		metadataLower(c, "classifier_lifecycle"),
+		metadataLower(c, "classifier_authority"),
+	}, "\n"))
+	body := lowerBodyPrefix(c.Body, 5000)
+	var signals []string
+	if containsAny(descriptor, "decision memo", "decision record", "owner decision", "next_epoch_decision_memo", "next-epoch-decision-memo") ||
+		containsAny(body, "decision memo", "decision record", "owner decision") {
+		signals = append(signals, "owner decision record")
+	}
+	if containsAny(descriptor, "north_star", "north-star", "north star", "active phase") ||
+		containsAny(body, "active phase:", "active phase -", "active phase\n") {
+		signals = append(signals, "active phase marker")
+	}
+	if isForwardIntentStatus(strings.ToLower(strings.TrimSpace(c.Status))) ||
+		isForwardIntentStatus(metadataLower(c, "classifier_status")) ||
+		isForwardIntentStatus(metadataLower(c, "status")) ||
+		bodyHasStatus(c.Body, "next", "active", "current", "ready") {
+		signals = append(signals, "active intent status")
+	}
+	return uniqueStrings(signals)
+}
+
+func inactiveIntentSignal(c Candidate) bool {
+	statuses := []string{
+		c.Status,
+		metadataLower(c, "classifier_status"),
+		metadataLower(c, "classifier_lifecycle"),
+		metadataLower(c, "lifecycle"),
+		metadataLower(c, "status"),
+	}
+	for _, status := range statuses {
+		if isInactiveIntentStatus(strings.ToLower(strings.TrimSpace(status))) {
+			return true
+		}
+	}
+	body := lowerBodyPrefix(c.Body, 5000)
+	if bodyHasStatus(body, "blocked", "closed", "cancelled", "canceled", "abandoned", "rejected", "superseded", "stale", "deprecated") {
+		return true
+	}
+	descriptor := strings.ToLower(c.Path + "\n" + c.Title)
+	return containsAny(descriptor, "superseded", "stale", "deprecated", "obsolete", "blocked")
+}
+
+func isActiveIntentStatus(statusLower string) bool {
+	statusLower = strings.TrimSpace(strings.ReplaceAll(statusLower, "_", "-"))
+	switch statusLower {
+	case "next", "active", "accepted", "approved", "current", "implementing", "in-progress", "proposed", "ready":
+		return true
+	default:
+		return false
+	}
+}
+
+func isForwardIntentStatus(statusLower string) bool {
+	statusLower = strings.TrimSpace(strings.ReplaceAll(statusLower, "_", "-"))
+	switch statusLower {
+	case "next", "active", "current", "implementing", "in-progress", "proposed", "ready":
+		return true
+	default:
+		return false
+	}
+}
+
+func isInactiveIntentStatus(statusLower string) bool {
+	statusLower = strings.TrimSpace(strings.ReplaceAll(statusLower, "_", "-"))
+	switch statusLower {
+	case "blocked", "closed", "cancelled", "canceled", "abandoned", "rejected", "superseded", "stale", "deprecated", "obsolete", "archived":
+		return true
+	default:
+		return false
+	}
+}
+
+func bodyHasStatus(body string, values ...string) bool {
+	body = lowerBodyPrefix(body, 5000)
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" {
+			continue
+		}
+		if strings.Contains(body, "status: "+value) ||
+			strings.Contains(body, "status - "+value) ||
+			strings.Contains(body, "status\n"+value) ||
+			strings.Contains(body, "status\r\n"+value) {
+			return true
+		}
+	}
+	return false
+}
+
+func lowerBodyPrefix(body string, limit int) string {
+	if limit > 0 && len(body) > limit {
+		body = body[:limit]
+	}
+	return strings.ToLower(body)
 }
 
 func metadataLower(c Candidate, key string) string {
@@ -4906,7 +5042,7 @@ func hasNonIntentModeIntent(queryLower, mode string) bool {
 }
 
 func hasLifecycleIntent(queryLower string) bool {
-	if containsAny(queryLower, "stale", "superseded", "abandoned", "deprecated", "history", "historical", "why not") {
+	if containsAny(queryLower, "stale", "superseded", "blocked", "closed", "cancelled", "canceled", "abandoned", "rejected", "deprecated", "history", "historical", "why not") {
 		return true
 	}
 	return containsAny(queryLower, "local entitlement", "local entitlements") &&
