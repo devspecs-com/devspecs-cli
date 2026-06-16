@@ -5,7 +5,7 @@
   "query": "v1.1 command surface realignment: task-first launch story, ds recent, and real architecture map",
   "status": "packed",
   "created_at": "2026-06-16T08:09:52Z",
-  "updated_at": "2026-06-16T08:49:10Z",
+  "updated_at": "2026-06-16T09:08:42Z",
   "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
   "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/v1-1-command-surface-realignment",
   "artifacts": {
@@ -32,7 +32,13 @@
         "title": "Reclaim ds map for architecture and system boundary output using boundary evidence",
         "plan": "I02-reclaim-ds-map-for-architecture-and-system-bound-plan.md",
         "result": "I02-reclaim-ds-map-for-architecture-and-system-bound-result.md",
-        "kind": "slice"
+        "kind": "slice",
+        "stage": "validated",
+        "decision": "promote",
+        "updated_at": "2026-06-16T09:07:59Z",
+        "latest_checkpoint_id": "cp_20260616T090759Z_i02_validated",
+        "latest_checkpoint": "checkpoints/20260616-090759-validated.md",
+        "latest_checkpoint_json": "checkpoints/20260616-090759-validated.json"
       },
       {
         "id": "I03",

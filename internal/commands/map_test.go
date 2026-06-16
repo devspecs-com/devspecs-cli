@@ -44,7 +44,7 @@ func TestMapTextHidesReviewerDiagnosticsByDefault(t *testing.T) {
 			t.Fatalf("default map output leaked reviewer diagnostic %q:\n%s", notWant, text)
 		}
 	}
-	for _, want := range []string{"Repo map: payments-api", "Candidate areas", "Type:", "Try: ds find"} {
+	for _, want := range []string{"Repo map: payments-api", "Candidate subsystems", "Subsystem:", "Purpose:", "Boundary:", "Try: ds find", "Try: ds task"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("default map output missing %q:\n%s", want, text)
 		}
@@ -88,6 +88,9 @@ func TestMapJSONSchemaIsAgentReadable(t *testing.T) {
 	}
 	if decoded.Areas[0].AreaType == "" {
 		t.Fatalf("expected area_type in JSON:\n%s", string(data))
+	}
+	if decoded.Areas[0].Purpose == "" || len(decoded.Areas[0].BoundaryPaths) == 0 {
+		t.Fatalf("expected subsystem purpose and boundary paths in JSON:\n%s", string(data))
 	}
 }
 
@@ -1533,7 +1536,7 @@ func TestMapAutoScanLeavesUsableIndexForFindPack(t *testing.T) {
 	runGitForFindPack(t, repoRoot, "commit", "-m", "add credentials rotation context")
 
 	mapCmd := NewMapCmd()
-	mapCmd.SetArgs([]string{"--experimental-boundaries", "--path", repoRoot, "--max-areas", "4"})
+	mapCmd.SetArgs([]string{"--path", repoRoot, "--max-areas", "4"})
 	mapOut := &bytes.Buffer{}
 	mapErr := &bytes.Buffer{}
 	mapCmd.SetOut(mapOut)
@@ -1581,7 +1584,7 @@ func TestMapNoRefreshSkipsAutoScan(t *testing.T) {
 	runGitForFindPack(t, repoRoot, "commit", "-m", "add credentials rotation context")
 
 	mapCmd := NewMapCmd()
-	mapCmd.SetArgs([]string{"--experimental-boundaries", "--path", repoRoot, "--max-areas", "4", "--no-refresh"})
+	mapCmd.SetArgs([]string{"--path", repoRoot, "--max-areas", "4", "--no-refresh"})
 	mapOut := &bytes.Buffer{}
 	mapErr := &bytes.Buffer{}
 	mapCmd.SetOut(mapOut)
@@ -1608,7 +1611,7 @@ func TestMapJSONAutoScanKeepsStdoutJSON(t *testing.T) {
 	runGitForFindPack(t, repoRoot, "commit", "-m", "add credentials rotation context")
 
 	cmd := NewMapCmd()
-	cmd.SetArgs([]string{"--experimental-boundaries", "--json", "--path", repoRoot})
+	cmd.SetArgs([]string{"--json", "--path", repoRoot})
 	outBuf := &bytes.Buffer{}
 	errBuf := &bytes.Buffer{}
 	cmd.SetOut(outBuf)

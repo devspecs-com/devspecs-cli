@@ -16,17 +16,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/devspecs-com/devspecs-cli/internal/adapters"
-	"github.com/devspecs-com/devspecs-cli/internal/adapters/adr"
-	"github.com/devspecs-com/devspecs-cli/internal/adapters/codecomment"
-	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
-	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
-	"github.com/devspecs-com/devspecs-cli/internal/adapters/sourcecontext"
-	"github.com/devspecs-com/devspecs-cli/internal/adapters/testcase"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/freshness"
-	"github.com/devspecs-com/devspecs-cli/internal/idgen"
-	"github.com/devspecs-com/devspecs-cli/internal/ignore"
 	"github.com/devspecs-com/devspecs-cli/internal/scan"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/devspecs-com/devspecs-cli/internal/telemetry"
@@ -109,7 +100,7 @@ func NewMapCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "map [area]",
-		Short: "Show a concise repo map and useful follow-up context commands",
+		Short: "Show architecture/system boundaries and useful follow-up context commands",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			areaQuery := ""
@@ -133,11 +124,13 @@ func NewMapCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show map diagnostics and extra evidence")
 	cmd.Flags().BoolVar(&recent, "recent", false, "Show recently active topics from local git history")
-	cmd.Flags().BoolVar(&boundary, "experimental-boundaries", false, "Build the map from path-primary system boundary candidates")
+	cmd.Flags().BoolVar(&boundary, "experimental-boundaries", false, "Deprecated: ds map now uses path-primary system boundary candidates by default")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	cmd.Flags().IntVar(&maxAreas, "max-areas", mapDefaultMaxAreas, "Maximum areas to show")
 	_ = cmd.Flags().MarkHidden("recent")
 	_ = cmd.Flags().MarkDeprecated("recent", "use `ds recent` instead")
+	_ = cmd.Flags().MarkHidden("experimental-boundaries")
+	_ = cmd.Flags().MarkDeprecated("experimental-boundaries", "ds map now uses boundary mapping by default")
 	return cmd
 }
 
@@ -258,6 +251,9 @@ type mapArea struct {
 	Class              string             `json:"class"`
 	AreaType           string             `json:"area_type"`
 	BoundaryRole       string             `json:"boundary_role,omitempty"`
+	Purpose            string             `json:"purpose,omitempty"`
+	BoundaryPaths      []string           `json:"boundary_paths,omitempty"`
+	AdjacentSystems    []string           `json:"adjacent_systems,omitempty"`
 	Confidence         string             `json:"confidence"`
 	IsRepoRootUmbrella bool               `json:"is_repo_root_umbrella,omitempty"`
 	Covers             []string           `json:"covers,omitempty"`
@@ -1381,7 +1377,7 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 		"json":       opts.JSON,
 		"verbose":    opts.Verbose,
 		"recent":     opts.Recent,
-		"boundary":   opts.Boundary,
+		"boundary":   true,
 		"no_refresh": opts.NoRefresh,
 		"max_areas":  opts.MaxAreas,
 		"area_query": opts.AreaQuery != "",
@@ -1402,27 +1398,6 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 			return err
 		}
 	}
-	if opts.Boundary {
-		out := buildPathBoundaryMapOutput(cmd.Context(), repoRoot, opts)
-		success = true
-		props["confidence"] = out.Repo.Confidence
-		props["area_count_bucket"] = telemetry.CountBucket(len(out.Areas))
-		props["path_boundary"] = true
-		if opts.JSON {
-			if opts.AreaQuery != "" {
-				out = filterMapOutputByAreaQuery(out, opts.AreaQuery)
-			}
-			enc := json.NewEncoder(cmd.OutOrStdout())
-			enc.SetIndent("", "  ")
-			return enc.Encode(out)
-		}
-		if opts.AreaQuery != "" {
-			writeMapAreaText(cmd.OutOrStdout(), out, opts.AreaQuery, opts.Verbose)
-			return nil
-		}
-		writeMapText(cmd.OutOrStdout(), out, opts.Verbose)
-		return nil
-	}
 	if opts.Recent {
 		out := buildMapRecentOutput(cmd.Context(), repoRoot, opts)
 		success = true
@@ -1435,75 +1410,12 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 		writeMapRecentText(cmd.OutOrStdout(), out, opts.Verbose)
 		return nil
 	}
-	if opts.AreaQuery == "" {
-		indexed, indexErr := mapRepoHasIndexedArtifacts(repoRoot)
-		if indexErr != nil {
-			debugLog("map index availability unavailable: %v", indexErr)
-		} else if !indexed {
-			out := buildFastMapFallbackOutput(cmd.Context(), repoRoot, opts, false)
-			success = true
-			props["confidence"] = out.Repo.Confidence
-			props["area_count_bucket"] = telemetry.CountBucket(len(out.Areas))
-			props["fast_fallback"] = true
-			props["index_ready"] = false
-			if opts.JSON {
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				return enc.Encode(out)
-			}
-			writeMapText(cmd.OutOrStdout(), out, opts.Verbose)
-			return nil
-		}
-	}
-	var result *scan.Result
-	var cachedOutput *mapOutput
-	if cached, ok, cacheErr := loadMapOutputCache(repoRoot, opts.MaxAreas); cacheErr != nil {
-		debugLog("map output cache unavailable: %v", cacheErr)
-	} else if ok {
-		cachedOutput = &cached
-		props["output_cache_hit"] = true
-	}
-	if cachedOutput == nil {
-		if cached, ok, cacheErr := runCachedMapScan(repoRoot); cacheErr != nil {
-			debugLog("map cache unavailable: %v", cacheErr)
-		} else if ok {
-			result = cached
-			props["cache_hit"] = true
-		}
-	}
-	if result == nil && cachedOutput == nil && opts.AreaQuery == "" {
-		out := buildFastMapFallbackOutput(cmd.Context(), repoRoot, opts, true)
-		success = true
-		props["confidence"] = out.Repo.Confidence
-		props["area_count_bucket"] = telemetry.CountBucket(len(out.Areas))
-		props["fast_fallback"] = true
-		if opts.JSON {
-			enc := json.NewEncoder(cmd.OutOrStdout())
-			enc.SetIndent("", "  ")
-			return enc.Encode(out)
-		}
-		writeMapText(cmd.OutOrStdout(), out, opts.Verbose)
-		return nil
-	}
-	if result == nil && cachedOutput == nil {
-		result, err = runMapScan(cmd.Context(), repoRoot)
-		if err != nil {
-			return err
-		}
-	}
-	var out mapOutput
-	if cachedOutput != nil {
-		out = *cachedOutput
-	} else {
-		out = buildMapOutput(repoRoot, result, opts)
-		if err := saveMapOutputCache(repoRoot, opts.MaxAreas, out); err != nil {
-			debugLog("save map output cache: %v", err)
-		}
-	}
+
+	out := buildPathBoundaryMapOutput(cmd.Context(), repoRoot, opts)
 	success = true
 	props["confidence"] = out.Repo.Confidence
 	props["area_count_bucket"] = telemetry.CountBucket(len(out.Areas))
-
+	props["path_boundary"] = true
 	if opts.JSON {
 		if opts.AreaQuery != "" {
 			out = filterMapOutputByAreaQuery(out, opts.AreaQuery)
@@ -1581,56 +1493,6 @@ func mapRepoHasIndexedArtifacts(repoRoot string) (bool, error) {
 		return false, err
 	}
 	return count > 0, nil
-}
-
-func runMapScan(ctx context.Context, repoRoot string) (*scan.Result, error) {
-	cfg, err := config.LoadRepoConfig(repoRoot)
-	if err != nil {
-		return nil, fmt.Errorf("load config: %w", err)
-	}
-	cfg = config.WithDefaultIntentCandidateDiscovery(cfg, true)
-	cfg = config.WithTestCaseArtifacts(cfg, true)
-	cfg = config.WithCodeCommentArtifacts(cfg, true)
-
-	db, err := openDB()
-	if err != nil {
-		return nil, fmt.Errorf("open map index: %w", err)
-	}
-	defer db.Close()
-	db.SetMaxOpenConns(1)
-
-	adpts := []adapters.Adapter{
-		&openspec.Adapter{},
-		&adr.Adapter{},
-		&markdown.Adapter{},
-		&sourcecontext.Adapter{},
-		&testcase.Adapter{},
-		&codecomment.Adapter{},
-	}
-	scanner := scan.New(db, idgen.NewFactory(), adpts)
-	scanOpts, err := liveScanRunOptions(db, repoRoot)
-	if err != nil {
-		return nil, fmt.Errorf("inspect map index state: %w", err)
-	}
-	scanOpts.IncludeGitEvidence = true
-	scanOpts.IncludeWorkstreamEvidence = true
-	scanOpts.RichTypedIndex = true
-	result, err := scanner.RunWithOptions(ctx, repoRoot, cfg, scan.RunOptions{
-		UseTransaction:            scanOpts.UseTransaction,
-		FreshIndex:                scanOpts.FreshIndex,
-		SkipAuthoredAtLookup:      scanOpts.SkipAuthoredAtLookup,
-		IncludeGitEvidence:        scanOpts.IncludeGitEvidence,
-		IncludeWorkstreamEvidence: scanOpts.IncludeWorkstreamEvidence,
-		RichTypedIndex:            scanOpts.RichTypedIndex,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("map scan: %w", err)
-	}
-	if scanTotalFound(result) == 0 {
-		matcher, _ := ignore.NewMatcher(repoRoot)
-		attachScanHints(result, repoRoot, matcher)
-	}
-	return result, nil
 }
 
 type cachedMapOutputFile struct {
@@ -1749,24 +1611,6 @@ func mapOutputCacheScanMetaMatches(cached cachedMapOutputFile, meta *store.RepoM
 		return cached.LastScanCommit == meta.LastScanCommit
 	}
 	return cached.LastScanAt == meta.LastScanAt
-}
-
-func runCachedMapScan(repoRoot string) (*scan.Result, bool, error) {
-	db, err := openDB()
-	if err != nil {
-		return nil, false, fmt.Errorf("open map cache: %w", err)
-	}
-	defer db.Close()
-	db.SetMaxOpenConns(1)
-
-	if status := freshness.Check(db, repoRoot); status == nil || status.Stale {
-		return nil, false, nil
-	}
-	result, ok, err := buildCachedMapResult(db, repoRoot)
-	if err != nil {
-		return nil, false, err
-	}
-	return result, ok, nil
 }
 
 type cachedMapEdgeMetadata struct {
@@ -2074,7 +1918,7 @@ func buildPathBoundaryMapOutput(ctx context.Context, repoRoot string, opts mapOp
 	}
 	areas, evidence, rawCandidateCount := buildPathBoundaryAreas(repoRoot, repoName, files, recentCommits, opts.MaxAreas, packability)
 	confidence := mapBoundaryOutputConfidence(areas)
-	caveats := []string{"experimental path-primary boundary map; git/docs/tests boost boundaries but do not define them"}
+	caveats := []string{"path-primary boundary map; git/docs/tests boost boundaries but do not define them"}
 	if source == "walk" {
 		caveats = append(caveats, "git file manifest unavailable; used filesystem walk")
 	}
@@ -2207,6 +2051,94 @@ func mapBoundaryRecentCommits(ctx context.Context, repoRoot string) []parsedFind
 		out = append(out, commit)
 	}
 	return out
+}
+
+func annotateMapAreas(areas []mapArea) {
+	for i := range areas {
+		areas[i].Purpose = mapAreaPurposeText(areas[i])
+		areas[i].BoundaryPaths = mapAreaBoundaryPaths(areas[i])
+	}
+	for i := range areas {
+		areas[i].AdjacentSystems = mapAdjacentSystemLabels(areas[i], areas)
+	}
+}
+
+func mapAreaPurposeText(area mapArea) string {
+	label := strings.TrimSpace(area.Label)
+	if label == "" {
+		label = "this subsystem"
+	}
+	areaType := displayMapAreaType(area.AreaType)
+	if areaType == "" || areaType == "unknown area" {
+		areaType = "repo capability"
+	}
+	switch area.BoundaryRole {
+	case mapBoundaryRoleHorizontalLayer:
+		return fmt.Sprintf("Provides shared %s behavior used across the repo.", areaType)
+	case mapBoundaryRoleExtensionEcosystem:
+		return fmt.Sprintf("Groups extension and integration behavior around %s.", label)
+	case mapBoundaryRoleFixtureOrTestbed:
+		return fmt.Sprintf("Holds fixture, harness, or testbed behavior for %s.", label)
+	case mapBoundaryRoleDocsReference:
+		return fmt.Sprintf("Documents %s decisions, usage, or handoff context.", label)
+	case mapBoundaryRoleGenericParent:
+		return fmt.Sprintf("Groups related %s paths under %s.", areaType, label)
+	case mapBoundaryRoleRepoNamespace:
+		return fmt.Sprintf("Represents a broad repo namespace for %s.", label)
+	case mapBoundaryRoleHandoffUnsafe:
+		return fmt.Sprintf("Looks like a broad or shell-like boundary; inspect before handing off %s work.", label)
+	default:
+		return fmt.Sprintf("Owns %s behavior for %s.", areaType, label)
+	}
+}
+
+func mapAreaBoundaryPaths(area mapArea) []string {
+	var paths []string
+	for _, anchor := range area.Diagnostics.RawAnchors {
+		anchor = normalizeMapPath(anchor)
+		if !strings.Contains(anchor, "/") {
+			continue
+		}
+		paths = appendUniqueString(paths, mapBoundaryDisplayPath(anchor))
+		if len(paths) >= 4 {
+			return paths
+		}
+	}
+	for _, path := range area.KeyPaths {
+		dir := normalizeMapPath(filepath.ToSlash(filepath.Dir(path)))
+		if dir == "." || dir == "" {
+			continue
+		}
+		paths = appendUniqueString(paths, mapBoundaryDisplayPath(dir))
+		if len(paths) >= 4 {
+			break
+		}
+	}
+	return paths
+}
+
+func mapBoundaryDisplayPath(path string) string {
+	path = strings.Trim(strings.TrimSpace(filepath.ToSlash(path)), "/")
+	if path == "" {
+		return path
+	}
+	if strings.HasSuffix(path, "/**") {
+		return path
+	}
+	if strings.Contains(path, ".") && filepath.Ext(path) != "" {
+		return path
+	}
+	return path + "/**"
+}
+
+func mapAdjacentSystemLabels(primary mapArea, areas []mapArea) []string {
+	var labels []string
+	for _, area := range relatedMapAreas(primary, areas) {
+		if area.Label != "" {
+			labels = appendUniqueString(labels, area.Label)
+		}
+	}
+	return firstStrings(labels, 3)
 }
 
 func buildPathBoundaryAreas(repoRoot, repoName string, files []string, commits []parsedFindGitCommit, maxAreas int, packabilityArg ...*mapPackabilityIndex) ([]mapArea, mapEvidenceAvailability, int) {
@@ -3947,6 +3879,7 @@ func publicMapAreas(repoRoot, repoName string, areas []*mapAreaInternal, maxArea
 		}
 		out = append(out, pub)
 	}
+	annotateMapAreas(out)
 	return out
 }
 
@@ -3963,20 +3896,26 @@ func writeMapText(out io.Writer, m mapOutput, verbose bool) {
 	if m.Repo.Confidence == mapLowConfidence {
 		fmt.Fprintln(out, "I found repo-local signals, but not enough distinct boundaries to make a strong map.")
 		fmt.Fprintln(out)
-		fmt.Fprintln(out, "Candidate areas")
+		fmt.Fprintln(out, "Candidate subsystems")
 	} else {
-		fmt.Fprintln(out, "Detected areas")
+		fmt.Fprintln(out, "Detected subsystems")
 	}
 	fmt.Fprintln(out)
 	for i, area := range m.Areas {
-		fmt.Fprintf(out, "%d. %s\n", i+1, area.Label)
-		if area.AreaType != "" {
-			fmt.Fprintf(out, "   Type: %s\n", displayMapAreaType(area.AreaType))
+		fmt.Fprintf(out, "%d. Subsystem: %s\n", i+1, area.Label)
+		if area.Purpose != "" {
+			fmt.Fprintf(out, "   Purpose: %s\n", area.Purpose)
+		}
+		if len(area.BoundaryPaths) > 0 {
+			fmt.Fprintf(out, "   Boundary: %s\n", strings.Join(area.BoundaryPaths, ", "))
 		}
 		if len(area.Covers) > 0 {
 			fmt.Fprintf(out, "   Covers: %s\n", strings.Join(area.Covers, ", "))
 		}
 		fmt.Fprintf(out, "   Evidence: %s\n", mapAreaEvidenceText(area.EvidenceCounts))
+		if len(area.AdjacentSystems) > 0 {
+			fmt.Fprintf(out, "   Adjacent systems: %s\n", strings.Join(area.AdjacentSystems, ", "))
+		}
 		if len(area.KeyPaths) > 0 {
 			fmt.Fprintln(out, "   Key files:")
 			for _, p := range firstStrings(area.KeyPaths, 3) {
@@ -3986,11 +3925,14 @@ func writeMapText(out io.Writer, m mapOutput, verbose bool) {
 		if len(area.TraceReceipts) > 0 {
 			fmt.Fprintf(out, "   Recent signal: %s\n", area.TraceReceipts[0].Subject)
 		}
-		if area.Try != "" {
-			fmt.Fprintf(out, "   Try: %s\n", area.Try)
+		if findCmd := mapAreaFindCommand(area); findCmd != "" {
+			fmt.Fprintf(out, "   Try: %s\n", findCmd)
+		}
+		if taskCmd := mapAreaTaskCommand(area); taskCmd != "" {
+			fmt.Fprintf(out, "   Try: %s\n", taskCmd)
 		}
 		if verbose {
-			fmt.Fprintf(out, "   Diagnostics: class=%s role=%s confidence=%s key=%s\n", area.Class, area.BoundaryRole, area.Confidence, area.Diagnostics.Key)
+			fmt.Fprintf(out, "   Diagnostics: type=%s class=%s role=%s confidence=%s key=%s\n", displayMapAreaType(area.AreaType), area.Class, area.BoundaryRole, area.Confidence, area.Diagnostics.Key)
 			if area.Diagnostics.Packability != nil {
 				fmt.Fprintf(out, "   Packability: %s\n", mapPackabilityDiagnosticsText(area.Diagnostics.Packability))
 			}
@@ -4007,6 +3949,28 @@ func writeMapText(out io.Writer, m mapOutput, verbose bool) {
 		fmt.Fprintln(out)
 	}
 	writeMapCaveats(out, m.Caveats)
+}
+
+func mapAreaFindCommand(area mapArea) string {
+	if strings.TrimSpace(area.Try) != "" {
+		return strings.TrimSpace(area.Try)
+	}
+	query := strings.TrimSpace(area.Label)
+	if query == "" {
+		return ""
+	}
+	return fmt.Sprintf("ds find %q", strings.ToLower(query))
+}
+
+func mapAreaTaskCommand(area mapArea) string {
+	query := strings.TrimSpace(area.Label)
+	if len(area.Covers) > 0 {
+		query = strings.TrimSpace(query + " " + area.Covers[0])
+	}
+	if query == "" {
+		return ""
+	}
+	return fmt.Sprintf("ds task \"modify %s\"", strings.ToLower(query))
 }
 
 func writeMapAreaText(out io.Writer, m mapOutput, query string, verbose bool) {
@@ -4149,11 +4113,6 @@ func buildMapRecentOutput(ctx context.Context, repoRoot string, opts mapOptions)
 		out.Caveats = append(out.Caveats, "no non-noisy recent topics found")
 	}
 	return out
-}
-
-func buildFastMapFallbackOutput(ctx context.Context, repoRoot string, opts mapOptions, indexReady bool) mapOutput {
-	recent := buildMapRecentOutput(ctx, repoRoot, mapOptions{MaxAreas: opts.MaxAreas})
-	return buildFastMapFallbackOutputFromRecent(repoRoot, recent, indexReady)
 }
 
 func buildFastMapFallbackOutputFromRecent(repoRoot string, recent mapRecentOutput, indexReady bool) mapOutput {

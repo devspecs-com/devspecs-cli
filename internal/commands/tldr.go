@@ -65,7 +65,7 @@ func buildTLDRGuide() tldrOutput {
 			"Prefer one bounded target over the whole plan.",
 			"Workflow commands refresh the local index by default; use ds scan for explicit manual refresh or rebuild.",
 			"If the work item is known, start with ds task or ds task quick; task creation already packs source/test/doc context.",
-			"Use ds recent or ds find first when you are still discovering recent activity, repo intent, current plans, or likely scope.",
+			"Use ds map, ds recent, or ds find first when you are still discovering system boundaries, recent activity, repo intent, current plans, or likely scope.",
 			"Record evidence with checkpoint/finish instead of relying on chat memory.",
 			"Do not claim DevSpecs found every relevant file; verify source and tests.",
 			"Use ds task quick for small work and full ds task slices for multi-step work.",
@@ -113,6 +113,7 @@ func buildTLDRGuide() tldrOutput {
 				UseWhen: "The repo already has plans, ADRs, PRDs, RFCs, runbooks, or agent notes.",
 				Commands: []string{
 					"ds init",
+					"ds map",
 					"ds recent",
 					"ds list",
 					`ds find "<topic>"`,
@@ -120,7 +121,7 @@ func buildTLDRGuide() tldrOutput {
 				},
 				AgentRule: "Use IDs from list/find/context instead of pasting whole folders. Treat old artifacts as context, not instructions, unless current.",
 				Notes: []string{
-					"`ds recent`, `ds find`, and `ds list` refresh the index by default.",
+					"`ds map`, `ds recent`, `ds find`, and `ds list` refresh the index by default.",
 					"Once the work item is known, switch to `ds task`; it will pack context again for bounded execution.",
 					"`ds adopt` is planned, not shipped.",
 					"Use `ds scan --no-gitignore` only when intentionally inspecting ignored paths.",
@@ -140,14 +141,15 @@ func buildTLDRGuide() tldrOutput {
 			},
 			{
 				ID:      "deep-dive",
-				Name:    "Repo Deep Dive / Recent To Pack",
-				UseWhen: "You need to understand recent activity or a recognizable area before choosing task scope.",
+				Name:    "Repo Deep Dive / Map To Pack",
+				UseWhen: "You need to understand system boundaries, recent activity, or a recognizable area before choosing task scope.",
 				Commands: []string{
+					"ds map",
 					"ds recent",
 					`ds find "<area or task>"`,
 					"ds context <artifact-id>",
 				},
-				AgentRule: "Use recent for local activity orientation and find for agent-ready packed context. Do not treat either as an implementation plan.",
+				AgentRule: "Use map for subsystem boundaries, recent for local activity orientation, and find for agent-ready packed context. Do not treat any of them as an implementation plan.",
 			},
 		},
 	}
