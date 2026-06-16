@@ -155,6 +155,7 @@ func TestTask_StartCreatesUncertaintyAwareWorkspace(t *testing.T) {
 		"## Success Criteria",
 		"## Tasks",
 		"## Decision Gates",
+		"Block: external input",
 	} {
 		if !strings.Contains(firstSlice, want) {
 			t.Fatalf("A01 missing %q:\n%s", want, firstSlice)
@@ -164,6 +165,9 @@ func TestTask_StartCreatesUncertaintyAwareWorkspace(t *testing.T) {
 	resultTemplate := mustReadFile(t, out.ResultPath)
 	for _, want := range []string{
 		"## Summary",
+		"## Completion Contract",
+		"Attempted slice: `A01`",
+		"Gate tested: promote, improve, rework, rollback, or block",
 		"## Changed Files",
 		"## Tests",
 		"## Decision",
@@ -895,6 +899,9 @@ func TestTask_BoundaryPrimitivesResolveOneTarget(t *testing.T) {
 		"- A02",
 		"Do not implement sibling slices",
 		"Checklist edits are useful notes",
+		"Completion contract:",
+		"Evidence for decision",
+		"Next iteration",
 	} {
 		if !strings.Contains(promptOut.Prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, promptOut.Prompt)
@@ -1019,6 +1026,7 @@ func TestTask_TargetAddressingResolvesUniqueSlice(t *testing.T) {
 	for _, want := range []string{
 		"task target-address-test target A02 only",
 		"Checklist edits are useful notes",
+		"Completion contract:",
 	} {
 		if !strings.Contains(promptOut.Prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, promptOut.Prompt)
@@ -2175,6 +2183,13 @@ func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
 		"`internal/retrieval/ranking_test.go`",
 		"## Distracting Files DevSpecs Included",
 		"`fixtures/noisy-plan.md`",
+		"## Completion Contract",
+		"Attempted slice: `A01`",
+		"Gate tested: improve",
+		"found a missing same-package test",
+		"Evidence for decision: 1 file(s) read; 1 file(s) edited; 1 test command(s); 1 missed file(s); 1 noise file(s)",
+		"Next iteration: A01-1 with decision improve",
+		"- Block",
 	} {
 		if !strings.Contains(checkpointBody, want) {
 			t.Fatalf("checkpoint missing %q:\n%s", want, checkpointBody)
@@ -2225,6 +2240,10 @@ func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
 		"Stage: implemented",
 		"Decision: improve",
 		"Structured Evidence:",
+		"What changed: found a missing same-package test",
+		"Evidence for decision: 1 file(s) read; 1 file(s) edited; 1 test command(s); 1 missed file(s); 1 noise file(s)",
+		"What remains: next target A01-1; next decision improve; resolve missed files",
+		"Next iteration: A01-1 with decision improve",
 		"Missed files:",
 		"`internal/retrieval/ranking_test.go`",
 	} {

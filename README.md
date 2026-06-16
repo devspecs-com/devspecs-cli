@@ -138,6 +138,8 @@ What this gives you:
 - packed source, test, docs, and receipt context;
 - a one-slice agent prompt;
 - explicit decision gates: `promote`, `improve`, `rework`, `rollback`, `block`;
+- a completion contract for what changed, evidence, remaining work, and the
+  next iteration;
 - lifecycle state from `start`, `checkpoint`, `finish`, `decide`, and `refresh`.
 
 For a small one-off change, bugfix, or doc spike, use the lighter entrypoint:
@@ -210,7 +212,7 @@ Source files remain authoritative. DevSpecs stores derived index state locally.
 | `ds task quick <query>` | Create a one-off task workspace with compact output. |
 | `ds task show <target>` | Show exact context for one task target. |
 | `ds task prompt <target>` | Emit an agent prompt bounded to one target. |
-| `ds task checkpoint <target>` | Record files, tests, misses, noise, learnings, and next decision. |
+| `ds task checkpoint <target>` | Record files, tests, misses, noise, learnings, decision evidence, and next iteration. |
 | `ds task finish <target>` | Finish a target with a decision gate. |
 | `ds task refresh <task-id>` | Recapture edited task artifacts into the local index without rewriting task docs. |
 | `ds map` | Show architecture/system boundaries with evidence and useful follow-up commands. |

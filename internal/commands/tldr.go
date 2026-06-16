@@ -67,7 +67,7 @@ func buildTLDRGuide() tldrOutput {
 			"Workflow commands refresh the local index by default; use ds scan for explicit manual refresh or rebuild.",
 			"Use ds task quick for small work and full ds task slices for multi-step work.",
 			"Use ds map, ds recent, and ds find as diagnostic/evidence tools when the target is unclear or needs trust checks.",
-			"Record evidence with checkpoint/finish instead of relying on chat memory.",
+			"Record the completion contract with checkpoint/finish: attempted slice, gate tested, changes, evidence, remaining work, and next iteration.",
 			"Do not claim DevSpecs found every relevant file; verify source and tests.",
 		},
 		Workflows: []tldrWorkflow{

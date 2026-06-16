@@ -164,6 +164,8 @@ Do not implement sibling slices, future slices, or the full task track. Stop aft
 Record the outcome in `devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md` or with `ds task checkpoint weekly-digest --target A01`.
 Checklist edits are useful notes, but lifecycle state comes from `ds task checkpoint`, `ds task finish`, or `ds task decide`.
 At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.
+Also answer the completion contract: attempted slice, gate tested, what changed,
+evidence for the decision, what remains, and the next iteration.
 ````
 
 ## Record The Decision Gate

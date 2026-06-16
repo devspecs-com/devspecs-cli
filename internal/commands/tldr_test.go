@@ -26,6 +26,7 @@ func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 		"Default to ds task for known work",
 		"Workflow commands refresh the local index by default",
 		"Use ds map, ds recent, and ds find as diagnostic/evidence tools",
+		"Record the completion contract with checkpoint/finish",
 		"ds map",
 		"ds recent",
 		`ds task "implement <bounded target>"`,

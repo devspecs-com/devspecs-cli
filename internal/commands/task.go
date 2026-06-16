@@ -1806,6 +1806,14 @@ func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput, prior
 	fmt.Fprintln(&b, "Checklist edits are useful notes, but lifecycle state comes from `ds task checkpoint`, `ds task finish`, or `ds task decide`.")
 	fmt.Fprintln(&b, "At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.")
 	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "Completion contract:")
+	fmt.Fprintf(&b, "- Attempted slice: `%s` - %s\n", target.Target, target.Title)
+	fmt.Fprintln(&b, "- Gate tested: which decision gate you were trying to earn")
+	fmt.Fprintln(&b, "- What changed: files, behavior, docs, or plan updates")
+	fmt.Fprintln(&b, "- Evidence for decision: tests, reads, diffs, screenshots, or explicit misses/noise")
+	fmt.Fprintln(&b, "- What remains: unresolved risks, known misses, or follow-up scope")
+	fmt.Fprintln(&b, "- Next iteration: promote to next slice, improve as <slice>-1, rework, rollback, or block")
+	fmt.Fprintln(&b)
 	if target.PlanBody != "" {
 		fmt.Fprintln(&b, "Target plan:")
 		fmt.Fprintln(&b)
@@ -3849,6 +3857,7 @@ func renderTaskSlicePlan(manifest taskManifest, slice taskSliceArtifact) string 
 	fmt.Fprintln(&b, "- Improve: useful start, but incomplete/noisy enough to require template or retrieval changes.")
 	fmt.Fprintln(&b, "- Rework: task workspace feels like planning overhead or fails to capture useful evidence.")
 	fmt.Fprintln(&b, "- Rollback: workspace creates false confidence or worsens agent performance.")
+	fmt.Fprintln(&b, "- Block: external input or a missing prerequisite prevents useful progress.")
 	return b.String()
 }
 
@@ -3915,6 +3924,7 @@ func renderTaskGreenfieldSlicePlan(manifest taskManifest, slice taskSliceArtifac
 	fmt.Fprintln(&b, "- Improve: the slice is directionally useful but needs another planning iteration.")
 	fmt.Fprintln(&b, "- Rework: the plan chose the wrong claim, artifact, or evaluation target.")
 	fmt.Fprintln(&b, "- Rollback: the scaffold added noise or false confidence.")
+	fmt.Fprintln(&b, "- Block: external input or a missing prerequisite prevents useful progress.")
 	return b.String()
 }
 
@@ -3925,6 +3935,7 @@ func renderTaskSliceResultTemplate(manifest taskManifest, slice taskSliceArtifac
 	fmt.Fprintf(&b, "- Target: `%s` - %s\n", slice.ID, slice.Title)
 	fmt.Fprintln(&b, "- Outcome: ")
 	fmt.Fprintln(&b)
+	writeTaskCompletionContractTemplate(&b, slice.ID, slice.Title)
 	fmt.Fprintln(&b, "## Changed Files")
 	fmt.Fprintln(&b, "- ")
 	fmt.Fprintln(&b)
@@ -3948,6 +3959,17 @@ func renderTaskSliceResultTemplate(manifest taskManifest, slice taskSliceArtifac
 	fmt.Fprintln(&b, "## Checkpoints")
 	fmt.Fprintf(&b, "- Use `ds task checkpoint %s --target %s` to append structured evidence.\n", manifest.TaskID, slice.ID)
 	return b.String()
+}
+
+func writeTaskCompletionContractTemplate(b *strings.Builder, target, title string) {
+	fmt.Fprintln(b, "## Completion Contract")
+	fmt.Fprintf(b, "- Attempted slice: `%s` - %s\n", target, title)
+	fmt.Fprintln(b, "- Gate tested: promote, improve, rework, rollback, or block")
+	fmt.Fprintln(b, "- What changed: ")
+	fmt.Fprintln(b, "- Evidence for decision: ")
+	fmt.Fprintln(b, "- What remains: ")
+	fmt.Fprintln(b, "- Next iteration: ")
+	fmt.Fprintln(b)
 }
 
 func writePredictedFiles(b *strings.Builder, title string, files []taskPredictedFile) {
@@ -4254,6 +4276,9 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	if opts.Decision != "" && !isAllowedValue(opts.Decision, taskDecisions) {
 		return fmt.Errorf("invalid decision %q; valid values: %s", opts.Decision, strings.Join(taskDecisions, ", "))
 	}
+	if opts.NextDecision != "" && !isAllowedValue(opts.NextDecision, taskDecisions) {
+		return fmt.Errorf("invalid next decision %q; valid values: %s", opts.NextDecision, strings.Join(taskDecisions, ", "))
+	}
 	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(opts.Dir, taskID)
 	if err != nil {
 		return err
@@ -4290,7 +4315,7 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 		return err
 	}
 	resultPath := filepath.Join(workspace, selectedSlice.Result)
-	if err := appendTaskCheckpointToResult(resultPath, checkpointPath, checkpointJSONPath, workspace, opts, now); err != nil {
+	if err := appendTaskCheckpointToResult(resultPath, checkpointPath, checkpointJSONPath, workspace, selectedSlice, opts, now); err != nil {
 		return err
 	}
 	applyTaskTargetState(&manifest, selectedSlice.ID, opts.Stage, opts.Decision, now)
@@ -4981,6 +5006,7 @@ func renderTaskCheckpoint(manifest taskManifest, slice taskSliceArtifact, opts t
 	writeMarkdownList(&b, "Tests Actually Run", opts.TestsRun)
 	writeMarkdownList(&b, "Critical Files DevSpecs Missed", opts.MissedFiles)
 	writeMarkdownList(&b, "Distracting Files DevSpecs Included", opts.NoiseFiles)
+	writeTaskCheckpointCompletionContract(&b, slice, opts)
 	fmt.Fprintln(&b, "## Success Criteria")
 	fmt.Fprintln(&b, "- [ ] Checkpoint records actual context used.")
 	fmt.Fprintln(&b, "- [ ] Misses and noise are explicit when observed.")
@@ -5000,7 +5026,94 @@ func renderTaskCheckpoint(manifest taskManifest, slice taskSliceArtifact, opts t
 	fmt.Fprintln(&b, "- Improve")
 	fmt.Fprintln(&b, "- Rework")
 	fmt.Fprintln(&b, "- Rollback")
+	fmt.Fprintln(&b, "- Block")
 	return b.String()
+}
+
+func writeTaskCheckpointCompletionContract(b *strings.Builder, slice taskSliceArtifact, opts taskCheckpointOptions) {
+	fmt.Fprintln(b, "## Completion Contract")
+	fmt.Fprintf(b, "- Attempted slice: `%s` - %s\n", slice.ID, slice.Title)
+	fmt.Fprintf(b, "- Gate tested: %s\n", emptyAsDash(opts.Decision))
+	fmt.Fprintf(b, "- What changed: %s\n", taskCheckpointChangeSummary(opts))
+	fmt.Fprintf(b, "- Evidence for decision: %s\n", taskCheckpointEvidenceSummary(opts))
+	fmt.Fprintf(b, "- What remains: %s\n", taskCheckpointRemainingSummary(opts))
+	fmt.Fprintf(b, "- Next iteration: %s\n", taskCheckpointNextSummary(slice, opts))
+	fmt.Fprintln(b)
+}
+
+func taskCheckpointChangeSummary(opts taskCheckpointOptions) string {
+	if text := strings.TrimSpace(opts.Description); text != "" {
+		return text
+	}
+	if text := strings.TrimSpace(opts.Note); text != "" {
+		return text
+	}
+	if len(opts.Tasks) > 0 {
+		return strings.Join(normalizeList(opts.Tasks), "; ")
+	}
+	return "-"
+}
+
+func taskCheckpointEvidenceSummary(opts taskCheckpointOptions) string {
+	var parts []string
+	if len(opts.FilesRead) > 0 {
+		parts = append(parts, fmt.Sprintf("%d file(s) read", len(opts.FilesRead)))
+	}
+	if len(opts.FilesEdited) > 0 {
+		parts = append(parts, fmt.Sprintf("%d file(s) edited", len(opts.FilesEdited)))
+	}
+	if len(opts.TestsRun) > 0 {
+		parts = append(parts, fmt.Sprintf("%d test command(s)", len(opts.TestsRun)))
+	}
+	if len(opts.MissedFiles) > 0 {
+		parts = append(parts, fmt.Sprintf("%d missed file(s)", len(opts.MissedFiles)))
+	}
+	if len(opts.NoiseFiles) > 0 {
+		parts = append(parts, fmt.Sprintf("%d noise file(s)", len(opts.NoiseFiles)))
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, "; ")
+}
+
+func taskCheckpointRemainingSummary(opts taskCheckpointOptions) string {
+	var parts []string
+	if opts.NextTarget != "" {
+		parts = append(parts, "next target "+opts.NextTarget)
+	}
+	if opts.NextDecision != "" {
+		parts = append(parts, "next decision "+opts.NextDecision)
+	}
+	if len(opts.MissedFiles) > 0 {
+		parts = append(parts, "resolve missed files")
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, "; ")
+}
+
+func taskCheckpointNextSummary(slice taskSliceArtifact, opts taskCheckpointOptions) string {
+	if opts.NextTarget != "" || opts.NextDecision != "" {
+		target := emptyAsDash(opts.NextTarget)
+		decision := emptyAsDash(opts.NextDecision)
+		return fmt.Sprintf("%s with decision %s", target, decision)
+	}
+	switch strings.ToLower(strings.TrimSpace(opts.Decision)) {
+	case "promote":
+		return "promote to the next slice"
+	case "improve":
+		return fmt.Sprintf("create or run an improvement iteration such as %s-1", slice.ID)
+	case "rework":
+		return "rework this slice before promoting"
+	case "rollback":
+		return "rollback the attempted change"
+	case "block", "blocked":
+		return "block until the missing input is resolved"
+	default:
+		return "-"
+	}
 }
 
 func yamlScalar(value string) string {
@@ -5016,7 +5129,7 @@ func yamlScalar(value string) string {
 	return value
 }
 
-func appendTaskCheckpointToResult(resultPath, checkpointPath, checkpointJSONPath, workspace string, opts taskCheckpointOptions, now time.Time) error {
+func appendTaskCheckpointToResult(resultPath, checkpointPath, checkpointJSONPath, workspace string, slice taskSliceArtifact, opts taskCheckpointOptions, now time.Time) error {
 	rel, err := filepath.Rel(workspace, checkpointPath)
 	if err != nil {
 		rel = checkpointPath
@@ -5034,6 +5147,10 @@ func appendTaskCheckpointToResult(resultPath, checkpointPath, checkpointJSONPath
 	if strings.TrimSpace(opts.Note) != "" {
 		fmt.Fprintf(&b, "- Note: %s\n", strings.TrimSpace(opts.Note))
 	}
+	fmt.Fprintf(&b, "- What changed: %s\n", taskCheckpointChangeSummary(opts))
+	fmt.Fprintf(&b, "- Evidence for decision: %s\n", taskCheckpointEvidenceSummary(opts))
+	fmt.Fprintf(&b, "- What remains: %s\n", taskCheckpointRemainingSummary(opts))
+	fmt.Fprintf(&b, "- Next iteration: %s\n", taskCheckpointNextSummary(slice, opts))
 	writeIndentedResultList(&b, "Files read", opts.FilesRead)
 	writeIndentedResultList(&b, "Files edited", opts.FilesEdited)
 	writeIndentedResultList(&b, "Tests read", opts.TestsRead)
