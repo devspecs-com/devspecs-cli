@@ -80,11 +80,12 @@ function Install-DevSpecs {
     $UserPath = [Environment]::GetEnvironmentVariable("PATH", "User")
     if ($UserPath -notlike "*$InstallDir*") {
         [Environment]::SetEnvironmentVariable("PATH", "$UserPath;$InstallDir", "User")
-        Write-Host "[INFO] Added $InstallDir to PATH. Restart your shell to use 'ds'." -ForegroundColor Yellow
+        Write-Host "[INFO] Added $InstallDir to PATH. Restart your shell or IDE terminal to use 'ds'." -ForegroundColor Yellow
     }
 
     Write-Host "[INFO] DevSpecs CLI installed successfully!" -ForegroundColor Green
-    Write-Host "[INFO] Run 'ds --help' to get started" -ForegroundColor Green
+    Write-Host "[INFO] Run 'ds version' to verify the active binary" -ForegroundColor Green
+    Write-Host "[INFO] If your shell or IDE terminal cannot find ds yet, restart it and try again" -ForegroundColor Yellow
     Send-TelemetryInstallCompleted -Version $Version -Arch $Arch
 }
 

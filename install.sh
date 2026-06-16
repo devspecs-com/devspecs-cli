@@ -111,13 +111,14 @@ main() {
     fi
 
     info "DevSpecs CLI installed successfully!"
-    info "Run 'ds --help' to get started"
+    info "Run 'ds version' to verify the active binary"
+    info "If your shell or IDE terminal cannot find ds yet, restart it and try again"
     telemetry_install_completed
 
     if command -v ds >/dev/null 2>&1; then
-        ds --version
+        ds version
     else
-        warn "ds is not in PATH. Add $INSTALL_DIR to your PATH."
+        warn "ds is not in PATH. Add $INSTALL_DIR to your PATH, then restart your shell or IDE terminal."
     fi
 }
 

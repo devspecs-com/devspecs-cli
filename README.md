@@ -74,6 +74,20 @@ found. Verify the active binary with:
 ds version
 ```
 
+Check for updates with:
+
+```bash
+ds update
+```
+
+`ds update` is guidance-only: it shows the active binary, likely install
+source, latest release status, and the update command to run. It does not modify
+your system. Use `ds update --no-check` for offline guidance.
+
+If an upgrade succeeds but `ds version` still shows the old build, restart the
+current shell or IDE terminal. Editors often keep an old PATH until their
+embedded terminal is reopened.
+
 ## Agent quickstart
 
 Start agent sessions with `ds tldr`. It is the shortest way to remind an LLM to
@@ -228,6 +242,7 @@ Source files remain authoritative. DevSpecs stores derived index state locally.
 | `ds recent` | Show recently active local git topics and useful follow-up context commands. |
 | `ds find <query>` | Build agent-readable packed context. |
 | `ds find --plain <query>` | Show the older flat ranked result list. |
+| `ds update` | Show update guidance and latest-version status for the active binary. |
 | `ds context <id>` | Export one artifact as paste-ready agent context. |
 | `ds scan` | Manually refresh or rebuild configured intent-artifact paths. |
 | `ds config show` | Inspect effective repo discovery config. |
@@ -267,6 +282,17 @@ DS_TELEMETRY=0
 ```
 
 Use `DEVSPECS_TELEMETRY=debug` to print the would-send event to stderr.
+
+## Install Troubleshooting
+
+If `ds` is not found after install or upgrade:
+
+1. Restart the current shell or IDE terminal.
+2. Run `ds version` to confirm which binary is active.
+3. Run `ds update` to see the likely install source and update command.
+
+If the command still is not found, make sure the install directory from Homebrew,
+Scoop, Go, or the install script is on your PATH.
 
 ## Public Eval Boundary
 

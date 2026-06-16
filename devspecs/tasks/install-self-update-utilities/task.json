@@ -5,7 +5,7 @@
   "query": "Install and self-update utilities",
   "status": "packed",
   "created_at": "2026-06-15T15:09:47Z",
-  "updated_at": "2026-06-16T13:58:47Z",
+  "updated_at": "2026-06-16T14:01:50Z",
   "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
   "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/install-self-update-utilities",
   "artifacts": {
@@ -45,7 +45,13 @@
         "title": "Document restart shell or IDE after install and upgrade",
         "plan": "G03-document-restart-shell-or-ide-after-install-and-plan.md",
         "result": "G03-document-restart-shell-or-ide-after-install-and-result.md",
-        "kind": "slice"
+        "kind": "slice",
+        "stage": "validated",
+        "decision": "promote",
+        "updated_at": "2026-06-16T14:01:50Z",
+        "latest_checkpoint_id": "cp_20260616T140150Z_g03_validated",
+        "latest_checkpoint": "checkpoints/20260616-140150-validated.md",
+        "latest_checkpoint_json": "checkpoints/20260616-140150-validated.json"
       }
     ]
   },
