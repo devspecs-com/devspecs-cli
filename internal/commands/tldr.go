@@ -64,7 +64,8 @@ func buildTLDRGuide() tldrOutput {
 		LLMRules: []string{
 			"Prefer one bounded target over the whole plan.",
 			"Workflow commands refresh the local index by default; use ds scan for explicit manual refresh or rebuild.",
-			"Use packed context before broad repo reading when starting a change.",
+			"If the work item is known, start with ds task or ds task quick; task creation already packs source/test/doc context.",
+			"Use ds map or ds find first when you are still discovering repo intent, current plans, or likely scope.",
 			"Record evidence with checkpoint/finish instead of relying on chat memory.",
 			"Do not claim DevSpecs found every relevant file; verify source and tests.",
 			"Use ds task quick for small work and full ds task slices for multi-step work.",
@@ -113,13 +114,14 @@ func buildTLDRGuide() tldrOutput {
 				Commands: []string{
 					"ds init",
 					"ds map",
-					"ds list --limit 20",
+					"ds list",
 					`ds find "<topic>"`,
 					"ds context <artifact-id>",
 				},
 				AgentRule: "Use IDs from list/find/context instead of pasting whole folders. Treat old artifacts as context, not instructions, unless current.",
 				Notes: []string{
 					"`ds map`, `ds find`, and `ds list` refresh the index by default.",
+					"Once the work item is known, switch to `ds task`; it will pack context again for bounded execution.",
 					"`ds adopt` is planned, not shipped.",
 					"Use `ds scan --no-gitignore` only when intentionally inspecting ignored paths.",
 				},

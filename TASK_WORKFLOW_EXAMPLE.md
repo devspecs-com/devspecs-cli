@@ -15,6 +15,10 @@ Before handing work to an agent, run `ds tldr`. It gives the agent-facing rules:
 one bounded target, read the relevant artifacts, checkpoint actual evidence, and
 stop at the decision gate.
 
+This example starts with `ds task` because the work item is already known. In a
+brownfield repo where the target is unclear, start with `ds map` or `ds find`,
+then switch to `ds task` once the execution target is concrete.
+
 DevSpecs does not replace canonical repo plans. Existing `PLAN-*` files, ADRs,
 PRDs, RFCs, decision memos, and runbooks remain the source of truth. A task
 workspace is the execution layer on top: it turns that intent into addressable

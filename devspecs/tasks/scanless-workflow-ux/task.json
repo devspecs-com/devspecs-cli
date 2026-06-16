@@ -5,7 +5,7 @@
   "query": "Fold ds scan into workflow commands so onboarding starts with map, find, and task instead of a required manual scan",
   "status": "packed",
   "created_at": "2026-06-10T13:27:53Z",
-  "updated_at": "2026-06-15T16:54:29Z",
+  "updated_at": "2026-06-16T07:54:44Z",
   "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
   "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/scanless-workflow-ux",
   "artifacts": {
@@ -45,7 +45,13 @@
         "title": "Clarify find-before-task workflow and task context packing",
         "plan": "A03-clarify-find-before-task-workflow-and-task-conte-plan.md",
         "result": "A03-clarify-find-before-task-workflow-and-task-conte-result.md",
-        "kind": "slice"
+        "kind": "slice",
+        "stage": "validated",
+        "decision": "promote",
+        "updated_at": "2026-06-16T07:54:33Z",
+        "latest_checkpoint_id": "cp_20260616T075433Z_a03_validated",
+        "latest_checkpoint": "checkpoints/20260616-075433-validated.md",
+        "latest_checkpoint_json": "checkpoints/20260616-075433-validated.json"
       }
     ]
   },

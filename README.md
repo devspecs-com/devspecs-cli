@@ -86,6 +86,11 @@ ds tldr hotfix
 ds tldr incident --json
 ```
 
+If the work item is already known, start with `ds task` or `ds task quick`.
+Task creation refreshes the local index and packs source, test, docs, and
+receipt context for the generated slice. Use `ds map` or `ds find` first when
+the agent is still discovering repo intent, current plans, or likely scope.
+
 ## Intent artifacts and task workspaces
 
 DevSpecs has a two-layer model:
@@ -150,7 +155,8 @@ transcript generated from current CLI output.
 
 Use scan/map/find when a repo already has plans, PRDs, RFCs, ADRs, specs,
 runbooks, eval cards, or agent notes, but they are hard to find or hand to an
-agent.
+agent. Once the target is known, switch to `ds task` for bounded execution;
+`ds task` packs context again for the actual slice.
 
 ```bash
 ds init

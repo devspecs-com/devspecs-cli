@@ -24,11 +24,16 @@ func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 		"ds task quick",
 		"ds task checkpoint <task-id> --target <target>",
 		"Workflow commands refresh the local index by default",
-		"ds list --limit 20",
+		"If the work item is known, start with ds task or ds task quick",
+		"Use ds map or ds find first when you are still discovering repo intent",
+		"ds list",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("tldr output missing %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "ds list --limit") {
+		t.Fatalf("tldr output should not advertise unsupported list limit flag:\n%s", out)
 	}
 }
 
