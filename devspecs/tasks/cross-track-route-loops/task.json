@@ -1,0 +1,73 @@
+{
+  "task_id": "cross-track-route-loops",
+  "series": "N",
+  "profile": "code-change",
+  "query": "Cross-track route loop placeholder: preserve ordered multi-track release routes, repair slices, smoke reruns, and later route views without building full orchestration yet",
+  "status": "packed",
+  "created_at": "2026-06-17T12:33:30Z",
+  "updated_at": "2026-06-17T12:35:39Z",
+  "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
+  "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/cross-track-route-loops",
+  "artifacts": {
+    "series": "N",
+    "index": "N00-index.md",
+    "first_slice": "N01-define-route-loop-artifact-model-and-launch-era-plan.md",
+    "result": "N01-define-route-loop-artifact-model-and-launch-era-result.md",
+    "slices": [
+      {
+        "id": "N01",
+        "title": "Define route loop artifact model and launch-era manual workflow",
+        "plan": "N01-define-route-loop-artifact-model-and-launch-era-plan.md",
+        "result": "N01-define-route-loop-artifact-model-and-launch-era-result.md",
+        "kind": "slice",
+        "stage": "planned",
+        "decision": "promote",
+        "updated_at": "2026-06-17T12:35:39Z",
+        "latest_checkpoint_id": "cp_20260617T123539Z_n01_planned",
+        "latest_checkpoint": "checkpoints/20260617-123539-planned.md",
+        "latest_checkpoint_json": "checkpoints/20260617-123539-planned.json"
+      },
+      {
+        "id": "N02",
+        "title": "Plan route-aware task inventory and apply-next interaction",
+        "plan": "N02-plan-route-aware-task-inventory-and-apply-next-i-plan.md",
+        "result": "N02-plan-route-aware-task-inventory-and-apply-next-i-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "N03",
+        "title": "Decide when route loops graduate into CLI primitives",
+        "plan": "N03-decide-when-route-loops-graduate-into-cli-primit-plan.md",
+        "result": "N03-decide-when-route-loops-graduate-into-cli-primit-result.md",
+        "kind": "slice"
+      }
+    ]
+  },
+  "predicted_context": {},
+  "risk_cards": [
+    {
+      "id": "prior-noise",
+      "title": "Prior checkpoint recorded distracting context",
+      "severity": "low",
+      "source": "checkpoint_fact",
+      "evidence": [
+        "task v1-1-release-readiness-tag-gate checkpoint cp_20260617T121918Z_k01_validated called distracting `ds task progress on stderr appears as NativeCommandError when PowerShell captures combined streams`"
+      ],
+      "agent_check": "Keep that family as reference-only unless this task verifies it.",
+      "count": 1
+    }
+  ],
+  "confidence": {
+    "primary_file_confidence": "low",
+    "test_coverage_confidence": "low",
+    "docs_config_confidence": "low",
+    "git_receipt_confidence": "low",
+    "noise_risk": "low",
+    "pack_completeness": "low",
+    "why": [
+      "no clear primary implementation file was found",
+      "test companion coverage was not evident from the initial pack"
+    ],
+    "agent_instruction": "Validate the test and integration surface before editing. Record critical misses and distracting inclusions in the slice result or a task checkpoint."
+  }
+}
