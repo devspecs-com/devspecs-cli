@@ -33,12 +33,17 @@ func TestDetectInstallSourceHomebrew(t *testing.T) {
 }
 
 func TestDetectInstallSourceScoop(t *testing.T) {
-	source, _, command, _ := detectInstallSource(`C:\Users\brenn\scoop\apps\devspecs\current\ds.exe`)
-	if source != "scoop" {
-		t.Fatalf("source = %q", source)
-	}
-	if command != "scoop update devspecs" {
-		t.Fatalf("command = %q", command)
+	for _, path := range []string{
+		`C:\Users\brenn\scoop\apps\devspecs\current\ds.exe`,
+		`C:\Users\brenn\scoop\shims\ds.exe`,
+	} {
+		source, _, command, _ := detectInstallSource(path)
+		if source != "scoop" {
+			t.Fatalf("%s source = %q", path, source)
+		}
+		if command != "scoop update devspecs" {
+			t.Fatalf("%s command = %q", path, command)
+		}
 	}
 }
 

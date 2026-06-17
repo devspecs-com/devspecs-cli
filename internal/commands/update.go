@@ -383,6 +383,7 @@ func detectInstallSource(executable string) (source, confidence, command string,
 }
 
 func normalizeExecutablePath(path string) string {
+	path = strings.ReplaceAll(path, `\`, `/`)
 	path = filepath.ToSlash(strings.TrimSpace(path))
 	return strings.ToLower(path)
 }

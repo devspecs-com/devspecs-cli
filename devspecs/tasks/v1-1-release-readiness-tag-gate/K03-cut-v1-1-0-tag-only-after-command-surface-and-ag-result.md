@@ -78,3 +78,24 @@
   - `ds find --help does not expose --pack`
   - `ds map --json --no-refresh parses and returns areas`
   - `ds apply v1-1-release-readiness-tag-gate --json resolves K03`
+
+### Checkpoint
+- Created At: 2026-06-17T17:21:07Z
+- Stage: validated
+- Decision: block
+- Source: `checkpoints/20260617-172107-validated.md`
+- Structured Evidence: `checkpoints/20260617-172107-validated.json`
+- Note: Push this fix and wait for CI before creating v1.1.0.
+- What changed: Fixed the red GitHub Actions update test by normalizing Windows backslashes before Scoop install-source detection.
+- Evidence for decision: 2 file(s) edited; 5 test command(s)
+- What remains: next target K03; next decision block
+- Next iteration: K03 with decision block
+- Files edited:
+  - `internal/commands/update.go`
+  - `internal/commands/update_test.go`
+- Tests run:
+  - `go test ./internal/commands -run TestDetectInstallSourceScoop -count=1 -v`
+  - `go test ./internal/commands -run TestDetectInstallSource -count=1`
+  - `go test ./internal/commands -count=1`
+  - `git diff --check`
+  - `go build -o .devspecs\bin\ds.exe ./cmd/ds`
