@@ -43,6 +43,21 @@ v1.1 release readiness and tag gate
 - Release notes should say `ds task` is the main workflow. `ds find` and `ds recent` are the diagnostic/evidence layer.
 - If architecture mapping is still not stable, release it as `ds beta map` and document it as experimental.
 
+## Current Cross-Track Route
+This release route is a deliberate cross-track loop, not a single linear task series:
+
+```text
+K01 -> B03 -> H02 -> H03 -> F03 -> K01-1 -> K02 -> K03
+```
+
+Interpretation:
+- `K01` is the first release smoke gate.
+- `B03`, `H02`, `H03`, and `F03` are targeted repair slices if smoke confirms they remain launch-relevant.
+- `K01-1` is the second smoke iteration after those repairs.
+- `K02` and `K03` only run after the smoke loop is clean enough for public docs and tag work.
+
+Dogfood note: this points toward a future cross-track route/loop concept. For now, keep the route explicit in the release index rather than inventing a separate orchestration model.
+
 ## Gate Checklist
 - [ ] `ds tldr` starts with task workflows and includes agent-oriented hotfix/epic/incident guidance.
 - [ ] `ds map`/`ds recent` naming no longer confuses recent activity with architecture mapping.

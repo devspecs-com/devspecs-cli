@@ -5,7 +5,7 @@
   "query": "v1.1 release readiness and tag gate",
   "status": "packed",
   "created_at": "2026-06-16T08:11:38Z",
-  "updated_at": "2026-06-16T08:22:58Z",
+  "updated_at": "2026-06-17T12:19:18Z",
   "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
   "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/v1-1-release-readiness-tag-gate",
   "artifacts": {
@@ -19,7 +19,13 @@
         "title": "Run launch-ready CLI smoke tests across task recent find map init and apply",
         "plan": "K01-run-launch-ready-cli-smoke-tests-across-task-rec-plan.md",
         "result": "K01-run-launch-ready-cli-smoke-tests-across-task-rec-result.md",
-        "kind": "slice"
+        "kind": "slice",
+        "stage": "validated",
+        "decision": "improve",
+        "updated_at": "2026-06-17T12:19:18Z",
+        "latest_checkpoint_id": "cp_20260617T121918Z_k01_validated",
+        "latest_checkpoint": "checkpoints/20260617-121918-validated.md",
+        "latest_checkpoint_json": "checkpoints/20260617-121918-validated.json"
       },
       {
         "id": "K02",

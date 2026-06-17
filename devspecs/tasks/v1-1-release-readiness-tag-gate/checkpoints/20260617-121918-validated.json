@@ -1,0 +1,87 @@
+{
+  "schema_version": 2,
+  "checkpoint_id": "cp_20260617T121918Z_k01_validated",
+  "task_id": "v1-1-release-readiness-tag-gate",
+  "target": "K01",
+  "series": "K",
+  "query": "v1.1 release readiness and tag gate",
+  "slice": "K01",
+  "slice_title": "Run launch-ready CLI smoke tests across task recent find map init and apply",
+  "parent_slice": "K01",
+  "stage": "validated",
+  "decision": "improve",
+  "created_at": "2026-06-17T12:19:18Z",
+  "goal": "Record progress for `v1.1 release readiness and tag gate`.",
+  "description": "Fresh-repo launch smoke passed core CLI workflows, but surfaced launch-surface papercuts: top-level ds list still appears in public help, PowerShell combined stderr/stdout capture can make task progress look like an error, init sparse-docs suggestion is noisy for tiny valid repos, and external slash command execution is only partially smokeable here.",
+  "note": "Follow release route K01 -\u003e B03 -\u003e H02 -\u003e H03 -\u003e F03 -\u003e K01-1 -\u003e K02 -\u003e K03 before tag work.",
+  "resources": [
+    "../K00-index.md",
+    "../K01-run-launch-ready-cli-smoke-tests-across-task-rec-plan.md",
+    "../K01-run-launch-ready-cli-smoke-tests-across-task-rec-result.md",
+    "../task.json",
+    "devspecs/tasks/v1-1-release-readiness-tag-gate/K01-release-smoke-transcript.md",
+    "devspecs/tasks/task-list-inventory-ux/M00-index.md"
+  ],
+  "files_read": [
+    "devspecs/tasks/v1-1-release-readiness-tag-gate/K01-run-launch-ready-cli-smoke-tests-across-task-rec-plan.md",
+    "devspecs/tasks/v1-1-release-readiness-tag-gate/K00-index.md"
+  ],
+  "files_edited": [
+    "devspecs/tasks/v1-1-release-readiness-tag-gate/K00-index.md",
+    "devspecs/tasks/v1-1-release-readiness-tag-gate/K01-run-launch-ready-cli-smoke-tests-across-task-rec-result.md",
+    "devspecs/tasks/v1-1-release-readiness-tag-gate/K01-release-smoke-transcript.md",
+    "devspecs/tasks/task-list-inventory-ux/M00-index.md",
+    "devspecs/tasks/task-list-inventory-ux/M01-define-task-list-open-plan-inventory-ux-and-rout-plan.md"
+  ],
+  "tests_run": [
+    "K01 fresh repo smoke: ds init/map/recent/find/task/prompt/apply/checkpoint/apply",
+    "Agent tooling file smoke: generated 8/8 Codex Cursor Claude Windsurf files",
+    "External CLI smoke: codex help blocked by Access is denied; claude help succeeded; claude /ds-task stdin probe partial"
+  ],
+  "missed_files": [
+    "top-level ds list remains in public help"
+  ],
+  "noise_files": [
+    "ds task progress on stderr appears as NativeCommandError when PowerShell captures combined streams"
+  ],
+  "actual_context": {
+    "files_read": [
+      "devspecs/tasks/v1-1-release-readiness-tag-gate/K01-run-launch-ready-cli-smoke-tests-across-task-rec-plan.md",
+      "devspecs/tasks/v1-1-release-readiness-tag-gate/K00-index.md"
+    ],
+    "files_edited": [
+      "devspecs/tasks/v1-1-release-readiness-tag-gate/K00-index.md",
+      "devspecs/tasks/v1-1-release-readiness-tag-gate/K01-run-launch-ready-cli-smoke-tests-across-task-rec-result.md",
+      "devspecs/tasks/v1-1-release-readiness-tag-gate/K01-release-smoke-transcript.md",
+      "devspecs/tasks/task-list-inventory-ux/M00-index.md",
+      "devspecs/tasks/task-list-inventory-ux/M01-define-task-list-open-plan-inventory-ux-and-rout-plan.md"
+    ],
+    "tests_run": [
+      "K01 fresh repo smoke: ds init/map/recent/find/task/prompt/apply/checkpoint/apply",
+      "Agent tooling file smoke: generated 8/8 Codex Cursor Claude Windsurf files",
+      "External CLI smoke: codex help blocked by Access is denied; claude help succeeded; claude /ds-task stdin probe partial"
+    ]
+  },
+  "predicted_context_feedback": {
+    "critical_missed": [
+      "top-level ds list remains in public help"
+    ],
+    "distracting_included": [
+      "ds task progress on stderr appears as NativeCommandError when PowerShell captures combined streams"
+    ]
+  },
+  "evidence": {
+    "plan_refs": [
+      "../K00-index.md",
+      "../K01-run-launch-ready-cli-smoke-tests-across-task-rec-plan.md",
+      "../K01-run-launch-ready-cli-smoke-tests-across-task-rec-result.md",
+      "../task.json",
+      "devspecs/tasks/v1-1-release-readiness-tag-gate/K01-release-smoke-transcript.md",
+      "devspecs/tasks/task-list-inventory-ux/M00-index.md"
+    ]
+  },
+  "next": {
+    "recommended_target": "B03",
+    "recommended_decision": "improve"
+  }
+}
