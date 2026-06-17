@@ -58,6 +58,11 @@ const (
 	PackTierDiagnostic = "diagnostic"
 )
 
+const (
+	currentIntentAnchorBoost      = 18.0
+	currentIntentInactiveDemotion = 120.0
+)
+
 type WeightedFilesRetrieverV0 struct {
 	DisableSectionAware bool
 	EvidenceMode        string
@@ -200,6 +205,7 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode 
 			})
 		}
 	}
+	scoredCandidates = applyCurrentIntentDominance(scoredCandidates, queryLower)
 	evidenceBalanced := strings.EqualFold(evidenceMode, EvidenceModeBalanced)
 	sort.Slice(scoredCandidates, func(i, j int) bool {
 		if scoredCandidates[i].score == scoredCandidates[j].score {
@@ -256,6 +262,46 @@ func retrieveWeightedFilesV0(candidates []Candidate, query string, evidenceMode 
 		sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	}
 	return out
+}
+
+func applyCurrentIntentDominance(candidates []scoredCandidate, queryLower string) []scoredCandidate {
+	if len(candidates) == 0 || hasLifecycleIntent(queryLower) || containsAny(queryLower, "archive", "archived", "historical", "history") {
+		return candidates
+	}
+	hasActiveIntent := false
+	for _, candidate := range candidates {
+		if isIntentAuthorityRole(candidate.role) && len(activeIntentAuthoritySignals(candidate.candidate)) > 0 {
+			hasActiveIntent = true
+			break
+		}
+	}
+	if !hasActiveIntent {
+		return candidates
+	}
+	for i := range candidates {
+		if !isIntentAuthorityRole(candidates[i].role) {
+			continue
+		}
+		switch {
+		case len(activeIntentAuthoritySignals(candidates[i].candidate)) > 0:
+			candidates[i].score += currentIntentAnchorBoost
+			candidates[i].candidate = withCurrentIntentMetadata(candidates[i].candidate, "current_intent_anchor_reason", "current decision context is present")
+		case inactiveIntentSignal(candidates[i].candidate):
+			candidates[i].score -= currentIntentInactiveDemotion
+			candidates[i].candidate = withCurrentIntentMetadata(candidates[i].candidate, "current_intent_demotion_reason", "current decision context is present")
+		}
+	}
+	return candidates
+}
+
+func withCurrentIntentMetadata(c Candidate, key, value string) Candidate {
+	if c.Metadata == nil {
+		c.Metadata = map[string]string{}
+	} else {
+		c.Metadata = copyMetadata(c.Metadata)
+	}
+	c.Metadata[key] = value
+	return c
 }
 
 type scoredCandidate struct {
@@ -2726,15 +2772,15 @@ func authorityPrior(c Candidate, role, queryLower string) authorityPriorResult {
 		for _, signal := range activeIntentAuthoritySignals(c) {
 			switch signal {
 			case "owner decision record":
-				add(1.4, "authority prior: owner decision record")
+				add(1.8, "authority prior: owner decision record")
 			case "active phase marker":
-				add(1.2, "authority prior: active phase marker")
+				add(2.2, "authority prior: active phase marker")
 			case "active intent status":
-				add(1.1, "authority prior: active/next intent status")
+				add(1.4, "authority prior: active/next intent status")
 			}
 		}
 		if inactiveIntentSignal(c) && !hasLifecycleIntent(queryLower) {
-			add(-1.4, "authority prior: blocked, closed, stale, or superseded")
+			add(-2.0, "authority prior: blocked, closed, stale, or superseded")
 		}
 	}
 
@@ -2770,7 +2816,7 @@ func authorityPrior(c Candidate, role, queryLower string) authorityPriorResult {
 	if status == "superseded" || status == "stale" || status == "deprecated" ||
 		lifecycle == "superseded" || lifecycle == "stale" || lifecycle == "deprecated" || lifecycle == "obsolete" {
 		if !hasLifecycleIntent(queryLower) {
-			add(-0.8, "authority prior: stale or superseded")
+			add(-1.2, "authority prior: stale or superseded")
 		}
 	}
 	if lifecycle == "archived" && !containsAny(queryLower, "archive", "archived", "historical", "history") {
@@ -3997,6 +4043,9 @@ func filterWeakBodyOnlyBackfill(candidates []scoredCandidate, queryLower string)
 
 func isWeakBodyOnlyBackfill(candidate scoredCandidate, queryLower string) bool {
 	if candidate.profile.coreTerms < 3 {
+		return false
+	}
+	if isIntentAuthorityRole(candidate.role) && len(activeIntentAuthoritySignals(candidate.candidate)) > 0 {
 		return false
 	}
 	if candidate.profile.pathTitleCoreMatches > 0 || candidate.profile.identifierMatches > 0 {
@@ -5668,6 +5717,12 @@ func reasonsForCandidate(c Candidate, terms map[string]float64, queryLower strin
 	}
 	if c.Metadata != nil && c.Metadata["exact_intent_id_reasons"] != "" {
 		reasons = append(reasons, "exact intent ID: "+strings.ReplaceAll(c.Metadata["exact_intent_id_reasons"], "\n", "; "))
+	}
+	if c.Metadata != nil && c.Metadata["current_intent_demotion_reason"] != "" {
+		reasons = append(reasons, "authority prior: inactive intent demoted because "+c.Metadata["current_intent_demotion_reason"])
+	}
+	if c.Metadata != nil && c.Metadata["current_intent_anchor_reason"] != "" {
+		reasons = append(reasons, "authority prior: current intent anchor because "+c.Metadata["current_intent_anchor_reason"])
 	}
 	if c.Metadata != nil && c.Metadata["anchor_first_score"] != "" {
 		parts := []string{"score " + c.Metadata["anchor_first_score"]}

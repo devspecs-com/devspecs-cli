@@ -1788,6 +1788,79 @@ func TestWeightedFilesRetrieverV0_RanksActiveIntentAboveBlockedHistoricalPlan(t 
 	}
 }
 
+func TestWeightedFilesRetrieverV0_BrownfieldRecoveryBeforeAndAfterCurrentDecisionDocs(t *testing.T) {
+	query := "epoch 4 external validity bridge"
+	beforeCurrentDocs := []Candidate{
+		{
+			Path:   "docs/plans/D4.2-blocked-external-validity-bridge.md",
+			Kind:   "plan",
+			Title:  "D4.2 blocked external validity bridge",
+			Status: "blocked",
+			Body:   "Status: blocked\nExternal validity bridge plan from an older epoch. Blocked on repo-world assumptions.",
+		},
+		{
+			Path:   "docs/plans/T00-epoch-index.md",
+			Kind:   "plan",
+			Title:  "T00 epoch planning index",
+			Status: "superseded",
+			Body:   "Status: superseded\nOlder epoch index mentioning external validity bridge work.",
+		},
+		{
+			Path:  "docs/plans/PLAN-008.1-synthetic-repo-world.md",
+			Kind:  "plan",
+			Title: "PLAN-008.1 synthetic repo world",
+			Body:  "Historical external validity analogy for synthetic repo world experiments.",
+		},
+	}
+
+	before := (WeightedFilesRetrieverV0{}).Retrieve(beforeCurrentDocs, query)
+	if !containsCandidatePath(before, "docs/plans/D4.2-blocked-external-validity-bridge.md") {
+		t.Fatalf("blocked historical plan should remain visible when no current decision artifact exists, got %#v", CandidatePaths(before))
+	}
+	beforeReasons := ExplainCandidates([]Candidate{beforeCurrentDocs[0]}, query)
+	if len(beforeReasons) == 0 || !reasonContains(beforeReasons[0].Reasons, "authority prior: blocked, closed, stale, or superseded") {
+		t.Fatalf("blocked historical plan should explain inactive lifecycle, got %#v", beforeReasons)
+	}
+
+	afterCurrentDocs := append([]Candidate{}, beforeCurrentDocs...)
+	afterCurrentDocs = append(afterCurrentDocs,
+		Candidate{
+			Path:   "docs/notes/next_epoch_decision_memo.md",
+			Kind:   "plan",
+			Title:  "Epoch 4 external validity bridge decision memo",
+			Status: "next",
+			Body:   "Status: next\nOwner decision: Epoch 4 external validity bridge is the active bridge work.",
+		},
+		Candidate{
+			Path:  "docs/north_star.md",
+			Kind:  "plan",
+			Title: "Research north star",
+			Body:  "Active phase: Epoch 4 external validity bridge. Route current implementation slices here.",
+		},
+	)
+
+	after := (WeightedFilesRetrieverV0{}).Retrieve(afterCurrentDocs, query)
+	topTwo := CandidatePaths(after)
+	if len(topTwo) > 2 {
+		topTwo = topTwo[:2]
+	}
+	if !containsString(topTwo, "docs/notes/next_epoch_decision_memo.md") || !containsString(topTwo, "docs/north_star.md") {
+		t.Fatalf("current decision docs should become the brownfield recovery anchors, paths=%#v candidates=%#v", CandidatePaths(after), after)
+	}
+	northStarIndex := candidatePathIndex(after, "docs/north_star.md")
+	if northStarIndex < 0 || after[northStarIndex].Metadata["current_intent_anchor_reason"] == "" {
+		t.Fatalf("active phase doc should carry current-intent anchor metadata, got %#v", after)
+	}
+	blockedIndex := candidatePathIndex(after, "docs/plans/D4.2-blocked-external-validity-bridge.md")
+	decisionIndex := candidatePathIndex(after, "docs/notes/next_epoch_decision_memo.md")
+	if blockedIndex >= 0 && decisionIndex >= 0 && blockedIndex < decisionIndex {
+		t.Fatalf("blocked historical plan outranked current decision doc after it existed: %#v", CandidatePaths(after))
+	}
+	if blockedIndex >= 0 && after[blockedIndex].Metadata["current_intent_demotion_reason"] == "" {
+		t.Fatalf("blocked historical plan should carry current-intent demotion metadata, got %#v", after[blockedIndex].Metadata)
+	}
+}
+
 func TestWeightedFilesRetrieverV0_ExactPlanIDKeepsDirectArtifactAndLinkedNeighborAheadOfHistoricalAnalog(t *testing.T) {
 	query := "EV-R1 external validity bridge"
 	candidates := []Candidate{

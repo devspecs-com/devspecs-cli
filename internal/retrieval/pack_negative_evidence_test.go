@@ -123,3 +123,44 @@ func TestApplyDemotionOnlyNegativeEvidenceDemotesBlockedIntentWhenCurrentDecisio
 		t.Fatalf("expected downgrade reason, got %#v", got.ExcludedNoise[0])
 	}
 }
+
+func TestApplyDemotionOnlyNegativeEvidenceKeepsBlockedIntentWhenCurrentDecisionAbsent(t *testing.T) {
+	pack := RoleGroupedPack{
+		Groups: []PackGroup{
+			{
+				Role:   PackRoleOpenWork,
+				Title:  PackRoleTitle(PackRoleOpenWork),
+				Budget: 3,
+				Items: []PackItem{
+					{
+						OriginalRank: 1,
+						ID:           "blocked",
+						Path:         "docs/plans/D4.2-blocked-external-validity-bridge.md",
+						Title:        "D4.2 blocked external validity bridge",
+						Status:       "blocked",
+						Role:         PackRoleOpenWork,
+						Reasons:      []string{"authority prior: blocked, closed, stale, or superseded"},
+					},
+					{
+						OriginalRank: 2,
+						ID:           "historical",
+						Path:         "docs/plans/PLAN-008.1-synthetic-repo-world.md",
+						Title:        "PLAN-008.1 synthetic repo world",
+						Role:         PackRoleOpenWork,
+					},
+				},
+			},
+		},
+	}
+
+	got := ApplyDemotionOnlyNegativeEvidence(pack, "epoch 4 external validity bridge")
+	if len(got.ExcludedNoise) != 0 {
+		t.Fatalf("blocked plan should stay visible when no current decision context exists, got %#v", got.ExcludedNoise)
+	}
+	if len(got.Groups) != 1 || len(got.Groups[0].Items) != 2 {
+		t.Fatalf("expected blocked and historical intent to remain visible, got %#v", got.Groups)
+	}
+	if got.Metadata[packNegativeEvidenceCountKey] != "" {
+		t.Fatalf("negative evidence should not fire without active decision context: %#v", got.Metadata)
+	}
+}
