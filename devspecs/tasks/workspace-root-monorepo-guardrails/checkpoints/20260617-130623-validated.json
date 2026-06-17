@@ -1,0 +1,77 @@
+{
+  "schema_version": 2,
+  "checkpoint_id": "cp_20260617T130623Z_h02_validated",
+  "task_id": "workspace-root-monorepo-guardrails",
+  "target": "H02",
+  "series": "H",
+  "query": "Workspace root and monorepo guardrails for scan/map/find/task commands",
+  "slice": "H02",
+  "slice_title": "Add traversal budgets, progress output, and ignored-directory explanations for scan map find and task",
+  "parent_slice": "H02",
+  "stage": "validated",
+  "decision": "promote",
+  "created_at": "2026-06-17T13:06:23Z",
+  "goal": "Record progress for `Workspace root and monorepo guardrails for scan/map/find/task commands`.",
+  "description": "Confirmed H02 with complete touched-file evidence and full command/scan package tests.",
+  "resources": [
+    "../H00-index.md",
+    "../H02-add-traversal-budgets-progress-output-and-ignore-plan.md",
+    "../H02-add-traversal-budgets-progress-output-and-ignore-result.md",
+    "../task.json"
+  ],
+  "files_read": [
+    "internal/scan/scan.go",
+    "internal/commands/scan.go",
+    "internal/commands/refresh.go"
+  ],
+  "files_edited": [
+    "internal/scan/result.go",
+    "internal/scan/scan.go",
+    "internal/scan/first_party_source_context.go",
+    "internal/scan/source_manifest.go",
+    "internal/commands/scan.go",
+    "internal/commands/refresh.go",
+    "internal/commands/scan_output_test.go",
+    "internal/scan/scan_test.go"
+  ],
+  "tests_run": [
+    "go test ./internal/scan -run 'TestCollectFileInventoryExplainsSkippedHeavyAndIgnoredDirs|TestScan_FreshIndexProgressIncludesGranularTimings|TestScan_SourceManifest' -count=1",
+    "go test ./internal/commands -run 'TestScanJSONProgressUsesStderrAndReportsTraversalDiagnostics|TestScanTraversalErrorNamesRootAndNarrowingAction|TestScanJSONIncludesWorkspaceRootWarning|TestMapJSONAutoScanWarnsForWorkspaceRootWithoutBreakingStdout|TestMapJSONAutoScanKeepsStdoutJSON|TestScan_QuietWithJSON|TestLiveScanRunOptions' -count=1",
+    "go test ./internal/scan ./internal/commands -count=1"
+  ],
+  "actual_context": {
+    "files_read": [
+      "internal/scan/scan.go",
+      "internal/commands/scan.go",
+      "internal/commands/refresh.go"
+    ],
+    "files_edited": [
+      "internal/scan/result.go",
+      "internal/scan/scan.go",
+      "internal/scan/first_party_source_context.go",
+      "internal/scan/source_manifest.go",
+      "internal/commands/scan.go",
+      "internal/commands/refresh.go",
+      "internal/commands/scan_output_test.go",
+      "internal/scan/scan_test.go"
+    ],
+    "tests_run": [
+      "go test ./internal/scan -run 'TestCollectFileInventoryExplainsSkippedHeavyAndIgnoredDirs|TestScan_FreshIndexProgressIncludesGranularTimings|TestScan_SourceManifest' -count=1",
+      "go test ./internal/commands -run 'TestScanJSONProgressUsesStderrAndReportsTraversalDiagnostics|TestScanTraversalErrorNamesRootAndNarrowingAction|TestScanJSONIncludesWorkspaceRootWarning|TestMapJSONAutoScanWarnsForWorkspaceRootWithoutBreakingStdout|TestMapJSONAutoScanKeepsStdoutJSON|TestScan_QuietWithJSON|TestLiveScanRunOptions' -count=1",
+      "go test ./internal/scan ./internal/commands -count=1"
+    ]
+  },
+  "predicted_context_feedback": {},
+  "evidence": {
+    "plan_refs": [
+      "../H00-index.md",
+      "../H02-add-traversal-budgets-progress-output-and-ignore-plan.md",
+      "../H02-add-traversal-budgets-progress-output-and-ignore-result.md",
+      "../task.json"
+    ]
+  },
+  "next": {
+    "recommended_target": "H03",
+    "recommended_decision": "promote"
+  }
+}

@@ -31,6 +31,22 @@ type RootSelectionWarning struct {
 	SuggestedCommands []string `json:"suggested_commands,omitempty"`
 }
 
+// TraversalDiagnostics explains the bounded filesystem walk that feeds scan
+// discovery. It is intentionally coarse so JSON output can explain skipped
+// heavy directories without becoming a file listing.
+type TraversalDiagnostics struct {
+	InventoryFiles  int                    `json:"inventory_files"`
+	SkippedDirs     int                    `json:"skipped_dirs,omitempty"`
+	SkippedByReason map[string]int         `json:"skipped_by_reason,omitempty"`
+	TopSkippedDirs  []TraversalSkippedPath `json:"top_skipped_dirs,omitempty"`
+}
+
+// TraversalSkippedPath is one representative skipped directory.
+type TraversalSkippedPath struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+}
+
 // SourceCompanionAdmissionDiagnostics summarizes bounded source files admitted
 // because indexed tests pointed at likely implementation companions.
 type SourceCompanionAdmissionDiagnostics struct {
@@ -101,6 +117,8 @@ type ProgressEvent struct {
 	ChunksFlushed        map[string]int `json:"chunks_flushed,omitempty"`
 	DeferredFTSRows      int            `json:"deferred_fts_rows,omitempty"`
 	InventoryFiles       int            `json:"inventory_files,omitempty"`
+	SkippedDirs          int            `json:"skipped_dirs,omitempty"`
+	SkippedByReason      map[string]int `json:"skipped_by_reason,omitempty"`
 	SharedDiscovery      bool           `json:"shared_discovery,omitempty"`
 	ParallelWorkers      int            `json:"parallel_workers,omitempty"`
 	CappedDiscovery      bool           `json:"capped_discovery,omitempty"`
@@ -135,6 +153,7 @@ type Result struct {
 	WorkstreamEvidence *WorkstreamEvidenceDiagnostics       `json:"workstream_evidence,omitempty"`
 	SourceCompanions   *SourceCompanionAdmissionDiagnostics `json:"source_companion_admission,omitempty"`
 	SourceManifest     *SourceManifestDiagnostics           `json:"source_manifest,omitempty"`
+	Traversal          *TraversalDiagnostics                `json:"traversal,omitempty"`
 
 	sourcesAgg map[string]*sourceAgg `json:"-"`
 }

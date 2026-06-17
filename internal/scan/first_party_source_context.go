@@ -26,10 +26,11 @@ func buildFirstPartySourceContextCandidates(ctx context.Context, repoRoot string
 	if strings.TrimSpace(repoRoot) == "" {
 		return nil
 	}
-	inventory, err := collectFileInventory(ctx, repoRoot)
-	if err != nil || len(inventory) == 0 {
+	inventoryResult, err := collectFileInventory(ctx, repoRoot)
+	if err != nil || len(inventoryResult.files) == 0 {
 		return nil
 	}
+	inventory := inventoryResult.files
 	existingPaths := map[string]bool{}
 	for _, candidate := range existing {
 		if rel := normalizeFirstPartySourceRel(candidate.RelPath); rel != "" {

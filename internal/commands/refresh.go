@@ -122,14 +122,14 @@ func countRepoSourcesByType(db *store.DB, repoID, sourceType string) int {
 }
 
 func runScanQuietAndNotify(cmd *cobra.Command, db *store.DB, repoRoot string) {
-	result := runScanQuiet(db, repoRoot)
+	result := runScanQuiet(cmd, db, repoRoot)
 	if result != nil && (result.New > 0 || result.Updated > 0) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Index updated (%d new, %d updated)\n", result.New, result.Updated)
 	}
 }
 
 func runTaskScanQuietAndNotify(cmd *cobra.Command, db *store.DB, repoRoot string) {
-	result := runTaskScanQuiet(db, repoRoot)
+	result := runTaskScanQuiet(cmd, db, repoRoot)
 	if result != nil && (result.New > 0 || result.Updated > 0) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Task index updated (%d new, %d updated)\n", result.New, result.Updated)
 	}
@@ -163,7 +163,7 @@ func findDevspecsRoot(dir string) string {
 	}
 }
 
-func runScanQuiet(db *store.DB, repoRoot string) *scan.Result {
+func runScanQuiet(cmd *cobra.Command, db *store.DB, repoRoot string) *scan.Result {
 	cfg, err := config.LoadRepoConfig(repoRoot)
 	if err != nil {
 		debugLog("runScanQuiet: LoadRepoConfig error: %v", err)
@@ -182,15 +182,21 @@ func runScanQuiet(db *store.DB, repoRoot string) *scan.Result {
 		debugLog("runScanQuiet: live scan option error: %v", err)
 		return nil
 	}
+	if cmd != nil {
+		scanOpts.Progress = scanProgressStderr(cmd.ErrOrStderr(), "Auto-index")
+	}
 	result, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, scanOpts)
 	if err != nil {
 		debugLog("runScanQuiet: scan error: %v", err)
+		if cmd != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Auto-index skipped: %v\n", scanTraversalError(repoRoot, err))
+		}
 		return nil
 	}
 	return result
 }
 
-func runTaskScanQuiet(db *store.DB, repoRoot string) *scan.Result {
+func runTaskScanQuiet(cmd *cobra.Command, db *store.DB, repoRoot string) *scan.Result {
 	cfg, err := config.LoadRepoConfig(repoRoot)
 	if err != nil {
 		debugLog("runTaskScanQuiet: LoadRepoConfig error: %v", err)
@@ -209,9 +215,15 @@ func runTaskScanQuiet(db *store.DB, repoRoot string) *scan.Result {
 		return nil
 	}
 	scanOpts.SourceManifest = true
+	if cmd != nil {
+		scanOpts.Progress = scanProgressStderr(cmd.ErrOrStderr(), "Task auto-index")
+	}
 	result, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, scanOpts)
 	if err != nil {
 		debugLog("runTaskScanQuiet: scan error: %v", err)
+		if cmd != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Task auto-index skipped: %v\n", scanTraversalError(repoRoot, err))
+		}
 		return nil
 	}
 	return result

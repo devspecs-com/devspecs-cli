@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -95,6 +96,97 @@ func TestScan_QuietWithJSON_WritesJSONSuppressesHuman(t *testing.T) {
 	}
 	if strings.Contains(out, "Indexed by source") {
 		t.Fatalf("human summary should be suppressed with --quiet, got: %q", out)
+	}
+}
+
+func TestScanJSONProgressUsesStderrAndReportsTraversalDiagnostics(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
+	repoDir := filepath.Join(tmp, "repo")
+	if err := os.MkdirAll(filepath.Join(repoDir, ".devspecs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "version: 1\nsources:\n  - type: markdown\n    paths:\n      - docs/plans\n"
+	if err := os.WriteFile(filepath.Join(repoDir, ".devspecs", "config.yaml"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < scanProgressInventoryThreshold+5; i++ {
+		path := filepath.Join(repoDir, "docs", "plans", "plan-"+strconv.Itoa(i)+".md")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("# Plan\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(repoDir, "node_modules", "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "node_modules", "pkg", "ignored.md"), []byte("# Ignored\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git", "objects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, ".git", "objects", "ignored"), []byte("ignored\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	scanCmd := NewScanCmd()
+	scanCmd.SetArgs([]string{"--json", "--path", repoDir})
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	scanCmd.SetOut(stdout)
+	scanCmd.SetErr(stderr)
+	if err := scanCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.String(), "Scan progress: discovered") {
+		t.Fatalf("expected progress on stderr, got: %s", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "Scan progress") {
+		t.Fatalf("progress leaked into JSON stdout:\n%s", stdout.String())
+	}
+	var out struct {
+		Found     map[string]int `json:"Found"`
+		Traversal *struct {
+			InventoryFiles  int            `json:"inventory_files"`
+			SkippedDirs     int            `json:"skipped_dirs"`
+			SkippedByReason map[string]int `json:"skipped_by_reason"`
+			TopSkippedDirs  []struct {
+				Path   string `json:"path"`
+				Reason string `json:"reason"`
+			} `json:"top_skipped_dirs"`
+		} `json:"traversal"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("scan --json stdout should be valid JSON: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	if out.Found["markdown"] != scanProgressInventoryThreshold+5 {
+		t.Fatalf("markdown found = %d, want %d", out.Found["markdown"], scanProgressInventoryThreshold+5)
+	}
+	if out.Traversal == nil || out.Traversal.InventoryFiles < scanProgressInventoryThreshold || out.Traversal.SkippedByReason["generated_vendor_or_build"] < 2 {
+		t.Fatalf("missing traversal diagnostics: %#v", out.Traversal)
+	}
+}
+
+func TestScanTraversalErrorNamesRootAndNarrowingAction(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
+	missingRoot := filepath.Join(tmp, "missing")
+
+	scanCmd := NewScanCmd()
+	scanCmd.SetArgs([]string{"--path", missingRoot})
+	if err := scanCmd.Execute(); err == nil {
+		t.Fatal("expected scan error for missing root")
+	} else {
+		msg := err.Error()
+		if !strings.Contains(msg, missingRoot) {
+			t.Fatalf("expected error to name scanned root, got: %s", msg)
+		}
+		if !strings.Contains(msg, "focused project root") || !strings.Contains(msg, "--path <repo-dir>") {
+			t.Fatalf("expected narrowing guidance, got: %s", msg)
+		}
 	}
 }
 

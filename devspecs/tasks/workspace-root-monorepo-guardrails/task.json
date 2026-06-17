@@ -5,7 +5,7 @@
   "query": "Workspace root and monorepo guardrails for scan/map/find/task commands",
   "status": "packed",
   "created_at": "2026-06-15T15:37:17Z",
-  "updated_at": "2026-06-15T18:51:32Z",
+  "updated_at": "2026-06-17T13:11:35Z",
   "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
   "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/workspace-root-monorepo-guardrails",
   "artifacts": {
@@ -32,7 +32,13 @@
         "title": "Add traversal budgets, progress output, and ignored-directory explanations for scan map find and task",
         "plan": "H02-add-traversal-budgets-progress-output-and-ignore-plan.md",
         "result": "H02-add-traversal-budgets-progress-output-and-ignore-result.md",
-        "kind": "slice"
+        "kind": "slice",
+        "stage": "validated",
+        "decision": "promote",
+        "updated_at": "2026-06-17T13:06:23Z",
+        "latest_checkpoint_id": "cp_20260617T130623Z_h02_validated",
+        "latest_checkpoint": "checkpoints/20260617-130623-validated.md",
+        "latest_checkpoint_json": "checkpoints/20260617-130623-validated.json"
       },
       {
         "id": "H03",

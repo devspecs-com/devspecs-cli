@@ -18,6 +18,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/format"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
+	"github.com/devspecs-com/devspecs-cli/internal/ignore"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 )
 
@@ -965,6 +966,42 @@ func TestScan_FreshIndexProgressIncludesGranularTimings(t *testing.T) {
 	}
 }
 
+func TestCollectFileInventoryExplainsSkippedHeavyAndIgnoredDirs(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, "docs/plans/launch.md", "# Launch\n")
+	writeScanTestFile(t, repoRoot, "node_modules/pkg/plan.md", "# Noise\n")
+	writeScanTestFile(t, repoRoot, ".git/objects/noise", "noise\n")
+	writeScanTestFile(t, repoRoot, "ignored/plan.md", "# Ignored\n")
+	writeScanTestFile(t, repoRoot, ".gitignore", "ignored/\n")
+
+	matcher, err := ignore.NewMatcher(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := collectFileInventory(ignore.WithContext(context.Background(), matcher), repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diag := result.diagnostics()
+	if diag == nil {
+		t.Fatal("expected traversal diagnostics")
+	}
+	if diag.SkippedByReason["generated_vendor_or_build"] < 2 {
+		t.Fatalf("expected generated/vendor/build skips for .git and node_modules, got %#v", diag)
+	}
+	if diag.SkippedByReason["ignore_rules"] != 1 {
+		t.Fatalf("expected one ignore_rules skip, got %#v", diag)
+	}
+	if !traversalSkipContains(diag.TopSkippedDirs, "node_modules", "generated_vendor_or_build") {
+		t.Fatalf("expected node_modules skip example, got %#v", diag.TopSkippedDirs)
+	}
+	for _, file := range result.files {
+		if strings.HasPrefix(file.relPath, "node_modules/") || strings.HasPrefix(file.relPath, ".git/") || strings.HasPrefix(file.relPath, "ignored/") {
+			t.Fatalf("inventory included skipped path: %#v", file)
+		}
+	}
+}
+
 func TestScan_FreshIndexAppendSeedsExistingShortIDs(t *testing.T) {
 	root := t.TempDir()
 	repoOne := filepath.Join(root, "repo-one")
@@ -1026,6 +1063,15 @@ func TestScan_FreshIndexAppendSeedsExistingShortIDs(t *testing.T) {
 func hasScanProgressEvent(events []ProgressEvent, phase, event string) bool {
 	for _, got := range events {
 		if got.Phase == phase && got.Event == event {
+			return true
+		}
+	}
+	return false
+}
+
+func traversalSkipContains(paths []TraversalSkippedPath, path, reason string) bool {
+	for _, got := range paths {
+		if got.Path == path && got.Reason == reason {
 			return true
 		}
 	}

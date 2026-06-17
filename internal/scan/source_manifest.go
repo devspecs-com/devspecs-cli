@@ -51,10 +51,11 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 		RowsByLanguage:  map[string]int{},
 		RowsByRole:      map[string]int{},
 	}
-	inventory, err := collectFileInventory(ctx, repoRoot)
+	inventoryResult, err := collectFileInventory(ctx, repoRoot)
 	if err != nil {
 		return diagnostics, err
 	}
+	inventory := inventoryResult.files
 	diagnostics.InventoryFiles = len(inventory)
 	roots := detectFirstPartySourceRoots(inventory)
 	var candidates []sourceManifestCandidate

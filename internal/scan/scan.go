@@ -125,10 +125,11 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 		TransactionEnabled:   opts.UseTransaction,
 		SkipAuthoredAtLookup: opts.SkipAuthoredAtLookup,
 	})
-	sharedCandidates, err := s.discoverSharedFileCandidates(ctx, repoRoot, cfg, opts, progress)
+	sharedCandidates, traversal, err := s.discoverSharedFileCandidates(ctx, repoRoot, cfg, opts, progress)
 	if err != nil {
 		return nil, fmt.Errorf("shared file discovery: %w", err)
 	}
+	result.Traversal = traversal
 	if diagnostics, companions := buildTestSourceCompanionCandidates(ctx, repoRoot, sharedCandidates["test_case"], sharedCandidates["source_context"]); diagnostics != nil {
 		result.SourceCompanions = diagnostics
 		if len(companions) > 0 {
@@ -343,6 +344,11 @@ type fileInventoryEntry struct {
 	size        int64
 }
 
+type fileInventoryResult struct {
+	files      []fileInventoryEntry
+	diagnostic TraversalDiagnostics
+}
+
 type fileCandidateResult struct {
 	index     int
 	byAdapter map[string][]adapters.Candidate
@@ -387,7 +393,7 @@ func (p *progressReporter) maybe(event ProgressEvent) {
 	p.emit(event)
 }
 
-func (s *Scanner) discoverSharedFileCandidates(ctx context.Context, repoRoot string, cfg *config.RepoConfig, opts RunOptions, progress *progressReporter) (map[string][]adapters.Candidate, error) {
+func (s *Scanner) discoverSharedFileCandidates(ctx context.Context, repoRoot string, cfg *config.RepoConfig, opts RunOptions, progress *progressReporter) (map[string][]adapters.Candidate, *TraversalDiagnostics, error) {
 	fileAdapters := make([]adapters.FileDiscoveryAdapter, 0)
 	for _, adapter := range s.adapters {
 		if fileAdapter, ok := adapter.(adapters.FileDiscoveryAdapter); ok {
@@ -396,28 +402,34 @@ func (s *Scanner) discoverSharedFileCandidates(ctx context.Context, repoRoot str
 	}
 	out := make(map[string][]adapters.Candidate, len(fileAdapters))
 	if len(fileAdapters) == 0 {
-		return out, nil
+		return out, nil, nil
 	}
-	inventory, err := collectFileInventory(ctx, repoRoot)
+	inventoryResult, err := collectFileInventory(ctx, repoRoot)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	inventory := inventoryResult.files
+	traversal := inventoryResult.diagnostics()
 	progress.emit(ProgressEvent{
 		Phase:           "shared_discovery",
 		Event:           "inventory_done",
 		InventoryFiles:  len(inventory),
 		FilesTotal:      len(inventory),
+		SkippedDirs:     inventoryResult.diagnostic.SkippedDirs,
+		SkippedByReason: cloneIntMap(inventoryResult.diagnostic.SkippedByReason),
 		SharedDiscovery: true,
 		CappedDiscovery: hasCandidateLimits(fileAdapters, opts),
 	})
 	if hasCandidateLimits(fileAdapters, opts) || opts.FileWorkerCount == 1 {
-		return discoverSharedFileCandidatesSequential(ctx, repoRoot, cfg, inventory, fileAdapters, opts, progress)
+		candidates, err := discoverSharedFileCandidatesSequential(ctx, repoRoot, cfg, inventory, fileAdapters, opts, progress)
+		return candidates, traversal, err
 	}
-	return discoverSharedFileCandidatesParallel(ctx, repoRoot, cfg, inventory, fileAdapters, opts, progress)
+	candidates, err := discoverSharedFileCandidatesParallel(ctx, repoRoot, cfg, inventory, fileAdapters, opts, progress)
+	return candidates, traversal, err
 }
 
-func collectFileInventory(ctx context.Context, repoRoot string) ([]fileInventoryEntry, error) {
-	var files []fileInventoryEntry
+func collectFileInventory(ctx context.Context, repoRoot string) (fileInventoryResult, error) {
+	var result fileInventoryResult
 	err := filepath.WalkDir(repoRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -435,12 +447,14 @@ func collectFileInventory(ctx context.Context, repoRoot string) ([]fileInventory
 		}
 		if m := ignore.FromContext(ctx); m != nil && m.ShouldSkip(rel, d.IsDir()) {
 			if d.IsDir() {
+				result.recordSkip(rel, "ignore_rules")
 				return filepath.SkipDir
 			}
 			return nil
 		}
 		if d.IsDir() {
 			if isSharedFileIgnoredDir(d.Name()) {
+				result.recordSkip(rel, "generated_vendor_or_build")
 				return filepath.SkipDir
 			}
 			return nil
@@ -449,15 +463,15 @@ func collectFileInventory(ctx context.Context, repoRoot string) ([]fileInventory
 		if statErr != nil || info.IsDir() {
 			return nil
 		}
-		files = append(files, fileInventoryEntry{
+		result.files = append(result.files, fileInventoryEntry{
 			primaryPath: path,
 			relPath:     rel,
 			size:        info.Size(),
 		})
 		return nil
 	})
-	sort.Slice(files, func(i, j int) bool { return files[i].relPath < files[j].relPath })
-	return files, err
+	sort.Slice(result.files, func(i, j int) bool { return result.files[i].relPath < result.files[j].relPath })
+	return result, err
 }
 
 func discoverSharedFileCandidatesSequential(ctx context.Context, repoRoot string, cfg *config.RepoConfig, inventory []fileInventoryEntry, fileAdapters []adapters.FileDiscoveryAdapter, opts RunOptions, progress *progressReporter) (map[string][]adapters.Candidate, error) {
@@ -842,11 +856,50 @@ func cloneIntMap(values map[string]int) map[string]int {
 
 func isSharedFileIgnoredDir(name string) bool {
 	switch strings.ToLower(name) {
-	case ".git", ".devspecs", "node_modules", "dist", "build", ".next", "coverage", "tmp", "vendor", ".venv", "__pycache__":
+	case ".cache", ".git", ".devspecs", ".next", ".pytest_cache", ".turbo", ".venv",
+		"__pycache__", "build", "coverage", "dist", "generated", "node_modules",
+		"out", "target", "tmp", "vendor":
 		return true
 	default:
 		return false
 	}
+}
+
+func (r *fileInventoryResult) recordSkip(rel, reason string) {
+	rel = filepath.ToSlash(filepath.Clean(rel))
+	if rel == "." || rel == "" {
+		return
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "skipped"
+	}
+	r.diagnostic.SkippedDirs++
+	if r.diagnostic.SkippedByReason == nil {
+		r.diagnostic.SkippedByReason = map[string]int{}
+	}
+	r.diagnostic.SkippedByReason[reason]++
+	if len(r.diagnostic.TopSkippedDirs) < 8 {
+		r.diagnostic.TopSkippedDirs = append(r.diagnostic.TopSkippedDirs, TraversalSkippedPath{
+			Path:   rel,
+			Reason: reason,
+		})
+	}
+}
+
+func (r fileInventoryResult) diagnostics() *TraversalDiagnostics {
+	diag := r.diagnostic
+	diag.InventoryFiles = len(r.files)
+	if diag.InventoryFiles == 0 && diag.SkippedDirs == 0 {
+		return nil
+	}
+	if len(diag.SkippedByReason) == 0 {
+		diag.SkippedByReason = nil
+	}
+	if len(diag.TopSkippedDirs) == 0 {
+		diag.TopSkippedDirs = nil
+	}
+	return &diag
 }
 
 func (s *Scanner) ensureRepo(rootPath, now string) (string, error) {

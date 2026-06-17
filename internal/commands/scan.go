@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -190,12 +191,15 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	scanOpts.FirstPartySourceContext = experimentalFirstPartySource
 	scanOpts.SourceManifest = experimentalSourceManifest
 	scanOpts.IgnoreRules = noGitignore
+	if !quiet {
+		scanOpts.Progress = scanProgressStderr(cmd.ErrOrStderr(), "Scan")
+	}
 	if verbose && !quiet && scanOpts.FreshIndex {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Using fresh-index scan path for empty/rebuilt index\n")
 	}
 	result, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, scanOpts)
 	if err != nil {
-		return fmt.Errorf("scan: %w", err)
+		return scanTraversalError(repoRoot, err)
 	}
 	result.RootWarning = rootWarning
 
@@ -252,8 +256,76 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 		fmt.Fprintf(out, "  %d indexed tests\n", result.SourceManifest.IndexedTests)
 		fmt.Fprintf(out, "  %d symbols, %d test names, %d imports\n", result.SourceManifest.SymbolRows, result.SourceManifest.TestRows, result.SourceManifest.ImportRows)
 	}
+	if result.Traversal != nil && result.Traversal.SkippedDirs > 0 {
+		fmt.Fprintln(out, "\nTraversal:")
+		fmt.Fprintf(out, "  %d candidate files considered\n", result.Traversal.InventoryFiles)
+		fmt.Fprintf(out, "  %d ignored/heavy directories skipped", result.Traversal.SkippedDirs)
+		if reasons := formatTraversalReasonsHuman(result.Traversal.SkippedByReason); reasons != "" {
+			fmt.Fprintf(out, " (reasons: %s)", reasons)
+		}
+		fmt.Fprintln(out)
+		if len(result.Traversal.TopSkippedDirs) > 0 {
+			fmt.Fprintln(out, "  Examples:")
+			for _, skipped := range result.Traversal.TopSkippedDirs {
+				fmt.Fprintf(out, "    - %s (%s)\n", skipped.Path, traversalReasonLabel(skipped.Reason))
+			}
+		}
+	}
 	fmt.Fprintln(out, "\nRun:\n  ds find \"<topic>\"\n  ds recent")
 	return nil
+}
+
+const scanProgressInventoryThreshold = 200
+
+func scanProgressStderr(out io.Writer, label string) func(scan.ProgressEvent) {
+	if out == nil {
+		return nil
+	}
+	label = strings.TrimSpace(label)
+	if label == "" {
+		label = "Scan"
+	}
+	emitted := false
+	return func(event scan.ProgressEvent) {
+		switch {
+		case event.Phase == "shared_discovery" && event.Event == "inventory_done" && shouldPrintScanProgress(event):
+			fmt.Fprintf(out, "%s progress: discovered %d candidate file(s)", label, event.InventoryFiles)
+			if event.SkippedDirs > 0 {
+				fmt.Fprintf(out, "; skipped %d ignored/heavy directories", event.SkippedDirs)
+				if reasons := formatTraversalReasonsHuman(event.SkippedByReason); reasons != "" {
+					fmt.Fprintf(out, " (%s)", reasons)
+				}
+			}
+			fmt.Fprintln(out)
+			emitted = true
+		case event.Phase == "shared_discovery" && event.Event == "" && (emitted || shouldPrintScanProgress(event)):
+			fmt.Fprintf(out, "%s progress: scanned %d/%d candidate file(s)\n", label, event.FilesScanned, event.FilesTotal)
+			emitted = true
+		case event.Phase == "scan" && event.Event == "done" && emitted:
+			fmt.Fprintf(out, "%s progress: complete\n", label)
+		}
+	}
+}
+
+func shouldPrintScanProgress(event scan.ProgressEvent) bool {
+	if event.InventoryFiles >= scanProgressInventoryThreshold || event.FilesTotal >= scanProgressInventoryThreshold {
+		return true
+	}
+	return event.ElapsedMS >= int64((5 * time.Second).Milliseconds())
+}
+
+func scanTraversalError(repoRoot string, err error) error {
+	if err == nil {
+		return nil
+	}
+	root := strings.TrimSpace(repoRoot)
+	if root == "" {
+		root = "."
+	}
+	if abs, absErr := filepath.Abs(root); absErr == nil {
+		root = abs
+	}
+	return fmt.Errorf("scan failed while walking %s: %w; try running DevSpecs from one focused project root or pass --path <repo-dir> to narrow the scan", root, err)
 }
 
 func liveScanRunOptions(db *store.DB, repoRoot string) (scan.RunOptions, error) {
@@ -354,6 +426,32 @@ func formatScanFormatsHuman(m map[string]int) string {
 		fmt.Fprintf(&b, "%s %d", k, m[k])
 	}
 	return b.String()
+}
+
+func formatTraversalReasonsHuman(m map[string]int) string {
+	if len(m) == 0 {
+		return ""
+	}
+	labeled := make(map[string]int, len(m))
+	for reason, count := range m {
+		labeled[traversalReasonLabel(reason)] += count
+	}
+	return formatScanFormatsHuman(labeled)
+}
+
+func traversalReasonLabel(reason string) string {
+	switch reason {
+	case "generated_vendor_or_build":
+		return "default heavy dirs"
+	case "ignore_rules":
+		return "ignore rules"
+	default:
+		reason = strings.TrimSpace(reason)
+		if reason == "" {
+			return "skipped"
+		}
+		return strings.ReplaceAll(reason, "_", " ")
+	}
 }
 
 func sourcePathsChanged(repoRoot string, cfg *config.RepoConfig) bool {
