@@ -129,6 +129,7 @@ func TestRootCmd_PublicHelpHidesInternalCommands(t *testing.T) {
 		"  criteria    ",
 		"  eval        ",
 		"  link        ",
+		"  list        ",
 		"  resolve     ",
 		"  resume      ",
 		"  status      ",
@@ -139,5 +140,25 @@ func TestRootCmd_PublicHelpHidesInternalCommands(t *testing.T) {
 		if strings.Contains(got, hidden) {
 			t.Fatalf("public help should hide internal command %q, got:\n%s", strings.TrimSpace(hidden), got)
 		}
+	}
+}
+
+func TestRootCmd_ListNotRegistered(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"list"})
+
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("expected ds list to be unavailable")
+	}
+	got := buf.String()
+	if strings.Contains(got, "List indexed artifacts") {
+		t.Fatalf("ds list should not dispatch to artifact list command, got:\n%s", got)
+	}
+	if !strings.Contains(err.Error(), "unknown command") {
+		t.Fatalf("expected unknown command error, got %v", err)
 	}
 }

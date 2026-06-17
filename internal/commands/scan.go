@@ -252,7 +252,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 		fmt.Fprintf(out, "  %d indexed tests\n", result.SourceManifest.IndexedTests)
 		fmt.Fprintf(out, "  %d symbols, %d test names, %d imports\n", result.SourceManifest.SymbolRows, result.SourceManifest.TestRows, result.SourceManifest.ImportRows)
 	}
-	fmt.Fprintln(out, "\nRun:\n  ds list")
+	fmt.Fprintln(out, "\nRun:\n  ds find \"<topic>\"\n  ds recent")
 	return nil
 }
 
