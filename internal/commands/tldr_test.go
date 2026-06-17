@@ -17,6 +17,7 @@ func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"# DevSpecs TLDR For LLM Agents",
+		"## Launch Setup / Agent Commands (`setup`)",
 		"## Hotfix / Small Bug (`hotfix`)",
 		"## Epic / Multi-Slice Feature (`epic`)",
 		"## Incident / Triage (`incident`)",
@@ -24,6 +25,9 @@ func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 		"ds task quick",
 		"ds task checkpoint <task-id> --target <target>",
 		"Fastest path for known work",
+		"Run ds init once per repo",
+		`/ds-task "goal"`,
+		"/ds-apply <task-id|target>",
 		"Workflow commands refresh the local index by default",
 		"Use ds map, ds recent, ds find, and ds context as diagnostic/evidence tools around a task",
 		"Record the completion contract with checkpoint/finish",

@@ -32,7 +32,7 @@ func NewTLDRCmd() *cobra.Command {
 		Short: "Show LLM-oriented DevSpecs workflow quickstarts",
 		Long: `Show short, workflow-grouped DevSpecs usage guidance for humans and LLM agents.
 
-Use this when an agent needs to know which DevSpecs commands to run for a
+Use this when an agent needs to know which DevSpecs commands to run for setup,
 hotfix, epic, incident, brownfield recovery, or handoff without reading the full
 documentation.`,
 		Args: cobra.MaximumNArgs(1),
@@ -63,6 +63,7 @@ func buildTLDRGuide() tldrOutput {
 		Purpose: "DevSpecs is a local-first CLI for turning repo intent into bounded task slices, packed context, checkpoints, and handoff receipts.",
 		LLMRules: []string{
 			"Fastest path for known work: run ds task or ds task quick first; task creation refreshes the index and packs source/test/doc context.",
+			"Run ds init once per repo; if it generates agent files, use /ds-task and /ds-apply as thin wrappers over the same CLI flow.",
 			"Prefer one bounded target over the whole plan.",
 			"Workflow commands refresh the local index by default; use ds scan for explicit manual refresh or rebuild.",
 			"Use ds task quick for small work and full ds task slices for multi-step work.",
@@ -71,6 +72,22 @@ func buildTLDRGuide() tldrOutput {
 			"Do not claim DevSpecs found every relevant file; verify source and tests.",
 		},
 		Workflows: []tldrWorkflow{
+			{
+				ID:      "setup",
+				Name:    "Launch Setup / Agent Commands",
+				UseWhen: "A repo is new to DevSpecs or the user wants Codex, Cursor, Claude, or Windsurf shortcuts.",
+				Commands: []string{
+					"ds init",
+					"ds init --tool codex,cursor,claude,windsurf",
+					`/ds-task "goal"`,
+					"/ds-apply <task-id|target>",
+				},
+				AgentRule: "Initialize once, then use generated adapter commands as thin wrappers over ds task and ds apply. If adapters are unavailable, use the plain CLI commands directly.",
+				Notes: []string{
+					"After install or upgrade, restart the terminal or IDE if `ds` is not found.",
+					"`ds init` can index in the background or foreground depending on flags and environment.",
+				},
+			},
 			{
 				ID:      "hotfix",
 				Name:    "Hotfix / Small Bug",

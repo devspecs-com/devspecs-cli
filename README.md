@@ -11,6 +11,7 @@ bounded, repo-grounded task slices with packed source/test context.
 - Docs: [docs.devspecs.com](https://docs.devspecs.com)
 - Public task transcript: [TASK_WORKFLOW_EXAMPLE.md](TASK_WORKFLOW_EXAMPLE.md)
 - Public eval boundary: [EVALS.md](EVALS.md)
+- Changelog: [CHANGELOG.md](CHANGELOG.md)
 - Releases: [GitHub Releases](https://github.com/devspecs-com/devspecs-cli/releases)
 
 ## Why
@@ -31,8 +32,8 @@ Its launch workflow is task-first:
   diagnostic/evidence tools, then convert the result into a bounded task.
 
 DevSpecs is not an autonomous agent, task manager, SaaS workspace, or hosted
-memory layer. The CLI is the product; editors, agents, and MCP/slash surfaces
-can wrap it later.
+memory layer. The CLI is the product; generated editor and agent files are thin
+wrappers over the same local `ds task` and `ds apply` commands.
 
 ## Install
 
@@ -90,12 +91,31 @@ embedded terminal is reopened.
 
 ## Agent quickstart
 
+Start a repo with `ds init`. In an interactive terminal it can detect common
+layouts, prepare repo config, and offer Codex, Cursor, Claude, or Windsurf
+adapter files. The generated files route agents back through `ds task` and
+`ds apply`.
+
+```bash
+ds init
+# then use the generated adapter when available:
+/ds-task "goal"
+```
+
+Without an adapter, use the CLI directly:
+
+```bash
+ds task "goal"
+ds apply <task-id>
+```
+
 Start agent sessions with `ds tldr`. It is the shortest way to remind an LLM to
 work on one bounded target, checkpoint evidence, and avoid claiming full repo
 coverage.
 
 ```bash
 ds tldr
+ds tldr setup
 ds tldr hotfix
 ds tldr incident --json
 ```
@@ -140,6 +160,7 @@ ds task "Serve Swagger UI OAuth2 redirect from a custom docs redirect URL" \
 
 ds task show A01
 ds task prompt A01
+ds apply <task-id>
 ds task checkpoint <task-id> --target A01 --stage validated --decision promote
 ds task finish A01 --decision promote
 ds task next <task-id>
@@ -229,8 +250,8 @@ Source files remain authoritative. DevSpecs stores derived index state locally.
 
 | Command | Use |
 | --- | --- |
-| `ds init` | Create local index state and repo config. |
-| `ds tldr [workflow]` | Show LLM-oriented workflow quickstarts for hotfixes, epics, incidents, brownfield recovery, handoff, and deep dives. |
+| `ds init` | Create local index state, repo config, and optional agent adapter files. |
+| `ds tldr [workflow]` | Show LLM-oriented workflow quickstarts for setup, hotfixes, epics, incidents, brownfield recovery, handoff, and deep dives. |
 | `ds task <query>` | Create a bounded task workspace with slice artifacts. |
 | `ds task quick <query>` | Create a one-off task workspace with compact output. |
 | `ds task show <target>` | Show exact context for one task target. |
@@ -335,8 +356,8 @@ The hook runs `go vet`, `staticcheck`, `gofmt -l`, and by default
 Releases use GoReleaser via GitHub Actions.
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
 ## License

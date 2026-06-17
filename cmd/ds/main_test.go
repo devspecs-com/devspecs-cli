@@ -67,6 +67,9 @@ func TestRootCmd_HelpCentersTaskWorkflow(t *testing.T) {
 		"Default workflow:",
 		"use ds task to create bounded task workspaces",
 		"Use ds apply next or ds apply",
+		"Setup:",
+		"run ds init once per repo",
+		"adapter files for ds task and ds apply",
 		"Diagnostic layer:",
 		"use ds map, ds recent, and ds find",
 	} {

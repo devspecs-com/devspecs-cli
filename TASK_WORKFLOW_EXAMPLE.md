@@ -15,11 +15,14 @@ Before handing work to an agent, run `ds tldr`. It gives the agent-facing rules:
 one bounded target, read the relevant artifacts, checkpoint actual evidence, and
 stop at the decision gate.
 
+If the repo was initialized with agent adapters, the shortest equivalent path is
+usually `/ds-task "goal"` followed by `/ds-apply <task-id>` for the next slice.
+Those adapters are thin wrappers over the same CLI commands shown below.
+
 This example starts with `ds task` because the work item is already known. In a
-brownfield repo where the target is unclear, start with `ds map`, `ds recent`,
-or `ds find`, then switch to `ds task` once the execution target is concrete.
-Those diagnostic commands are trust/evidence layers, not prerequisites for
-known work.
+brownfield repo where the target is unclear, use `ds map`, `ds recent`, or
+`ds find` as trust/evidence checks, then switch to `ds task` once the execution
+target is concrete. Diagnostics are not prerequisites for known work.
 
 DevSpecs does not replace canonical repo plans. Existing `PLAN-*` files, ADRs,
 PRDs, RFCs, decision memos, and runbooks remain the source of truth. A task

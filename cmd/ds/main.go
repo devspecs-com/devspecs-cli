@@ -30,6 +30,9 @@ source/test/docs context, one-slice prompts, checkpoints, result receipts, and
 decision gates for AI-assisted coding work. Use ds apply next or ds apply
 <target> to emit the next bounded one-slice agent prompt.
 
+Setup: run ds init once per repo to create local config and optional Codex,
+Cursor, Claude, or Windsurf adapter files for ds task and ds apply.
+
 Diagnostic layer: use ds map, ds recent, and ds find when the target is unclear
 or you need to verify existing plans, specs, ADRs, recent commits, source files,
 tests, and owner decision docs before creating or continuing a task.

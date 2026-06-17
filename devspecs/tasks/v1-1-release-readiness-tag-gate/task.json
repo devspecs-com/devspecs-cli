@@ -5,7 +5,7 @@
   "query": "v1.1 release readiness and tag gate",
   "status": "packed",
   "created_at": "2026-06-16T08:11:38Z",
-  "updated_at": "2026-06-17T13:52:01Z",
+  "updated_at": "2026-06-17T14:06:18Z",
   "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
   "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/v1-1-release-readiness-tag-gate",
   "artifacts": {
@@ -32,7 +32,13 @@
         "title": "Update public docs and tldr for v1.1 task-first launch story",
         "plan": "K02-update-public-docs-and-tldr-for-v1-1-task-first-plan.md",
         "result": "K02-update-public-docs-and-tldr-for-v1-1-task-first-result.md",
-        "kind": "slice"
+        "kind": "slice",
+        "stage": "validated",
+        "decision": "promote",
+        "updated_at": "2026-06-17T14:06:18Z",
+        "latest_checkpoint_id": "cp_20260617T140618Z_k02_validated",
+        "latest_checkpoint": "checkpoints/20260617-140618-validated.md",
+        "latest_checkpoint_json": "checkpoints/20260617-140618-validated.json"
       },
       {
         "id": "K03",
