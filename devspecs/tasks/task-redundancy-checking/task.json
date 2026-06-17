@@ -1,0 +1,179 @@
+{
+  "task_id": "task-redundancy-checking",
+  "series": "O",
+  "profile": "code-change",
+  "query": "Task redundancy checking: flag overlapping unimplemented plans and repeated planned changes across tracks before agents create or follow duplicate work",
+  "status": "packed",
+  "created_at": "2026-06-17T12:47:30Z",
+  "updated_at": "2026-06-17T12:49:24Z",
+  "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
+  "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/task-redundancy-checking",
+  "artifacts": {
+    "series": "O",
+    "index": "O00-index.md",
+    "first_slice": "O01-define-overlap-signals-and-non-blocking-warning-plan.md",
+    "result": "O01-define-overlap-signals-and-non-blocking-warning-result.md",
+    "slices": [
+      {
+        "id": "O01",
+        "title": "Define overlap signals and non-blocking warning UX",
+        "plan": "O01-define-overlap-signals-and-non-blocking-warning-plan.md",
+        "result": "O01-define-overlap-signals-and-non-blocking-warning-result.md",
+        "kind": "slice",
+        "stage": "planned",
+        "decision": "promote",
+        "updated_at": "2026-06-17T12:49:24Z",
+        "latest_checkpoint_id": "cp_20260617T124924Z_o01_planned",
+        "latest_checkpoint": "checkpoints/20260617-124924-planned.md",
+        "latest_checkpoint_json": "checkpoints/20260617-124924-planned.json"
+      },
+      {
+        "id": "O02",
+        "title": "Plan task inventory and creation-time redundancy checks",
+        "plan": "O02-plan-task-inventory-and-creation-time-redundancy-plan.md",
+        "result": "O02-plan-task-inventory-and-creation-time-redundancy-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "O03",
+        "title": "Evaluate redundancy detection against dogfood task corpus",
+        "plan": "O03-evaluate-redundancy-detection-against-dogfood-ta-plan.md",
+        "result": "O03-evaluate-redundancy-detection-against-dogfood-ta-result.md",
+        "kind": "slice"
+      }
+    ]
+  },
+  "predicted_context": {},
+  "advisory_files": [
+    {
+      "path": "devspecs/tasks/install-self-update-utilities/G02-add-lightweight-version-staleness-detection-with-plan.md",
+      "kind": "prior-source",
+      "source": "checkpoint_fact",
+      "evidence": [
+        "task install-self-update-utilities checkpoint cp_20260616T135847Z_g02_validated read `devspecs/tasks/install-self-update-utilities/G02-add-lightweight-version-staleness-detection-with-plan.md`"
+      ],
+      "agent_check": "Verify this prior source lead before choosing an edit target."
+    },
+    {
+      "path": "internal/commands/update_test.go",
+      "kind": "prior-test",
+      "source": "checkpoint_fact",
+      "evidence": [
+        "task install-self-update-utilities checkpoint cp_20260616T135847Z_g02_validated read `internal/commands/update_test.go`",
+        "task install-self-update-utilities checkpoint cp_20260616T135847Z_g02_validated edited `internal/commands/update_test.go`",
+        "task install-self-update-utilities checkpoint cp_20260616T135847Z_g02_validated read test `internal/commands/update_test.go`"
+      ],
+      "agent_check": "Verify this prior test lead before editing."
+    },
+    {
+      "path": "internal/commands/update.go",
+      "kind": "prior-source",
+      "source": "checkpoint_fact",
+      "evidence": [
+        "task install-self-update-utilities checkpoint cp_20260616T135847Z_g02_validated read `internal/commands/update.go`",
+        "task install-self-update-utilities checkpoint cp_20260616T135847Z_g02_validated edited `internal/commands/update.go`",
+        "task install-self-update-utilities checkpoint cp_20260616T135847Z_g02_validated learned: Version checks should stay explicit through ds update; normal task/find/map/tldr workflows should not pay network or trust cost."
+      ],
+      "agent_check": "Verify this prior source lead before choosing an edit target."
+    },
+    {
+      "path": "devspecs/tasks/install-self-update-utilities/G02-add-lightweight-version-staleness-detection-with-result.md",
+      "kind": "prior-edited-source",
+      "source": "checkpoint_fact",
+      "evidence": [
+        "task install-self-update-utilities checkpoint cp_20260616T135847Z_g02_validated edited `devspecs/tasks/install-self-update-utilities/G02-add-lightweight-version-staleness-detection-with-result.md`"
+      ],
+      "agent_check": "Verify this prior source lead before choosing an edit target."
+    },
+    {
+      "path": "internal/commands/tldr.go",
+      "kind": "prior-edited-source",
+      "source": "checkpoint_fact",
+      "evidence": [
+        "task v1-1-command-surface-realignment checkpoint cp_20260616T131730Z_i03_validated edited `internal/commands/tldr.go`",
+        "task v1-1-command-surface-realignment checkpoint cp_20260616T131730Z_i03_validated learned: Brownfield recovery should teach init then task for actionable work; diagnostics are the optional trust layer around task creation, not the default pre-task funnel.",
+        "task v1-1-command-surface-realignment checkpoint cp_20260616T093909Z_i04_validated edited `internal/commands/tldr.go`",
+        "task v1-1-command-surface-realignment checkpoint cp_20260616T092341Z_i03_validated read `internal/commands/tldr.go`",
+        "task v1-1-command-surface-realignment checkpoint cp_20260616T092341Z_i03_validated edited `internal/commands/tldr.go`",
+        "task scanless-workflow-ux checkpoint cp_20260616T075433Z_a03_validated read `internal/commands/tldr.go`",
+        "task scanless-workflow-ux checkpoint cp_20260616T075433Z_a03_validated edited `internal/commands/tldr.go`",
+        "task scanless-workflow-ux checkpoint cp_20260616T075433Z_a03_validated learned: Known work should start with ds task or ds task quick; map/find are discovery steps before a target is concrete, not mandatory pre-task setup."
+      ],
+      "agent_check": "Verify this prior source lead before choosing an edit target."
+    }
+  ],
+  "freshness_warnings": [
+    {
+      "path": "internal/commands/task_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: task"
+    },
+    {
+      "path": "internal/commands/workspace_root_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: work"
+    },
+    {
+      "path": "internal/scan/workstream_evidence_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: work"
+    },
+    {
+      "path": "internal/store/task_checkpoint_facts_test.go",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: task"
+    },
+    {
+      "path": ".private/strategy/docs/plans/2026-05-21-artifact-coverage-before-ranking-plan.md",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: plans, before"
+    },
+    {
+      "path": ".private/strategy/docs/plans/2026-05-21-artifact-mode-role-adapter-architecture-followup-plan.md",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: plans, follow"
+    },
+    {
+      "path": ".private/strategy/docs/plans/2026-05-22-01-duplicate-variant-collapse-plan.md",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: plans, duplicate"
+    },
+    {
+      "path": ".private/strategy/openspec/changes/add-adapter-classifier-pipeline/tasks.md",
+      "reason": "on-disk path matched task terms but was not in the indexed candidate set: task, changes"
+    }
+  ],
+  "risk_cards": [
+    {
+      "id": "stale-index",
+      "title": "On-disk paths matched the task but were not indexed",
+      "severity": "medium",
+      "source": "freshness",
+      "evidence": [
+        "`internal/commands/task_test.go` - on-disk path matched task terms but was not in the indexed candidate set: task",
+        "`internal/commands/workspace_root_test.go` - on-disk path matched task terms but was not in the indexed candidate set: work",
+        "`internal/scan/workstream_evidence_test.go` - on-disk path matched task terms but was not in the indexed candidate set: work",
+        "`internal/store/task_checkpoint_facts_test.go` - on-disk path matched task terms but was not in the indexed candidate set: task"
+      ],
+      "agent_check": "Inspect the warned files or refresh the index before trusting missing context.",
+      "count": 8
+    },
+    {
+      "id": "prior-noise",
+      "title": "Prior checkpoint recorded distracting context",
+      "severity": "low",
+      "source": "checkpoint_fact",
+      "evidence": [
+        "task v1-1-release-readiness-tag-gate checkpoint cp_20260617T121918Z_k01_validated called distracting `ds task progress on stderr appears as NativeCommandError when PowerShell captures combined streams`"
+      ],
+      "agent_check": "Keep that family as reference-only unless this task verifies it.",
+      "count": 1
+    }
+  ],
+  "confidence": {
+    "primary_file_confidence": "low",
+    "test_coverage_confidence": "low",
+    "docs_config_confidence": "low",
+    "git_receipt_confidence": "low",
+    "noise_risk": "low",
+    "pack_completeness": "low",
+    "why": [
+      "no clear primary implementation file was found",
+      "test companion coverage was not evident from the initial pack"
+    ],
+    "agent_instruction": "Validate the test and integration surface before editing. Record critical misses and distracting inclusions in the slice result or a task checkpoint."
+  }
+}
