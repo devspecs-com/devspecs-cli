@@ -12,7 +12,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const workspaceRootCandidateLimit = 6
+const (
+	workspaceRootCandidateLimit               = 6
+	workspaceRootActionCurrentRoot            = "current_root"
+	workspaceRootActionChooseOneRoot          = "choose_one_root"
+	workspaceRootParallelGroupingNotNeeded    = "not_needed"
+	workspaceRootParallelGroupingDeferDefault = "defer_default"
+)
 
 var workspaceRootMarkerFiles = []string{
 	".git",
@@ -61,6 +67,20 @@ var workspaceRootSkipDirs = map[string]bool{
 	"vendor":       true,
 }
 
+type workspaceRootGroupingPlan struct {
+	Root             string
+	CandidateRoots   []workspaceRootGroup
+	DefaultAction    string
+	ParallelGrouping string
+	Reason           string
+}
+
+type workspaceRootGroup struct {
+	RelPath          string
+	AbsPath          string
+	SuggestedCommand string
+}
+
 func maybeWarnWorkspaceRoot(cmd *cobra.Command, repoRoot string) *scan.RootSelectionWarning {
 	warning := detectWorkspaceRootWarning(repoRoot, workspaceCommandName(cmd))
 	if warning == nil {
@@ -71,31 +91,60 @@ func maybeWarnWorkspaceRoot(cmd *cobra.Command, repoRoot string) *scan.RootSelec
 }
 
 func detectWorkspaceRootWarning(repoRoot, commandName string) *scan.RootSelectionWarning {
-	repoRoot = canonicalRepoRoot(repoRoot)
-	if repoRoot == "" {
+	plan := evaluateWorkspaceRootGrouping(repoRoot, commandName)
+	if plan.DefaultAction != workspaceRootActionChooseOneRoot {
 		return nil
 	}
-	candidates := workspaceRootCandidates(repoRoot)
-	if len(candidates) < 2 {
-		return nil
-	}
-	if hasWorkspaceGitMarker(repoRoot) && workspaceRootGitCandidateCount(repoRoot, candidates) < 2 {
-		return nil
-	}
-	if len(candidates) > workspaceRootCandidateLimit {
-		candidates = candidates[:workspaceRootCandidateLimit]
-	}
-	suggested := make([]string, 0, len(candidates))
-	for _, rel := range candidates {
-		suggested = append(suggested, workspaceSuggestedCommand(rel, commandName))
+	candidates := make([]string, 0, len(plan.CandidateRoots))
+	suggested := make([]string, 0, len(plan.CandidateRoots))
+	for _, group := range plan.CandidateRoots {
+		candidates = append(candidates, group.RelPath)
+		suggested = append(suggested, group.SuggestedCommand)
 	}
 	return &scan.RootSelectionWarning{
 		Kind:              "workspace_root",
-		Path:              repoRoot,
+		Path:              plan.Root,
 		Message:           "This looks like a workspace or monorepo root. Scanning from here can be slow or mix unrelated projects; consider running DevSpecs from one focused project root.",
 		CandidateRoots:    candidates,
 		SuggestedCommands: suggested,
 	}
+}
+
+func evaluateWorkspaceRootGrouping(repoRoot, commandName string) workspaceRootGroupingPlan {
+	repoRoot = canonicalRepoRoot(repoRoot)
+	plan := workspaceRootGroupingPlan{
+		Root:             repoRoot,
+		DefaultAction:    workspaceRootActionCurrentRoot,
+		ParallelGrouping: workspaceRootParallelGroupingNotNeeded,
+		Reason:           "single focused root",
+	}
+	if repoRoot == "" {
+		plan.Reason = "empty root"
+		return plan
+	}
+	candidates := workspaceRootCandidates(repoRoot)
+	if len(candidates) < 2 {
+		return plan
+	}
+	if hasWorkspaceGitMarker(repoRoot) && workspaceRootGitCandidateCount(repoRoot, candidates) < 2 {
+		plan.Reason = "selected git root with child markers, but not multiple nested git roots"
+		return plan
+	}
+	if len(candidates) > workspaceRootCandidateLimit {
+		candidates = candidates[:workspaceRootCandidateLimit]
+	}
+	plan.DefaultAction = workspaceRootActionChooseOneRoot
+	plan.ParallelGrouping = workspaceRootParallelGroupingDeferDefault
+	plan.Reason = "multiple candidate roots; hidden grouped scans would mix unrelated projects"
+	plan.CandidateRoots = make([]workspaceRootGroup, 0, len(candidates))
+	for _, rel := range candidates {
+		plan.CandidateRoots = append(plan.CandidateRoots, workspaceRootGroup{
+			RelPath:          rel,
+			AbsPath:          filepath.Join(repoRoot, filepath.FromSlash(rel)),
+			SuggestedCommand: workspaceSuggestedCommand(rel, commandName),
+		})
+	}
+	return plan
 }
 
 func workspaceRootCandidates(repoRoot string) []string {

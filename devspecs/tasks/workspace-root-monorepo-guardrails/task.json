@@ -5,7 +5,7 @@
   "query": "Workspace root and monorepo guardrails for scan/map/find/task commands",
   "status": "packed",
   "created_at": "2026-06-15T15:37:17Z",
-  "updated_at": "2026-06-17T13:11:35Z",
+  "updated_at": "2026-06-17T13:20:01Z",
   "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
   "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/workspace-root-monorepo-guardrails",
   "artifacts": {
@@ -45,7 +45,13 @@
         "title": "Evaluate bounded high-level root grouping and parallel scan after deterministic root detection",
         "plan": "H03-evaluate-bounded-high-level-root-grouping-and-pa-plan.md",
         "result": "H03-evaluate-bounded-high-level-root-grouping-and-pa-result.md",
-        "kind": "slice"
+        "kind": "slice",
+        "stage": "validated",
+        "decision": "promote",
+        "updated_at": "2026-06-17T13:20:01Z",
+        "latest_checkpoint_id": "cp_20260617T132001Z_h03_validated",
+        "latest_checkpoint": "checkpoints/20260617-132001-validated.md",
+        "latest_checkpoint_json": "checkpoints/20260617-132001-validated.json"
       }
     ]
   },
