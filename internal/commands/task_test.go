@@ -163,6 +163,7 @@ func TestTask_StartCreatesUncertaintyAwareWorkspace(t *testing.T) {
 	}
 
 	resultTemplate := mustReadFile(t, out.ResultPath)
+	assertNoTrailingWhitespace(t, "A01 result template", resultTemplate)
 	for _, want := range []string{
 		"## Summary",
 		"## Completion Contract",
@@ -1649,6 +1650,58 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
 		t.Fatalf("decide rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
 	}
+
+	finishCmd := NewTaskCmd()
+	finishCmd.SetArgs([]string{
+		"finish", "lifecycle-add-test",
+		"--target", "B02",
+		"--decision", "promote",
+		"--index=false",
+		"--json",
+	})
+	finishBuf := &bytes.Buffer{}
+	finishCmd.SetOut(finishBuf)
+	if err := finishCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var finishOut taskDecideOutput
+	if err := json.Unmarshal(finishBuf.Bytes(), &finishOut); err != nil {
+		t.Fatalf("finish json: %v\n%s", err, finishBuf.String())
+	}
+	if finishOut.Target != "B02" || finishOut.Decision != "promote" {
+		t.Fatalf("finish output = %#v", finishOut)
+	}
+	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
+		t.Fatalf("finish rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
+	}
+
+	refreshedIndexBody := authoredIndexBody + "\n## Human Refresh Notes\n\nRefresh should recapture this without rewriting it.\n"
+	mustWriteFile(t, indexPath, refreshedIndexBody)
+	refreshManifest, err := readTaskManifest(filepath.Join(workspace, taskManifestFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshManifest.UpdatedAt = "2026-01-01T00:00:00Z"
+	if err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), refreshManifest); err != nil {
+		t.Fatal(err)
+	}
+	refreshCmd := NewTaskCmd()
+	refreshCmd.SetArgs([]string{"refresh", "lifecycle-add-test", "--json"})
+	refreshBuf := &bytes.Buffer{}
+	refreshCmd.SetOut(refreshBuf)
+	if err := refreshCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var refreshOut taskSyncOutput
+	if err := json.Unmarshal(refreshBuf.Bytes(), &refreshOut); err != nil {
+		t.Fatalf("refresh json: %v\n%s", err, refreshBuf.String())
+	}
+	if !taskArtifactRefreshContainsPath(refreshOut.RefreshedArtifacts, "B00-index.md") {
+		t.Fatalf("refresh did not report edited index artifact: %#v", refreshOut.RefreshedArtifacts)
+	}
+	if got := mustReadFile(t, indexPath); got != refreshedIndexBody {
+		t.Fatalf("refresh rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, refreshedIndexBody)
+	}
 }
 
 func TestTaskSliceAddRefusesExistingArtifactFile(t *testing.T) {
@@ -2164,6 +2217,7 @@ func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
 		t.Fatalf("expected checkpoint id, learning count, and indexed fact in output: %#v", out)
 	}
 	checkpointBody := mustReadFile(t, out.CheckpointPath)
+	assertNoTrailingWhitespace(t, "checkpoint markdown", checkpointBody)
 	for _, want := range []string{
 		"---",
 		"schema_version: 2",
@@ -2235,6 +2289,7 @@ func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
 		t.Fatalf("checkpoint next recommendation = %#v", record.Next)
 	}
 	resultBody := mustReadFile(t, out.ResultPath)
+	assertNoTrailingWhitespace(t, "checkpoint result", resultBody)
 	for _, want := range []string{
 		"### Checkpoint",
 		"Stage: implemented",
@@ -2655,6 +2710,16 @@ func mustReadFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+func assertNoTrailingWhitespace(t *testing.T, label, body string) {
+	t.Helper()
+	for i, line := range strings.Split(body, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if strings.HasSuffix(line, " ") || strings.HasSuffix(line, "\t") {
+			t.Fatalf("%s line %d has trailing whitespace: %q", label, i+1, line)
+		}
+	}
 }
 
 func writeExistingTaskSeriesRange(t *testing.T, repoDir, last string) {
