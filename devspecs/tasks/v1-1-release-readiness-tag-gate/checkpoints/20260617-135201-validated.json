@@ -1,0 +1,72 @@
+{
+  "schema_version": 2,
+  "checkpoint_id": "cp_20260617T135201Z_k01-1_validated",
+  "task_id": "v1-1-release-readiness-tag-gate",
+  "target": "K01-1",
+  "series": "K",
+  "query": "v1.1 release readiness and tag gate",
+  "slice": "K01-1",
+  "slice_title": "Repeat launch smoke after command surface and diagnostic ranking repairs",
+  "parent_slice": "K01",
+  "iteration": "K01-1",
+  "stage": "validated",
+  "decision": "promote",
+  "created_at": "2026-06-17T13:52:01Z",
+  "goal": "Record progress for `v1.1 release readiness and tag gate`.",
+  "description": "K01-1 updated smoke passed in a fresh isolated repo after command-surface and diagnostic-ranking repairs.",
+  "note": "Proceed to K02 public docs/tldr, then K03 tag gate.",
+  "resources": [
+    "../K00-index.md",
+    "../K01-1-repeat-launch-smoke-after-command-surface-and-di-plan.md",
+    "../K01-1-repeat-launch-smoke-after-command-surface-and-di-result.md",
+    "../task.json"
+  ],
+  "files_read": [
+    "devspecs/tasks/v1-1-release-readiness-tag-gate/K01-release-smoke-transcript.md"
+  ],
+  "files_edited": [
+    "devspecs/tasks/v1-1-release-readiness-tag-gate/K01-1-repeat-launch-smoke-after-command-surface-and-di-plan.md",
+    "devspecs/tasks/v1-1-release-readiness-tag-gate/K01-1-repeat-launch-smoke-after-command-surface-and-di-result.md",
+    "devspecs/tasks/v1-1-release-readiness-tag-gate/K01-1-release-smoke-transcript.md"
+  ],
+  "tests_run": [
+    "isolated K01-1 PowerShell smoke harness: 16 CLI commands, all exit 0"
+  ],
+  "actual_context": {
+    "files_read": [
+      "devspecs/tasks/v1-1-release-readiness-tag-gate/K01-release-smoke-transcript.md"
+    ],
+    "files_edited": [
+      "devspecs/tasks/v1-1-release-readiness-tag-gate/K01-1-repeat-launch-smoke-after-command-surface-and-di-plan.md",
+      "devspecs/tasks/v1-1-release-readiness-tag-gate/K01-1-repeat-launch-smoke-after-command-surface-and-di-result.md",
+      "devspecs/tasks/v1-1-release-readiness-tag-gate/K01-1-release-smoke-transcript.md"
+    ],
+    "tests_run": [
+      "isolated K01-1 PowerShell smoke harness: 16 CLI commands, all exit 0"
+    ]
+  },
+  "predicted_context_feedback": {},
+  "evidence": {
+    "plan_refs": [
+      "../K00-index.md",
+      "../K01-1-repeat-launch-smoke-after-command-surface-and-di-plan.md",
+      "../K01-1-repeat-launch-smoke-after-command-surface-and-di-result.md",
+      "../task.json"
+    ]
+  },
+  "learnings": [
+    {
+      "learning_type": "product",
+      "summary": "Run brownfield diagnostics before task creation when testing owner-intent recovery; post-task find is expected to include generated task workspace.",
+      "evidence_refs": [
+        "K01-1-release-smoke-transcript.md"
+      ],
+      "applies_to": "v1.1 launch smoke",
+      "confidence": "0.82"
+    }
+  ],
+  "next": {
+    "recommended_target": "K02",
+    "recommended_decision": "promote"
+  }
+}

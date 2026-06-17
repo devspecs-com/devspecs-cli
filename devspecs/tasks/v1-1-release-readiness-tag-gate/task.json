@@ -5,7 +5,7 @@
   "query": "v1.1 release readiness and tag gate",
   "status": "packed",
   "created_at": "2026-06-16T08:11:38Z",
-  "updated_at": "2026-06-17T12:19:18Z",
+  "updated_at": "2026-06-17T13:52:01Z",
   "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\devspecs-cli",
   "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/devspecs-cli/devspecs/tasks/v1-1-release-readiness-tag-gate",
   "artifacts": {
@@ -40,6 +40,21 @@
         "plan": "K03-cut-v1-1-0-tag-only-after-command-surface-and-ag-plan.md",
         "result": "K03-cut-v1-1-0-tag-only-after-command-surface-and-ag-result.md",
         "kind": "slice"
+      },
+      {
+        "id": "K01-1",
+        "title": "Repeat launch smoke after command surface and diagnostic ranking repairs",
+        "plan": "K01-1-repeat-launch-smoke-after-command-surface-and-di-plan.md",
+        "result": "K01-1-repeat-launch-smoke-after-command-surface-and-di-result.md",
+        "kind": "iteration",
+        "parent_id": "K01",
+        "reason": "improve",
+        "stage": "validated",
+        "decision": "promote",
+        "updated_at": "2026-06-17T13:52:01Z",
+        "latest_checkpoint_id": "cp_20260617T135201Z_k01-1_validated",
+        "latest_checkpoint": "checkpoints/20260617-135201-validated.md",
+        "latest_checkpoint_json": "checkpoints/20260617-135201-validated.json"
       }
     ]
   },
