@@ -1,39 +1,92 @@
 # DevSpecs CLI
 
-> Local-first CLI for AI coding work as addressable task slices.
+> Give agents the next slice, not the whole roadmap.
 
-DevSpecs helps developers and coding agents work from durable intent instead of
-one-off chat context. It indexes the plans, specs, ADRs, PRDs, task notes, and
-OpenSpec changes already in a repository, then helps start new work from
-bounded, repo-grounded task slices with packed source/test context.
+DevSpecs is a local-first CLI for AI coding workflows. It turns repo intent,
+source, tests, docs, and recent work into bounded task slices with packed
+context, checkpoints, and explicit decision gates.
 
-- Website: [devspecs.com](https://devspecs.com)
-- Docs: [docs.devspecs.com](https://docs.devspecs.com)
-- Public task transcript: [TASK_WORKFLOW_EXAMPLE.md](TASK_WORKFLOW_EXAMPLE.md)
-- Public eval boundary: [EVALS.md](EVALS.md)
-- Changelog: [CHANGELOG.md](CHANGELOG.md)
-- Releases: [GitHub Releases](https://github.com/devspecs-com/devspecs-cli/releases)
+No cloud required. No account. No LLM calls. No code upload. Your source files
+stay authoritative.
 
-## Why
+<p>
+  <a href="https://devspecs.com">
+    <img src="https://devspecs.com/demo/fastapi-task-flow-v1-1.gif" alt="DevSpecs FastAPI task flow demo" width="900">
+  </a>
+</p>
 
-AI-assisted development creates a lot of useful intent artifacts: plans,
-checklists, ADRs, PRDs, RFCs, OpenSpec changes, implementation notes, and
-follow-up summaries. They are valuable, but they often end up scattered across
-repo folders, editor state, pull requests, and ad-hoc files.
+## Links
 
-DevSpecs gives those artifacts stable local identity and makes them useful to
-the next human or agent session.
+| | |
+| --- | --- |
+| Website | [devspecs.com](https://devspecs.com) |
+| Docs | [docs.devspecs.com](https://docs.devspecs.com) |
+| Task transcript | [TASK_WORKFLOW_EXAMPLE.md](TASK_WORKFLOW_EXAMPLE.md) |
+| Releases | [GitHub Releases](https://github.com/devspecs-com/devspecs-cli/releases) |
+| Changelog | [CHANGELOG.md](CHANGELOG.md) |
+| X | [@brennan_maker](https://x.com/brennan_maker) |
+| Reddit | [u/bnunamak](https://www.reddit.com/user/bnunamak/) |
+| LinkedIn | [Brennan Nunamaker](https://www.linkedin.com/in/brennan-nunamaker-30657a70) |
 
-Its launch workflow is task-first:
+## Try It In Five Minutes
 
-- **Known work:** start `ds task` or `ds task quick` to create a bounded agent
-  workspace with packed source/test/doc context and decision gates.
-- **Unclear work:** use `ds map`, `ds recent`, and `ds find` as
-  diagnostic/evidence tools, then convert the result into a bounded task.
+Install:
 
-DevSpecs is not an autonomous agent, task manager, SaaS workspace, or hosted
-memory layer. The CLI is the product; generated editor and agent files are thin
-wrappers over the same local `ds task` and `ds apply` commands.
+```bash
+brew install devspecs-com/tap/devspecs
+```
+
+Start with the LLM-oriented guide:
+
+```bash
+ds tldr
+```
+
+Create one bounded task:
+
+```bash
+ds task "fix OAuth redirect"
+ds apply next
+ds task checkpoint A01 --decision improve
+ds apply next
+```
+
+Or let DevSpecs write thin adapter files for Codex, Cursor, Claude, and
+Windsurf:
+
+```bash
+ds init
+# then, when your tool supports it:
+/ds-task "fix OAuth redirect"
+```
+
+## What It Helps With
+
+| Job | Command | Use When |
+| --- | --- | --- |
+| Bound an agent task | `ds task "goal"` | You know the work and want packed repo context plus a stop line. |
+| Continue the next slice | `ds apply next` | A task already exists and the agent needs the current target only. |
+| Record the receipt | `ds task checkpoint A01 --decision promote` | You need to capture what changed, what ran, and what comes next. |
+| Map a repo | `ds map` | You are entering unfamiliar code and need system boundaries. |
+| Inspect evidence | `ds find "topic"` | You want source, tests, docs, receipts, and exclusions in one context pack. |
+| Recover the thread | `ds recent` | You need recently active local work and likely follow-up commands. |
+
+## Why DevSpecs Exists
+
+Issue trackers describe intended work. AI coding adds a new local work layer:
+prompts, partial attempts, missed files, test evidence, course corrections,
+and follow-up slices. Without structure, that layer disappears into chat logs
+and editor state.
+
+DevSpecs gives that layer local shape:
+
+- task slices that tell the agent where to stop;
+- packed source, test, docs, and intent context before implementation starts;
+- explicit gates: `promote`, `improve`, `rework`, `rollback`, and `block`;
+- iteration slices such as `A01-1` and `A01-2` when the first attempt teaches
+  you something;
+- checkpoint and result artifacts that survive compaction, handoff, and the
+  next agent session.
 
 ## Install
 
@@ -68,88 +121,21 @@ irm https://raw.githubusercontent.com/devspecs-com/devspecs-cli/main/install.ps1
 go install github.com/devspecs-com/devspecs-cli/cmd/ds@latest
 ```
 
-After installing or upgrading, restart your shell or IDE terminal if `ds` is not
-found. Verify the active binary with:
+After installing or upgrading, restart your shell or IDE terminal if `ds` is
+not found.
 
 ```bash
 ds version
-```
-
-Check for updates with:
-
-```bash
 ds update
 ```
 
-`ds update` is guidance-only: it shows the active binary, likely install
-source, latest release status, and the update command to run. It does not modify
-your system. Use `ds update --no-check` for offline guidance.
+`ds update` is guidance-only. It shows the active binary, likely install source,
+latest release status, and the update command to run.
 
-If an upgrade succeeds but `ds version` still shows the old build, restart the
-current shell or IDE terminal. Editors often keep an old PATH until their
-embedded terminal is reopened.
+## Task-First Workflow
 
-## Agent quickstart
-
-Start a repo with `ds init`. In an interactive terminal it can detect common
-layouts, prepare repo config, and offer Codex, Cursor, Claude, or Windsurf
-adapter files. The generated files route agents back through `ds task` and
-`ds apply`.
-
-```bash
-ds init
-# then use the generated adapter when available:
-/ds-task "goal"
-```
-
-Without an adapter, use the CLI directly:
-
-```bash
-ds task "goal"
-ds apply <task-id>
-```
-
-Start agent sessions with `ds tldr`. It is the shortest way to remind an LLM to
-work on one bounded target, checkpoint evidence, and avoid claiming full repo
-coverage.
-
-```bash
-ds tldr
-ds tldr setup
-ds tldr hotfix
-ds tldr incident --json
-```
-
-If the work item is already known, start with `ds task` or `ds task quick`.
-Task creation refreshes the local index and packs source, test, docs, and
-receipt context for the generated slice. Use `ds map`, `ds recent`, or
-`ds find` first only when the agent is still discovering system boundaries,
-recent activity, repo intent, current plans, or likely scope.
-
-## Intent artifacts and task workspaces
-
-DevSpecs has a two-layer model:
-
-- **Canonical intent artifacts** are the repo's existing `PLAN-*` files, ADRs,
-  PRDs, RFCs, decision memos, north-star docs, OpenSpec changes, and runbooks.
-  Humans still own these. DevSpecs should route agents to them, not replace
-  reading them.
-- **Task workspaces** under `devspecs/tasks/<task-id>/` are execution slices:
-  bounded plans, prompts, checkpoints, result receipts, and decision gates for
-  one implementation thread.
-
-When a repo already has an owner decision doc, link or reference it from the task
-workspace instead of duplicating the canonical gate. A good pattern is:
-`PLAN-*` says what/why; `devspecs/tasks/*` says what the next agent should do
-now and records what actually happened.
-
-## Bounded Task Slices
-
-Use `ds task` when you are about to ask an agent to make a repo change and want
-the first slice to be grounded before the agent grabs the whole roadmap.
-
-For multi-slice features, epics, migrations, or architecture work, use full
-`ds task`:
+For multi-slice features, migrations, architecture work, or anything likely to
+drift, create explicit slices:
 
 ```bash
 ds task "Serve Swagger UI OAuth2 redirect from a custom docs redirect URL" \
@@ -159,112 +145,79 @@ ds task "Serve Swagger UI OAuth2 redirect from a custom docs redirect URL" \
   --slice "Add regression coverage and docs examples"
 
 ds task show A01
-ds task prompt A01
-ds apply <task-id>
-ds task checkpoint <task-id> --target A01 --stage validated --decision promote
-ds task finish A01 --decision promote
-ds task next <task-id>
+ds apply next
+ds task checkpoint A01 --decision promote --next-target A02
+ds apply next
 ```
 
-What this gives you:
+What you get:
 
-- an `A00` task index;
+- `A00` task index;
 - `A01`, `A02`, ... slice plan/result artifacts;
 - packed source, test, docs, and receipt context;
 - a one-slice agent prompt;
-- explicit decision gates: `promote`, `improve`, `rework`, `rollback`, `block`;
-- a completion contract for what changed, evidence, remaining work, and the
-  next iteration;
-- lifecycle state from `start`, `checkpoint`, `finish`, `decide`, and `refresh`.
+- lifecycle state from `start`, `checkpoint`, `finish`, `decide`, and
+  `refresh`;
+- a durable record of what changed, what ran, what missed, and what should
+  happen next.
 
-For a small one-off change, bugfix, or doc spike, use the lighter entrypoint:
+For a smaller one-off:
 
 ```bash
 ds task quick "Fix discount rounding in invoice totals"
 ```
 
 Use full `ds task` when you want durable slices and handoff receipts. Use
-`ds task quick` when the cost of a full task workspace would exceed the change.
+`ds task quick` when the ceremony would outweigh the change.
 
-See [TASK_WORKFLOW_EXAMPLE.md](TASK_WORKFLOW_EXAMPLE.md) for a public-safe
-transcript generated from current CLI output.
+## Trust Layer
 
-## Diagnostics: recover existing intent
-
-When a repo already has plans, PRDs, RFCs, ADRs, specs, runbooks, eval cards,
-recent commits, or agent notes, the fastest path is still `ds task` if the work
-is actionable. Task creation refreshes the index and packs source, test, docs,
-and owner-artifact context for the slice.
-
-```bash
-ds init
-ds task "Serve Swagger UI OAuth2 redirect from a custom docs redirect URL"
-ds task show A01
-ds task prompt A01
-```
-
-Use map/recent/find/context as the trust layer around the task when the target
-is unclear, when you need to recover owner intent, or when stale history might
-confuse the agent.
+Use these commands when scope is unclear or you want to verify what the agent is
+about to use:
 
 ```bash
 ds map
 ds recent
 ds find "oauth redirect"
-ds context <id>
+ds context <artifact-id>
 ```
 
-`ds map`, `ds recent`, `ds find`, and `ds context` refresh the local index as
-needed. `ds map` summarizes architecture/system boundaries with evidence and
-follow-up commands. `ds recent` summarizes recently active local git topics.
-`ds find` groups source, tests, docs, receipts, and exclusions into an
-agent-readable context pack by default. Use `ds find --plain` when you want the
-older flat ranked result list. Use `ds scan` when you want an explicit manual
-refresh or rebuild.
+The trust layer is diagnostic. It should route you to current owner intent,
+source, tests, docs, recent changes, and exclusions. It does not replace reading
+the owner decision doc when one exists.
 
-`ds find` is a routing layer, not a replacement for owner decision docs. When it
-surfaces a current decision memo, north-star doc, or `Status: next` plan, read
-that artifact while creating or continuing the bounded task. Diagnostics are
-optional for known work; they are there to build trust when scope is unclear.
-
-`ds adopt` is planned, not shipped. Current brownfield workflows scan and query
-existing artifacts in place without mutating old files.
+`ds find` returns an agent-readable pack by default. Use `ds find --plain` for
+the older flat ranked result list.
 
 ## What DevSpecs Indexes
 
-DevSpecs currently indexes:
+DevSpecs indexes the substrate your repo already has:
 
+- plans, specs, PRDs, RFCs, ADRs, runbooks, and decision memos;
 - OpenSpec changes;
-- ADR directories such as `docs/adr`, `docs/adrs`, `adr`, and `adrs`;
-- markdown plans/specs/PRDs/design docs under common paths such as `plans`,
-  `docs/plans`, `docs/specs`, `.cursor/plans`, `docs/design`, and
-  `docs/technical`;
-- common agent and planning layouts, including Cursor, Spec Kit, BMAD output,
-  Claude, and Codex samples used by tests;
+- task workspaces created by `ds task`;
+- source, tests, docs, config, and recent git activity used for maps and
+  evidence packs;
 - checklists, acceptance criteria, success criteria, and OKR-style criteria;
-- task workspaces created by `ds task`.
+- common agent/planning layouts such as Cursor, Codex, Claude, Spec Kit, and
+  BMAD samples used by tests.
 
-Source files remain authoritative. DevSpecs stores derived index state locally.
+Index state lives in local SQLite and can be rebuilt.
 
-## Core Commands
+## Command Map
 
 | Command | Use |
 | --- | --- |
 | `ds init` | Create local index state, repo config, and optional agent adapter files. |
-| `ds tldr [workflow]` | Show LLM-oriented workflow quickstarts for setup, hotfixes, epics, incidents, brownfield recovery, handoff, and deep dives. |
+| `ds tldr [workflow]` | Show LLM-oriented quickstarts for setup, hotfixes, epics, incidents, brownfield recovery, handoff, and deep dives. |
 | `ds task <query>` | Create a bounded task workspace with slice artifacts. |
-| `ds task quick <query>` | Create a one-off task workspace with compact output. |
-| `ds task show <target>` | Show exact context for one task target. |
-| `ds task prompt <target>` | Emit an agent prompt bounded to one target. |
+| `ds task quick <query>` | Create a compact one-off task workspace. |
 | `ds apply <next\|task-id\|target>` | Emit the next bounded one-slice agent prompt without mutating task state. |
 | `ds task checkpoint <target>` | Record files, tests, misses, noise, learnings, decision evidence, and next iteration. |
-| `ds task finish <target>` | Finish a target with a decision gate. |
 | `ds task refresh <task-id>` | Recapture edited task artifacts into the local index without rewriting task docs. |
-| `ds map` | Show architecture/system boundaries with evidence and useful follow-up commands. |
-| `ds recent` | Show recently active local git topics and useful follow-up context commands. |
+| `ds map` | Show architecture/system boundaries with evidence and follow-up commands. |
+| `ds recent` | Show recently active local git topics and follow-up context commands. |
 | `ds find <query>` | Build agent-readable packed context. |
-| `ds find --plain <query>` | Show the older flat ranked result list. |
-| `ds update` | Show update guidance and latest-version status for the active binary. |
 | `ds context <id>` | Export one artifact as paste-ready agent context. |
 | `ds scan` | Manually refresh or rebuild configured intent-artifact paths. |
 | `ds config show` | Inspect effective repo discovery config. |
@@ -283,13 +236,15 @@ flag surface.
 
 Commit task artifacts when they explain durable work, should be reviewed with a
 change, or are useful to the next person or agent. If a task is scratch-only,
-ignore `devspecs/tasks/<task-id>/` yourself or use an alternate workspace path.
-Lifecycle commands auto-detect legacy `.devspecs/tasks/<task-id>/` workspaces
-when the visible default path does not contain that task.
+ignore `devspecs/tasks/<task-id>/` yourself or use:
 
-Telemetry is minimal and anonymous. It is used for install, init, scan, and
-query flow health, and excludes repository names, file paths, git remotes,
-artifact titles, document text, source code, and raw search queries.
+```bash
+ds task "scratch goal" --dir .devspecs/tasks
+```
+
+Telemetry is minimal and anonymous. It excludes repository names, file paths,
+git remotes, artifact titles, document text, source code, and raw search
+queries.
 
 Disable it with:
 
@@ -305,23 +260,53 @@ DS_TELEMETRY=0
 
 Use `DEVSPECS_TELEMETRY=debug` to print the would-send event to stderr.
 
-## Install Troubleshooting
+## FAQ
 
-If `ds` is not found after install or upgrade:
+### Does DevSpecs call an LLM?
 
-1. Restart the current shell or IDE terminal.
-2. Run `ds version` to confirm which binary is active.
-3. Run `ds update` to see the likely install source and update command.
+No. DevSpecs is a local CLI. It creates context and prompts for agents, but it
+does not call a model itself.
 
-If the command still is not found, make sure the install directory from Homebrew,
-Scoop, Go, or the install script is on your PATH.
+### Does DevSpecs upload code or plans?
+
+No. The index is local SQLite. Source files remain authoritative. Optional
+telemetry is anonymous and excludes repo names, file paths, document text,
+source code, and raw queries.
+
+### Do I need MCP or slash commands?
+
+No. The CLI is the product. `ds init` can generate thin adapter files for agent
+tools, but those wrappers route back through `ds task` and `ds apply`.
+
+### Why not just use epics, stories, and tasks?
+
+Traditional issue trackers describe planned work. Agent work creates local
+attempts, misses, evidence, and iteration slices between ticket updates.
+DevSpecs manages that local AI work layer without replacing the tracker.
+
+### Should I commit `devspecs/tasks`?
+
+Commit durable task artifacts when they help the team understand or review the
+work. Use `.devspecs/tasks` or a gitignored path for scratch-only local plans.
+
+### Is `ds adopt` available?
+
+Not yet. Current brownfield workflows already index existing intent artifacts
+in place through `ds map`, `ds find`, `ds recent`, and `ds scan`. `ds adopt` is
+planned for creating thin wrapper artifacts without mutating old PRDs, RFCs,
+ADRs, or plans.
+
+### Is `ds find` a replacement for reading plans?
+
+No. `ds find` is a routing and evidence layer. If it surfaces a current owner
+decision memo, north-star doc, or `Status: next` plan, read that artifact before
+asking the agent to change code.
 
 ## Public Eval Boundary
 
 The public repo contains deterministic product tests and small synthetic
 fixtures. It is the product claim surface, not a dump of exploratory research
-material or unreduced evaluation runs. Public claims should stay tied to
-reproducible public fixtures and documented behavior.
+material or unreduced evaluation runs.
 
 See [EVALS.md](EVALS.md) for the current boundary.
 
