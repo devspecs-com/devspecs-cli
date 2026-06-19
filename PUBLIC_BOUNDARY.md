@@ -40,6 +40,7 @@ boundary plus completed cleanup actions.
 | `internal/classify/eval*`, `internal/evalharness/`, `internal/commands/eval*` | `keep-public` | Public harness code is acceptable when it is not bundled with private corpora. | Keep, but pair public claims with a small public eval corpus. |
 | `README.md`, `LICENSE`, `install.ps1`, `install.sh`, `.goreleaser.yml`, `.github/`, `.githooks/`, `Makefile` | `keep-public` | Product docs, install, release, and development hygiene. | Keep. |
 | `TASK_WORKFLOW_EXAMPLE.md` | `keep-public` | Public-safe normalized transcript that replaces raw local task workflow captures. | Keep current with the public CLI UX. |
+| `devspecs/tasks/**` | `archived-private` plus `summarize-public` | The CLI repo's own dogfood task workspaces include internal planning, local paths, private strategy, smoke transcripts, and research notes. Product users may still choose to version durable task workspaces in their own repos, but this public repo should not track its internal workspaces. | Preserve privately before removal; keep only deliberately normalized public transcripts such as `TASK_WORKFLOW_EXAMPLE.md`. |
 | `fixtures/agentic-saas-fragmented/` | `keep-public-review` | Small deterministic synthetic fixture for local intent-artifact behavior. | Keep if attribution/story text remains synthetic and claim-aligned. |
 | `testdata/samples/freetext/`, `testdata/samples/codex/`, `testdata/samples/cursor/`, `testdata/samples/claude/`, `testdata/samples/specify/`, `testdata/samples/false-positives/` | `keep-public` | Narrow parser and retrieval fixtures. | Keep. |
 | `testdata/samples/bmad/_bmad-output/**` | `keep-public` | Tiny synthetic BMAD output fixture for format detection. | Keep public; the larger installed BMAD method bundle was removed from the public fixture surface. |
@@ -65,6 +66,15 @@ Completed on 2026-06-09:
 - Added `TASK_WORKFLOW_EXAMPLE.md` as the public-safe replacement for raw task
   workflow samples.
 
+Completed on 2026-06-19:
+
+- Copied tracked `devspecs/tasks/**` into ignored local preservation storage.
+- Removed tracked `devspecs/tasks/**` from the public repo.
+- Added ignore coverage for this repo's generated `devspecs/tasks/**`
+  dogfood workspaces. This is a repo-boundary choice for the public CLI repo,
+  not a product rule that forbids users from versioning durable task
+  workspaces in their own repositories.
+
 Remaining:
 
 1. Re-run the hygiene checks below before public push.
@@ -76,7 +86,7 @@ Run these checks before public launch and after any cleanup move:
 ```bash
 git ls-files | rg -n "raw|sample|eval|fixture|demo|coverage|private|_ignore|scope|holdout|transcript|vhs|\\.zip|\\.7z|\\.db|\\.exe"
 git status --ignored --short
-rg -n "C:\\\\Users\\\\brenn|C:/Users/brenn|/Users/brenn|claims\\.zone|dogfood|holdout|ScopeLab|scopelab|raw sample|Focusee|VHS|private" README.md .github cmd internal scripts fixtures testdata .devspecs -S
+rg -n "C:\\\\Users\\\\[^\\\\]+|C:/Users/[^/]+|/Users/[^/]+|claims\\.zone|dogfood|holdout|ScopeLab|scopelab|raw sample|Focusee|VHS|private" README.md .github cmd internal scripts fixtures testdata .devspecs devspecs -S
 ```
 
 Expected public posture:
@@ -84,5 +94,7 @@ Expected public posture:
 - no tracked local binaries, DBs, raw eval outputs, or coverage files;
 - no tracked absolute local paths;
 - no private dogfood or research-only conclusions in product docs;
+- no tracked internal dogfood task workspaces under `.devspecs/tasks/**` or
+  `devspecs/tasks/**`;
 - public evals are small, deterministic, and tied to public claims;
 - messy research evidence is preserved privately before removal.

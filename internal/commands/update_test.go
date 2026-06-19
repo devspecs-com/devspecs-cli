@@ -34,8 +34,8 @@ func TestDetectInstallSourceHomebrew(t *testing.T) {
 
 func TestDetectInstallSourceScoop(t *testing.T) {
 	for _, path := range []string{
-		`C:\Users\brenn\scoop\apps\devspecs\current\ds.exe`,
-		`C:\Users\brenn\scoop\shims\ds.exe`,
+		`C:\Users\alice\scoop\apps\devspecs\current\ds.exe`,
+		`C:\Users\alice\scoop\shims\ds.exe`,
 	} {
 		source, _, command, _ := detectInstallSource(path)
 		if source != "scoop" {

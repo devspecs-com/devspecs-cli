@@ -78,8 +78,8 @@ nfpms:
     package_name: devspecs
     vendor: devspecs-com
     homepage: "https://github.com/devspecs-com/devspecs-cli"
-    maintainer: "DevSpecs <support@devspecs.com>"
-    description: "DevSpecs CLI — index and reference your specs, plans, and ADRs"
+    maintainer: "Kalo Software GmbH <info@kalo.build>"
+    description: "DevSpecs CLI - local-first task slices and repo-grounded context for AI coding agents"
     license: "MIT"
     formats:
       - deb
@@ -94,7 +94,7 @@ brews:
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     homepage: "https://github.com/devspecs-com/devspecs-cli"
-    description: "DevSpecs CLI — index and reference your specs, plans, and ADRs"
+    description: "DevSpecs CLI - local-first task slices and repo-grounded context for AI coding agents"
     license: "MIT"
     skip_upload: false
     test: |
@@ -109,6 +109,6 @@ scoops:
       name: scoop-bucket
       token: "{{ .Env.SCOOP_BUCKET_GITHUB_TOKEN }}"
     homepage: "https://github.com/devspecs-com/devspecs-cli"
-    description: "DevSpecs CLI — index and reference your specs, plans, and ADRs"
+    description: "DevSpecs CLI - local-first task slices and repo-grounded context for AI coding agents"
     license: "MIT"
     skip_upload: false
