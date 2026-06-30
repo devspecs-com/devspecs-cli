@@ -12,6 +12,10 @@
   repo.
 - Added workspace trace output for known change/task IDs, including per-slice
   lifecycle status and aggregate workspace change completeness.
+- Added `ds ws` as a built-in shortcut for `ds workspace` and introduced
+  `specs/cli-surface.yaml` as the first canonical CLI surface audit artifact.
+- Clarified `ds scan` help copy so it describes a repository intent/source/test
+  rescan instead of only specs, plans, and ADRs.
 - Added `ds task checkpoint --draft` to preview checkpoint markdown, structured
   JSON evidence, and result append text without mutating task lifecycle state.
 - Added `ds task checkpoint --from-git` to populate edited-file evidence from

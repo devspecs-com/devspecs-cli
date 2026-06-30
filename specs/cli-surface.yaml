@@ -1,0 +1,571 @@
+schema: kalo.cli-surface/v0.1
+kind: cli_surface
+metadata:
+  product: devspecs-cli
+  binary: ds
+  audited_at: "2026-06-30"
+  audit_method:
+    - "go run ./cmd/ds --help"
+    - "go run ./cmd/ds task --help"
+    - "go run ./cmd/ds workspace --help"
+    - "source audit of cmd/ds/main.go and internal/commands"
+  status: current_worktree
+  purpose: >
+    A condensed, legible, high-resolution source of truth for the DevSpecs CLI
+    surface. This file records what exists today, how each command should be
+    explained, where aliases are allowed, and which surfaces are candidates for
+    consolidation before broader release.
+
+standard:
+  name: kalo cli-surface
+  goal: >
+    Describe a CLI as a product model rather than scattered Cobra help strings.
+    The model should be readable by humans, LLMs, docs generators, release
+    reviewers, and future conformance tests.
+  command_fields:
+    path: Canonical invocation path.
+    aliases: Stable built-in aliases. Avoid listing shell aliases here.
+    visibility: public, hidden, removed, or planned.
+    status: launch_core, supported, experimental, diagnostic, maintenance, legacy, hidden_compat, internal, or removed.
+    actor: human, agent, maintainer, researcher, or compatibility.
+    job: The user-facing job the command exists to do.
+    output_shape: human_text, json, markdown, prompt, artifact, or mixed.
+    stability: stable, beta, experimental, deprecated_candidate, or internal.
+    idiom: The short rule for when to use it.
+    consolidate_with: Optional preferred command or future command family.
+    notes: Product, docs, or implementation caveats.
+  review_rules:
+    - Every public command must have one obvious job and one first-use sentence.
+    - Aliases are allowed only for high-frequency commands with painful names.
+    - Hidden compatibility aliases may exist, but docs must teach the canonical path.
+    - If two commands mutate the same state, the model must say which one is canonical.
+    - Docs, README, tldr, slash-command prompts, and tests should be generated from or checked against this file.
+
+surface_principles:
+  first_command: ds recent
+  default_build_command: ds task
+  default_agent_command: ds apply next
+  diagnostic_layer:
+    - ds recent
+    - ds find
+    - ds map
+    - ds context
+  task_layer:
+    - ds task
+    - ds apply
+    - ds task checkpoint
+  workspace_layer:
+    - ds workspace
+    - ds ws
+  maintenance_layer:
+    - ds init
+    - ds scan
+    - ds config
+    - ds update
+  copy_rules:
+    - Prefer "intent docs" over "specs, plans, and ADRs" when naming indexed substrate.
+    - Do not tell new users to run ds scan first; task/find/map/recent should refresh when needed.
+    - Explain find/map/recent as evidence and trust tools, not as the main workflow.
+    - Explain task/apply/checkpoint as the bounded execution loop.
+
+alias_policy:
+  built_in_aliases:
+    - canonical: ds workspace
+      aliases:
+        - ds ws
+      status: approved
+      reason: Workspace is a high-frequency umbrella-root command and too long for everyday use.
+    - canonical: ds show
+      aliases:
+        - ds get
+      status: existing
+      reason: Common read alias.
+  hidden_compat_aliases:
+    - alias: ds change
+      canonical: ds workspace change
+      reason: Preserves local scripts while keeping workspace namespace primary.
+    - alias: ds slice
+      canonical: ds workspace slice
+      reason: Preserves local scripts while keeping workspace namespace primary.
+    - alias: ds trace
+      canonical: ds workspace trace
+      reason: Preserves local scripts while keeping workspace namespace primary.
+  backlog:
+    - id: user_aliases
+      proposal: ds alias set <name> <command>
+      status: explore_later
+      notes: >
+        Similar to git aliases, but not needed before workspace QA. Keep aliases
+        local/configurable and avoid changing launch docs around user aliases yet.
+
+root_commands:
+  public:
+    - path: ds recent
+      visibility: public
+      status: launch_core
+      actor: human
+      group: human_orientation
+      job: Recover the local thread from recent work and likely follow-up commands.
+      output_shape: human_text_or_json
+      stability: stable
+      idiom: Start here when you came back cold or need the next clue.
+    - path: ds task
+      visibility: public
+      status: launch_core
+      actor: human
+      group: human_work_setup
+      job: Create a bounded task workspace with packed context, slices, plans, and result receipts.
+      output_shape: artifact_plus_summary_or_json
+      stability: stable
+      idiom: Use when you know the goal and want one or more bounded agent slices.
+    - path: ds apply
+      visibility: public
+      status: launch_core
+      actor: agent
+      group: ai_execution
+      job: Emit the next one-slice prompt without mutating task state.
+      output_shape: prompt_or_json
+      stability: stable
+      idiom: Agents use this to get exactly one target and stop conditions.
+    - path: ds task checkpoint
+      visibility: public_nested
+      status: launch_core
+      actor: agent
+      group: ai_execution
+      job: Record what happened, what ran, decision evidence, and the next gate.
+      output_shape: artifact_plus_summary_or_json
+      stability: stable
+      idiom: Canonical receipt command after attempted work.
+    - path: ds find
+      visibility: public
+      status: supported
+      actor: human_or_agent
+      group: human_orientation
+      job: Build packed context for a focused query.
+      output_shape: evidence_pack_or_json
+      stability: stable
+      idiom: Use for evidence before changing code or when the task pack looks suspicious.
+    - path: ds map
+      visibility: public
+      status: supported
+      actor: human_or_agent
+      group: human_orientation
+      job: Show architecture/system boundaries and follow-up commands.
+      output_shape: boundary_map_or_json
+      stability: beta
+      idiom: Use for unfamiliar repos or subsystem onboarding.
+    - path: ds context
+      visibility: public
+      status: supported
+      actor: human_or_agent
+      group: human_orientation
+      job: Export one known artifact as paste-ready context.
+      output_shape: markdown
+      stability: stable
+      idiom: Use after find/recent/show gives an artifact ID.
+      notes: Needs better docs that artifact IDs come from find/recent/show.
+    - path: ds show
+      aliases:
+        - ds get
+      visibility: public
+      status: supported
+      actor: human_or_agent
+      group: human_orientation
+      job: Show artifact details for a known artifact ID.
+      output_shape: human_text_or_json
+      stability: stable
+      idiom: Use when you already have an artifact ID and want metadata/details.
+    - path: ds tldr
+      visibility: public
+      status: launch_core
+      actor: agent
+      group: ai_execution
+      job: Show LLM-oriented quickstarts grouped by workflow type.
+      output_shape: human_text_or_json
+      stability: stable
+      idiom: Hand this to an agent before it uses DevSpecs.
+    - path: ds init
+      visibility: public
+      status: supported
+      actor: human
+      group: human_work_setup
+      job: Initialize repo config and optional agent adapter files.
+      output_shape: human_text_or_json
+      stability: stable
+      idiom: Run once per repo or when adding slash-command/skill wrappers.
+    - path: ds workspace
+      aliases:
+        - ds ws
+      visibility: public
+      status: experimental
+      actor: human
+      group: human_work_setup
+      job: Coordinate umbrella workspace changes that create repo-local task slices.
+      output_shape: artifact_plus_summary_or_json
+      stability: experimental
+      idiom: Use from a parent directory that coordinates several child repos.
+    - path: ds scan
+      visibility: public
+      status: maintenance
+      actor: maintainer
+      group: advanced_maintenance
+      job: Rescan repository intent docs, source, tests, and git evidence into the local index.
+      output_shape: summary_or_json
+      stability: stable
+      idiom: Manual refresh/rebuild command; most workflows should auto-refresh.
+    - path: ds config
+      visibility: public
+      status: maintenance
+      actor: maintainer
+      group: advanced_maintenance
+      job: Inspect and edit local DevSpecs discovery config.
+      output_shape: human_text_or_json
+      stability: stable
+      idiom: Use when scan/find/map are missing expected paths.
+    - path: ds update
+      visibility: public
+      status: maintenance
+      actor: human
+      group: advanced_maintenance
+      job: Detect install channel and print update guidance.
+      output_shape: human_text_or_json
+      stability: beta
+      idiom: Use to see how this install should be upgraded.
+      notes: Does not self-replace the binary yet.
+    - path: ds version
+      visibility: public
+      status: maintenance
+      actor: human_or_script
+      group: advanced_maintenance
+      job: Print version information.
+      output_shape: human_text
+      stability: stable
+      idiom: Use in bug reports and release smoke tests.
+  cobra_builtin:
+    - path: ds help
+      visibility: public
+      status: cobra_builtin
+      actor: human
+      job: Show command help.
+    - path: ds completion
+      visibility: public
+      status: cobra_builtin
+      actor: human
+      job: Generate shell completion scripts.
+      notes: Low-priority docs; okay to leave as standard CLI affordance.
+  hidden:
+    - path: ds capture
+      visibility: hidden
+      status: internal
+      actor: maintainer
+      job: Capture a specific file as an artifact.
+      consolidate_with: ds scan
+    - path: ds criteria
+      visibility: hidden
+      status: internal
+      actor: maintainer
+      job: List extracted acceptance/success/OKR checklist criteria from artifacts.
+      consolidate_with: ds find
+    - path: ds eval
+      visibility: hidden
+      status: researcher
+      actor: researcher
+      job: Run deterministic retrieval evals for fixture repos.
+      notes: Keep hidden in public CLI.
+    - path: ds link
+      visibility: hidden
+      status: internal
+      actor: maintainer
+      job: Link an artifact to an external target.
+      consolidate_with: future intent graph commands.
+    - path: ds resolve
+      visibility: hidden
+      status: internal
+      actor: maintainer
+      job: Resolve an artifact ID to source path.
+      consolidate_with: ds show
+    - path: ds resume
+      visibility: hidden
+      status: legacy
+      actor: human
+      job: Show artifacts grouped by lifecycle phase.
+      consolidate_with: ds recent
+    - path: ds status
+      visibility: hidden
+      status: legacy
+      actor: maintainer
+      job: Update generic artifact status.
+      consolidate_with: ds task checkpoint
+    - path: ds tag
+      visibility: hidden
+      status: internal
+      actor: maintainer
+      job: Add tags to artifacts.
+      consolidate_with: future artifact metadata command.
+    - path: ds todos
+      visibility: hidden
+      status: internal
+      actor: maintainer
+      job: List extracted todos from artifacts.
+      consolidate_with: ds find or future artifact query.
+    - path: ds untag
+      visibility: hidden
+      status: internal
+      actor: maintainer
+      job: Remove tags from artifacts.
+      consolidate_with: future artifact metadata command.
+    - path: ds change
+      visibility: hidden
+      status: hidden_compat
+      actor: compatibility
+      job: Compatibility alias for ds workspace change.
+      consolidate_with: ds workspace change
+    - path: ds slice
+      visibility: hidden
+      status: hidden_compat
+      actor: compatibility
+      job: Compatibility alias for ds workspace slice.
+      consolidate_with: ds workspace slice
+    - path: ds trace
+      visibility: hidden
+      status: hidden_compat
+      actor: compatibility
+      job: Compatibility alias for ds workspace trace.
+      consolidate_with: ds workspace trace
+  removed_or_unregistered:
+    - path: ds list
+      aliases:
+        - ds ls
+      visibility: removed
+      status: removed
+      actor: human
+      job: Flat artifact listing.
+      reason: Too broad/noisy for launch surface; retained in code but not registered.
+
+task_surface:
+  problem_statement: >
+    ds task currently has too many semantically adjacent subcommands. The
+    difference between checkpoint, finish, evaluate, audit, decide, refresh, and
+    sync is real internally, but not legible enough for new users or agents.
+  canonical_loop:
+    - command: ds task "<goal>"
+      role: create bounded task workspace
+    - command: ds apply next
+      role: emit one-slice agent prompt
+    - command: ds task checkpoint <task-id> --target <slice> --decision <gate>
+      role: record receipt and gate outcome
+    - command: ds apply next
+      role: continue only if the gate permits it
+  idiomatic_differences:
+    checkpoint: Canonical receipt command. Records observed work, run evidence, learnings, misses, and decision gate.
+    evaluate: Diagnostic comparison of predicted task context vs checkpointed actual context. Useful for DevSpecs quality, not everyday completion.
+    audit: Scope guard. Compares observed edits against a target boundary.
+    finish: Lightweight gate close. Candidate for deprecation or rewrite as checkpoint sugar.
+    decide: Decision-only metadata update. Useful for humans, risky for agents because it can skip evidence.
+    start: Optional active marker. Useful for lifecycle UI, not required in happy path.
+    prompt: Older bounded-prompt command. Prefer ds apply for launch/agent story.
+    refresh: Preferred index recapture word.
+    sync: Older/duplicate-feeling recapture word. Candidate to hide behind refresh.
+  public_subcommands:
+    - path: ds task "<query>"
+      status: launch_core
+      actor: human_or_agent
+      job: Create durable sliced task workspace from a grounded goal.
+      key_flags:
+        - --slice
+        - --profile
+        - --series
+        - --id
+        - --repo
+        - --dir
+        - --json
+      stability: stable
+    - path: ds task quick "<query>"
+      status: supported
+      actor: human_or_agent
+      job: Create compact one-off task workspace for small changes.
+      stability: beta
+    - path: ds task next <task-id>
+      status: supported
+      actor: human_or_agent
+      job: Show next bounded task target.
+      consolidate_with: ds apply next
+      stability: stable
+    - path: ds task show <task-id|target>
+      status: supported
+      actor: human_or_agent
+      job: Show exact context for one task target.
+      stability: stable
+    - path: ds task prompt <task-id|target>
+      status: legacy_candidate
+      actor: agent
+      job: Emit bounded agent prompt.
+      consolidate_with: ds apply
+      stability: deprecated_candidate
+    - path: ds task start <task-id|target>
+      status: optional_lifecycle
+      actor: human_or_agent
+      job: Mark one target started.
+      stability: beta
+    - path: ds task checkpoint <task-id|target>
+      status: launch_core
+      actor: agent
+      job: Record checkpoint receipt, structured evidence, and decision gate.
+      key_flags:
+        - --target
+        - --decision
+        - --stage
+        - --from-git
+        - --git-diff
+        - --run-log
+        - --draft
+        - --repo
+        - --json
+      stability: stable
+    - path: ds task finish <task-id|target>
+      status: legacy_candidate
+      actor: human_or_agent
+      job: Finish one target with a decision gate.
+      consolidate_with: ds task checkpoint
+      stability: deprecated_candidate
+    - path: ds task audit <task-id|target>
+      status: diagnostic
+      actor: human_or_agent
+      job: Audit whether observed edits stayed inside one target.
+      stability: beta
+    - path: ds task evaluate <task-id>
+      status: diagnostic
+      actor: maintainer
+      job: Compare predicted context with checkpointed actual context.
+      stability: beta
+    - path: ds task status <task-id>
+      status: supported
+      actor: human_or_agent
+      job: Show series, slice, iteration, checkpoint, and decision state.
+      stability: stable
+    - path: ds task decide <task-id|target>
+      status: supported
+      actor: human
+      job: Update decision gate without adding a full checkpoint.
+      stability: beta
+      risk: Can mutate gates without evidence; keep agent docs biased toward checkpoint.
+    - path: ds task refresh <task-id>
+      status: maintenance
+      actor: maintainer
+      job: Recapture task artifacts into local index without rewriting docs.
+      stability: stable
+    - path: ds task sync <task-id>
+      status: legacy_candidate
+      actor: maintainer
+      job: Recapture task workspace artifacts into the index.
+      consolidate_with: ds task refresh
+      stability: deprecated_candidate
+    - path: ds task slice add <task-id> <title>
+      status: supported
+      actor: human
+      job: Add a sibling slice plan/result pair.
+      stability: beta
+    - path: ds task iteration add <task-id> <title>
+      status: supported
+      actor: human
+      job: Add an iteration plan/result pair under an existing slice.
+      stability: beta
+
+workspace_surface:
+  status: experimental
+  canonical_prefix: ds workspace
+  utility_alias: ds ws
+  problem_solved: >
+    From an umbrella directory, create workspace-level change records while
+    routing repo-local task plans into the child repo that owns the work.
+  commands:
+    - path: ds workspace init [path]
+      aliases:
+        - ds ws init
+      job: Create workspace manifest, document, and changes directory.
+      stability: experimental
+    - path: ds workspace show
+      aliases:
+        - ds ws show
+      job: Show resolved workspace and detected child repos.
+      stability: experimental
+    - path: ds workspace change create <title>
+      aliases:
+        - ds ws change create <title>
+      job: Create umbrella-level change artifact for one or more repo aliases.
+      key_flags:
+        - --workspace
+        - --repos
+        - --json
+      stability: experimental
+    - path: ds workspace slice create <change-id>
+      aliases:
+        - ds ws slice create <change-id>
+      job: Create repo-local task slice linked to workspace change.
+      key_flags:
+        - --workspace
+        - --repo
+        - --repo-path
+        - --name
+        - --json
+      stability: experimental
+    - path: ds workspace trace <change-id|task-id>
+      aliases:
+        - ds ws trace <change-id|task-id>
+      job: Trace a known workspace change or repo task to linked slices.
+      key_flags:
+        - --workspace
+        - --repo
+        - --json
+      stability: experimental
+
+surface_findings:
+  - id: scan_copy_too_narrow
+    severity: low
+    finding: Root help described scan as specs/plans/ADRs even though it indexes richer intent/code/test/git substrate.
+    action: Updated short copy to "Rescan repository intent docs, source, tests, and git evidence."
+  - id: workspace_command_too_long
+    severity: medium
+    finding: Workspace is a high-frequency command in umbrella-root flows and painful to type repeatedly.
+    action: Add built-in ds ws alias and document alias policy here.
+  - id: task_subcommand_density
+    severity: high
+    finding: Task has 14 visible subcommands plus nested slice/iteration groups; several are semantically adjacent.
+    action: Keep launch docs on task/apply/checkpoint; plan consolidation of finish/prompt/sync into preferred commands.
+  - id: hidden_surface_exists
+    severity: medium
+    finding: Old artifact-management commands remain registered but hidden.
+    action: Keep hidden for now; do not document unless a concrete workflow needs them.
+  - id: no_cli_surface_ssot
+    severity: high
+    finding: Help text, README, docs, tldr, slash commands, and tests can drift because no model owns command roles.
+    action: Treat this file as the initial SSOT; add conformance tests or generators later.
+
+planned_track:
+  id: cli-surface-ssot
+  series: L
+  storage: .devspecs/tasks/cli-surface-ssot
+  slices:
+    - id: L01
+      title: Define cli-surface YAML schema and command taxonomy
+      gate: promote when schema can represent public, hidden, alias, task, workspace, and maintenance surfaces.
+    - id: L02
+      title: Audit current command tree into one canonical artifact
+      gate: promote when this file covers root commands, task subcommands, workspace subcommands, hidden commands, and removed commands.
+    - id: L03
+      title: Plan command consolidation, aliases, and docs generation
+      gate: promote when there is a concrete consolidation path for task verbs and generated docs/tests.
+
+next_actions:
+  immediate:
+    - Add conformance test that ds workspace and ds ws both dispatch.
+    - Keep root help scan copy generalized.
+    - Use this artifact when revising README/docs/tldr.
+  near_term:
+    - Decide whether ds task prompt should be hidden in favor of ds apply.
+    - Decide whether ds task finish should become checkpoint sugar or be hidden.
+    - Decide whether ds task sync should be hidden in favor of ds task refresh.
+    - Add command-surface generated docs or at least a test that public help matches this model.
+  later:
+    - Explore user-configurable ds alias support.
+    - Add a CLI surface linter for accidental new public commands.

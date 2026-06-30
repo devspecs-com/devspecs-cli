@@ -34,8 +34,9 @@ type workspaceOutput struct {
 // NewWorkspaceCmd creates the ds workspace command group.
 func NewWorkspaceCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "workspace",
-		Short: "Manage workspace-level DevSpecs artifacts",
+		Use:     "workspace",
+		Aliases: []string{"ws"},
+		Short:   "Manage workspace-level DevSpecs artifacts",
 	}
 	cmd.AddCommand(newWorkspaceInitCmd())
 	cmd.AddCommand(newWorkspaceShowCmd())

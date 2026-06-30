@@ -184,6 +184,9 @@ umbrella directory coordinates work across several child repos. Normal
 single-repo `ds task`, `ds task quick`, `ds apply`, and `ds task checkpoint`
 remain the default path.
 
+`ds ws` is a built-in shortcut for `ds workspace`; docs use the full command
+when first introducing the workflow.
+
 Current dogfood flow:
 
 ```powershell

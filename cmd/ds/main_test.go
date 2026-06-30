@@ -112,7 +112,7 @@ func TestRootCmd_HelpGroupsCommandsByActor(t *testing.T) {
 		"AI execution",
 		"  apply       Emit a one-slice DevSpecs apply prompt",
 		"Advanced and maintenance",
-		"  scan        Scan repository for specs, plans, and ADRs",
+		"  scan        Rescan repository intent docs, source, tests, and git evidence",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected grouped help to contain %q, got:\n%s", want, got)
@@ -232,6 +232,7 @@ func TestRootCmd_WorkspaceNamespaceAndCompatibilityCommandsRegistered(t *testing
 		want string
 	}{
 		{args: []string{"workspace", "--help"}, want: "Manage workspace-level DevSpecs artifacts"},
+		{args: []string{"ws", "--help"}, want: "Manage workspace-level DevSpecs artifacts"},
 		{args: []string{"workspace", "change", "--help"}, want: "Manage workspace-level change artifacts"},
 		{args: []string{"workspace", "slice", "--help"}, want: "Create repo-local task slices from workspace changes"},
 		{args: []string{"workspace", "trace", "--help"}, want: "Trace a known workspace change or repo task to linked repo-local slices"},
@@ -258,6 +259,11 @@ func TestRootCmd_HiddenWorkspaceCompatibilityAliasesDispatch(t *testing.T) {
 	initOut := executeRootJSON(t, "workspace", "init", root, "--json")
 	if got := stringField(t, initOut, "workspace_root"); got != root {
 		t.Fatalf("workspace init root = %q, want %q", got, root)
+	}
+
+	wsShowOut := executeRootJSON(t, "ws", "show", "--workspace", root, "--json")
+	if got := stringField(t, wsShowOut, "workspace_root"); got != root {
+		t.Fatalf("ws show root = %q, want %q", got, root)
 	}
 
 	changeOut := executeRootJSON(t,
