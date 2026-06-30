@@ -281,7 +281,59 @@ removed_tree:
         purpose: Flat artifact listing removed from root surface as too noisy.
 
 surface_questions:
+  - Should ds apply with no arguments default to ds apply next when unambiguous?
+  - Should ds task status include a first-class next_target before ds task next is hidden?
+  - Should ds task quick become ds task --quick?
+  - Should ds task slice add --after replace ds task iteration add?
   - Should ds task prompt be hidden in favor of ds apply?
   - Should ds task finish become checkpoint sugar or be hidden?
   - Should ds task sync be hidden in favor of ds task refresh?
   - Should user-defined aliases exist, or are built-in aliases enough for now?
+
+planned_simplification:
+  keep_public:
+    ds:
+      - tldr
+      - init
+      - recent
+      - task
+      - apply
+      - find
+      - map
+      - config
+      - update
+      - version
+    ds_task:
+      - checkpoint
+      - status
+      - next
+      - show
+      - audit
+      - refresh
+      - slice add
+  shift_to_flags:
+    ds_task_quick:
+      target: ds task "<goal>" --quick
+      reason: Quick is a creation mode, not a separate verb.
+    ds_task_iteration_add:
+      target: ds task slice add <task-id> "<title>" --after A01 --reason improve
+      reason: Iteration is a slice with newer information, not a separate user noun.
+  keep_until_replacement_is_proven:
+    ds_task_next:
+      reason: ds apply does not yet default to next, and status does not yet present next_target clearly enough.
+      replacement_tests:
+        - ds apply defaults to next only when unambiguous.
+        - ds task status shows Next in human output.
+        - ds task status JSON includes next_target.
+  hide_or_deemphasize:
+    ds_task_prompt:
+      replacement: ds apply
+    ds_task_finish:
+      replacement: ds task checkpoint
+    ds_task_decide:
+      replacement: ds task checkpoint --decision
+      reason: Decision-only mutation can skip evidence.
+    ds_task_start:
+      replacement: ds task checkpoint --stage started, if needed.
+    ds_task_sync:
+      replacement: ds task refresh
