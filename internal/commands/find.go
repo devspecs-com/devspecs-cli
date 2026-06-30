@@ -48,7 +48,13 @@ func NewFindCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "find <query>",
 		Short: "Build packed context for a query",
-		Args:  cobra.ExactArgs(1),
+		Long: `Build agent-readable packed context for a focused question.
+
+Use ds find when you are discovering relevant source, tests, docs, receipts, or
+exclusions. It does not report task lifecycle state; use ds task status, ds task
+next, or ds task show for task progress. Use ds workspace trace only when you
+already know a workspace change or repo task ID and need linked repo slices.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fp := store.FilterParams{Kind: kind, Subtype: subtype, Tag: tag, Branch: branch, User: user}
 			if cmd.Flags().Changed("experimental-anchor-first-mode") && !cmd.Flags().Changed("experimental-anchor-first-ranking") {

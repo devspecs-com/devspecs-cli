@@ -28,8 +28,10 @@ func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 		"Run ds init once per repo",
 		`/ds-task "goal"`,
 		"/ds-apply <task-id|target>",
+		"Human front door: run ds recent",
 		"Workflow commands refresh the local index by default",
-		"Use ds map, ds recent, ds find, and ds context as diagnostic/evidence tools around a task",
+		"Use ds recent, ds find, ds map, and ds context as diagnostic/evidence tools around a task",
+		"Command roles: ds find discovers and packs evidence",
 		"Record the completion contract with checkpoint/finish",
 		"ds map",
 		"ds recent",
@@ -44,10 +46,11 @@ func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 			t.Fatalf("tldr output should not advertise %q:\n%s", notWant, out)
 		}
 	}
-	taskIndex := strings.Index(out, "`ds task \"implement <bounded target>\"`")
-	mapIndex := strings.Index(out, "`ds map`")
-	if taskIndex < 0 || mapIndex < 0 || taskIndex > mapIndex {
-		t.Fatalf("brownfield workflow should put ds task before diagnostics:\n%s", out)
+	brownfield := tldrSection(t, out, "## Brownfield Intent Recovery (`brownfield`)", "## Handoff / Resume After Context Loss (`handoff`)")
+	recentIndex := strings.Index(brownfield, "`ds recent`")
+	taskIndex := strings.Index(brownfield, "`ds task \"implement <bounded target>\"`")
+	if recentIndex < 0 || taskIndex < 0 || recentIndex > taskIndex {
+		t.Fatalf("brownfield workflow should put ds recent before bounded execution:\n%s", brownfield)
 	}
 }
 
@@ -67,8 +70,14 @@ func TestTLDR_FilterAndJSON(t *testing.T) {
 		t.Fatalf("expected only incident workflow, got %#v", out.Workflows)
 	}
 	commands := strings.Join(out.Workflows[0].Commands, "\n")
+	if !strings.Contains(commands, "ds recent") {
+		t.Fatalf("incident workflow missing recent orientation command: %#v", out.Workflows[0])
+	}
 	if !strings.Contains(commands, "ds find") {
 		t.Fatalf("incident workflow missing packed find command: %#v", out.Workflows[0])
+	}
+	if strings.Index(commands, "ds recent") > strings.Index(commands, "ds task quick") {
+		t.Fatalf("incident workflow should orient with recent before task execution: %#v", out.Workflows[0])
 	}
 	if strings.Contains(commands, "ds scan") {
 		t.Fatalf("incident workflow should not require manual scan: %#v", out.Workflows[0])
@@ -86,4 +95,17 @@ func TestTLDR_UnknownWorkflowErrorsWithValidIDs(t *testing.T) {
 	if !strings.Contains(err.Error(), "valid workflows:") || !strings.Contains(err.Error(), "hotfix") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func tldrSection(t *testing.T, out, start, end string) string {
+	t.Helper()
+	startIndex := strings.Index(out, start)
+	if startIndex < 0 {
+		t.Fatalf("tldr output missing section %q:\n%s", start, out)
+	}
+	endIndex := strings.Index(out[startIndex:], end)
+	if endIndex < 0 {
+		t.Fatalf("tldr output missing section terminator %q after %q:\n%s", end, start, out)
+	}
+	return out[startIndex : startIndex+endIndex]
 }

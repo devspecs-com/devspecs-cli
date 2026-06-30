@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -66,16 +67,18 @@ var taskDecisions = []string{
 }
 
 type taskStartOptions struct {
-	ID        string
-	Dir       string
-	Series    string
-	Profile   string
-	Slices    []string
-	NoRefresh bool
-	AsJSON    bool
-	Force     bool
-	Index     bool
-	Quick     bool
+	ID            string
+	Dir           string
+	Repo          string
+	Series        string
+	Profile       string
+	Slices        []string
+	WorkspaceLink taskWorkspaceLink
+	NoRefresh     bool
+	AsJSON        bool
+	Force         bool
+	Index         bool
+	Quick         bool
 }
 
 type taskArtifactAddOptions struct {
@@ -129,31 +132,36 @@ type taskDecideOptions struct {
 }
 
 type taskCheckpointOptions struct {
-	Dir          string
-	Slice        string
-	Target       string
-	Stage        string
-	Decision     string
-	Note         string
-	Description  string
-	Goal         string
-	Resources    []string
-	FilesRead    []string
-	FilesEdited  []string
-	TestsRead    []string
-	TestsRun     []string
-	MissedFiles  []string
-	NoiseFiles   []string
-	Tasks        []string
-	Learnings    []string
-	NextTarget   string
-	NextDecision string
-	GitDiff      bool
-	GitDiffMax   int
-	TestOutput   bool
-	TestMax      int
-	Index        bool
-	AsJSON       bool
+	Dir            string
+	Slice          string
+	Target         string
+	Stage          string
+	Decision       string
+	Note           string
+	Description    string
+	Goal           string
+	Resources      []string
+	FilesRead      []string
+	FilesEdited    []string
+	TestsRead      []string
+	TestsRun       []string
+	RunLogs        []string
+	MissedFiles    []string
+	NoiseFiles     []string
+	Tasks          []string
+	Learnings      []string
+	NextTarget     string
+	NextDecision   string
+	GitDiff        bool
+	FromGit        bool
+	GitDiffMax     int
+	TestOutput     bool
+	TestMax        int
+	Index          bool
+	Draft          bool
+	AsJSON         bool
+	gitEvidence    *taskGitDiffEvidence
+	runLogEvidence []taskCommandRunEvidence
 }
 
 type taskStartOutput struct {
@@ -198,6 +206,10 @@ type taskStatusOutput struct {
 	TaskID               string                  `json:"task_id"`
 	Series               string                  `json:"series"`
 	Profile              string                  `json:"profile,omitempty"`
+	WorkspaceID          string                  `json:"workspace_id,omitempty"`
+	WorkspaceRoot        string                  `json:"workspace_root,omitempty"`
+	ParentChange         string                  `json:"parent_change,omitempty"`
+	RepoAlias            string                  `json:"repo_alias,omitempty"`
 	Status               string                  `json:"status"`
 	Decision             string                  `json:"decision,omitempty"`
 	UpdatedAt            string                  `json:"updated_at,omitempty"`
@@ -252,6 +264,26 @@ type taskCheckpointOutput struct {
 	TestEvidenceCount  int      `json:"test_evidence_count,omitempty"`
 }
 
+type taskCheckpointDraftOutput struct {
+	TaskID               string               `json:"task_id"`
+	Series               string               `json:"series,omitempty"`
+	Slice                string               `json:"slice,omitempty"`
+	Stage                string               `json:"stage"`
+	Decision             string               `json:"decision,omitempty"`
+	Draft                bool                 `json:"draft"`
+	Mutates              bool                 `json:"mutates"`
+	CheckpointID         string               `json:"checkpoint_id"`
+	CheckpointPathHint   string               `json:"checkpoint_path_hint"`
+	CheckpointJSONHint   string               `json:"checkpoint_json_path_hint"`
+	ResultPath           string               `json:"result_path"`
+	CheckpointMarkdown   string               `json:"checkpoint_markdown"`
+	CheckpointRecord     taskCheckpointRecord `json:"checkpoint_record"`
+	ResultAppendMarkdown string               `json:"result_append_markdown"`
+	GitDiffFiles         []string             `json:"git_diff_files,omitempty"`
+	LearningCount        int                  `json:"learning_count,omitempty"`
+	TestEvidenceCount    int                  `json:"test_evidence_count,omitempty"`
+}
+
 type taskSyncOutput struct {
 	TaskID             string                  `json:"task_id"`
 	Series             string                  `json:"series"`
@@ -288,6 +320,10 @@ type taskTargetOutput struct {
 	TaskID            string                  `json:"task_id"`
 	Series            string                  `json:"series"`
 	Profile           string                  `json:"profile,omitempty"`
+	WorkspaceID       string                  `json:"workspace_id,omitempty"`
+	WorkspaceRoot     string                  `json:"workspace_root,omitempty"`
+	ParentChange      string                  `json:"parent_change,omitempty"`
+	RepoAlias         string                  `json:"repo_alias,omitempty"`
 	Query             string                  `json:"query"`
 	Workspace         string                  `json:"workspace"`
 	IndexPath         string                  `json:"index_path"`
@@ -335,6 +371,10 @@ type taskManifest struct {
 	TaskID               string                 `json:"task_id"`
 	Series               string                 `json:"series,omitempty"`
 	Profile              string                 `json:"profile,omitempty"`
+	WorkspaceID          string                 `json:"workspace_id,omitempty"`
+	WorkspaceRoot        string                 `json:"workspace_root,omitempty"`
+	ParentChange         string                 `json:"parent_change,omitempty"`
+	RepoAlias            string                 `json:"repo_alias,omitempty"`
 	Query                string                 `json:"query"`
 	Status               string                 `json:"status"`
 	Decision             string                 `json:"decision,omitempty"`
@@ -351,6 +391,29 @@ type taskManifest struct {
 	FreshnessWarnings    []taskFreshnessWarning `json:"freshness_warnings,omitempty"`
 	RiskCards            []taskRiskCard         `json:"risk_cards,omitempty"`
 	Confidence           taskConfidence         `json:"confidence"`
+}
+
+type taskWorkspaceLink struct {
+	WorkspaceID   string `json:"workspace_id,omitempty"`
+	WorkspaceRoot string `json:"workspace_root,omitempty"`
+	ParentChange  string `json:"parent_change,omitempty"`
+	RepoAlias     string `json:"repo_alias,omitempty"`
+}
+
+func taskWorkspaceLinkFromManifest(manifest taskManifest) taskWorkspaceLink {
+	return taskWorkspaceLink{
+		WorkspaceID:   strings.TrimSpace(manifest.WorkspaceID),
+		WorkspaceRoot: strings.TrimSpace(manifest.WorkspaceRoot),
+		ParentChange:  strings.TrimSpace(manifest.ParentChange),
+		RepoAlias:     strings.TrimSpace(manifest.RepoAlias),
+	}
+}
+
+func hasTaskWorkspaceLink(link taskWorkspaceLink) bool {
+	return strings.TrimSpace(link.WorkspaceID) != "" ||
+		strings.TrimSpace(link.WorkspaceRoot) != "" ||
+		strings.TrimSpace(link.ParentChange) != "" ||
+		strings.TrimSpace(link.RepoAlias) != ""
 }
 
 type taskArtifactPaths struct {
@@ -446,6 +509,10 @@ type taskCheckpointRecord struct {
 	SchemaVersion            int                              `json:"schema_version"`
 	CheckpointID             string                           `json:"checkpoint_id,omitempty"`
 	TaskID                   string                           `json:"task_id"`
+	WorkspaceID              string                           `json:"workspace_id,omitempty"`
+	WorkspaceRoot            string                           `json:"workspace_root,omitempty"`
+	ParentChange             string                           `json:"parent_change,omitempty"`
+	RepoAlias                string                           `json:"repo_alias,omitempty"`
 	Target                   string                           `json:"target,omitempty"`
 	Series                   string                           `json:"series,omitempty"`
 	Query                    string                           `json:"query,omitempty"`
@@ -509,6 +576,7 @@ type taskCheckpointEvidence struct {
 
 type taskGitDiffEvidence struct {
 	Command      string   `json:"command"`
+	Status       string   `json:"status,omitempty"`
 	Stat         string   `json:"stat,omitempty"`
 	ChangedFiles []string `json:"changed_files,omitempty"`
 	MaxBytes     int      `json:"max_bytes"`
@@ -518,6 +586,7 @@ type taskGitDiffEvidence struct {
 
 type taskCommandRunEvidence struct {
 	Command   string `json:"command"`
+	Source    string `json:"source,omitempty"`
 	ExitCode  int    `json:"exit_code"`
 	Output    string `json:"output,omitempty"`
 	MaxBytes  int    `json:"max_bytes"`
@@ -547,6 +616,7 @@ templates for recording actual reads, edits, tests, misses, and noise.`,
 		},
 	}
 
+	addRepoTargetPersistentFlag(cmd)
 	cmd.Flags().StringVar(&opts.ID, "id", "", "Task ID to use instead of a generated slug")
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
 	cmd.Flags().StringVar(&opts.Series, "series", "", "Series prefix for generated artifacts, e.g. A or B; defaults to the next available alphabetic series")
@@ -809,7 +879,13 @@ func newTaskStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status <task-id>",
 		Short: "Show task series, slice, and iteration state",
-		Args:  cobra.ExactArgs(1),
+		Long: `Show lifecycle state for an existing DevSpecs task.
+
+Use ds task status to inspect task, slice, iteration, checkpoint, and decision
+state. It does not discover new source or docs; use ds find for focused evidence
+packs. It does not follow workspace graph links; use ds workspace trace when you
+already know a workspace change or repo task ID.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskStatus(cmd, args[0], opts)
 		},
@@ -870,6 +946,7 @@ func newTaskCheckpointCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&opts.FilesEdited, "file-edited", nil, "File actually edited; may be repeated")
 	cmd.Flags().StringArrayVar(&opts.TestsRead, "test-read", nil, "Test file actually read; may be repeated")
 	cmd.Flags().StringArrayVar(&opts.TestsRun, "test-run", nil, "Test command actually run; may be repeated")
+	cmd.Flags().StringArrayVar(&opts.RunLogs, "run-log", nil, "Read test/build/typecheck command evidence from a captured run log file; may be repeated")
 	cmd.Flags().StringArrayVar(&opts.MissedFiles, "missed-file", nil, "Critical file DevSpecs missed; may be repeated")
 	cmd.Flags().StringArrayVar(&opts.NoiseFiles, "noise-file", nil, "Distracting file DevSpecs included; may be repeated")
 	cmd.Flags().StringArrayVar(&opts.Tasks, "task", nil, "Task/checklist item update; may be repeated")
@@ -877,26 +954,40 @@ func newTaskCheckpointCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.NextTarget, "next-target", "", "Recommended next task target")
 	cmd.Flags().StringVar(&opts.NextDecision, "next-decision", "", "Recommended next decision gate")
 	cmd.Flags().BoolVar(&opts.GitDiff, "git-diff", false, "Include bounded git diff stat and changed-file evidence in checkpoint JSON")
+	cmd.Flags().BoolVar(&opts.FromGit, "from-git", false, "Populate edited-file evidence from current git status and diff")
 	cmd.Flags().IntVar(&opts.GitDiffMax, "git-diff-max-bytes", opts.GitDiffMax, "Maximum bytes of git diff stat evidence to keep")
 	cmd.Flags().BoolVar(&opts.TestOutput, "capture-test-output", false, "Run --test-run commands and include bounded output evidence in checkpoint JSON")
 	cmd.Flags().IntVar(&opts.TestMax, "test-output-max-bytes", opts.TestMax, "Maximum bytes of captured test command output to keep")
 	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the checkpoint into the DevSpecs index")
+	cmd.Flags().BoolVar(&opts.Draft, "draft", false, "Preview checkpoint markdown and JSON without writing files or updating lifecycle state")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	return cmd
 }
 
 func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error {
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return fmt.Errorf("task query is empty")
-	}
-	wd, err := os.Getwd()
+	out, confidence, err := createTaskWorkspace(cmd, query, opts)
 	if err != nil {
 		return err
 	}
-	repoRoot := canonicalRepoRoot(resolveRepoRootFromWd(wd))
-	if repoRoot == "" {
-		repoRoot = canonicalRepoRoot(wd)
+	if opts.AsJSON {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	if opts.Quick {
+		return writeTaskQuickStartHuman(cmd.OutOrStdout(), out, confidence)
+	}
+	return writeTaskStartHuman(cmd.OutOrStdout(), out, confidence)
+}
+
+func createTaskWorkspace(cmd *cobra.Command, query string, opts taskStartOptions) (taskStartOutput, taskConfidence, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return taskStartOutput{}, taskConfidence{}, fmt.Errorf("task query is empty")
+	}
+	repoRoot, err := resolveTargetRepoRoot(firstNonEmptyTaskString(opts.Repo, commandRepoTarget(cmd)))
+	if err != nil {
+		return taskStartOutput{}, taskConfidence{}, err
 	}
 	now := time.Now().UTC()
 	taskID := strings.TrimSpace(opts.ID)
@@ -904,25 +995,25 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 		taskID = generatedTaskID(query, now)
 	}
 	if err := validateTaskID(taskID); err != nil {
-		return err
+		return taskStartOutput{}, taskConfidence{}, err
 	}
 	profile, err := normalizeTaskProfile(opts.Profile)
 	if err != nil {
-		return err
+		return taskStartOutput{}, taskConfidence{}, err
 	}
 
 	workspace := taskWorkspacePath(repoRoot, opts.Dir, taskID)
 	series, err := resolveTaskStartSeries(repoRoot, opts.Dir, taskID, opts.Series, opts.Force)
 	if err != nil {
-		return err
+		return taskStartOutput{}, taskConfidence{}, err
 	}
 	if err := prepareTaskWorkspace(workspace, opts.Force); err != nil {
-		return err
+		return taskStartOutput{}, taskConfidence{}, err
 	}
 
 	preflight, err := buildTaskPreflight(cmd, repoRoot, query, opts.NoRefresh)
 	if err != nil {
-		return err
+		return taskStartOutput{}, taskConfidence{}, err
 	}
 	slices := taskSliceArtifacts(series, query, opts.Slices)
 	firstSlice := firstTaskSliceArtifact(taskArtifactPaths{Slices: slices})
@@ -942,6 +1033,10 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 		CreatedAt:         now.Format(time.RFC3339),
 		RepoRoot:          repoRoot,
 		Workspace:         filepath.ToSlash(workspace),
+		WorkspaceID:       strings.TrimSpace(opts.WorkspaceLink.WorkspaceID),
+		WorkspaceRoot:     strings.TrimSpace(opts.WorkspaceLink.WorkspaceRoot),
+		ParentChange:      strings.TrimSpace(opts.WorkspaceLink.ParentChange),
+		RepoAlias:         strings.TrimSpace(opts.WorkspaceLink.RepoAlias),
 		Artifacts:         relArtifacts,
 		Predicted:         preflight.Predicted,
 		AdvisoryFiles:     preflight.AdvisoryFiles,
@@ -960,12 +1055,12 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 	}
 	for path, body := range files {
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			return fmt.Errorf("write %s: %w", path, err)
+			return taskStartOutput{}, taskConfidence{}, fmt.Errorf("write %s: %w", path, err)
 		}
 	}
 	manifestPath := filepath.Join(workspace, taskManifestFilename)
 	if err := writeTaskManifest(manifestPath, manifest); err != nil {
-		return err
+		return taskStartOutput{}, taskConfidence{}, err
 	}
 
 	var indexed []string
@@ -982,7 +1077,7 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 		}
 		indexed, err = captureTaskArtifacts(cmd, repoRoot, requests)
 		if err != nil {
-			return err
+			return taskStartOutput{}, taskConfidence{}, err
 		}
 	}
 
@@ -1007,15 +1102,7 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 		RiskCards:         preflight.RiskCards,
 		PackCompleteness:  preflight.Confidence.PackCompleteness,
 	}
-	if opts.AsJSON {
-		enc := json.NewEncoder(cmd.OutOrStdout())
-		enc.SetIndent("", "  ")
-		return enc.Encode(out)
-	}
-	if opts.Quick {
-		return writeTaskQuickStartHuman(cmd.OutOrStdout(), out, preflight.Confidence)
-	}
-	return writeTaskStartHuman(cmd.OutOrStdout(), out, preflight.Confidence)
+	return out, preflight.Confidence, nil
 }
 
 func runTaskSliceAdd(cmd *cobra.Command, taskID, title string, opts taskArtifactAddOptions) error {
@@ -1027,7 +1114,7 @@ func runTaskSliceAdd(cmd *cobra.Command, taskID, title string, opts taskArtifact
 	if title == "" {
 		return fmt.Errorf("slice title is empty")
 	}
-	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(opts.Dir, taskID)
+	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(cmd, opts.Dir, taskID)
 	if err != nil {
 		return err
 	}
@@ -1056,7 +1143,7 @@ func runTaskIterationAdd(cmd *cobra.Command, taskID, title string, opts taskArti
 	if reason == "" {
 		reason = "improve"
 	}
-	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(opts.Dir, taskID)
+	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(cmd, opts.Dir, taskID)
 	if err != nil {
 		return err
 	}
@@ -1072,12 +1159,15 @@ func runTaskIterationAdd(cmd *cobra.Command, taskID, title string, opts taskArti
 	return writeAddedTaskArtifact(cmd, repoRoot, workspace, manifest, iteration, opts)
 }
 
-func loadTaskWorkspaceManifest(baseDir, taskID string) (string, string, taskManifest, error) {
-	wd, err := os.Getwd()
+func loadTaskWorkspaceManifest(cmd *cobra.Command, baseDir, taskID string) (string, string, taskManifest, error) {
+	return loadTaskWorkspaceManifestForRepo(baseDir, taskID, commandRepoTarget(cmd))
+}
+
+func loadTaskWorkspaceManifestForRepo(baseDir, taskID, repoPath string) (string, string, taskManifest, error) {
+	repoRoot, err := resolveTargetRepoRoot(repoPath)
 	if err != nil {
 		return "", "", taskManifest{}, err
 	}
-	repoRoot := canonicalRepoRoot(resolveRepoRootFromWd(wd))
 	var firstErr error
 	for _, workspace := range taskWorkspaceSearchPaths(repoRoot, baseDir, taskID) {
 		manifestPath := filepath.Join(workspace, taskManifestFilename)
@@ -1169,7 +1259,7 @@ func runTaskSync(cmd *cobra.Command, taskID string, opts taskSyncOptions) error 
 	if err := validateTaskID(taskID); err != nil {
 		return err
 	}
-	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(opts.Dir, taskID)
+	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(cmd, opts.Dir, taskID)
 	if err != nil {
 		return err
 	}
@@ -1227,7 +1317,7 @@ func runTaskSync(cmd *cobra.Command, taskID string, opts taskSyncOptions) error 
 }
 
 func runTaskNext(cmd *cobra.Command, taskID string, opts taskTargetOptions) error {
-	ctx, err := loadTaskTargetContext(opts.Dir, taskID, "")
+	ctx, err := loadTaskTargetContext(cmd, opts.Dir, taskID, "")
 	if err != nil {
 		return err
 	}
@@ -1241,7 +1331,7 @@ func runTaskNext(cmd *cobra.Command, taskID string, opts taskTargetOptions) erro
 }
 
 func runTaskShow(cmd *cobra.Command, taskID string, opts taskTargetOptions) error {
-	ctx, err := loadResolvedTaskTargetContext(opts.Dir, taskID, opts.Target)
+	ctx, err := loadResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1255,7 +1345,7 @@ func runTaskShow(cmd *cobra.Command, taskID string, opts taskTargetOptions) erro
 }
 
 func runTaskPrompt(cmd *cobra.Command, taskID string, opts taskTargetOptions) error {
-	ctx, err := loadResolvedTaskTargetContext(opts.Dir, taskID, opts.Target)
+	ctx, err := loadResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1280,7 +1370,7 @@ func runTaskPrompt(cmd *cobra.Command, taskID string, opts taskTargetOptions) er
 }
 
 func runTaskStartTarget(cmd *cobra.Command, taskID string, opts taskTargetStateOptions) error {
-	ctx, err := loadResolvedTaskTargetContext(opts.Dir, taskID, opts.Target)
+	ctx, err := loadResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1295,7 +1385,7 @@ func runTaskStartTarget(cmd *cobra.Command, taskID string, opts taskTargetStateO
 }
 
 func runTaskFinish(cmd *cobra.Command, taskID string, opts taskTargetStateOptions) error {
-	ctx, err := loadResolvedTaskTargetContext(opts.Dir, taskID, opts.Target)
+	ctx, err := loadResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1328,7 +1418,7 @@ func runTaskFinish(cmd *cobra.Command, taskID string, opts taskTargetStateOption
 }
 
 func runTaskAudit(cmd *cobra.Command, taskID string, opts taskAuditOptions) error {
-	ctx, err := loadResolvedTaskTargetContext(opts.Dir, taskID, opts.Target)
+	ctx, err := loadResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1349,7 +1439,7 @@ func runTaskStatus(cmd *cobra.Command, taskID string, opts taskStatusOptions) er
 	if err := validateTaskID(taskID); err != nil {
 		return err
 	}
-	_, workspace, manifest, err := loadTaskWorkspaceManifest(opts.Dir, taskID)
+	_, workspace, manifest, err := loadTaskWorkspaceManifest(cmd, opts.Dir, taskID)
 	if err != nil {
 		return err
 	}
@@ -1368,6 +1458,10 @@ func taskStatusFromManifest(manifest taskManifest) taskStatusOutput {
 		TaskID:               manifest.TaskID,
 		Series:               defaultTaskSeries(manifest.Series),
 		Profile:              defaultTaskProfile(manifest.Profile),
+		WorkspaceID:          manifest.WorkspaceID,
+		WorkspaceRoot:        manifest.WorkspaceRoot,
+		ParentChange:         manifest.ParentChange,
+		RepoAlias:            manifest.RepoAlias,
 		Status:               manifest.Status,
 		Decision:             manifest.Decision,
 		UpdatedAt:            manifest.UpdatedAt,
@@ -1400,6 +1494,17 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 	fmt.Fprintf(out, "Series: %s\n", status.Series)
 	if status.Profile != "" {
 		fmt.Fprintf(out, "Profile: %s\n", status.Profile)
+	}
+	if hasTaskWorkspaceLink(taskWorkspaceLink{
+		WorkspaceID:   status.WorkspaceID,
+		WorkspaceRoot: status.WorkspaceRoot,
+		ParentChange:  status.ParentChange,
+		RepoAlias:     status.RepoAlias,
+	}) {
+		fmt.Fprintf(out, "Workspace ID: %s\n", status.WorkspaceID)
+		fmt.Fprintf(out, "Workspace Root: %s\n", status.WorkspaceRoot)
+		fmt.Fprintf(out, "Parent Change: %s\n", status.ParentChange)
+		fmt.Fprintf(out, "Repo Alias: %s\n", status.RepoAlias)
 	}
 	fmt.Fprintf(out, "Status: %s\n", emptyAsDash(status.Status))
 	if status.Decision != "" {
@@ -1465,7 +1570,7 @@ func writeTaskArtifactFreshnessHuman(out io.Writer, taskID string, warnings []ta
 }
 
 func runTaskDecide(cmd *cobra.Command, taskID string, opts taskDecideOptions) error {
-	resolvedTaskID, resolvedTarget, err := resolveTaskTargetArgument(opts.Dir, taskID, opts.Target)
+	resolvedTaskID, resolvedTarget, err := resolveTaskTargetArgument(cmd, opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1495,7 +1600,7 @@ func runTaskDecide(cmd *cobra.Command, taskID string, opts taskDecideOptions) er
 		return fmt.Errorf("invalid stage %q; valid values: %s", stage, strings.Join(taskLifecycleStages, ", "))
 	}
 
-	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(opts.Dir, taskID)
+	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(cmd, opts.Dir, taskID)
 	if err != nil {
 		return err
 	}
@@ -1572,6 +1677,7 @@ func taskAbsoluteArtifactPaths(workspace string, rel taskArtifactPaths) taskAbso
 
 type taskTargetContext struct {
 	RepoRoot          string
+	RepoArg           string
 	Workspace         string
 	ManifestPath      string
 	IndexPath         string
@@ -1588,15 +1694,23 @@ type taskTargetAddressMatch struct {
 	Plan   string
 }
 
-func loadResolvedTaskTargetContext(baseDir, taskIDOrTarget, selector string) (taskTargetContext, error) {
-	taskID, target, err := resolveTaskTargetArgument(baseDir, taskIDOrTarget, selector)
+func loadResolvedTaskTargetContext(cmd *cobra.Command, baseDir, taskIDOrTarget, selector string) (taskTargetContext, error) {
+	return loadResolvedTaskTargetContextForRepo(baseDir, taskIDOrTarget, selector, commandRepoTarget(cmd))
+}
+
+func loadResolvedTaskTargetContextForRepo(baseDir, taskIDOrTarget, selector, repoPath string) (taskTargetContext, error) {
+	taskID, target, err := resolveTaskTargetArgumentForRepo(baseDir, taskIDOrTarget, selector, repoPath)
 	if err != nil {
 		return taskTargetContext{}, err
 	}
-	return loadTaskTargetContext(baseDir, taskID, target)
+	return loadTaskTargetContextForRepo(baseDir, taskID, target, repoPath)
 }
 
-func resolveTaskTargetArgument(baseDir, taskIDOrTarget, selector string) (string, string, error) {
+func resolveTaskTargetArgument(cmd *cobra.Command, baseDir, taskIDOrTarget, selector string) (string, string, error) {
+	return resolveTaskTargetArgumentForRepo(baseDir, taskIDOrTarget, selector, commandRepoTarget(cmd))
+}
+
+func resolveTaskTargetArgumentForRepo(baseDir, taskIDOrTarget, selector, repoPath string) (string, string, error) {
 	taskIDOrTarget = strings.TrimSpace(taskIDOrTarget)
 	selector = strings.TrimSpace(selector)
 	if selector != "" {
@@ -1606,11 +1720,11 @@ func resolveTaskTargetArgument(baseDir, taskIDOrTarget, selector string) (string
 		return "", "", fmt.Errorf("task id is empty")
 	}
 	if validateTaskID(taskIDOrTarget) == nil {
-		if _, _, _, err := loadTaskWorkspaceManifest(baseDir, taskIDOrTarget); err == nil {
+		if _, _, _, err := loadTaskWorkspaceManifestForRepo(baseDir, taskIDOrTarget, repoPath); err == nil {
 			return taskIDOrTarget, "", nil
 		}
 	}
-	matches, err := findTaskTargetAddressMatches(baseDir, taskIDOrTarget)
+	matches, err := findTaskTargetAddressMatchesForRepo(baseDir, taskIDOrTarget, repoPath)
 	if err != nil {
 		return "", "", err
 	}
@@ -1632,16 +1746,15 @@ func resolveTaskTargetArgument(baseDir, taskIDOrTarget, selector string) (string
 	}
 }
 
-func findTaskTargetAddressMatches(baseDir, selector string) ([]taskTargetAddressMatch, error) {
+func findTaskTargetAddressMatchesForRepo(baseDir, selector, repoPath string) ([]taskTargetAddressMatch, error) {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {
 		return nil, nil
 	}
-	wd, err := os.Getwd()
+	repoRoot, err := resolveTargetRepoRoot(repoPath)
 	if err != nil {
 		return nil, err
 	}
-	repoRoot := canonicalRepoRoot(resolveRepoRootFromWd(wd))
 	var matches []taskTargetAddressMatch
 	for _, parent := range taskWorkspaceSearchParents(repoRoot, baseDir) {
 		entries, err := os.ReadDir(parent)
@@ -1692,12 +1805,16 @@ func findTaskTargetAddressMatches(baseDir, selector string) ([]taskTargetAddress
 	return matches, nil
 }
 
-func loadTaskTargetContext(baseDir, taskID, selector string) (taskTargetContext, error) {
+func loadTaskTargetContext(cmd *cobra.Command, baseDir, taskID, selector string) (taskTargetContext, error) {
+	return loadTaskTargetContextForRepo(baseDir, taskID, selector, commandRepoTarget(cmd))
+}
+
+func loadTaskTargetContextForRepo(baseDir, taskID, selector, repoPath string) (taskTargetContext, error) {
 	taskID = strings.TrimSpace(taskID)
 	if err := validateTaskID(taskID); err != nil {
 		return taskTargetContext{}, err
 	}
-	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(baseDir, taskID)
+	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifestForRepo(baseDir, taskID, repoPath)
 	if err != nil {
 		return taskTargetContext{}, err
 	}
@@ -1712,6 +1829,7 @@ func loadTaskTargetContext(baseDir, taskID, selector string) (taskTargetContext,
 	}
 	return taskTargetContext{
 		RepoRoot:          repoRoot,
+		RepoArg:           strings.TrimSpace(repoPath),
 		Workspace:         workspace,
 		ManifestPath:      filepath.Join(workspace, taskManifestFilename),
 		IndexPath:         filepath.Join(workspace, manifest.Artifacts.Index),
@@ -1729,6 +1847,10 @@ func taskTargetOutputFromContext(ctx taskTargetContext, includePlanBody bool) ta
 		TaskID:            ctx.Manifest.TaskID,
 		Series:            defaultTaskSeries(ctx.Manifest.Series),
 		Profile:           defaultTaskProfile(ctx.Manifest.Profile),
+		WorkspaceID:       ctx.Manifest.WorkspaceID,
+		WorkspaceRoot:     ctx.Manifest.WorkspaceRoot,
+		ParentChange:      ctx.Manifest.ParentChange,
+		RepoAlias:         ctx.Manifest.RepoAlias,
 		Query:             ctx.Manifest.Query,
 		Workspace:         ctx.Workspace,
 		IndexPath:         ctx.IndexPath,
@@ -1758,6 +1880,17 @@ func writeTaskTargetHuman(out io.Writer, title string, target taskTargetOutput, 
 	fmt.Fprintf(out, "Series: %s\n", target.Series)
 	if target.Profile != "" {
 		fmt.Fprintf(out, "Profile: %s\n", target.Profile)
+	}
+	if hasTaskWorkspaceLink(taskWorkspaceLink{
+		WorkspaceID:   target.WorkspaceID,
+		WorkspaceRoot: target.WorkspaceRoot,
+		ParentChange:  target.ParentChange,
+		RepoAlias:     target.RepoAlias,
+	}) {
+		fmt.Fprintf(out, "Workspace ID: %s\n", target.WorkspaceID)
+		fmt.Fprintf(out, "Workspace Root: %s\n", target.WorkspaceRoot)
+		fmt.Fprintf(out, "Parent Change: %s\n", target.ParentChange)
+		fmt.Fprintf(out, "Repo Alias: %s\n", target.RepoAlias)
 	}
 	fmt.Fprintf(out, "Title: %s\n", target.Title)
 	fmt.Fprintf(out, "Stage: %s\n", emptyAsDash(target.Stage))
@@ -1802,8 +1935,13 @@ func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput, prior
 	writeTaskPromptAdvisoryFiles(&b, ctx.Manifest.AdvisoryFiles)
 	writeTaskPromptPriorSliceEvidence(&b, priorEvidence)
 	fmt.Fprintln(&b, "Do not implement sibling slices, future slices, or the full task track. Stop after this target's acceptance checks are satisfied.")
-	fmt.Fprintf(&b, "Record the outcome in `%s` or with `ds task checkpoint %s --target %s`.\n", filepath.ToSlash(taskRelativePath(ctx.RepoRoot, target.ResultPath)), target.TaskID, target.Target)
+	checkpointCommand := fmt.Sprintf("ds task checkpoint %s --target %s", target.TaskID, target.Target)
+	if strings.TrimSpace(ctx.RepoArg) != "" {
+		checkpointCommand += " --repo " + commandArg(ctx.RepoArg)
+	}
+	fmt.Fprintf(&b, "Record the outcome in `%s` or with `%s`.\n", filepath.ToSlash(taskRelativePath(ctx.RepoRoot, target.ResultPath)), checkpointCommand)
 	fmt.Fprintln(&b, "Checklist edits are useful notes, but lifecycle state comes from `ds task checkpoint`, `ds task finish`, or `ds task decide`.")
+	fmt.Fprintln(&b, "Command roles: use `ds find` to discover and pack evidence, `ds task status` or `ds task next` to inspect lifecycle, and `ds workspace trace` only for known workspace change/task links. In trace output, `status` and `index_status` are separate signals.")
 	fmt.Fprintln(&b, "At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.")
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "Completion contract:")
@@ -3780,6 +3918,7 @@ func renderTaskIndex(manifest taskManifest) string {
 	fmt.Fprintln(&b, "## Repo / Workspace")
 	fmt.Fprintf(&b, "- Repo: `%s`\n", manifest.RepoRoot)
 	fmt.Fprintf(&b, "- Workspace: `%s`\n\n", manifest.Workspace)
+	writeTaskWorkspaceLinkSection(&b, manifest)
 	fmt.Fprintln(&b, "## Resources")
 	fmt.Fprintf(&b, "- `%s`\n", taskManifestFilename)
 	for _, slice := range manifest.Artifacts.Slices {
@@ -3898,6 +4037,7 @@ func renderTaskSlicePlan(manifest taskManifest, slice taskSliceArtifact) string 
 	fmt.Fprintln(&b, "## Description")
 	fmt.Fprintf(&b, "Create a bounded implementation slice for `%s`. This plan is grounded by the task index preflight, but it is not authoritative; confirm predicted files and tests before making edits.\n", manifest.Query)
 	fmt.Fprintln(&b)
+	writeTaskWorkspaceLinkSection(&b, manifest)
 	fmt.Fprintln(&b, "## Resources")
 	if manifest.Artifacts.Index != "" {
 		fmt.Fprintf(&b, "- `%s`\n", manifest.Artifacts.Index)
@@ -3984,6 +4124,7 @@ func renderTaskGreenfieldSlicePlan(manifest taskManifest, slice taskSliceArtifac
 	fmt.Fprintln(&b, "## Description")
 	fmt.Fprintf(&b, "Create a bounded planning slice for `%s`. Use the task index as evidence, then settle the claim, interface, evaluation shape, and known unknowns needed before implementation scope expands.\n", manifest.Query)
 	fmt.Fprintln(&b)
+	writeTaskWorkspaceLinkSection(&b, manifest)
 	fmt.Fprintln(&b, "## Resources")
 	if manifest.Artifacts.Index != "" {
 		fmt.Fprintf(&b, "- `%s`\n", manifest.Artifacts.Index)
@@ -4050,6 +4191,7 @@ func renderTaskSliceResultTemplate(manifest taskManifest, slice taskSliceArtifac
 	fmt.Fprintf(&b, "- Target: `%s` - %s\n", slice.ID, slice.Title)
 	fmt.Fprintln(&b, "- Outcome: -")
 	fmt.Fprintln(&b)
+	writeTaskWorkspaceLinkSection(&b, manifest)
 	writeTaskCompletionContractTemplate(&b, slice.ID, slice.Title)
 	fmt.Fprintln(&b, "## Changed Files")
 	fmt.Fprintln(&b, "-")
@@ -4084,6 +4226,29 @@ func writeTaskCompletionContractTemplate(b *strings.Builder, target, title strin
 	fmt.Fprintln(b, "- Evidence for decision: -")
 	fmt.Fprintln(b, "- What remains: -")
 	fmt.Fprintln(b, "- Next iteration: -")
+	fmt.Fprintln(b)
+}
+
+func writeTaskWorkspaceLinkSection(b *strings.Builder, manifest taskManifest) {
+	link := taskWorkspaceLinkFromManifest(manifest)
+	if !hasTaskWorkspaceLink(link) {
+		return
+	}
+	fmt.Fprintln(b, "## Workspace Link")
+	fmt.Fprintln(b, "```yaml")
+	if link.WorkspaceID != "" {
+		fmt.Fprintf(b, "workspace_id: %s\n", yamlScalar(link.WorkspaceID))
+	}
+	if link.WorkspaceRoot != "" {
+		fmt.Fprintf(b, "workspace_root: %s\n", yamlScalar(link.WorkspaceRoot))
+	}
+	if link.ParentChange != "" {
+		fmt.Fprintf(b, "parent_change: %s\n", yamlScalar(link.ParentChange))
+	}
+	if link.RepoAlias != "" {
+		fmt.Fprintf(b, "repo_alias: %s\n", yamlScalar(link.RepoAlias))
+	}
+	fmt.Fprintln(b, "```")
 	fmt.Fprintln(b)
 }
 
@@ -4372,7 +4537,7 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	if err != nil {
 		return err
 	}
-	resolvedTaskID, resolvedSlice, err := resolveTaskTargetArgument(opts.Dir, taskID, target)
+	resolvedTaskID, resolvedSlice, err := resolveTaskTargetArgument(cmd, opts.Dir, taskID, target)
 	if err != nil {
 		return err
 	}
@@ -4394,11 +4559,16 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	if opts.NextDecision != "" && !isAllowedValue(opts.NextDecision, taskDecisions) {
 		return fmt.Errorf("invalid next decision %q; valid values: %s", opts.NextDecision, strings.Join(taskDecisions, ", "))
 	}
-	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(opts.Dir, taskID)
+	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(cmd, opts.Dir, taskID)
 	if err != nil {
 		return err
 	}
 	opts = normalizeTaskCheckpointOptions(opts)
+	opts = captureTaskCheckpointGitEvidence(repoRoot, opts)
+	opts, err = captureTaskCheckpointRunLogs(repoRoot, opts)
+	if err != nil {
+		return err
+	}
 	selectedSlice, err := taskSliceForCheckpoint(manifest, opts.Slice)
 	if err != nil {
 		return err
@@ -4407,6 +4577,9 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 		return fmt.Errorf("selected task slice %q has no result artifact", selectedSlice.ID)
 	}
 	now := time.Now().UTC()
+	if opts.Draft {
+		return runTaskCheckpointDraft(cmd, taskID, repoRoot, workspace, manifest, selectedSlice, opts, now)
+	}
 	checkpointDir := filepath.Join(workspace, "checkpoints")
 	if err := os.MkdirAll(checkpointDir, 0o755); err != nil {
 		return fmt.Errorf("create checkpoint dir: %w", err)
@@ -4496,6 +4669,44 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	return nil
 }
 
+func runTaskCheckpointDraft(cmd *cobra.Command, taskID, repoRoot, workspace string, manifest taskManifest, selectedSlice taskSliceArtifact, opts taskCheckpointOptions, now time.Time) error {
+	checkpointID := taskCheckpointDraftID(selectedSlice.ID, opts.Stage)
+	checkpointRel, checkpointJSONRel := taskCheckpointDraftRelPaths(opts.Stage)
+	checkpointPathHint := filepath.Join(workspace, filepath.FromSlash(checkpointRel))
+	checkpointJSONPathHint := filepath.Join(workspace, filepath.FromSlash(checkpointJSONRel))
+	record := buildTaskCheckpointRecord(manifest, opts, selectedSlice, checkpointID, now, repoRoot)
+	checkpointMarkdown := renderTaskCheckpoint(manifest, selectedSlice, opts, now, checkpointID, checkpointJSONRel)
+	resultAppend := renderTaskCheckpointResultAppend(checkpointPathHint, checkpointJSONPathHint, workspace, selectedSlice, opts, now)
+	out := taskCheckpointDraftOutput{
+		TaskID:               taskID,
+		Series:               defaultTaskSeries(manifest.Series),
+		Slice:                selectedSlice.ID,
+		Stage:                opts.Stage,
+		Decision:             opts.Decision,
+		Draft:                true,
+		Mutates:              false,
+		CheckpointID:         checkpointID,
+		CheckpointPathHint:   checkpointRel,
+		CheckpointJSONHint:   checkpointJSONRel,
+		ResultPath:           filepath.Join(workspace, selectedSlice.Result),
+		CheckpointMarkdown:   checkpointMarkdown,
+		CheckpointRecord:     record,
+		ResultAppendMarkdown: resultAppend,
+		LearningCount:        len(record.Learnings),
+		TestEvidenceCount:    len(record.Evidence.TestCommands),
+	}
+	if record.Evidence.GitDiff != nil {
+		out.GitDiffFiles = record.Evidence.GitDiff.ChangedFiles
+	}
+	if opts.AsJSON {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	writeTaskCheckpointDraftHuman(cmd.OutOrStdout(), out)
+	return nil
+}
+
 func checkpointTargetFromOptions(opts taskCheckpointOptions) (string, error) {
 	target := strings.TrimSpace(opts.Target)
 	slice := strings.TrimSpace(opts.Slice)
@@ -4514,6 +4725,7 @@ func normalizeTaskCheckpointOptions(opts taskCheckpointOptions) taskCheckpointOp
 	opts.FilesEdited = normalizePathList(opts.FilesEdited)
 	opts.TestsRead = normalizePathList(opts.TestsRead)
 	opts.TestsRun = normalizeList(opts.TestsRun)
+	opts.RunLogs = normalizeList(opts.RunLogs)
 	opts.MissedFiles = normalizePathList(opts.MissedFiles)
 	opts.NoiseFiles = normalizePathList(opts.NoiseFiles)
 	opts.Tasks = normalizeList(opts.Tasks)
@@ -4527,6 +4739,55 @@ func normalizeTaskCheckpointOptions(opts taskCheckpointOptions) taskCheckpointOp
 		opts.TestMax = 12000
 	}
 	return opts
+}
+
+func captureTaskCheckpointRunLogs(repoRoot string, opts taskCheckpointOptions) (taskCheckpointOptions, error) {
+	for _, path := range opts.RunLogs {
+		evidence, err := readTaskRunLogEvidence(repoRoot, path, opts.TestMax)
+		if err != nil {
+			return opts, err
+		}
+		opts.runLogEvidence = append(opts.runLogEvidence, evidence)
+		opts.TestsRun = appendUniqueValues(opts.TestsRun, evidence.Command)
+	}
+	return opts, nil
+}
+
+func captureTaskCheckpointGitEvidence(repoRoot string, opts taskCheckpointOptions) taskCheckpointOptions {
+	if !opts.GitDiff && !opts.FromGit {
+		return opts
+	}
+	gitDiff := collectTaskGitDiffEvidence(repoRoot, opts.GitDiffMax)
+	opts.gitEvidence = &gitDiff
+	if opts.FromGit {
+		opts.FilesEdited = appendNormalizedUnique(opts.FilesEdited, gitDiff.ChangedFiles...)
+	}
+	return opts
+}
+
+func taskCheckpointDraftID(target, stage string) string {
+	parts := []string{
+		"draft",
+		sanitizeTaskFilename(target),
+		sanitizeTaskFilename(stage),
+	}
+	var kept []string
+	for _, part := range parts {
+		part = strings.Trim(part, "-")
+		if part != "" {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, "_")
+}
+
+func taskCheckpointDraftRelPaths(stage string) (string, string) {
+	slug := sanitizeTaskFilename(stage)
+	if slug == "" {
+		slug = "checkpoint"
+	}
+	stem := "<timestamp>-" + slug
+	return filepath.ToSlash(filepath.Join("checkpoints", stem+".md")), filepath.ToSlash(filepath.Join("checkpoints", stem+".json"))
 }
 
 func taskCheckpointID(target, stage string, now time.Time) string {
@@ -4676,6 +4937,20 @@ func taskStateForTarget(manifest taskManifest, targetID string) (string, string)
 	return "", ""
 }
 
+func taskCheckpointCreatedAt(opts taskCheckpointOptions, now time.Time) string {
+	if opts.Draft {
+		return "<generated-at-checkpoint>"
+	}
+	return now.Format(time.RFC3339)
+}
+
+func taskCheckpointDefaultDescription(opts taskCheckpointOptions) string {
+	if opts.Draft {
+		return "Draft checkpoint generated by `ds task checkpoint --draft`; no files were written."
+	}
+	return "Checkpoint generated by `ds task checkpoint`."
+}
+
 func buildTaskCheckpointRecord(manifest taskManifest, opts taskCheckpointOptions, slice taskSliceArtifact, checkpointID string, now time.Time, repoRoot string) taskCheckpointRecord {
 	goal := strings.TrimSpace(opts.Goal)
 	if goal == "" {
@@ -4683,7 +4958,7 @@ func buildTaskCheckpointRecord(manifest taskManifest, opts taskCheckpointOptions
 	}
 	description := strings.TrimSpace(opts.Description)
 	if description == "" {
-		description = "Checkpoint generated by `ds task checkpoint`."
+		description = taskCheckpointDefaultDescription(opts)
 	}
 	actual := taskCheckpointActualContext{
 		FilesRead:   opts.FilesRead,
@@ -4700,6 +4975,10 @@ func buildTaskCheckpointRecord(manifest taskManifest, opts taskCheckpointOptions
 		SchemaVersion:            2,
 		CheckpointID:             checkpointID,
 		TaskID:                   manifest.TaskID,
+		WorkspaceID:              manifest.WorkspaceID,
+		WorkspaceRoot:            manifest.WorkspaceRoot,
+		ParentChange:             manifest.ParentChange,
+		RepoAlias:                manifest.RepoAlias,
 		Target:                   slice.ID,
 		Series:                   defaultTaskSeries(manifest.Series),
 		Query:                    manifest.Query,
@@ -4709,7 +4988,7 @@ func buildTaskCheckpointRecord(manifest taskManifest, opts taskCheckpointOptions
 		Iteration:                taskCheckpointIteration(slice),
 		Stage:                    opts.Stage,
 		Decision:                 opts.Decision,
-		CreatedAt:                now.Format(time.RFC3339),
+		CreatedAt:                taskCheckpointCreatedAt(opts, now),
 		Goal:                     goal,
 		Description:              description,
 		Note:                     strings.TrimSpace(opts.Note),
@@ -4730,11 +5009,15 @@ func buildTaskCheckpointRecord(manifest taskManifest, opts taskCheckpointOptions
 		},
 	}
 	record.Evidence.PlanRefs = appendUniqueValues(nil, record.Resources...)
-	if opts.GitDiff {
+	if opts.gitEvidence != nil {
+		record.Evidence.GitDiff = opts.gitEvidence
+		record.Evidence.GitDiffPaths = appendNormalizedUnique(record.Evidence.GitDiffPaths, opts.gitEvidence.ChangedFiles...)
+	} else if opts.GitDiff || opts.FromGit {
 		gitDiff := collectTaskGitDiffEvidence(repoRoot, opts.GitDiffMax)
 		record.Evidence.GitDiff = &gitDiff
 		record.Evidence.GitDiffPaths = appendNormalizedUnique(record.Evidence.GitDiffPaths, gitDiff.ChangedFiles...)
 	}
+	record.Evidence.TestCommands = append(record.Evidence.TestCommands, opts.runLogEvidence...)
 	if opts.TestOutput {
 		for _, command := range opts.TestsRun {
 			record.Evidence.TestCommands = append(record.Evidence.TestCommands, runTaskCommandEvidence(repoRoot, command, opts.TestMax))
@@ -4939,17 +5222,114 @@ func writeTaskCheckpointRecord(path string, record taskCheckpointRecord) error {
 	return nil
 }
 
+func readTaskRunLogEvidence(repoRoot, path string, maxBytes int) (taskCommandRunEvidence, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return taskCommandRunEvidence{}, fmt.Errorf("run log path is empty")
+	}
+	readPath := path
+	if !filepath.IsAbs(readPath) {
+		readPath = filepath.Join(repoRoot, filepath.FromSlash(path))
+	}
+	data, err := os.ReadFile(readPath)
+	if err != nil {
+		return taskCommandRunEvidence{}, fmt.Errorf("read run log %s: %w", path, err)
+	}
+	command, exitCode, timedOut, errorText, output := parseTaskRunLog(string(data), path)
+	output, truncated := boundedText(output, maxBytes)
+	return taskCommandRunEvidence{
+		Command:   command,
+		Source:    filepath.ToSlash(path),
+		ExitCode:  exitCode,
+		Output:    output,
+		MaxBytes:  maxBytes,
+		Truncated: truncated,
+		TimedOut:  timedOut,
+		Error:     errorText,
+	}, nil
+}
+
+func parseTaskRunLog(body, source string) (string, int, bool, string, string) {
+	var command string
+	var output []string
+	exitCode := 0
+	timedOut := false
+	for _, line := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if command == "" {
+			switch {
+			case strings.HasPrefix(trimmed, "$ "):
+				command = strings.TrimSpace(strings.TrimPrefix(trimmed, "$ "))
+				continue
+			case strings.HasPrefix(trimmed, "> "):
+				command = strings.TrimSpace(strings.TrimPrefix(trimmed, "> "))
+				continue
+			case strings.HasPrefix(strings.ToLower(trimmed), "ps> "):
+				command = strings.TrimSpace(trimmed[4:])
+				continue
+			}
+		}
+		if key, value, ok := taskRunLogMetadata(trimmed); ok {
+			switch key {
+			case "command":
+				if command == "" {
+					command = value
+				}
+				continue
+			case "exit_code", "exit code":
+				if parsed, err := strconv.Atoi(value); err == nil {
+					exitCode = parsed
+					continue
+				}
+			case "timed_out", "timed out":
+				timedOut = strings.EqualFold(value, "true") || value == "1" || strings.EqualFold(value, "yes")
+				continue
+			}
+		}
+		output = append(output, line)
+	}
+	if command == "" {
+		command = filepath.Base(filepath.FromSlash(source))
+	}
+	return command, exitCode, timedOut, "", strings.TrimSpace(strings.Join(output, "\n"))
+}
+
+func taskRunLogMetadata(line string) (string, string, bool) {
+	key, value, ok := strings.Cut(line, ":")
+	if !ok {
+		return "", "", false
+	}
+	key = strings.ToLower(strings.TrimSpace(key))
+	value = strings.TrimSpace(value)
+	switch key {
+	case "command", "exit_code", "exit code", "timed_out", "timed out":
+		return key, value, true
+	default:
+		return "", "", false
+	}
+}
+
 func collectTaskGitDiffEvidence(repoRoot string, maxBytes int) taskGitDiffEvidence {
-	commandLabel := "git diff --stat; git diff --name-only; git diff --cached --name-only; git ls-files --others --exclude-standard"
+	commandLabel := "git status --short --untracked-files=all; git diff --stat; git diff --name-only; git diff --cached --name-only; git ls-files --others --exclude-standard"
 	evidence := taskGitDiffEvidence{
 		Command:  commandLabel,
 		MaxBytes: maxBytes,
 	}
+	status, statusTruncated, statusErr := runBoundedGitCommand(repoRoot, maxBytes, "status", "--short", "--untracked-files=all")
+	evidence.Status = status
+	evidence.Truncated = statusTruncated
+	if statusErr != nil {
+		evidence.Error = statusErr.Error()
+	}
 	stat, statTruncated, statErr := runBoundedGitCommand(repoRoot, maxBytes, "diff", "--stat")
 	evidence.Stat = stat
-	evidence.Truncated = statTruncated
+	if statTruncated {
+		evidence.Truncated = true
+	}
 	if statErr != nil {
-		evidence.Error = statErr.Error()
+		if evidence.Error == "" {
+			evidence.Error = statErr.Error()
+		}
 	}
 	for _, args := range [][]string{
 		{"diff", "--name-only"},
@@ -5071,6 +5451,20 @@ func renderTaskCheckpoint(manifest taskManifest, slice taskSliceArtifact, opts t
 	fmt.Fprintln(&b, "schema_version: 2")
 	fmt.Fprintf(&b, "checkpoint_id: %s\n", yamlScalar(checkpointID))
 	fmt.Fprintf(&b, "task_id: %s\n", yamlScalar(manifest.TaskID))
+	if link := taskWorkspaceLinkFromManifest(manifest); hasTaskWorkspaceLink(link) {
+		if link.WorkspaceID != "" {
+			fmt.Fprintf(&b, "workspace_id: %s\n", yamlScalar(link.WorkspaceID))
+		}
+		if link.WorkspaceRoot != "" {
+			fmt.Fprintf(&b, "workspace_root: %s\n", yamlScalar(link.WorkspaceRoot))
+		}
+		if link.ParentChange != "" {
+			fmt.Fprintf(&b, "parent_change: %s\n", yamlScalar(link.ParentChange))
+		}
+		if link.RepoAlias != "" {
+			fmt.Fprintf(&b, "repo_alias: %s\n", yamlScalar(link.RepoAlias))
+		}
+	}
 	fmt.Fprintf(&b, "series: %s\n", yamlScalar(defaultTaskSeries(manifest.Series)))
 	if slice.ID != "" {
 		fmt.Fprintf(&b, "target: %s\n", yamlScalar(slice.ID))
@@ -5084,7 +5478,7 @@ func renderTaskCheckpoint(manifest taskManifest, slice taskSliceArtifact, opts t
 	if strings.TrimSpace(opts.Decision) != "" {
 		fmt.Fprintf(&b, "decision: %s\n", yamlScalar(opts.Decision))
 	}
-	fmt.Fprintf(&b, "created_at: %s\n", yamlScalar(now.Format(time.RFC3339)))
+	fmt.Fprintf(&b, "created_at: %s\n", yamlScalar(taskCheckpointCreatedAt(opts, now)))
 	fmt.Fprintf(&b, "checkpoint_json: %s\n", yamlScalar(checkpointJSONRel))
 	fmt.Fprintln(&b, "---")
 	fmt.Fprintln(&b)
@@ -5099,7 +5493,7 @@ func renderTaskCheckpoint(manifest taskManifest, slice taskSliceArtifact, opts t
 	if strings.TrimSpace(opts.Description) != "" {
 		fmt.Fprintf(&b, "%s\n\n", strings.TrimSpace(opts.Description))
 	} else {
-		fmt.Fprintln(&b, "Checkpoint generated by `ds task checkpoint`.")
+		fmt.Fprintln(&b, taskCheckpointDefaultDescription(opts))
 		fmt.Fprintln(&b)
 	}
 	fmt.Fprintln(&b, "## Resources")
@@ -5244,7 +5638,7 @@ func yamlScalar(value string) string {
 	return value
 }
 
-func appendTaskCheckpointToResult(resultPath, checkpointPath, checkpointJSONPath, workspace string, slice taskSliceArtifact, opts taskCheckpointOptions, now time.Time) error {
+func renderTaskCheckpointResultAppend(checkpointPath, checkpointJSONPath, workspace string, slice taskSliceArtifact, opts taskCheckpointOptions, now time.Time) string {
 	rel, err := filepath.Rel(workspace, checkpointPath)
 	if err != nil {
 		rel = checkpointPath
@@ -5254,7 +5648,7 @@ func appendTaskCheckpointToResult(resultPath, checkpointPath, checkpointJSONPath
 	var b strings.Builder
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "### Checkpoint")
-	fmt.Fprintf(&b, "- Created At: %s\n", now.Format(time.RFC3339))
+	fmt.Fprintf(&b, "- Created At: %s\n", taskCheckpointCreatedAt(opts, now))
 	fmt.Fprintf(&b, "- Stage: %s\n", opts.Stage)
 	fmt.Fprintf(&b, "- Decision: %s\n", emptyAsDash(opts.Decision))
 	fmt.Fprintf(&b, "- Source: `%s`\n", rel)
@@ -5272,7 +5666,90 @@ func appendTaskCheckpointToResult(resultPath, checkpointPath, checkpointJSONPath
 	writeIndentedResultList(&b, "Tests run", opts.TestsRun)
 	writeIndentedResultList(&b, "Missed files", opts.MissedFiles)
 	writeIndentedResultList(&b, "Noise files", opts.NoiseFiles)
-	return appendFile(resultPath, b.String())
+	return b.String()
+}
+
+func appendTaskCheckpointToResult(resultPath, checkpointPath, checkpointJSONPath, workspace string, slice taskSliceArtifact, opts taskCheckpointOptions, now time.Time) error {
+	if err := ensureTaskCheckpointHistorySection(resultPath); err != nil {
+		return err
+	}
+	return appendFile(resultPath, renderTaskCheckpointResultAppend(checkpointPath, checkpointJSONPath, workspace, slice, opts, now))
+}
+
+func ensureTaskCheckpointHistorySection(path string) error {
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return os.WriteFile(path, []byte("## Checkpoint History\n"), 0o644)
+	}
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	before := string(data)
+	after := ensureTaskCheckpointHistoryMarkdown(before)
+	if after == before {
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(after), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+func ensureTaskCheckpointHistoryMarkdown(body string) string {
+	if hasMarkdownHeading(body, "## Checkpoint History") {
+		return body
+	}
+	if strings.TrimSpace(body) == "" {
+		return "## Checkpoint History\n"
+	}
+	if updated, ok := replaceMarkdownSection(body, "## Checkpoints", "## Checkpoint History\n"); ok {
+		return updated
+	}
+	return strings.TrimRight(body, "\n") + "\n\n## Checkpoint History\n"
+}
+
+func replaceMarkdownSection(body, heading, replacement string) (string, bool) {
+	start := markdownHeadingIndex(body, heading)
+	if start < 0 {
+		return body, false
+	}
+	afterHeading := start + len(heading)
+	if afterHeading == len(body) {
+		return body[:start] + replacement, true
+	}
+	lineEnd := strings.IndexByte(body[afterHeading:], '\n')
+	if lineEnd < 0 {
+		return body[:start] + replacement, true
+	}
+	sectionStart := afterHeading + lineEnd + 1
+	end := len(body)
+	if next := strings.Index(body[sectionStart:], "\n## "); next >= 0 {
+		end = sectionStart + next + 1
+	}
+	return body[:start] + replacement + body[end:], true
+}
+
+func hasMarkdownHeading(body, heading string) bool {
+	return markdownHeadingIndex(body, heading) >= 0
+}
+
+func markdownHeadingIndex(body, heading string) int {
+	if body == heading || strings.HasPrefix(body, heading+"\n") || strings.HasPrefix(body, heading+"\r\n") {
+		return 0
+	}
+	searchFrom := 0
+	for {
+		idx := strings.Index(body[searchFrom:], "\n"+heading)
+		if idx < 0 {
+			return -1
+		}
+		start := searchFrom + idx + 1
+		after := start + len(heading)
+		if after == len(body) || body[after] == '\n' || body[after] == '\r' {
+			return start
+		}
+		searchFrom = after
+	}
 }
 
 func writeIndentedResultList(b *strings.Builder, label string, values []string) {
@@ -5298,6 +5775,20 @@ func writeMarkdownList(b *strings.Builder, title string, values []string) {
 		fmt.Fprintf(b, "- `%s`\n", value)
 	}
 	fmt.Fprintln(b)
+}
+
+func writeTaskCheckpointDraftHuman(out io.Writer, draft taskCheckpointDraftOutput) {
+	fmt.Fprintf(out, "Draft checkpoint for %s %s\n", draft.TaskID, draft.Slice)
+	fmt.Fprintln(out, "No files were written. Lifecycle state, result files, and index state are unchanged.")
+	fmt.Fprintf(out, "Would write checkpoint: %s\n", draft.CheckpointPathHint)
+	fmt.Fprintf(out, "Would write structured checkpoint: %s\n", draft.CheckpointJSONHint)
+	fmt.Fprintf(out, "Would append result: %s\n", draft.ResultPath)
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Checkpoint preview:")
+	fmt.Fprintln(out, draft.CheckpointMarkdown)
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Result append preview:")
+	fmt.Fprint(out, draft.ResultAppendMarkdown)
 }
 
 func writeTaskStartHuman(out io.Writer, result taskStartOutput, confidence taskConfidence) error {

@@ -20,9 +20,14 @@ usually `/ds-task "goal"` followed by `/ds-apply <task-id>` for the next slice.
 Those adapters are thin wrappers over the same CLI commands shown below.
 
 This example starts with `ds task` because the work item is already known. In a
-brownfield repo where the target is unclear, use `ds map`, `ds recent`, or
-`ds find` as trust/evidence checks, then switch to `ds task` once the execution
+brownfield repo where the target is unclear, start with `ds recent`, then use
+`ds find` or `ds map` as trust/evidence checks. Switch to `ds task` once the execution
 target is concrete. Diagnostics are not prerequisites for known work.
+
+For an umbrella workspace with multiple child repos, keep repo execution
+explicit. Workspace coordination creates the shared change record, but repo-local
+task work still uses `--repo <child-repo>` so task artifacts are not written into
+the umbrella root by accident.
 
 DevSpecs does not replace canonical repo plans. Existing `PLAN-*` files, ADRs,
 PRDs, RFCs, decision memos, and runbooks remain the source of truth. A task
@@ -166,6 +171,10 @@ Goal: Trace existing digest behavior and tests
 Do not implement sibling slices, future slices, or the full task track. Stop after this target's acceptance checks are satisfied.
 Record the outcome in `devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md` or with `ds task checkpoint weekly-digest --target A01`.
 Checklist edits are useful notes, but lifecycle state comes from `ds task checkpoint`, `ds task finish`, or `ds task decide`.
+Command roles: use `ds find` to discover and pack evidence, `ds task status`
+or `ds task next` to inspect lifecycle, and `ds workspace trace` only for known
+workspace change/task links. In trace output, `status` and `index_status` are
+separate signals.
 At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.
 Also answer the completion contract: attempted slice, gate tested, what changed,
 evidence for the decision, what remains, and the next iteration.
@@ -228,6 +237,11 @@ Result: <repo>/devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-con
 Out-of-scope sibling targets: A01
 ```
 
+`ds task status` and `ds task next` answer lifecycle questions: which slice is
+started, validated, promoted, blocked, or next. Use `ds find` when you need to
+discover source/docs/tests for a question. Use `ds workspace trace` only when you
+already know a workspace change or repo task ID and need linked repo slices.
+
 ## What This Shows
 
 - `ds task` creates addressable task and slice artifacts.
@@ -238,6 +252,25 @@ Out-of-scope sibling targets: A01
 - `ds task next` promotes the workflow to the next slice only.
 
 This is a small synthetic example. It is not a broad retrieval benchmark. In a
-real brownfield repo, use `ds map`, `ds find`, and `ds recent` to route to the
+real brownfield repo, use `ds recent`, `ds find`, and `ds map` to route to the
 current owner decision docs, then use `devspecs/tasks/*` for bounded execution
 and receipts.
+
+## Experimental Workspace Coordination
+
+For multi-repo dogfood, initialize the umbrella and create repo-local task
+slices explicitly:
+
+```powershell
+ds workspace init . --json
+ds workspace change create "Customer export across frontend/backend" --workspace . --repos backend,frontend,database,prefect --json
+ds workspace slice create EAG-C001 --workspace . --repo backend --name "Backend API" --json
+ds task show eag-c001-backend --repo ./enalytics-backend --json
+ds apply eag-c001-backend --repo ./enalytics-backend --json
+ds workspace trace EAG-C001 --workspace . --json
+```
+
+This surface is intentionally separate from the single-repo task workflow. Use
+`ds recent` or `ds find` to discover context; use `ds workspace trace` only when
+you already know the workspace change or repo task ID.
+Trace lifecycle `status` and index-capture `index_status` are separate signals.

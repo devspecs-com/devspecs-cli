@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- Added experimental workspace coordination commands for umbrella repos:
+  `ds workspace change create`, `ds workspace slice create`, and
+  `ds workspace trace`. Top-level `ds change`, `ds slice`, and `ds trace`
+  remain hidden compatibility aliases, with regression coverage for alias help
+  and dispatch.
+- Added explicit `--repo` routing for repo-local task and apply flows so agents
+  can work from an umbrella root without writing task artifacts into the wrong
+  repo.
+- Added workspace trace output for known change/task IDs, including per-slice
+  lifecycle status and aggregate workspace change completeness.
+- Added `ds task checkpoint --draft` to preview checkpoint markdown, structured
+  JSON evidence, and result append text without mutating task lifecycle state.
+- Added `ds task checkpoint --from-git` to populate edited-file evidence from
+  current git status/diff paths.
+- Added `ds task checkpoint --run-log` to ingest explicit test/build/typecheck
+  run logs as actual run evidence plus bounded structured output.
+- Changed checkpoint result appends to convert the initial instruction section
+  into `## Checkpoint History` after the first real checkpoint.
+
 ## v1.1.0 - draft
 
 DevSpecs v1.1 centers the launch story on bounded task execution for AI coding
@@ -26,4 +47,6 @@ Known launch caveats:
   agent.
 - Generated agent adapter files are thin wrappers over the local CLI, not a
   hosted service.
-- `ds adopt` and richer workspace support are planned, not included in v1.1.0.
+- `ds adopt` is planned, not included in v1.1.0.
+- Workspace coordination is experimental dogfood surface and may be renamed or
+  consolidated before public launch.

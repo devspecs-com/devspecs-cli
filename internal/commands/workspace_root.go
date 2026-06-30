@@ -243,8 +243,12 @@ func workspaceSuggestedCommand(rel, commandName string) string {
 		commandName = "scan"
 	}
 	switch commandName {
-	case "find", "task":
+	case "find":
 		return fmt.Sprintf("cd %s && ds %s ...", filepath.ToSlash(rel), commandName)
+	case "task":
+		return fmt.Sprintf("ds task ... --repo %s", filepath.ToSlash(rel))
+	case "apply":
+		return fmt.Sprintf("ds apply <task-id> --repo %s", filepath.ToSlash(rel))
 	default:
 		return fmt.Sprintf("cd %s && ds %s", filepath.ToSlash(rel), commandName)
 	}
