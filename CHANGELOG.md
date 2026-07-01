@@ -20,6 +20,8 @@
   `ds task quick` form from normal help as compatibility surface.
 - Changed `ds apply` with no target to resolve the unambiguous next slice and
   added next-target guidance to `ds task status`.
+- Added `ds task slice add --after <slice> --reason <gate>` for A01-1-style
+  follow-up slices and hid `ds task iteration` from normal help.
 - Added `ds task checkpoint --draft` to preview checkpoint markdown, structured
   JSON evidence, and result append text without mutating task lifecycle state.
 - Added `ds task checkpoint --from-git` to populate edited-file evidence from

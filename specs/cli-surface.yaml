@@ -100,7 +100,7 @@ tree:
       status:
         status: support
         usage: ds task status <task-id>
-        purpose: Show task, slice, iteration, checkpoint, and decision state.
+        purpose: Show task, slice, follow-up, checkpoint, and decision state.
       checkpoint:
         status: core
         usage: ds task checkpoint <task-id|target>
@@ -108,7 +108,7 @@ tree:
       decide:
         status: support
         usage: ds task decide <task-id|target>
-        purpose: Update a decision gate without recording a full checkpoint.
+        purpose: Update a task series or slice decision gate without recording a full checkpoint.
       start:
         status: support
         usage: ds task start <task-id|target>
@@ -143,26 +143,27 @@ tree:
         purpose: Compatibility alias; prefer ds task "<goal>" --quick.
       slice:
         status: support
-        purpose: Manage sibling task slices.
+        purpose: Manage task slices, including improve/rework follow-up slices.
       iteration:
-        status: support
-        purpose: Manage improve/rework iteration slices under an existing slice.
+        status: hidden_compat
+        purpose: Compatibility alias; prefer ds task slice add --after.
 
   ds task slice:
-    purpose: Add sibling slices to an existing task.
+    purpose: Add sibling or follow-up slices to an existing task.
     children:
       add:
         status: support
-        usage: ds task slice add <task-id> <title>
-        purpose: Add a new slice plan/result pair.
+        usage: ds task slice add <task-id> <title> [--after A01 --reason improve]
+        purpose: Add a new sibling slice, or add A01-1-style follow-up work when --after is set.
 
   ds task iteration:
-    purpose: Add follow-up iteration slices when a target needs improve/rework.
+    status: hidden_compat
+    purpose: Compatibility alias for ds task slice add --after.
     children:
       add:
-        status: support
+        status: hidden_compat
         usage: ds task iteration add <task-id> <title>
-        purpose: Add a new iteration plan/result pair under an existing slice.
+        purpose: Add a new follow-up slice under an existing slice; prefer ds task slice add --after.
 
   ds workspace:
     aliases:
@@ -283,7 +284,6 @@ removed_tree:
 
 surface_questions:
   - Should ds task quick remain as a hidden compatibility alias now that ds task --quick exists?
-  - Should ds task slice add --after replace ds task iteration add?
   - Should ds task prompt be hidden in favor of ds apply?
   - Should ds task finish become checkpoint sugar or be hidden?
   - Should ds task sync be hidden in favor of ds task refresh?
@@ -317,7 +317,8 @@ planned_simplification:
       reason: Quick is a creation mode, not a separate verb.
     ds_task_iteration_add:
       target: ds task slice add <task-id> "<title>" --after A01 --reason improve
-      reason: Iteration is a slice with newer information, not a separate user noun.
+      status: implemented
+      reason: Follow-up work is a slice with newer information, not a separate user noun.
   keep_until_replacement_is_proven:
     ds_task_next:
       status: replacement_behavior_implemented

@@ -591,6 +591,66 @@ func TestTask_QuickSubcommandHiddenButStillWorks(t *testing.T) {
 	}
 }
 
+func TestTask_IterationSubcommandHiddenButStillWorks(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	helpCmd := NewTaskCmd()
+	helpCmd.SetArgs([]string{"--help"})
+	helpBuf := &bytes.Buffer{}
+	helpCmd.SetOut(helpBuf)
+	if err := helpCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(helpBuf.String(), "\n  iteration   ") {
+		t.Fatalf("task iteration should be hidden from normal help:\n%s", helpBuf.String())
+	}
+	iterationHelpCmd := NewTaskCmd()
+	iterationHelpCmd.SetArgs([]string{"iteration", "add", "--help"})
+	iterationHelpBuf := &bytes.Buffer{}
+	iterationHelpCmd.SetOut(iterationHelpBuf)
+	if err := iterationHelpCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(iterationHelpBuf.String(), "Prefer `ds task slice add") {
+		t.Fatalf("iteration compatibility help should point to slice add --after:\n%s", iterationHelpBuf.String())
+	}
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "iteration-compat",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"--slice", "first iteration slice",
+		"iteration compatibility",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	compatCmd := NewTaskCmd()
+	compatCmd.SetArgs([]string{
+		"iteration", "add", "iteration-compat", "repair iteration slice",
+		"--slice", "A01",
+		"--reason", "improve",
+		"--index=false",
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	compatCmd.SetOut(buf)
+	if err := compatCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out taskArtifactAddOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("iteration compat json: %v\n%s", err, buf.String())
+	}
+	if out.Slice.ID != "A01-1" {
+		t.Fatalf("iteration compat output = %#v", out)
+	}
+}
+
 func TestTask_StartGreenfieldProfileUsesPlanningTemplate(t *testing.T) {
 	setupTaskCommandRepo(t)
 
@@ -1805,11 +1865,38 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 		t.Fatalf("slice add rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
 	}
 
+	followupCmd := NewTaskCmd()
+	followupCmd.SetArgs([]string{
+		"slice", "add", "lifecycle-add-test", "repair lifecycle status",
+		"--after", "B01",
+		"--reason", "improve",
+		"--index=false",
+		"--json",
+	})
+	followupBuf := &bytes.Buffer{}
+	followupCmd.SetOut(followupBuf)
+	if err := followupCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var followupOut taskArtifactAddOutput
+	if err := json.Unmarshal(followupBuf.Bytes(), &followupOut); err != nil {
+		t.Fatalf("slice add --after json: %v\n%s", err, followupBuf.String())
+	}
+	if followupOut.Series != "B" || followupOut.Slice.ID != "B01-1" {
+		t.Fatalf("slice add --after output = %#v", followupOut)
+	}
+	if filepath.Base(followupOut.Slice.PlanPath) != "B01-1-repair-lifecycle-status-plan.md" {
+		t.Fatalf("follow-up slice plan = %q", followupOut.Slice.PlanPath)
+	}
+	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
+		t.Fatalf("slice add --after rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
+	}
+
 	iterationCmd := NewTaskCmd()
 	iterationCmd.SetArgs([]string{
-		"iteration", "add", "lifecycle-add-test", "repair lifecycle status",
+		"iteration", "add", "lifecycle-add-test", "rework lifecycle status",
 		"--slice", "B01",
-		"--reason", "improve",
+		"--reason", "rework",
 		"--index=false",
 		"--json",
 	})
@@ -1820,28 +1907,29 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 	}
 	var iterationOut taskArtifactAddOutput
 	if err := json.Unmarshal(iterationBuf.Bytes(), &iterationOut); err != nil {
-		t.Fatalf("iteration add json: %v\n%s", err, iterationBuf.String())
+		t.Fatalf("hidden iteration add json: %v\n%s", err, iterationBuf.String())
 	}
-	if iterationOut.Series != "B" || iterationOut.Slice.ID != "B01-1" {
-		t.Fatalf("iteration add output = %#v", iterationOut)
+	if iterationOut.Series != "B" || iterationOut.Slice.ID != "B01-2" {
+		t.Fatalf("hidden iteration add output = %#v", iterationOut)
 	}
-	if filepath.Base(iterationOut.Slice.PlanPath) != "B01-1-repair-lifecycle-status-plan.md" {
-		t.Fatalf("iteration plan = %q", iterationOut.Slice.PlanPath)
-	}
-	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
-		t.Fatalf("iteration add rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
+	if filepath.Base(iterationOut.Slice.PlanPath) != "B01-2-rework-lifecycle-status-plan.md" {
+		t.Fatalf("hidden iteration plan = %q", iterationOut.Slice.PlanPath)
 	}
 
 	var manifest taskManifest
 	if err := json.Unmarshal([]byte(mustReadFile(t, filepath.Join(workspace, taskManifestFilename))), &manifest); err != nil {
 		t.Fatalf("manifest json: %v", err)
 	}
-	if len(manifest.Artifacts.Slices) != 3 {
+	if len(manifest.Artifacts.Slices) != 4 {
 		t.Fatalf("manifest slices = %#v", manifest.Artifacts.Slices)
 	}
 	iteration := manifest.Artifacts.Slices[2]
 	if iteration.ID != "B01-1" || iteration.Kind != "iteration" || iteration.ParentID != "B01" || iteration.Reason != "improve" {
 		t.Fatalf("iteration manifest entry = %#v", iteration)
+	}
+	compatIteration := manifest.Artifacts.Slices[3]
+	if compatIteration.ID != "B01-2" || compatIteration.Kind != "iteration" || compatIteration.ParentID != "B01" || compatIteration.Reason != "rework" {
+		t.Fatalf("hidden iteration manifest entry = %#v", compatIteration)
 	}
 
 	checkpointCmd := NewTaskCmd()
@@ -2088,6 +2176,40 @@ func TestTaskSliceAddRefusesExistingArtifactFile(t *testing.T) {
 	}
 	if got := mustReadFile(t, existingPlan); !strings.Contains(got, "Do not replace this file") {
 		t.Fatalf("existing plan was overwritten:\n%s", got)
+	}
+}
+
+func TestTaskSliceAddReasonRequiresAfter(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "slice-reason-test",
+		"--no-refresh",
+		"--index=false",
+		"--slice", "first lifecycle slice",
+		"task lifecycle flow",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	sliceCmd := NewTaskCmd()
+	sliceCmd.SetArgs([]string{
+		"slice", "add", "slice-reason-test", "ambiguous follow-up",
+		"--reason", "improve",
+		"--index=false",
+	})
+	sliceCmd.SetOut(&bytes.Buffer{})
+	err := sliceCmd.Execute()
+	if err == nil {
+		t.Fatal("expected --reason without --after to fail")
+	}
+	for _, want := range []string{"--reason requires --after", "ds task slice add", "--after <slice>", "--reason improve"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("slice reason error missing %q: %v", want, err)
+		}
 	}
 }
 

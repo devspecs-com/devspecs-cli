@@ -71,6 +71,7 @@ func buildTLDRGuide() tldrOutput {
 			"Use ds recent, ds find, ds map, and ds context as diagnostic/evidence tools around a task when scope, owner artifacts, or trust are unclear.",
 			"Command roles: ds find discovers and packs evidence; ds task status/show reports lifecycle; ds apply emits the current bounded prompt; ds workspace trace follows known workspace change or repo task links.",
 			"Record the completion contract with checkpoint/finish: attempted slice, gate tested, changes, evidence, remaining work, and next iteration.",
+			"Use ds task slice add <task-id> \"<title>\" --after A01 --reason improve to turn an improve/rework gate into A01-1 instead of widening the current slice.",
 			"Do not claim DevSpecs found every relevant file; verify source and tests.",
 		},
 		Workflows: []tldrWorkflow{
@@ -112,6 +113,7 @@ func buildTLDRGuide() tldrOutput {
 					"ds task show <target>",
 					"ds apply <task-id>",
 					"ds task checkpoint <task-id> --target <target> --stage validated --decision promote",
+					`ds task slice add <task-id> "<follow-up>" --after A01 --reason improve`,
 				},
 				AgentRule: "Implement only the current slice. End with promote, improve, rework, rollback, block, or complete.",
 			},

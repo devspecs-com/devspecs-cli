@@ -372,7 +372,7 @@ func taskAdapterBody(goalPhrase, taskCommand string) string {
 		"5. Work exactly one slice at a time. Do not implement an entire track when the current target is a slice like A01.\n"+
 		"6. End with a DevSpecs decision gate: `promote`, `improve`, `rework`, `rollback`, or `block`.\n"+
 		"7. Record evidence with `ds task checkpoint <task-id|target> --stage validated --decision <gate>` before claiming the slice is done.\n\n"+
-		"Keep `M00` or `A00` as the index, `M01`/`A01` as planned slices, and `M01-1`/`A01-1` as improvement iterations.", goalPhrase, taskCommand)
+		"Keep `M00` or `A00` as the index, `M01`/`A01` as planned slices, and `M01-1`/`A01-1` as follow-up slices. Create follow-up slices with `ds task slice add <task-id> \"<title>\" --after A01 --reason improve`.", goalPhrase, taskCommand)
 }
 
 func applyAdapterBody(targetPhrase, applyCommand string) string {

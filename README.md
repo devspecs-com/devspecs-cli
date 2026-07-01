@@ -90,8 +90,8 @@ DevSpecs gives that layer local shape:
 - task slices that tell the agent where to stop;
 - packed source, test, docs, and intent context before implementation starts;
 - explicit gates: `promote`, `improve`, `rework`, `rollback`, and `block`;
-- iteration slices such as `A01-1` and `A01-2` when the first attempt teaches
-  you something;
+- follow-up slices such as `A01-1` and `A01-2` when the first attempt teaches
+  you something, created with `ds task slice add <task-id> "<title>" --after A01`;
 - checkpoint and result artifacts that survive compaction, handoff, and the
   next agent session.
 
@@ -272,6 +272,7 @@ Index state lives in local SQLite and can be rebuilt.
 | `ds task status/show` | Inspect task lifecycle state and target context. |
 | `ds apply [next\|task-id\|target]` | Emit the next bounded one-slice agent prompt without mutating task state. |
 | `ds task checkpoint <target>` | Record files, tests, misses, noise, learnings, decision evidence, and next iteration. |
+| `ds task slice add <task-id> "<title>" --after A01 --reason improve` | Add an A01-1-style follow-up slice after an improve/rework gate. |
 | `ds task refresh <task-id>` | Recapture edited task artifacts into the local index without rewriting task docs. |
 | `ds workspace init/show/change/slice/trace` | Coordinate experimental workspace-level changes, repo-local task slices, and known change/task traces. |
 | `ds map` | Show architecture/system boundaries with evidence and follow-up commands. |
@@ -342,7 +343,7 @@ tools, but those wrappers route back through `ds task` and `ds apply`.
 ### Why not just use epics, stories, and tasks?
 
 Traditional issue trackers describe planned work. Agent work creates local
-attempts, misses, evidence, and iteration slices between ticket updates.
+attempts, misses, evidence, and follow-up slices between ticket updates.
 DevSpecs manages that local AI work layer without replacing the tracker.
 
 ### Should I commit `devspecs/tasks`?

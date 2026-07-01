@@ -32,6 +32,8 @@ func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 		"Workflow commands refresh the local index by default",
 		"Use ds recent, ds find, ds map, and ds context as diagnostic/evidence tools around a task",
 		"Command roles: ds find discovers and packs evidence",
+		"ds task slice add <task-id>",
+		"--after A01 --reason improve",
 		"Record the completion contract with checkpoint/finish",
 		"ds map",
 		"ds recent",

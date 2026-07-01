@@ -196,7 +196,7 @@ func TestRootCmd_CommandRoleHelpDistinguishesFindStatusAndTrace(t *testing.T) {
 			args: []string{"task", "status", "--help"},
 			want: []string{
 				"Show lifecycle state for an existing DevSpecs task.",
-				"inspect task, slice, iteration, checkpoint, and decision",
+				"inspect task, slice, follow-up, checkpoint, and decision",
 				"It does not discover new source or docs",
 			},
 		},

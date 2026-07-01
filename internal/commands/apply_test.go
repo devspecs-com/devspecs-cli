@@ -194,7 +194,7 @@ func TestApplyNextRespectsDecisionGateProgression(t *testing.T) {
 		{name: "promote-advances-to-next-slice", decision: "promote", wantTarget: "A02"},
 		{name: "improve-selects-existing-iteration", decision: "improve", iteration: true, wantTarget: "A01-1"},
 		{name: "rework-selects-existing-iteration", decision: "rework", iteration: true, wantTarget: "A01-1"},
-		{name: "improve-without-iteration-stops-before-sibling", decision: "improve", wantErr: []string{"A01 ended with improve", "ds task iteration add", "--slice A01", "--reason improve"}},
+		{name: "improve-without-iteration-stops-before-sibling", decision: "improve", wantErr: []string{"A01 ended with improve", "ds task slice add", "--after A01", "--reason improve"}},
 		{name: "rollback-blocks-automatic-next", decision: "rollback", wantErr: []string{"A01 ended with rollback", "automatic next is blocked", "choose an explicit target"}},
 		{name: "block-blocks-automatic-next", decision: "block", wantErr: []string{"A01 ended with block", "automatic next is blocked", "choose an explicit target"}},
 	} {

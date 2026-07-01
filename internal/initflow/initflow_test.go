@@ -194,7 +194,7 @@ func TestGenerateAgentToolFilesCreatesExpectedFiles(t *testing.T) {
 	}
 
 	taskSkill := readGeneratedFile(t, root, ".agents/skills/ds-task/SKILL.md")
-	for _, wantText := range []string{"name: ds-task", "ds task", "ds apply <task-id>", "ds recent", "ds find", "Work exactly one slice", "decision gate"} {
+	for _, wantText := range []string{"name: ds-task", "ds task", "ds apply <task-id>", "ds recent", "ds find", "Work exactly one slice", "decision gate", "ds task slice add"} {
 		if !strings.Contains(taskSkill, wantText) {
 			t.Fatalf("codex task skill missing %q:\n%s", wantText, taskSkill)
 		}
