@@ -36,8 +36,8 @@ tree:
         purpose: Create and manage bounded task workspaces with packed context.
       apply:
         status: core
-        usage: ds apply [next|task-id|target]
-        purpose: Emit one bounded one-slice prompt for an agent; defaults to the unambiguous next slice.
+        usage: ds apply [task-id|target]
+        purpose: Emit one bounded one-slice prompt for an agent; omit the argument for the unambiguous next slice.
       tldr:
         status: core
         purpose: Show LLM-oriented workflow quickstarts.

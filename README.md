@@ -269,8 +269,8 @@ Index state lives in local SQLite and can be rebuilt.
 | `ds task <query>` | Create a bounded task workspace with slice artifacts. |
 | `ds task <query> --quick` | Create a compact one-off task workspace. |
 | `ds task status/show` | Inspect task lifecycle state and target context. |
-| `ds apply [next\|task-id\|target]` | Emit the next bounded one-slice agent prompt without mutating task state. |
-| `ds task checkpoint <target>` | Record files, tests, misses, noise, learnings, decision evidence, and next iteration. |
+| `ds apply [task-id\|target]` | Emit the next bounded one-slice agent prompt without mutating task state; omit the argument for the unambiguous next slice. |
+| `ds task checkpoint <task-id\|target>` | Record files, tests, misses, noise, learnings, decision evidence, and next iteration. |
 | `ds task slice add <task-id> "<title>" --after A01 --reason improve` | Add an A01-1-style follow-up slice after an improve/rework gate. |
 | `ds task refresh <task-id>` | Recapture edited task artifacts into the local index without rewriting task docs. |
 | `ds workspace init/show/change/slice/trace` | Coordinate experimental workspace-level changes, repo-local task slices, and known change/task traces. |

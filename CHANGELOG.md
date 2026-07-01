@@ -19,7 +19,8 @@
 - Added `ds task --quick` for compact one-off task workspaces and hid the older
   `ds task quick` form from normal help as compatibility surface.
 - Changed `ds apply` with no target to resolve the unambiguous next slice and
-  added next-target guidance to `ds task status`.
+  added next-target guidance to `ds task status`; help/docs now present
+  argument-free `ds apply` as the happy path.
 - Added `ds task slice add --after <slice> --reason <gate>` for A01-1-style
   follow-up slices and hid `ds task iteration` from normal help.
 - Hid legacy task lifecycle shortcuts (`prompt`, `finish`, `decide`, `start`,

@@ -42,7 +42,7 @@ func NewApplyCmd() *cobra.Command {
 	opts.Dir = defaultTaskWorkspaceDir
 
 	cmd := &cobra.Command{
-		Use:   "apply [next|task-id|target]",
+		Use:   "apply [task-id|target]",
 		Short: "Emit a one-slice DevSpecs apply prompt",
 		Long: `Emit an agent prompt for exactly one DevSpecs task target.
 
@@ -71,7 +71,7 @@ agent, mark the target started, or advance lifecycle state.`,
 
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
 	cmd.Flags().StringVar(&opts.Repo, repoTargetFlagName, "", "Target repository path for repo-local DevSpecs artifacts and context")
-	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice/iteration target; useful when the first argument is a task id")
+	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice or follow-up target; useful when the first argument is a task id")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	return cmd
 }

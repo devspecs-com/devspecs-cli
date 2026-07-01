@@ -171,7 +171,7 @@ func TestRootCmd_ApplyRegistered(t *testing.T) {
 	got := buf.String()
 	for _, want := range []string{
 		"Emit an agent prompt for exactly one DevSpecs task target.",
-		"apply [next|task-id|target]",
+		"apply [task-id|target]",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected apply help to contain %q, got:\n%s", want, got)
