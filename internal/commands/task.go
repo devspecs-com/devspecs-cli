@@ -626,6 +626,7 @@ templates for recording actual reads, edits, tests, misses, and noise.`,
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&opts.Force, "force", false, "Overwrite an existing task workspace")
 	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the series index and slice plans into the DevSpecs index")
+	cmd.Flags().BoolVar(&opts.Quick, "quick", false, "Create a compact one-off task workspace")
 
 	cmd.AddCommand(newTaskQuickCmd())
 	cmd.AddCommand(newTaskSliceCmd())
@@ -652,13 +653,13 @@ func newTaskQuickCmd() *cobra.Command {
 	opts.Index = true
 	opts.Quick = true
 	cmd := &cobra.Command{
-		Use:   "quick <query>",
-		Short: "Create a compact one-off task workspace",
-		Long: `Create a one-off task workspace for a small change.
-
-This uses the normal task manifest, source/test pack, risk cards, and lifecycle
-commands, but prints a shorter handoff so tiny fixes do not start with a full
-multi-slice ceremony.`,
+		Use:    "quick <query>",
+		Short:  "Compatibility alias for ds task --quick",
+		Hidden: true,
+		Long: "Create a one-off task workspace for a small change.\n\n" +
+			"This uses the normal task manifest, source/test pack, risk cards, and lifecycle\n" +
+			"commands, but prints a shorter handoff so tiny fixes do not start with a full\n" +
+			"multi-slice ceremony. Prefer `ds task \"<goal>\" --quick` in new docs and scripts.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskStart(cmd, args[0], opts)

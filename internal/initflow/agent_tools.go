@@ -366,7 +366,7 @@ func slashCommandContent(name, description, body string) string {
 func taskAdapterBody(goalPhrase, taskCommand string) string {
 	return fmt.Sprintf("Use this adapter when the user wants to start or continue a DevSpecs task.\n\n"+
 		"1. Treat %s as the bounded work goal.\n"+
-		"2. Prefer `%s \"<bounded-goal>\"` for known work. Use `ds task quick \"<bounded-goal>\"` only for a tiny one-off.\n"+
+		"2. Prefer `%s \"<bounded-goal>\"` for known work. Add `--quick` only for a tiny one-off.\n"+
 		"3. If a task or slice already exists, run `ds apply <task-id|target>` or `ds apply next` instead of creating a duplicate task.\n"+
 		"4. If the target is unclear, run `ds recent` and `ds find \"<topic>\"` as diagnostics, then return to one bounded task.\n"+
 		"5. Work exactly one slice at a time. Do not implement an entire track when the current target is a slice like A01.\n"+

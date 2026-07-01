@@ -456,7 +456,7 @@ func TestTask_QuickCreatesOneOffWorkspaceWithCompactOutput(t *testing.T) {
 	repoDir := setupTaskCommandRepo(t)
 
 	cmd := NewTaskCmd()
-	cmd.SetArgs([]string{"quick", "--id", "quick-fix", "--no-refresh", "--index=false", "fix small billing typo"})
+	cmd.SetArgs([]string{"--quick", "--id", "quick-fix", "--no-refresh", "--index=false", "fix small billing typo"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	if err := cmd.Execute(); err != nil {
@@ -480,6 +480,35 @@ func TestTask_QuickCreatesOneOffWorkspaceWithCompactOutput(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "A01-fix-small-billing-typo-result.md")); err != nil {
 		t.Fatalf("quick result missing: %v", err)
+	}
+}
+
+func TestTask_QuickSubcommandHiddenButStillWorks(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	helpCmd := NewTaskCmd()
+	helpCmd.SetArgs([]string{"--help"})
+	helpBuf := &bytes.Buffer{}
+	helpCmd.SetOut(helpBuf)
+	if err := helpCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(helpBuf.String(), "\n  quick       ") {
+		t.Fatalf("task quick should be hidden from normal help:\n%s", helpBuf.String())
+	}
+	if !strings.Contains(helpBuf.String(), "--quick") {
+		t.Fatalf("task help should teach --quick:\n%s", helpBuf.String())
+	}
+
+	compatCmd := NewTaskCmd()
+	compatCmd.SetArgs([]string{"quick", "--id", "quick-compat", "--no-refresh", "--index=false", "fix small billing typo"})
+	buf := &bytes.Buffer{}
+	compatCmd.SetOut(buf)
+	if err := compatCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "Created one-off task: quick-compat") {
+		t.Fatalf("quick compatibility output missing one-off marker:\n%s", buf.String())
 	}
 }
 

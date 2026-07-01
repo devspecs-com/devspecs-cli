@@ -88,10 +88,6 @@ tree:
       status: core
       purpose: Create a sliced task workspace from a grounded goal.
     children:
-      quick:
-        status: support
-        usage: ds task quick "<goal>"
-        purpose: Create a compact one-off task workspace for small changes.
       next:
         status: support
         usage: ds task next <task-id>
@@ -140,6 +136,10 @@ tree:
         status: consolidation_candidate
         usage: ds task sync <task-id>
         purpose: Recapture task artifacts; prefer refresh as the clearer product word.
+      quick:
+        status: hidden_compat
+        usage: ds task quick "<goal>"
+        purpose: Compatibility alias; prefer ds task "<goal>" --quick.
       slice:
         status: support
         purpose: Manage sibling task slices.
@@ -283,7 +283,7 @@ removed_tree:
 surface_questions:
   - Should ds apply with no arguments default to ds apply next when unambiguous?
   - Should ds task status include a first-class next_target before ds task next is hidden?
-  - Should ds task quick become ds task --quick?
+  - Should ds task quick remain as a hidden compatibility alias now that ds task --quick exists?
   - Should ds task slice add --after replace ds task iteration add?
   - Should ds task prompt be hidden in favor of ds apply?
   - Should ds task finish become checkpoint sugar or be hidden?
@@ -314,6 +314,7 @@ planned_simplification:
   shift_to_flags:
     ds_task_quick:
       target: ds task "<goal>" --quick
+      status: implemented
       reason: Quick is a creation mode, not a separate verb.
     ds_task_iteration_add:
       target: ds task slice add <task-id> "<title>" --after A01 --reason improve

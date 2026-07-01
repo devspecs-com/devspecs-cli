@@ -63,11 +63,11 @@ func buildTLDRGuide() tldrOutput {
 		Purpose: "DevSpecs is a local-first CLI for turning repo intent into bounded task slices, packed context, checkpoints, and handoff receipts.",
 		LLMRules: []string{
 			"Human front door: run ds recent when resuming or entering a repo; use ds find for a focused question and ds map for subsystem boundaries.",
-			"Fastest path for known work: run ds task or ds task quick first; task creation refreshes the index and packs source/test/doc context.",
+			"Fastest path for known work: run ds task first; add --quick for tiny one-off work. Task creation refreshes the index and packs source/test/doc context.",
 			"Run ds init once per repo; if it generates agent files, use /ds-task and /ds-apply as thin wrappers over the same CLI flow.",
 			"Prefer one bounded target over the whole plan.",
 			"Workflow commands refresh the local index by default; use ds scan for explicit manual refresh or rebuild.",
-			"Use ds task quick for small work and full ds task slices for multi-step work.",
+			"Use ds task --quick for small work and full ds task slices for multi-step work.",
 			"Use ds recent, ds find, ds map, and ds context as diagnostic/evidence tools around a task when scope, owner artifacts, or trust are unclear.",
 			"Command roles: ds find discovers and packs evidence; ds task status/next/show reports lifecycle; ds workspace trace follows known workspace change or repo task links.",
 			"Record the completion contract with checkpoint/finish: attempted slice, gate tested, changes, evidence, remaining work, and next iteration.",
@@ -95,7 +95,7 @@ func buildTLDRGuide() tldrOutput {
 				Name:    "Hotfix / Small Bug",
 				UseWhen: "A focused change likely fits in one implementation slice.",
 				Commands: []string{
-					`ds task quick "fix <bug>"`,
+					`ds task "fix <bug>" --quick`,
 					"ds task prompt <target>",
 					"ds task checkpoint <task-id> --target <target> --stage validated --decision promote --file-edited <path> --test-run <cmd>",
 					"ds task finish <target> --decision promote",
@@ -122,7 +122,7 @@ func buildTLDRGuide() tldrOutput {
 				Commands: []string{
 					"ds recent",
 					`ds find "<symptom> <component>"`,
-					`ds task quick "triage <incident>"`,
+					`ds task "triage <incident>" --quick`,
 					"ds task checkpoint <task-id> --target <target> --stage validated --decision continue --file-read <path> --test-run <cmd>",
 				},
 				AgentRule: "Start with recent local activity, then pack focused evidence with find. Once the incident boundary is concrete, create the triage task and record facts, commands, changed files, and unresolved risks.",

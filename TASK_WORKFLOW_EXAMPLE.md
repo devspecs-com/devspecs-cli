@@ -37,7 +37,7 @@ slices and records what happened.
 ## Create A Bounded Task
 
 Use full `ds task` for multi-slice work where handoff and receipts matter. For a
-small bugfix or doc spike, `ds task quick` is usually enough.
+small bugfix or doc spike, `ds task "goal" --quick` is usually enough.
 
 ```bash
 $ ds task "Add a weekly digest email for unread notifications" \

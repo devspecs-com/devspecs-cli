@@ -171,17 +171,17 @@ What you get:
 For a smaller one-off:
 
 ```bash
-ds task quick "Fix discount rounding in invoice totals"
+ds task "Fix discount rounding in invoice totals" --quick
 ```
 
-Use full `ds task` when you want durable slices and handoff receipts. Use
-`ds task quick` when the ceremony would outweigh the change.
+Use full `ds task` when you want durable slices and handoff receipts. Add
+`--quick` when the ceremony would outweigh the change.
 
 ## Workspace Coordination
 
 Workspace coordination is experimental and explicit. Use it only when one
 umbrella directory coordinates work across several child repos. Normal
-single-repo `ds task`, `ds task quick`, `ds apply`, and `ds task checkpoint`
+single-repo `ds task`, `ds task --quick`, `ds apply`, and `ds task checkpoint`
 remain the default path.
 
 `ds ws` is a built-in shortcut for `ds workspace`; docs use the full command
@@ -268,7 +268,7 @@ Index state lives in local SQLite and can be rebuilt.
 | `ds init` | Create local index state, repo config, and optional agent adapter files. |
 | `ds tldr [workflow]` | Show LLM-oriented quickstarts for setup, hotfixes, epics, incidents, brownfield recovery, handoff, and deep dives. |
 | `ds task <query>` | Create a bounded task workspace with slice artifacts. |
-| `ds task quick <query>` | Create a compact one-off task workspace. |
+| `ds task <query> --quick` | Create a compact one-off task workspace. |
 | `ds task status/next/show` | Inspect task lifecycle state and choose the next target. |
 | `ds apply <next\|task-id\|target>` | Emit the next bounded one-slice agent prompt without mutating task state. |
 | `ds task checkpoint <target>` | Record files, tests, misses, noise, learnings, decision evidence, and next iteration. |
