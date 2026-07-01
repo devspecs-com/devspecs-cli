@@ -546,7 +546,7 @@ func TestTask_QuickCreatesOneOffWorkspaceWithCompactOutput(t *testing.T) {
 		"Created one-off task: quick-fix",
 		"Target: A01",
 		"Next:",
-		"ds task prompt A01",
+		"ds apply quick-fix --target A01",
 		"ds task checkpoint quick-fix --target A01",
 	} {
 		if !strings.Contains(output, want) {
@@ -588,6 +588,63 @@ func TestTask_QuickSubcommandHiddenButStillWorks(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "Created one-off task: quick-compat") {
 		t.Fatalf("quick compatibility output missing one-off marker:\n%s", buf.String())
+	}
+}
+
+func TestTask_LegacyLifecycleSubcommandsHiddenButStillWork(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	helpCmd := NewTaskCmd()
+	helpCmd.SetArgs([]string{"--help"})
+	helpBuf := &bytes.Buffer{}
+	helpCmd.SetOut(helpBuf)
+	if err := helpCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	help := helpBuf.String()
+	for _, hiddenLine := range []string{
+		"\n  decide      ",
+		"\n  finish      ",
+		"\n  prompt      ",
+		"\n  start       ",
+		"\n  sync        ",
+	} {
+		if strings.Contains(help, hiddenLine) {
+			t.Fatalf("legacy lifecycle command %q should be hidden from normal help:\n%s", hiddenLine, help)
+		}
+	}
+	for _, visibleLine := range []string{
+		"\n  checkpoint  ",
+		"\n  refresh     ",
+		"\n  status      ",
+		"\n  next        ",
+	} {
+		if !strings.Contains(help, visibleLine) {
+			t.Fatalf("expected visible task command %q in help:\n%s", visibleLine, help)
+		}
+	}
+
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"prompt", "--help"}, "Prefer `ds apply <task-id>`"},
+		{[]string{"finish", "--help"}, "Prefer `ds task checkpoint <task-id>"},
+		{[]string{"decide", "--help"}, "Prefer `ds task checkpoint <task-id>"},
+		{[]string{"start", "--help"}, "Prefer `ds task checkpoint <task-id>"},
+		{[]string{"sync", "--help"}, "Prefer `ds task refresh <task-id>`"},
+	}
+	for _, tc := range cases {
+		cmd := NewTaskCmd()
+		cmd.SetArgs(tc.args)
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		if !strings.Contains(buf.String(), tc.want) {
+			t.Fatalf("%v help missing %q:\n%s", tc.args, tc.want, buf.String())
+		}
 	}
 }
 

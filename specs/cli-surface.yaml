@@ -106,13 +106,13 @@ tree:
         usage: ds task checkpoint <task-id|target>
         purpose: Record what happened, evidence, run logs, learnings, and the decision gate.
       decide:
-        status: support
+        status: hidden_compat
         usage: ds task decide <task-id|target>
-        purpose: Update a task series or slice decision gate without recording a full checkpoint.
+        purpose: Compatibility shortcut for decision-only updates; prefer ds task checkpoint --decision so the gate carries evidence.
       start:
-        status: support
+        status: hidden_compat
         usage: ds task start <task-id|target>
-        purpose: Mark one task target as started.
+        purpose: Compatibility shortcut for started state; prefer ds task checkpoint --stage started when a durable receipt matters.
       audit:
         status: diagnostic
         usage: ds task audit <task-id|target>
@@ -126,17 +126,17 @@ tree:
         usage: ds task refresh <task-id>
         purpose: Recapture task artifacts into the local index without rewriting docs.
       prompt:
-        status: consolidation_candidate
+        status: hidden_compat
         usage: ds task prompt <task-id|target>
-        purpose: Emit a bounded target prompt; prefer ds apply for the launch story.
+        purpose: Compatibility alias; prefer ds apply for the bounded one-slice agent prompt.
       finish:
-        status: consolidation_candidate
+        status: hidden_compat
         usage: ds task finish <task-id|target>
-        purpose: Close a target with a decision gate; likely checkpoint sugar or legacy.
+        purpose: Compatibility alias; prefer ds task checkpoint so decisions carry evidence and run receipts.
       sync:
-        status: consolidation_candidate
+        status: hidden_compat
         usage: ds task sync <task-id>
-        purpose: Recapture task artifacts; prefer refresh as the clearer product word.
+        purpose: Compatibility alias; prefer ds task refresh as the clearer product word.
       quick:
         status: hidden_compat
         usage: ds task quick "<goal>"
@@ -284,9 +284,6 @@ removed_tree:
 
 surface_questions:
   - Should ds task quick remain as a hidden compatibility alias now that ds task --quick exists?
-  - Should ds task prompt be hidden in favor of ds apply?
-  - Should ds task finish become checkpoint sugar or be hidden?
-  - Should ds task sync be hidden in favor of ds task refresh?
   - Should user-defined aliases exist, or are built-in aliases enough for now?
 
 planned_simplification:
@@ -330,12 +327,17 @@ planned_simplification:
   hide_or_deemphasize:
     ds_task_prompt:
       replacement: ds apply
+      status: implemented
     ds_task_finish:
       replacement: ds task checkpoint
+      status: implemented
     ds_task_decide:
       replacement: ds task checkpoint --decision
       reason: Decision-only mutation can skip evidence.
+      status: implemented
     ds_task_start:
       replacement: ds task checkpoint --stage started, if needed.
+      status: implemented
     ds_task_sync:
       replacement: ds task refresh
+      status: implemented

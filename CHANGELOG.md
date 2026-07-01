@@ -22,6 +22,10 @@
   added next-target guidance to `ds task status`.
 - Added `ds task slice add --after <slice> --reason <gate>` for A01-1-style
   follow-up slices and hid `ds task iteration` from normal help.
+- Hid legacy task lifecycle shortcuts (`prompt`, `finish`, `decide`, `start`,
+  and `sync`) from normal help while keeping compatibility paths callable and
+  redirecting users toward `ds apply`, `ds task checkpoint`, and
+  `ds task refresh`.
 - Added `ds task checkpoint --draft` to preview checkpoint markdown, structured
   JSON evidence, and result append text without mutating task lifecycle state.
 - Added `ds task checkpoint --from-git` to populate edited-file evidence from

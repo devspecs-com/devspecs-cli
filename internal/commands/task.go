@@ -746,9 +746,11 @@ func newTaskSyncCmd() *cobra.Command {
 	var opts taskSyncOptions
 	opts.Dir = defaultTaskWorkspaceDir
 	cmd := &cobra.Command{
-		Use:   "sync <task-id>",
-		Short: "Recapture task workspace artifacts into the DevSpecs index",
-		Args:  cobra.ExactArgs(1),
+		Use:    "sync <task-id>",
+		Short:  "Compatibility alias for ds task refresh",
+		Long:   "Compatibility alias for ds task refresh.\n\nPrefer `ds task refresh <task-id>` for updating task artifacts in the local DevSpecs index without rewriting task docs.",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskSync(cmd, args[0], opts)
 		},
@@ -812,9 +814,11 @@ func newTaskPromptCmd() *cobra.Command {
 	var opts taskTargetOptions
 	opts.Dir = defaultTaskWorkspaceDir
 	cmd := &cobra.Command{
-		Use:   "prompt <task-id|target>",
-		Short: "Emit an agent prompt bounded to one task target",
-		Args:  cobra.ExactArgs(1),
+		Use:    "prompt <task-id|target>",
+		Short:  "Compatibility alias for ds apply",
+		Long:   "Compatibility alias for ds apply.\n\nPrefer `ds apply <task-id>` or `ds apply <task-id> --target <target>` for the bounded one-slice agent prompt.",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskPrompt(cmd, args[0], opts)
 		},
@@ -830,9 +834,11 @@ func newTaskStartTargetCmd() *cobra.Command {
 	opts.Dir = defaultTaskWorkspaceDir
 	opts.Index = true
 	cmd := &cobra.Command{
-		Use:   "start <task-id|target>",
-		Short: "Mark one task target as started",
-		Args:  cobra.ExactArgs(1),
+		Use:    "start <task-id|target>",
+		Short:  "Compatibility alias for recording started state",
+		Long:   "Compatibility alias for recording started state.\n\nPrefer `ds task checkpoint <task-id> --target <target> --stage started --decision continue` when you need a durable started receipt.",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskStartTarget(cmd, args[0], opts)
 		},
@@ -849,9 +855,11 @@ func newTaskFinishCmd() *cobra.Command {
 	opts.Dir = defaultTaskWorkspaceDir
 	opts.Index = true
 	cmd := &cobra.Command{
-		Use:   "finish <task-id|target>",
-		Short: "Finish one task target with a decision gate",
-		Args:  cobra.ExactArgs(1),
+		Use:    "finish <task-id|target>",
+		Short:  "Compatibility alias for ds task checkpoint",
+		Long:   "Compatibility alias for ds task checkpoint.\n\nPrefer `ds task checkpoint <task-id> --target <target> --stage validated --decision <gate>` so the decision carries evidence and run receipts.",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskFinish(cmd, args[0], opts)
 		},
@@ -910,9 +918,11 @@ func newTaskDecideCmd() *cobra.Command {
 	opts.Dir = defaultTaskWorkspaceDir
 	opts.Index = true
 	cmd := &cobra.Command{
-		Use:   "decide <task-id|target>",
-		Short: "Update a task series or slice decision gate",
-		Args:  cobra.ExactArgs(1),
+		Use:    "decide <task-id|target>",
+		Short:  "Compatibility shortcut for decision-only lifecycle updates",
+		Long:   "Compatibility shortcut for decision-only lifecycle updates.\n\nPrefer `ds task checkpoint <task-id> --target <target> --decision <gate>` so the gate records what changed, what ran, and what remains.",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskDecide(cmd, args[0], opts)
 		},
@@ -1978,7 +1988,7 @@ func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput, prior
 		checkpointCommand += " --repo " + commandArg(ctx.RepoArg)
 	}
 	fmt.Fprintf(&b, "Record the outcome in `%s` or with `%s`.\n", filepath.ToSlash(taskRelativePath(ctx.RepoRoot, target.ResultPath)), checkpointCommand)
-	fmt.Fprintln(&b, "Checklist edits are useful notes, but lifecycle state comes from `ds task checkpoint`, `ds task finish`, or `ds task decide`.")
+	fmt.Fprintln(&b, "Checklist edits are useful notes, but lifecycle state should be recorded with `ds task checkpoint`; legacy `finish` and `decide` shortcuts are compatibility-only.")
 	fmt.Fprintln(&b, "Command roles: use `ds find` to discover and pack evidence, `ds task status` to inspect lifecycle, `ds apply` to emit the current bounded prompt, and `ds workspace trace` only for known workspace change/task links. In trace output, `status` and `index_status` are separate signals.")
 	fmt.Fprintln(&b, "At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.")
 	fmt.Fprintln(&b)
@@ -2180,7 +2190,7 @@ func taskNextBlockedByDecisionError(manifest taskManifest, slice taskSliceArtifa
 	case "improve", "rework":
 		return fmt.Errorf("task target %s ended with %s; add or choose a follow-up slice before advancing, for example `ds task slice add %s \"<title>\" --after %s --reason %s` or `ds apply %s --target %s-1`", slice.ID, decision, taskID, slice.ID, decision, taskID, slice.ID)
 	case "rollback", "rolled_back", "block", "blocked":
-		return fmt.Errorf("task target %s ended with %s; automatic next is blocked until the gate is resolved, use `ds task decide %s --target %s --decision promote` or choose an explicit target", slice.ID, decision, taskID, slice.ID)
+		return fmt.Errorf("task target %s ended with %s; automatic next is blocked until the gate is resolved, use `ds task checkpoint %s --target %s --decision promote` or choose an explicit target", slice.ID, decision, taskID, slice.ID)
 	default:
 		return fmt.Errorf("task target %s ended with %s; automatic next is blocked until the gate is resolved or an explicit target is chosen", slice.ID, firstNonEmptyTaskString(decision, "a terminal state"))
 	}
@@ -5909,7 +5919,7 @@ func writeTaskQuickStartHuman(out io.Writer, result taskStartOutput, confidence 
 		fmt.Fprintf(out, "Freshness warnings: %d informational path(s); run `ds task show %s` for details\n", len(result.FreshnessWarnings), target)
 	}
 	fmt.Fprintf(out, "\nNext:\n")
-	fmt.Fprintf(out, "  ds task prompt %s\n", target)
+	fmt.Fprintf(out, "  ds apply %s --target %s\n", result.TaskID, target)
 	fmt.Fprintf(out, "  ds task checkpoint %s --target %s --stage validated --decision promote\n", result.TaskID, target)
 	return nil
 }

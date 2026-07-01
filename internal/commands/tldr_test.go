@@ -34,7 +34,7 @@ func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 		"Command roles: ds find discovers and packs evidence",
 		"ds task slice add <task-id>",
 		"--after A01 --reason improve",
-		"Record the completion contract with checkpoint/finish",
+		"Record the completion contract with checkpoint",
 		"ds map",
 		"ds recent",
 		`ds task "implement <bounded target>"`,

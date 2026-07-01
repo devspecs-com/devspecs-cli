@@ -148,7 +148,7 @@ Trace existing digest behavior and tests
 ## Emit A Bounded Agent Prompt
 
 ```bash
-$ ds task prompt A01
+$ ds apply weekly-digest
 ```
 
 ````text
@@ -170,7 +170,7 @@ Goal: Trace existing digest behavior and tests
 
 Do not implement sibling slices, future slices, or the full task track. Stop after this target's acceptance checks are satisfied.
 Record the outcome in `devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md` or with `ds task checkpoint weekly-digest --target A01`.
-Checklist edits are useful notes, but lifecycle state comes from `ds task checkpoint`, `ds task finish`, or `ds task decide`.
+Checklist edits are useful notes, but lifecycle state should be recorded with `ds task checkpoint`; legacy `finish` and `decide` shortcuts are compatibility-only.
 Command roles: use `ds find` to discover and pack evidence, `ds task status`
 to inspect lifecycle, `ds apply` to emit the current bounded prompt, and
 `ds workspace trace` only for known workspace change/task links. In trace

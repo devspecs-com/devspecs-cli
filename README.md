@@ -163,8 +163,7 @@ What you get:
 - `A01`, `A02`, ... slice plan/result artifacts;
 - packed source, test, docs, and receipt context;
 - a one-slice agent prompt;
-- lifecycle state from `start`, `checkpoint`, `finish`, `decide`, and
-  `refresh`;
+- lifecycle state from `checkpoint`, `status`, and `refresh`;
 - a durable record of what changed, what ran, what missed, and what should
   happen next.
 
