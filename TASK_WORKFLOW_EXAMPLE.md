@@ -172,9 +172,9 @@ Do not implement sibling slices, future slices, or the full task track. Stop aft
 Record the outcome in `devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md` or with `ds task checkpoint weekly-digest --target A01`.
 Checklist edits are useful notes, but lifecycle state comes from `ds task checkpoint`, `ds task finish`, or `ds task decide`.
 Command roles: use `ds find` to discover and pack evidence, `ds task status`
-or `ds task next` to inspect lifecycle, and `ds workspace trace` only for known
-workspace change/task links. In trace output, `status` and `index_status` are
-separate signals.
+to inspect lifecycle, `ds apply` to emit the current bounded prompt, and
+`ds workspace trace` only for known workspace change/task links. In trace
+output, `status` and `index_status` are separate signals.
 At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.
 Also answer the completion contract: attempted slice, gate tested, what changed,
 evidence for the decision, what remains, and the next iteration.
@@ -213,7 +213,6 @@ Updated result: <repo>/devspecs/tasks/weekly-digest/A01-trace-existing-digest-be
 
 ```bash
 $ ds task status weekly-digest
-$ ds task next weekly-digest
 ```
 
 ```text
@@ -222,34 +221,25 @@ Series: A
 Profile: code-change
 Status: packed
 Updated At: 2026-06-09T13:47:54Z
+Next: A02 - Add weekly digest scheduling contract
+Run: ds apply weekly-digest
 A01: Trace existing digest behavior and tests [slice] stage=validated decision=promote checkpoint=checkpoints/20260609-134754-validated.md checkpoint_id=cp_20260609T134754Z_a01_validated
 A02: Add weekly digest scheduling contract [slice]
-
-Next task target: A02
-Task ID: weekly-digest
-Series: A
-Profile: code-change
-Title: Add weekly digest scheduling contract
-Stage: -
-Decision: -
-Plan: <repo>/devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-contract-plan.md
-Result: <repo>/devspecs/tasks/weekly-digest/A02-add-weekly-digest-scheduling-contract-result.md
-Out-of-scope sibling targets: A01
 ```
 
-`ds task status` and `ds task next` answer lifecycle questions: which slice is
-started, validated, promoted, blocked, or next. Use `ds find` when you need to
-discover source/docs/tests for a question. Use `ds workspace trace` only when you
-already know a workspace change or repo task ID and need linked repo slices.
+`ds task status` answers lifecycle questions: which slice is started,
+validated, promoted, blocked, or next. `ds apply` emits the bounded prompt for
+that target. Use `ds find` when you need to discover source/docs/tests for a
+question. Use `ds workspace trace` only when you already know a workspace change
+or repo task ID and need linked repo slices.
 
 ## What This Shows
 
 - `ds task` creates addressable task and slice artifacts.
 - The generated task index carries source, test, doc, and git-receipt evidence.
-- `ds task prompt A01` gives an agent a one-slice boundary instead of the whole
-  task track.
+- `ds apply` gives an agent a one-slice boundary instead of the whole task track.
 - `ds task checkpoint` records the actual evidence and decision gate.
-- `ds task next` promotes the workflow to the next slice only.
+- `ds task status` shows the next slice before another agent prompt is emitted.
 
 This is a small synthetic example. It is not a broad retrieval benchmark. In a
 real brownfield repo, use `ds recent`, `ds find`, and `ds map` to route to the

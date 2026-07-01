@@ -52,9 +52,9 @@ Create one bounded task:
 
 ```bash
 ds task "fix OAuth redirect"
-ds apply next
+ds apply
 ds task checkpoint A01 --decision improve
-ds apply next
+ds apply
 ```
 
 Or let DevSpecs write thin adapter files for Codex, Cursor, Claude, and
@@ -73,7 +73,7 @@ ds init
 | Recover the thread | `ds recent` | You are returning to a repo, checking active local work, or deciding what to ask next. |
 | Bound an agent task | `ds task "goal"` | You know the work and want packed repo context plus a stop line. |
 | Coordinate multi-repo work | `ds workspace init .` | You have an umbrella workspace with several child repos. Experimental. |
-| Continue the next slice | `ds apply next` | A task already exists and the agent needs the current target only. |
+| Continue the next slice | `ds apply` | A task already exists and the repo has one unambiguous current target. |
 | Record the receipt | `ds task checkpoint A01 --decision promote` | You need to capture what changed, what ran, and what comes next. |
 | Map a repo | `ds map` | You are entering unfamiliar code and need system boundaries. |
 | Inspect evidence | `ds find "topic"` | You want source, tests, docs, receipts, and exclusions in one context pack. |
@@ -152,9 +152,9 @@ ds task "Serve Swagger UI OAuth2 redirect from a custom docs redirect URL" \
   --slice "Add regression coverage and docs examples"
 
 ds task show A01
-ds apply next
+ds apply
 ds task checkpoint A01 --decision promote --next-target A02
-ds apply next
+ds apply
 ```
 
 What you get:
@@ -219,7 +219,7 @@ workspace form, and the aliases still dispatch the same workspace operations.
 | Need | Command | Meaning |
 | --- | --- | --- |
 | Discover evidence | `ds find "topic"` | Pack likely source, tests, docs, receipts, and exclusions for a focused question. |
-| Check task progress | `ds task status/next/show` | Read lifecycle state from task manifests, checkpoints, stages, and decisions. |
+| Check task progress | `ds task status/show` + `ds apply` | Read lifecycle state, inspect one target, then emit the bounded prompt. |
 | Follow workspace links | `ds workspace trace <id>` | Trace a known workspace change or repo task to linked repo-local slices. |
 
 `ds workspace trace` reports both lifecycle `status` and index-capture
@@ -269,8 +269,8 @@ Index state lives in local SQLite and can be rebuilt.
 | `ds tldr [workflow]` | Show LLM-oriented quickstarts for setup, hotfixes, epics, incidents, brownfield recovery, handoff, and deep dives. |
 | `ds task <query>` | Create a bounded task workspace with slice artifacts. |
 | `ds task <query> --quick` | Create a compact one-off task workspace. |
-| `ds task status/next/show` | Inspect task lifecycle state and choose the next target. |
-| `ds apply <next\|task-id\|target>` | Emit the next bounded one-slice agent prompt without mutating task state. |
+| `ds task status/show` | Inspect task lifecycle state and target context. |
+| `ds apply [next\|task-id\|target]` | Emit the next bounded one-slice agent prompt without mutating task state. |
 | `ds task checkpoint <target>` | Record files, tests, misses, noise, learnings, decision evidence, and next iteration. |
 | `ds task refresh <task-id>` | Recapture edited task artifacts into the local index without rewriting task docs. |
 | `ds workspace init/show/change/slice/trace` | Coordinate experimental workspace-level changes, repo-local task slices, and known change/task traces. |

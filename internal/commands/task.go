@@ -213,6 +213,10 @@ type taskStatusOutput struct {
 	Status               string                  `json:"status"`
 	Decision             string                  `json:"decision,omitempty"`
 	UpdatedAt            string                  `json:"updated_at,omitempty"`
+	NextTarget           string                  `json:"next_target,omitempty"`
+	NextTitle            string                  `json:"next_title,omitempty"`
+	NextKind             string                  `json:"next_kind,omitempty"`
+	NextCommand          string                  `json:"next_command,omitempty"`
 	LatestCheckpointID   string                  `json:"latest_checkpoint_id,omitempty"`
 	LatestCheckpoint     string                  `json:"latest_checkpoint,omitempty"`
 	LatestCheckpointJSON string                  `json:"latest_checkpoint_json,omitempty"`
@@ -1444,7 +1448,7 @@ func runTaskStatus(cmd *cobra.Command, taskID string, opts taskStatusOptions) er
 	if err != nil {
 		return err
 	}
-	out := taskStatusFromManifest(manifest)
+	out := taskStatusFromManifest(manifest, commandRepoTarget(cmd))
 	out.ArtifactFreshness = taskArtifactFreshnessWarnings(workspace, manifest)
 	if opts.AsJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
@@ -1454,7 +1458,7 @@ func runTaskStatus(cmd *cobra.Command, taskID string, opts taskStatusOptions) er
 	return writeTaskStatusHuman(cmd.OutOrStdout(), out)
 }
 
-func taskStatusFromManifest(manifest taskManifest) taskStatusOutput {
+func taskStatusFromManifest(manifest taskManifest, repoPath string) taskStatusOutput {
 	out := taskStatusOutput{
 		TaskID:               manifest.TaskID,
 		Series:               defaultTaskSeries(manifest.Series),
@@ -1469,6 +1473,12 @@ func taskStatusFromManifest(manifest taskManifest) taskStatusOutput {
 		LatestCheckpointID:   manifest.LatestCheckpointID,
 		LatestCheckpoint:     manifest.LatestCheckpoint,
 		LatestCheckpointJSON: manifest.LatestCheckpointJSON,
+	}
+	if next, err := taskNextSlice(manifest); err == nil {
+		out.NextTarget = next.ID
+		out.NextTitle = next.Title
+		out.NextKind = next.Kind
+		out.NextCommand = applyCommandLabel(manifest.TaskID, "", repoPath)
 	}
 	for _, slice := range manifest.Artifacts.Slices {
 		out.Slices = append(out.Slices, taskStatusSliceOutput{
@@ -1513,6 +1523,19 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 	}
 	if status.UpdatedAt != "" {
 		fmt.Fprintf(out, "Updated At: %s\n", status.UpdatedAt)
+	}
+	if status.NextTarget != "" {
+		fmt.Fprintf(out, "Next: %s", status.NextTarget)
+		if status.NextTitle != "" {
+			fmt.Fprintf(out, " - %s", status.NextTitle)
+		}
+		if status.NextKind != "" {
+			fmt.Fprintf(out, " [%s]", status.NextKind)
+		}
+		fmt.Fprintln(out)
+		if status.NextCommand != "" {
+			fmt.Fprintf(out, "Run: %s\n", status.NextCommand)
+		}
 	}
 	if status.LatestCheckpoint != "" {
 		fmt.Fprintf(out, "Latest Checkpoint: %s\n", status.LatestCheckpoint)
@@ -1942,7 +1965,7 @@ func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput, prior
 	}
 	fmt.Fprintf(&b, "Record the outcome in `%s` or with `%s`.\n", filepath.ToSlash(taskRelativePath(ctx.RepoRoot, target.ResultPath)), checkpointCommand)
 	fmt.Fprintln(&b, "Checklist edits are useful notes, but lifecycle state comes from `ds task checkpoint`, `ds task finish`, or `ds task decide`.")
-	fmt.Fprintln(&b, "Command roles: use `ds find` to discover and pack evidence, `ds task status` or `ds task next` to inspect lifecycle, and `ds workspace trace` only for known workspace change/task links. In trace output, `status` and `index_status` are separate signals.")
+	fmt.Fprintln(&b, "Command roles: use `ds find` to discover and pack evidence, `ds task status` to inspect lifecycle, `ds apply` to emit the current bounded prompt, and `ds workspace trace` only for known workspace change/task links. In trace output, `status` and `index_status` are separate signals.")
 	fmt.Fprintln(&b, "At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.")
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "Completion contract:")

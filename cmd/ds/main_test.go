@@ -69,7 +69,7 @@ func TestRootCmd_HelpCentersTaskWorkflow(t *testing.T) {
 	for _, want := range []string{
 		"Default workflow:",
 		"use ds task to create bounded task workspaces",
-		"Use ds apply next or ds apply",
+		"Use ds apply or ds apply",
 		"Human orientation:",
 		"start with ds recent to recover the local thread",
 		"Use ds find for a focused question",
@@ -171,7 +171,7 @@ func TestRootCmd_ApplyRegistered(t *testing.T) {
 	got := buf.String()
 	for _, want := range []string{
 		"Emit an agent prompt for exactly one DevSpecs task target.",
-		"apply <next|task-id|target>",
+		"apply [next|task-id|target]",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected apply help to contain %q, got:\n%s", want, got)

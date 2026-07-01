@@ -254,6 +254,85 @@ func TestTask_StartCreatesUncertaintyAwareWorkspace(t *testing.T) {
 	}
 }
 
+func TestTask_StatusShowsNextTarget(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "status-next-test",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"--slice", "first status slice",
+		"--slice", "second status slice",
+		"status next workflow",
+	})
+	cmd.SetOut(&bytes.Buffer{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	statusCmd := NewTaskCmd()
+	statusCmd.SetArgs([]string{"status", "status-next-test", "--json"})
+	statusBuf := &bytes.Buffer{}
+	statusCmd.SetOut(statusBuf)
+	if err := statusCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var statusOut taskStatusOutput
+	if err := json.Unmarshal(statusBuf.Bytes(), &statusOut); err != nil {
+		t.Fatalf("status json: %v\n%s", err, statusBuf.String())
+	}
+	if statusOut.NextTarget != "A01" || statusOut.NextTitle != "first status slice" || statusOut.NextCommand != "ds apply status-next-test" {
+		t.Fatalf("status next output = %#v", statusOut)
+	}
+
+	humanStatusCmd := NewTaskCmd()
+	humanStatusCmd.SetArgs([]string{"status", "status-next-test"})
+	humanStatusBuf := &bytes.Buffer{}
+	humanStatusCmd.SetOut(humanStatusBuf)
+	if err := humanStatusCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	humanStatus := humanStatusBuf.String()
+	for _, want := range []string{
+		"Next: A01 - first status slice",
+		"Run: ds apply status-next-test",
+	} {
+		if !strings.Contains(humanStatus, want) {
+			t.Fatalf("human status missing %q:\n%s", want, humanStatus)
+		}
+	}
+
+	decideCmd := NewTaskCmd()
+	decideCmd.SetArgs([]string{
+		"decide", "status-next-test",
+		"--target", "A01",
+		"--decision", "promote",
+		"--index=false",
+		"--json",
+	})
+	decideCmd.SetOut(&bytes.Buffer{})
+	if err := decideCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	afterStatusCmd := NewTaskCmd()
+	afterStatusCmd.SetArgs([]string{"status", "status-next-test", "--json"})
+	afterStatusBuf := &bytes.Buffer{}
+	afterStatusCmd.SetOut(afterStatusBuf)
+	if err := afterStatusCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var afterStatus taskStatusOutput
+	if err := json.Unmarshal(afterStatusBuf.Bytes(), &afterStatus); err != nil {
+		t.Fatalf("after status json: %v\n%s", err, afterStatusBuf.String())
+	}
+	if afterStatus.NextTarget != "A02" || afterStatus.NextTitle != "second status slice" {
+		t.Fatalf("status did not advance next target after promote: %#v", afterStatus)
+	}
+}
+
 func TestTaskRepoFlagRoutesArtifactsToTargetRepoFromUmbrella(t *testing.T) {
 	umbrella, child := setupTaskCommandUmbrellaRepo(t)
 

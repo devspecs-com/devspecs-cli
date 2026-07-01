@@ -194,13 +194,13 @@ func TestGenerateAgentToolFilesCreatesExpectedFiles(t *testing.T) {
 	}
 
 	taskSkill := readGeneratedFile(t, root, ".agents/skills/ds-task/SKILL.md")
-	for _, wantText := range []string{"name: ds-task", "ds task", "ds apply next", "ds recent", "ds find", "Work exactly one slice", "decision gate"} {
+	for _, wantText := range []string{"name: ds-task", "ds task", "ds apply <task-id>", "ds recent", "ds find", "Work exactly one slice", "decision gate"} {
 		if !strings.Contains(taskSkill, wantText) {
 			t.Fatalf("codex task skill missing %q:\n%s", wantText, taskSkill)
 		}
 	}
 	applyWorkflow := readGeneratedFile(t, root, ".windsurf/workflows/ds-apply.md")
-	for _, wantText := range []string{"ds apply", "ds apply next", "ds recent", "ds find", "Stop after the decision gate"} {
+	for _, wantText := range []string{"ds apply", "unambiguous next slice", "ds recent", "ds find", "Stop after the decision gate"} {
 		if !strings.Contains(applyWorkflow, wantText) {
 			t.Fatalf("windsurf apply workflow missing %q:\n%s", wantText, applyWorkflow)
 		}

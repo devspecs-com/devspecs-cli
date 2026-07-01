@@ -27,7 +27,7 @@ func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 		"Fastest path for known work",
 		"Run ds init once per repo",
 		`/ds-task "goal"`,
-		"/ds-apply <task-id|target>",
+		"/ds-apply [task-id|target]",
 		"Human front door: run ds recent",
 		"Workflow commands refresh the local index by default",
 		"Use ds recent, ds find, ds map, and ds context as diagnostic/evidence tools around a task",

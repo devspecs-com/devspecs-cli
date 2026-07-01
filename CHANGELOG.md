@@ -18,6 +18,8 @@
   rescan instead of only specs, plans, and ADRs.
 - Added `ds task --quick` for compact one-off task workspaces and hid the older
   `ds task quick` form from normal help as compatibility surface.
+- Changed `ds apply` with no target to resolve the unambiguous next slice and
+  added next-target guidance to `ds task status`.
 - Added `ds task checkpoint --draft` to preview checkpoint markdown, structured
   JSON evidence, and result append text without mutating task lifecycle state.
 - Added `ds task checkpoint --from-git` to populate edited-file evidence from
