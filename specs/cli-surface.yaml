@@ -285,6 +285,7 @@ removed_tree:
 surface_questions:
   - Should ds task quick remain as a hidden compatibility alias now that ds task --quick exists?
   - Should user-defined aliases exist, or are built-in aliases enough for now?
+  - Should the experimental workspace surface rename workspace change to workspace plan before broader testing?
 
 planned_simplification:
   keep_public:
@@ -324,6 +325,17 @@ planned_simplification:
         - "implemented: ds apply defaults to next only when unambiguous."
         - "implemented: ds task status shows Next in human output."
         - "implemented: ds task status JSON includes next_target."
+  workspace_surface_backlog:
+    ds_workspace_change:
+      target: ds workspace plan create <title>
+      status: planned
+      reason: Workspace change versus repo task is accurate but not idiomatic enough for early users; workspace plans coordinate multi-repo intent while repo tasks execute bounded slices.
+      acceptance:
+        - "ds workspace --help shows plan, slice, and trace, not change."
+        - "ds workspace plan --help describes multi-repo workspace plan records."
+        - "Top-level ds change, ds slice, and ds trace compatibility aliases are removed."
+        - "README, CHANGELOG, TASK_WORKFLOW_EXAMPLE, and this cli-surface file use workspace plan language."
+        - "OpenSpec change terminology remains unchanged because it is an external dialect."
   hide_or_deemphasize:
     ds_task_prompt:
       replacement: ds apply
