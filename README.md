@@ -18,7 +18,7 @@ source files stay authoritative.
 
 <p>
   <a href="https://devspecs.com">
-    <img src="https://devspecs.com/demo/fastapi-task-flow-v1-1.gif" alt="DevSpecs FastAPI task flow demo" width="900">
+    <img src="https://devspecs.com/demo/fastapi-recent-gate-v1-1.gif" alt="DevSpecs FastAPI recent work demo" width="900">
   </a>
 </p>
 
@@ -43,16 +43,16 @@ Install:
 brew install devspecs-com/tap/devspecs
 ```
 
-Start with the LLM-oriented guide:
-
-```bash
-ds tldr
-```
-
 Recover the local thread:
 
 ```bash
 ds recent
+```
+
+When you want a compact agent cheat sheet:
+
+```bash
+ds tldr
 ```
 
 Create one bounded task in your repo:
