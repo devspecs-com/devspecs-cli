@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
@@ -1125,6 +1126,7 @@ func TestScan_AuthoredAtPrefetchUsesBulkWithExactFallback(t *testing.T) {
 	const bulkDate = "2020-01-02T03:04:05Z"
 	const fallbackDate = "2021-02-03T04:05:06Z"
 	bulkCalls := 0
+	var lookupMu sync.Mutex
 	singleLookups := map[string]int{}
 	fileFirstCommitDates = func(repoRoot string, rels []string) map[string]string {
 		bulkCalls++
@@ -1134,7 +1136,9 @@ func TestScan_AuthoredAtPrefetchUsesBulkWithExactFallback(t *testing.T) {
 		return map[string]string{"tests/test_00.py": bulkDate}
 	}
 	fileFirstCommitDate = func(repoRoot, relPath string) string {
+		lookupMu.Lock()
 		singleLookups[relPath]++
+		lookupMu.Unlock()
 		return fallbackDate
 	}
 	t.Cleanup(func() {
@@ -1153,18 +1157,29 @@ func TestScan_AuthoredAtPrefetchUsesBulkWithExactFallback(t *testing.T) {
 	if bulkCalls != 1 {
 		t.Fatalf("bulk calls = %d, want 1", bulkCalls)
 	}
-	if singleLookups["tests/test_00.py"] != 0 {
-		t.Fatalf("bulk hit should not fall back to exact lookup: %#v", singleLookups)
+	lookupMu.Lock()
+	bulkHitFallbacks := singleLookups["tests/test_00.py"]
+	fallbackLookupCount := len(singleLookups)
+	singleLookupSnapshot := map[string]int{}
+	for path, count := range singleLookups {
+		singleLookupSnapshot[path] = count
 	}
-	if got, want := len(singleLookups), minBulkAuthoredAtPaths-1; got != want {
-		t.Fatalf("fallback lookup count = %d, want %d: %#v", got, want, singleLookups)
+	lookupMu.Unlock()
+	if bulkHitFallbacks != 0 {
+		t.Fatalf("bulk hit should not fall back to exact lookup: %#v", singleLookupSnapshot)
+	}
+	if got, want := fallbackLookupCount, minBulkAuthoredAtPaths-1; got != want {
+		t.Fatalf("fallback lookup count = %d, want %d: %#v", got, want, singleLookupSnapshot)
 	}
 	gotBulk := state.resolveAuthoredAt("", adapters.Artifact{}, []adapters.Source{{Path: "tests/test_00.py"}}, "now")
 	gotFallback := state.resolveAuthoredAt("", adapters.Artifact{}, []adapters.Source{{Path: "tests/test_01.py"}}, "now")
 	if gotBulk != bulkDate || gotFallback != fallbackDate {
 		t.Fatalf("cached authored_at values = %q/%q, want %q/%q", gotBulk, gotFallback, bulkDate, fallbackDate)
 	}
-	if got, want := len(singleLookups), minBulkAuthoredAtPaths-1; got != want {
+	lookupMu.Lock()
+	fallbackLookupCount = len(singleLookups)
+	lookupMu.Unlock()
+	if got, want := fallbackLookupCount, minBulkAuthoredAtPaths-1; got != want {
 		t.Fatalf("resolveAuthoredAt caused extra fallback lookup: got %d want %d", got, want)
 	}
 }

@@ -2,6 +2,7 @@ package scan
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/store"
@@ -229,6 +230,23 @@ func TestTestSourceTriangulationSymbolMatch(t *testing.T) {
 	}
 	if got := countEdgesByType(result.edges, edgeTypeMentionsSymbol); got != 1 {
 		t.Fatalf("symbol match should emit one mentions_symbol edge, got %d: %#v", got, result.edges)
+	}
+}
+
+func TestTestSourceTriangulationPythonSymbolMatch(t *testing.T) {
+	source := evidenceSourceArtifact("src_users", "app/users.py", "def create_user():\n    return True\n")
+	source.extracted["language"] = "python"
+	result := buildEvidenceGraph("repo", []evidenceArtifact{
+		source,
+		evidenceTestCaseArtifact("test_users", "tests/test_users.py", "test create user", "", []string{"create_user"}),
+	})
+
+	edge := singleEdgeByType(t, result.edges, edgeTypeTestsSource)
+	if edge.SourceSignal != "test_source_stem" || !strings.Contains(edge.MetadataJSON, "create_user") {
+		t.Fatalf("expected python symbol evidence on stem match, got %#v", edge)
+	}
+	if got := countEdgesByType(result.edges, edgeTypeMentionsSymbol); got != 1 {
+		t.Fatalf("python symbol match should emit one mentions_symbol edge, got %d: %#v", got, result.edges)
 	}
 }
 
