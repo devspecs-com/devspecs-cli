@@ -7,8 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 	"unicode"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/sourcecontext"
@@ -43,7 +46,20 @@ type sourceManifestCandidate struct {
 	role string
 }
 
-func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, now string) (*SourceManifestDiagnostics, error) {
+type sourceManifestExtractResult struct {
+	ignoredReason string
+	file          store.SourceManifestFileInput
+	symbols       []store.SourceManifestSymbolInput
+	tests         []store.SourceManifestTestInput
+	imports       []store.SourceManifestImportInput
+	fts           store.SourceManifestFTSInput
+	indexedTest   bool
+	root          string
+	language      string
+	role          string
+}
+
+func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, now string, phaseTiming bool, workerCount int) (*SourceManifestDiagnostics, error) {
 	diagnostics := &SourceManifestDiagnostics{
 		Enabled:         true,
 		IgnoredByReason: map[string]int{},
@@ -51,13 +67,26 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 		RowsByLanguage:  map[string]int{},
 		RowsByRole:      map[string]int{},
 	}
+	if phaseTiming {
+		diagnostics.PhaseMS = map[string]int64{}
+	}
+	recordPhase := func(name string, started time.Time) {
+		if diagnostics.PhaseMS != nil {
+			diagnostics.PhaseMS[name] = time.Since(started).Milliseconds()
+		}
+	}
+	phaseStarted := time.Now()
 	inventoryResult, err := collectFileInventory(ctx, repoRoot)
+	recordPhase("inventory", phaseStarted)
 	if err != nil {
 		return diagnostics, err
 	}
 	inventory := inventoryResult.files
 	diagnostics.InventoryFiles = len(inventory)
+	phaseStarted = time.Now()
 	roots := detectFirstPartySourceRoots(inventory)
+	recordPhase("root_detection", phaseStarted)
+	phaseStarted = time.Now()
 	var candidates []sourceManifestCandidate
 	var moduleRootCandidates []sourceManifestCandidate
 	var files []store.SourceManifestFileInput
@@ -107,6 +136,8 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 		}
 		candidates = append(candidates, candidate)
 	}
+	recordPhase("candidate_filter", phaseStarted)
+	phaseStarted = time.Now()
 	moduleRootLimit := sourceManifestModuleRootCandidateLimit(len(moduleRootCandidates))
 	selectedModuleRootCandidates, skippedModuleRootCandidates := capSourceManifestModuleRootCandidates(moduleRootCandidates, moduleRootLimit)
 	if skippedModuleRootCandidates > 0 {
@@ -114,25 +145,134 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 	}
 	candidates = append(candidates, selectedModuleRootCandidates...)
 	sortSourceManifestCandidates(candidates)
+	recordPhase("module_root_cap", phaseStarted)
 
-	for _, candidate := range candidates {
-		if err := ctx.Err(); err != nil {
-			return diagnostics, err
-		}
-		body, err := os.ReadFile(candidate.file.primaryPath)
-		if err != nil {
-			diagnostics.IgnoredByReason["read_error"]++
+	phaseStarted = time.Now()
+	extracted, err := extractSourceManifestCandidates(ctx, repoID, candidates, workerCount)
+	if err != nil {
+		return diagnostics, err
+	}
+	for _, row := range extracted {
+		if row.ignoredReason != "" {
+			diagnostics.IgnoredByReason[row.ignoredReason]++
 			continue
 		}
-		fileID := sourceManifestFileID(repoID, candidate.rel)
-		language := sourcecontext.LanguageForPath(candidate.rel)
-		if language == "" {
-			language = strings.TrimPrefix(strings.ToLower(filepath.Ext(filepath.Base(candidate.rel))), ".")
+		files = append(files, row.file)
+		symbols = append(symbols, row.symbols...)
+		tests = append(tests, row.tests...)
+		imports = append(imports, row.imports...)
+		ftsRows = append(ftsRows, row.fts)
+		diagnostics.IndexedFiles++
+		if row.indexedTest {
+			diagnostics.IndexedTests++
 		}
-		if language == "" {
-			language = "unknown"
+		diagnostics.RowsByRoot[row.root]++
+		diagnostics.RowsByLanguage[row.language]++
+		diagnostics.RowsByRole[row.role]++
+	}
+	recordPhase("read_extract", phaseStarted)
+	phaseStarted = time.Now()
+	if err := s.db.ReplaceRepoSourceManifest(repoID, files, symbols, tests, imports, ftsRows, now); err != nil {
+		recordPhase("db_replace", phaseStarted)
+		return diagnostics, err
+	}
+	recordPhase("db_replace", phaseStarted)
+	diagnostics.SymbolRows = len(symbols)
+	diagnostics.TestRows = len(tests)
+	diagnostics.ImportRows = len(imports)
+	diagnostics.FTSRows = len(ftsRows)
+	if len(diagnostics.IgnoredByReason) == 0 {
+		diagnostics.IgnoredByReason = nil
+	}
+	return diagnostics, nil
+}
+
+func extractSourceManifestCandidates(ctx context.Context, repoID string, candidates []sourceManifestCandidate, workerCount int) ([]sourceManifestExtractResult, error) {
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	workers := workerCount
+	if workers <= 0 {
+		workers = runtime.GOMAXPROCS(0)
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	if workers > len(candidates) {
+		workers = len(candidates)
+	}
+	if workers == 1 {
+		out := make([]sourceManifestExtractResult, len(candidates))
+		for i, candidate := range candidates {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			out[i] = extractSourceManifestCandidate(repoID, candidate)
 		}
-		files = append(files, store.SourceManifestFileInput{
+		return out, nil
+	}
+
+	jobs := make(chan int)
+	out := make([]sourceManifestExtractResult, len(candidates))
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range jobs {
+				if ctx.Err() != nil {
+					continue
+				}
+				out[index] = extractSourceManifestCandidate(repoID, candidates[index])
+			}
+		}()
+	}
+	for i := range candidates {
+		if err := ctx.Err(); err != nil {
+			close(jobs)
+			wg.Wait()
+			return nil, err
+		}
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func extractSourceManifestCandidate(repoID string, candidate sourceManifestCandidate) sourceManifestExtractResult {
+	body, err := os.ReadFile(candidate.file.primaryPath)
+	if err != nil {
+		return sourceManifestExtractResult{ignoredReason: "read_error"}
+	}
+	fileID := sourceManifestFileID(repoID, candidate.rel)
+	language := sourcecontext.LanguageForPath(candidate.rel)
+	if language == "" {
+		language = strings.TrimPrefix(strings.ToLower(filepath.Ext(filepath.Base(candidate.rel))), ".")
+	}
+	if language == "" {
+		language = "unknown"
+	}
+	symbolValues := sourcecontext.ExtractSymbols(string(body))
+	symbols := make([]store.SourceManifestSymbolInput, 0, len(symbolValues))
+	for _, symbol := range symbolValues {
+		symbols = append(symbols, store.SourceManifestSymbolInput{FileID: fileID, Symbol: symbol, Kind: "symbol"})
+	}
+	testValues := sourcecontext.ExtractTestNames(string(body))
+	tests := make([]store.SourceManifestTestInput, 0, len(testValues))
+	for _, testName := range testValues {
+		tests = append(tests, store.SourceManifestTestInput{FileID: fileID, TestName: testName})
+	}
+	importValues := compactSourceManifestImports(extractSourceManifestImports(string(body)))
+	imports := make([]store.SourceManifestImportInput, 0, len(importValues))
+	for _, importRef := range importValues {
+		imports = append(imports, store.SourceManifestImportInput{FileID: fileID, ImportRef: importRef})
+	}
+	return sourceManifestExtractResult{
+		file: store.SourceManifestFileInput{
 			FileID:          fileID,
 			RepoID:          repoID,
 			Path:            candidate.rel,
@@ -143,28 +283,15 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 			SourceRootKind:  candidate.root.kind,
 			SourceRole:      candidate.role,
 			FirstPartyScore: firstPartySourceDiscoveryScore(candidate.role, candidate.root.kind),
-		})
-		diagnostics.IndexedFiles++
-		if candidate.role == "test" || candidate.role == "test_doc_example" {
-			diagnostics.IndexedTests++
-		}
-		diagnostics.RowsByRoot[candidate.root.path]++
-		diagnostics.RowsByLanguage[language]++
-		diagnostics.RowsByRole[candidate.role]++
-
-		symbolValues := sourcecontext.ExtractSymbols(string(body))
-		for _, symbol := range symbolValues {
-			symbols = append(symbols, store.SourceManifestSymbolInput{FileID: fileID, Symbol: symbol, Kind: "symbol"})
-		}
-		testValues := sourcecontext.ExtractTestNames(string(body))
-		for _, testName := range testValues {
-			tests = append(tests, store.SourceManifestTestInput{FileID: fileID, TestName: testName})
-		}
-		importValues := compactSourceManifestImports(extractSourceManifestImports(string(body)))
-		for _, importRef := range importValues {
-			imports = append(imports, store.SourceManifestImportInput{FileID: fileID, ImportRef: importRef})
-		}
-		ftsRows = append(ftsRows, store.SourceManifestFTSInput{
+		},
+		symbols:     symbols,
+		tests:       tests,
+		imports:     imports,
+		indexedTest: candidate.role == "test" || candidate.role == "test_doc_example",
+		root:        candidate.root.path,
+		language:    language,
+		role:        candidate.role,
+		fts: store.SourceManifestFTSInput{
 			FileID:     fileID,
 			Path:       candidate.rel,
 			PathTerms:  sourceManifestPathTerms(candidate.rel),
@@ -174,19 +301,8 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 			Symbols:    strings.Join(compactSourceManifestFTSSymbols(symbolValues), "\n"),
 			TestNames:  strings.Join(testValues, "\n"),
 			Imports:    strings.Join(importValues, "\n"),
-		})
+		},
 	}
-	if err := s.db.ReplaceRepoSourceManifest(repoID, files, symbols, tests, imports, ftsRows, now); err != nil {
-		return diagnostics, err
-	}
-	diagnostics.SymbolRows = len(symbols)
-	diagnostics.TestRows = len(tests)
-	diagnostics.ImportRows = len(imports)
-	diagnostics.FTSRows = len(ftsRows)
-	if len(diagnostics.IgnoredByReason) == 0 {
-		diagnostics.IgnoredByReason = nil
-	}
-	return diagnostics, nil
 }
 
 func sourceManifestFileID(repoID, rel string) string {

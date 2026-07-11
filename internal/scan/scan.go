@@ -39,6 +39,11 @@ type Scanner struct {
 	adapters []adapters.Adapter
 }
 
+var (
+	fileFirstCommitDate  = repo.FileFirstCommitDate
+	fileFirstCommitDates = repo.FileFirstCommitDates
+)
+
 type RunOptions struct {
 	MaxCandidatesByAdapter    map[string]int
 	FileWorkerCount           int
@@ -54,6 +59,7 @@ type RunOptions struct {
 	GitMaxCommits             int
 	GitMaxFilesPerCommit      int
 	IgnoreRules               bool
+	PhaseTiming               bool
 	Progress                  func(ProgressEvent)
 	ProgressInterval          time.Duration
 }
@@ -82,22 +88,28 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 	result := newResult(adapterNames)
 	now := time.Now().UTC().Format(time.RFC3339)
 	progress := newProgressReporter(opts.Progress, opts.ProgressInterval)
+	timing := newScanPhaseRecorder(opts.PhaseTiming)
 
 	if !opts.IgnoreRules {
 		matcher, _ := ignore.NewMatcher(repoRoot)
 		ctx = ignore.WithContext(ctx, matcher)
 	}
 
+	phase := timing.start("ensure_repo", "")
 	repoID, err := s.ensureRepo(repoRoot, now)
+	phase.finish(nil, statusTimingDetails(err))
 	if err != nil {
 		return nil, fmt.Errorf("ensure repo: %w", err)
 	}
 
 	inTx := false
 	if opts.UseTransaction {
+		phase := timing.start("begin_transaction", "")
 		if _, err := s.db.Exec("BEGIN IMMEDIATE"); err != nil {
+			phase.finish(nil, statusTimingDetails(err))
 			return nil, fmt.Errorf("begin scan transaction: %w", err)
 		}
+		phase.finish(nil, nil)
 		inTx = true
 		defer func() {
 			if inTx {
@@ -108,14 +120,18 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 
 	state := &scanRunState{}
 	if opts.FreshIndex {
+		phase := timing.start("fresh_index_prepare", "")
 		state.shortIDs, err = s.seedExistingShortIDClaims()
 		if err != nil {
+			phase.finish(nil, statusTimingDetails(err))
 			return nil, fmt.Errorf("seed fresh index short ids: %w", err)
 		}
 		state.fresh, err = newFreshInserter(s.db)
 		if err != nil {
+			phase.finish(nil, statusTimingDetails(err))
 			return nil, fmt.Errorf("prepare fresh index inserts: %w", err)
 		}
+		phase.finish(map[string]int{"short_id_claims": len(state.shortIDs)}, nil)
 		defer state.fresh.close()
 	}
 
@@ -125,11 +141,14 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 		TransactionEnabled:   opts.UseTransaction,
 		SkipAuthoredAtLookup: opts.SkipAuthoredAtLookup,
 	})
+	phase = timing.start("shared_discovery", "")
 	sharedCandidates, traversal, err := s.discoverSharedFileCandidates(ctx, repoRoot, cfg, opts, progress)
+	phase.finish(candidateTimingCounts(sharedCandidates, traversal), statusTimingDetails(err))
 	if err != nil {
 		return nil, fmt.Errorf("shared file discovery: %w", err)
 	}
 	result.Traversal = traversal
+	phase = timing.start("source_companion_admission", "")
 	if diagnostics, companions := buildTestSourceCompanionCandidates(ctx, repoRoot, sharedCandidates["test_case"], sharedCandidates["source_context"]); diagnostics != nil {
 		result.SourceCompanions = diagnostics
 		if len(companions) > 0 {
@@ -137,21 +156,27 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 			sortCandidates(sharedCandidates["source_context"])
 		}
 	}
+	phase.finish(candidateTimingCounts(sharedCandidates, traversal), nil)
 	if opts.RecentSourceContext {
+		phase := timing.start("recent_source_context", "")
 		if companions := buildRecentGitSourceContextCandidates(ctx, repoRoot, sharedCandidates["source_context"], opts); len(companions) > 0 {
 			sharedCandidates["source_context"] = append(sharedCandidates["source_context"], companions...)
 			sortCandidates(sharedCandidates["source_context"])
 		}
+		phase.finish(candidateTimingCounts(sharedCandidates, traversal), nil)
 	}
 	if opts.FirstPartySourceContext {
+		phase := timing.start("first_party_source_context", "")
 		if candidates := buildFirstPartySourceContextCandidates(ctx, repoRoot, sharedCandidates["source_context"]); len(candidates) > 0 {
 			sharedCandidates["source_context"] = append(sharedCandidates["source_context"], candidates...)
 			sortCandidates(sharedCandidates["source_context"])
 		}
+		phase.finish(candidateTimingCounts(sharedCandidates, traversal), nil)
 	}
 	parsedByAdapter := map[string]int{}
 	upsertedByAdapter := map[string]int{}
 	for _, adapter := range s.adapters {
+		adapterPhase := timing.start("adapter_parse_persist", adapter.Name())
 		var candidates []adapters.Candidate
 		if _, ok := adapter.(adapters.FileDiscoveryAdapter); ok {
 			candidates = sharedCandidates[adapter.Name()]
@@ -159,6 +184,7 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 			var err error
 			candidates, err = adapter.Discover(ctx, repoRoot, cfg)
 			if err != nil {
+				adapterPhase.finish(map[string]int{"candidates": len(candidates)}, map[string]string{"status": "discover_error"})
 				continue
 			}
 		}
@@ -170,10 +196,17 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 			CandidatesParsed:  cloneIntMap(parsedByAdapter),
 			ArtifactsUpserted: cloneIntMap(upsertedByAdapter),
 		})
+		authoredAtPhase := timing.start("authored_at_prefetch", adapter.Name())
+		prefetchedAuthoredAt := 0
+		if benefitsFromAuthoredAtPrefetch(adapter.Name()) {
+			prefetchedAuthoredAt = state.prefetchAuthoredAt(ctx, repoRoot, candidates, now, opts)
+		}
+		authoredAtPhase.finish(map[string]int{"paths": prefetchedAuthoredAt}, nil)
 
 		if opts.FreshIndex {
 			parsed, parsedCount, err := parseCandidatesForFreshIndex(ctx, repoRoot, adapter, candidates, opts, progress)
 			if err != nil {
+				adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedCount}, statusTimingDetails(err))
 				return nil, err
 			}
 			parsedByAdapter[adapter.Name()] += parsedCount
@@ -184,6 +217,7 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 				}
 				writerStarted := time.Now()
 				if err := s.upsertArtifact(repoRoot, repoID, adapter.Name(), parsedArtifact.artifact, parsedArtifact.sources, parsedArtifact.parseResult, now, result, opts, state); err != nil {
+					adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()]}, statusTimingDetails(err))
 					return nil, fmt.Errorf("upsert artifact %q: %w", parsedArtifact.artifact.SourceIdentity, err)
 				}
 				writerDurationMS += time.Since(writerStarted).Milliseconds()
@@ -212,46 +246,112 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 				RowsWritten:         state.fresh.rowCounts(),
 				ChunksFlushed:       state.fresh.chunkCounts(),
 			})
+			adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()]}, nil)
 			continue
 		}
 
-		for i, c := range candidates {
-			art, sources, pr, err := adapter.Parse(ctx, c)
-			if err != nil {
+		parsed, parsedCount, err := parseCandidatesForFreshIndex(ctx, repoRoot, adapter, candidates, opts, progress)
+		if err != nil {
+			adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedCount}, statusTimingDetails(err))
+			return nil, err
+		}
+		parsedByAdapter[adapter.Name()] += parsedCount
+		sourceIdentityCounts := parsedSourceIdentityCounts(parsed)
+		existingArtifacts, err := s.existingArtifactsBySourceIdentity(sourceIdentityKeys(sourceIdentityCounts))
+		if err != nil {
+			adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()]}, statusTimingDetails(err))
+			return nil, fmt.Errorf("lookup existing artifacts for %s: %w", adapter.Name(), err)
+		}
+		existingCount := 0
+		batchNewCount := 0
+		var writerDurationMS int64
+		for i, parsedArtifact := range parsed {
+			if !parsedArtifact.ok {
 				continue
 			}
-			parsedByAdapter[adapter.Name()]++
-			art = attachClassifierMetadata(repoRoot, c, art)
-			if err := s.upsertArtifact(repoRoot, repoID, adapter.Name(), art, sources, pr, now, result, opts, state); err != nil {
-				return nil, fmt.Errorf("upsert artifact %q: %w", art.SourceIdentity, err)
+			writerStarted := time.Now()
+			art := parsedArtifact.artifact
+			_, alreadyIndexed := existingArtifacts[art.SourceIdentity]
+			if !alreadyIndexed && sourceIdentityCounts[art.SourceIdentity] == 1 {
+				if err := s.insertBatchedNewArtifact(repoRoot, repoID, adapter.Name(), art, parsedArtifact.sources, parsedArtifact.parseResult, now, result, opts, state); err != nil {
+					adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()], "existing": existingCount, "batch_new": batchNewCount}, statusTimingDetails(err))
+					return nil, fmt.Errorf("batch insert artifact %q: %w", art.SourceIdentity, err)
+				}
+				batchNewCount++
+			} else {
+				if err := s.upsertArtifact(repoRoot, repoID, adapter.Name(), art, parsedArtifact.sources, parsedArtifact.parseResult, now, result, opts, state); err != nil {
+					adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()], "existing": existingCount, "batch_new": batchNewCount}, statusTimingDetails(err))
+					return nil, fmt.Errorf("upsert artifact %q: %w", art.SourceIdentity, err)
+				}
+				existingCount++
 			}
+			writerDurationMS += time.Since(writerStarted).Milliseconds()
 			upsertedByAdapter[adapter.Name()]++
+			var rowsWritten map[string]int
+			var chunksFlushed map[string]int
+			if state != nil && state.batchNew != nil {
+				rowsWritten = state.batchNew.rowCounts()
+				chunksFlushed = state.batchNew.chunkCounts()
+			}
 			progress.maybe(ProgressEvent{
-				Phase:               "parse_upsert",
+				Phase:               "persist",
 				CurrentAdapter:      adapter.Name(),
 				CandidatesTotal:     len(candidates),
 				CandidatesProcessed: i + 1,
 				CandidatesParsed:    cloneIntMap(parsedByAdapter),
 				ArtifactsUpserted:   cloneIntMap(upsertedByAdapter),
+				WriterDurationMS:    writerDurationMS,
+				RowsWritten:         rowsWritten,
+				ChunksFlushed:       chunksFlushed,
 			})
 		}
+		if state != nil && state.batchNew != nil {
+			if err := state.batchNew.flushRows(); err != nil {
+				adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()], "existing": existingCount, "batch_new": batchNewCount}, statusTimingDetails(err))
+				return nil, fmt.Errorf("flush batch-new rows for %s: %w", adapter.Name(), err)
+			}
+		}
 		progress.emit(ProgressEvent{
-			Phase:               "parse_upsert",
+			Phase:               "persist",
 			Event:               "adapter_done",
 			CurrentAdapter:      adapter.Name(),
 			CandidatesTotal:     len(candidates),
 			CandidatesProcessed: len(candidates),
 			CandidatesParsed:    cloneIntMap(parsedByAdapter),
 			ArtifactsUpserted:   cloneIntMap(upsertedByAdapter),
+			WriterDurationMS:    writerDurationMS,
+		})
+		adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()], "existing": existingCount, "batch_new": batchNewCount}, nil)
+	}
+
+	if state != nil && state.batchNew != nil {
+		phase := timing.start("batch_new_writer_flush", "")
+		flushStarted := time.Now()
+		if err := state.batchNew.flushRows(); err != nil {
+			phase.finish(state.batchNew.rowCounts(), statusTimingDetails(err))
+			return nil, fmt.Errorf("flush batch-new rows: %w", err)
+		}
+		flushDurationMS := time.Since(flushStarted).Milliseconds()
+		phase.finish(state.batchNew.rowCounts(), nil)
+		progress.emit(ProgressEvent{
+			Phase:           "batch_new_writer",
+			Event:           "rows_flushed",
+			FlushDurationMS: flushDurationMS,
+			RowsWritten:     state.batchNew.rowCounts(),
+			ChunksFlushed:   state.batchNew.chunkCounts(),
+			DeferredFTSRows: state.batchNew.pendingFTSRows(),
 		})
 	}
 
 	if state != nil && state.fresh != nil {
+		phase := timing.start("fresh_index_writer_flush", "")
 		flushStarted := time.Now()
 		if err := state.fresh.flushRows(); err != nil {
+			phase.finish(state.fresh.rowCounts(), statusTimingDetails(err))
 			return nil, fmt.Errorf("flush fresh index rows: %w", err)
 		}
 		flushDurationMS := time.Since(flushStarted).Milliseconds()
+		phase.finish(state.fresh.rowCounts(), nil)
 		progress.emit(ProgressEvent{
 			Phase:           "fresh_index_writer",
 			Event:           "rows_flushed",
@@ -262,50 +362,97 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 		})
 	}
 
+	phase = timing.start("openspec_links", "")
 	if err := s.syncOpenSpecLinks(repoID, now); err != nil {
+		phase.finish(nil, statusTimingDetails(err))
 		return nil, fmt.Errorf("sync openspec links: %w", err)
 	}
-	if diagnostics, err := s.rebuildEvidenceGraph(repoID, now, evidenceGraphBuildOptions{RichTypedIndex: opts.RichTypedIndex}); err != nil {
+	phase.finish(nil, nil)
+	phase = timing.start("evidence_graph", "")
+	if diagnostics, err := s.rebuildEvidenceGraph(repoID, now, evidenceGraphBuildOptions{RichTypedIndex: opts.RichTypedIndex, PhaseTiming: opts.PhaseTiming}); err != nil {
+		phase.finish(nil, statusTimingDetails(err))
 		return nil, fmt.Errorf("rebuild evidence graph: %w", err)
 	} else {
 		result.EvidenceGraph = diagnostics
+		phase.finish(map[string]int{
+			"concepts": diagnostics.ConceptsIndexed,
+			"mentions": diagnostics.MentionsIndexed,
+			"edges":    diagnostics.EdgesIndexed,
+		}, nil)
 	}
 	if opts.IncludeGitEvidence || opts.IncludeWorkstreamEvidence {
+		phase := timing.start("git_evidence", "")
 		if gitDiagnostics, workstreamDiagnostics, err := s.rebuildGitEvidence(ctx, repoRoot, repoID, now, opts); err != nil {
+			phase.finish(nil, statusTimingDetails(err))
 			return nil, fmt.Errorf("rebuild git evidence: %w", err)
 		} else {
 			result.GitEvidence = gitDiagnostics
 			result.WorkstreamEvidence = workstreamDiagnostics
+			counts := map[string]int{}
+			if gitDiagnostics != nil {
+				counts["commits"] = gitDiagnostics.CommitsStored
+				counts["files"] = gitDiagnostics.FilesStored
+				counts["edges"] = gitDiagnostics.EdgesIndexed
+			}
+			if workstreamDiagnostics != nil {
+				counts["workstream_edges"] = workstreamDiagnostics.EdgesIndexed
+			}
+			phase.finish(counts, nil)
 		}
-	} else if err := s.db.DeleteRepoGitFacts(repoID); err != nil {
-		return nil, fmt.Errorf("delete git facts: %w", err)
+	} else {
+		phase := timing.start("git_facts_delete", "")
+		if err := s.db.DeleteRepoGitFacts(repoID); err != nil {
+			phase.finish(nil, statusTimingDetails(err))
+			return nil, fmt.Errorf("delete git facts: %w", err)
+		}
+		phase.finish(nil, nil)
 	}
 	if opts.SourceManifest {
-		if diagnostics, err := s.rebuildSourceManifest(ctx, repoRoot, repoID, now); err != nil {
+		phase := timing.start("source_manifest", "")
+		if diagnostics, err := s.rebuildSourceManifest(ctx, repoRoot, repoID, now, opts.PhaseTiming, opts.FileWorkerCount); err != nil {
+			phase.finish(nil, statusTimingDetails(err))
 			return nil, fmt.Errorf("rebuild source manifest: %w", err)
 		} else {
 			result.SourceManifest = diagnostics
+			phase.finish(map[string]int{
+				"inventory_files": diagnostics.InventoryFiles,
+				"indexed_files":   diagnostics.IndexedFiles,
+				"symbols":         diagnostics.SymbolRows,
+				"tests":           diagnostics.TestRows,
+				"imports":         diagnostics.ImportRows,
+				"fts_rows":        diagnostics.FTSRows,
+			}, nil)
 		}
 	}
+	phase = timing.start("openspec_metrics", "")
 	if metrics, err := s.computeOpenSpecMetrics(repoRoot, repoID); err != nil {
+		phase.finish(nil, statusTimingDetails(err))
 		return nil, fmt.Errorf("compute openspec metrics: %w", err)
 	} else {
 		result.OpenSpec = metrics
+		phase.finish(nil, nil)
 	}
 
+	phase = timing.start("record_scan_meta", "")
 	s.recordScanMeta(repoID, repoRoot, now)
+	phase.finish(nil, nil)
+	phase = timing.start("sources_breakdown", "")
 	result.finalizeSourcesBreakdown()
+	phase.finish(map[string]int{"rows": len(result.SourcesBreakdown)}, nil)
 	if state != nil && state.fresh != nil {
 		progress.emit(ProgressEvent{
 			Phase:           "fresh_index_fts",
 			Event:           "start",
 			DeferredFTSRows: state.fresh.pendingFTSRows(),
 		})
+		phase := timing.start("fresh_index_fts", "")
 		ftsStarted := time.Now()
 		if err := state.fresh.flushDeferredFTS(); err != nil {
+			phase.finish(state.fresh.rowCounts(), statusTimingDetails(err))
 			return nil, fmt.Errorf("flush deferred fresh index FTS: %w", err)
 		}
 		ftsDurationMS := time.Since(ftsStarted).Milliseconds()
+		phase.finish(state.fresh.rowCounts(), nil)
 		progress.emit(ProgressEvent{
 			Phase:           "fresh_index_fts",
 			Event:           "done",
@@ -315,10 +462,36 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 			DeferredFTSRows: 0,
 		})
 	}
+	if state != nil && state.batchNew != nil {
+		progress.emit(ProgressEvent{
+			Phase:           "batch_new_fts",
+			Event:           "start",
+			DeferredFTSRows: state.batchNew.pendingFTSRows(),
+		})
+		phase := timing.start("batch_new_fts", "")
+		ftsStarted := time.Now()
+		if err := state.batchNew.flushDeferredFTS(); err != nil {
+			phase.finish(state.batchNew.rowCounts(), statusTimingDetails(err))
+			return nil, fmt.Errorf("flush deferred batch-new FTS: %w", err)
+		}
+		ftsDurationMS := time.Since(ftsStarted).Milliseconds()
+		phase.finish(state.batchNew.rowCounts(), nil)
+		progress.emit(ProgressEvent{
+			Phase:           "batch_new_fts",
+			Event:           "done",
+			FTSDurationMS:   ftsDurationMS,
+			RowsWritten:     state.batchNew.rowCounts(),
+			ChunksFlushed:   state.batchNew.chunkCounts(),
+			DeferredFTSRows: 0,
+		})
+	}
 	if inTx {
+		phase := timing.start("commit_transaction", "")
 		if _, err := s.db.Exec("COMMIT"); err != nil {
+			phase.finish(nil, statusTimingDetails(err))
 			return nil, fmt.Errorf("commit scan transaction: %w", err)
 		}
+		phase.finish(nil, nil)
 		inTx = false
 	}
 	progress.emit(ProgressEvent{
@@ -329,6 +502,7 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 		TransactionEnabled:   opts.UseTransaction,
 		SkipAuthoredAtLookup: opts.SkipAuthoredAtLookup,
 	})
+	result.PhaseTiming = timing.finish()
 	return result, nil
 }
 
@@ -391,6 +565,89 @@ func (p *progressReporter) maybe(event ProgressEvent) {
 		return
 	}
 	p.emit(event)
+}
+
+type scanPhaseRecorder struct {
+	enabled bool
+	started time.Time
+	rows    []PhaseTimingRow
+}
+
+type activeScanPhase struct {
+	rec     *scanPhaseRecorder
+	name    string
+	adapter string
+	started time.Time
+}
+
+func newScanPhaseRecorder(enabled bool) *scanPhaseRecorder {
+	return &scanPhaseRecorder{
+		enabled: enabled,
+		started: time.Now(),
+	}
+}
+
+func (r *scanPhaseRecorder) start(name, adapter string) *activeScanPhase {
+	if r == nil || !r.enabled {
+		return nil
+	}
+	return &activeScanPhase{
+		rec:     r,
+		name:    name,
+		adapter: adapter,
+		started: time.Now(),
+	}
+}
+
+func (p *activeScanPhase) finish(counts map[string]int, details map[string]string) {
+	if p == nil || p.rec == nil || !p.rec.enabled {
+		return
+	}
+	p.rec.rows = append(p.rec.rows, PhaseTimingRow{
+		Name:       p.name,
+		Adapter:    p.adapter,
+		DurationMS: time.Since(p.started).Milliseconds(),
+		Counts:     cloneIntMap(counts),
+		Details:    cloneStringMap(details),
+	})
+}
+
+func (r *scanPhaseRecorder) finish() *PhaseTimingDiagnostics {
+	if r == nil || !r.enabled {
+		return nil
+	}
+	return &PhaseTimingDiagnostics{
+		Enabled: true,
+		TotalMS: time.Since(r.started).Milliseconds(),
+		Phases:  append([]PhaseTimingRow(nil), r.rows...),
+	}
+}
+
+func candidateTimingCounts(candidates map[string][]adapters.Candidate, traversal *TraversalDiagnostics) map[string]int {
+	counts := map[string]int{}
+	total := 0
+	for name, rows := range candidates {
+		counts[name] = len(rows)
+		total += len(rows)
+	}
+	if total > 0 {
+		counts["total_candidates"] = total
+	}
+	if traversal != nil {
+		counts["inventory_files"] = traversal.InventoryFiles
+		counts["skipped_dirs"] = traversal.SkippedDirs
+	}
+	if len(counts) == 0 {
+		return nil
+	}
+	return counts
+}
+
+func statusTimingDetails(err error) map[string]string {
+	if err == nil {
+		return nil
+	}
+	return map[string]string{"status": "error"}
 }
 
 func (s *Scanner) discoverSharedFileCandidates(ctx context.Context, repoRoot string, cfg *config.RepoConfig, opts RunOptions, progress *progressReporter) (map[string][]adapters.Candidate, *TraversalDiagnostics, error) {
@@ -854,6 +1111,17 @@ func cloneIntMap(values map[string]int) map[string]int {
 	return out
 }
 
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		out[key] = value
+	}
+	return out
+}
+
 func isSharedFileIgnoredDir(name string) bool {
 	switch strings.ToLower(name) {
 	case ".cache", ".git", ".devspecs", ".next", ".pytest_cache", ".turbo", ".venv",
@@ -918,8 +1186,11 @@ func (s *Scanner) ensureRepo(rootPath, now string) (string, error) {
 }
 
 type scanRunState struct {
-	fresh    *freshInserter
-	shortIDs map[string]int
+	fresh        *freshInserter
+	batchNew     *freshInserter
+	shortIDs     map[string]int
+	authoredAt   map[string]string
+	authoredAtMu sync.Mutex
 }
 
 func (s *Scanner) seedExistingShortIDClaims() (map[string]int, error) {
@@ -990,6 +1261,79 @@ func allASCIIDigits(s string) bool {
 	return true
 }
 
+type existingArtifactRow struct {
+	artifactID     string
+	currentRevID   string
+	sourceIdentity string
+}
+
+func parsedSourceIdentityCounts(parsed []parsedFreshCandidate) map[string]int {
+	counts := map[string]int{}
+	for _, item := range parsed {
+		if !item.ok {
+			continue
+		}
+		counts[item.artifact.SourceIdentity]++
+	}
+	return counts
+}
+
+func sourceIdentityKeys(counts map[string]int) []string {
+	keys := make([]string, 0, len(counts))
+	for identity := range counts {
+		keys = append(keys, identity)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+const existingArtifactLookupChunkSize = 500
+
+func (s *Scanner) existingArtifactsBySourceIdentity(identities []string) (map[string]existingArtifactRow, error) {
+	out := map[string]existingArtifactRow{}
+	if len(identities) == 0 {
+		return out, nil
+	}
+	for start := 0; start < len(identities); start += existingArtifactLookupChunkSize {
+		end := start + existingArtifactLookupChunkSize
+		if end > len(identities) {
+			end = len(identities)
+		}
+		chunk := identities[start:end]
+		var b strings.Builder
+		b.WriteString("SELECT s.source_identity, a.id, COALESCE(a.current_revision_id, '') FROM sources s JOIN artifacts a ON a.id = s.artifact_id WHERE s.source_identity IN (")
+		args := make([]any, 0, len(chunk))
+		for i, identity := range chunk {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteByte('?')
+			args = append(args, identity)
+		}
+		b.WriteString(") ORDER BY s.source_identity, s.rowid")
+		rows, err := s.db.Query(b.String(), args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var row existingArtifactRow
+			if err := rows.Scan(&row.sourceIdentity, &row.artifactID, &row.currentRevID); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if _, exists := out[row.sourceIdentity]; !exists {
+				out[row.sourceIdentity] = row
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	return out, nil
+}
+
 func (s *Scanner) upsertArtifact(repoRoot, repoID, adapterName string, art adapters.Artifact, sources []adapters.Source, pr todoparse.ParseResult, now string, result *Result, opts RunOptions, state *scanRunState) error {
 	if opts.FreshIndex {
 		return s.insertFreshArtifact(repoRoot, repoID, adapterName, art, sources, pr, now, result, opts, state)
@@ -1007,10 +1351,10 @@ func (s *Scanner) upsertArtifact(repoRoot, repoID, adapterName string, art adapt
 		// New artifact
 		artifactID = s.ids.New()
 		revID := s.ids.NewWithPrefix("rev_")
-		if err := s.insertArtifact(artifactID, repoRoot, repoID, art, sources, revID, now, opts.SkipAuthoredAtLookup); err != nil {
+		if err := s.insertArtifact(artifactID, repoRoot, repoID, art, sources, revID, now, opts.SkipAuthoredAtLookup, state); err != nil {
 			return err
 		}
-		s.assignShortID(artifactID, art.SourceIdentity)
+		s.assignShortID(artifactID, art.SourceIdentity, state)
 		if err := s.insertRevision(revID, artifactID, contentHash, art.Body, art.Extracted, now); err != nil {
 			return err
 		}
@@ -1040,7 +1384,7 @@ func (s *Scanner) upsertArtifact(repoRoot, repoID, adapterName string, art adapt
 	s.db.Exec("UPDATE artifacts SET last_observed_at = ? WHERE id = ?", now, artifactID)
 
 	// Ensure short_id is set (covers artifacts created before v0.1)
-	s.assignShortID(artifactID, art.SourceIdentity)
+	s.assignShortID(artifactID, art.SourceIdentity, state)
 
 	if err := s.syncSources(artifactID, repoID, sources, now); err != nil {
 		return err
@@ -1204,28 +1548,56 @@ func (s *Scanner) insertFreshArtifact(repoRoot, repoID, adapterName string, art 
 	if state == nil || state.fresh == nil {
 		return fmt.Errorf("fresh index inserter is not initialized")
 	}
+	return s.insertBufferedNewArtifact(state.fresh, repoRoot, repoID, adapterName, art, sources, pr, now, result, opts, state)
+}
+
+func (s *Scanner) insertBatchedNewArtifact(repoRoot, repoID, adapterName string, art adapters.Artifact, sources []adapters.Source, pr todoparse.ParseResult, now string, result *Result, opts RunOptions, state *scanRunState) error {
+	if state == nil {
+		return fmt.Errorf("batch-new inserter state is not initialized")
+	}
+	if state.batchNew == nil {
+		if state.shortIDs == nil {
+			claims, err := s.seedExistingShortIDClaims()
+			if err != nil {
+				return fmt.Errorf("seed batch-new short ids: %w", err)
+			}
+			state.shortIDs = claims
+		}
+		inserter, err := newFreshInserter(s.db)
+		if err != nil {
+			return fmt.Errorf("prepare batch-new inserts: %w", err)
+		}
+		state.batchNew = inserter
+	}
+	return s.insertBufferedNewArtifact(state.batchNew, repoRoot, repoID, adapterName, art, sources, pr, now, result, opts, state)
+}
+
+func (s *Scanner) insertBufferedNewArtifact(inserter *freshInserter, repoRoot, repoID, adapterName string, art adapters.Artifact, sources []adapters.Source, pr todoparse.ParseResult, now string, result *Result, opts RunOptions, state *scanRunState) error {
+	if inserter == nil {
+		return fmt.Errorf("buffered artifact inserter is not initialized")
+	}
 	artifactID := s.ids.New()
 	revID := s.ids.NewWithPrefix("rev_")
 	contentHash := hashContent(art.Body)
 	shortID := state.claimShortID(art.SourceIdentity)
 	authoredAt := now
 	if !opts.SkipAuthoredAtLookup {
-		authoredAt = resolveAuthoredAt(repoRoot, art, sources, now)
+		authoredAt = state.resolveAuthoredAt(repoRoot, art, sources, now)
 	}
-	if err := state.fresh.insertArtifact(artifactID, repoID, shortID, art, revID, now, authoredAt); err != nil {
+	if err := inserter.insertArtifact(artifactID, repoID, shortID, art, revID, now, authoredAt); err != nil {
 		return err
 	}
-	if err := state.fresh.insertRevision(revID, artifactID, contentHash, art.Body, art.Extracted, now); err != nil {
+	if err := inserter.insertRevision(revID, artifactID, contentHash, art.Body, art.Extracted, now); err != nil {
 		return err
 	}
 	for _, src := range sources {
-		if err := state.fresh.insertSource(s.ids.NewWithPrefix("src_"), artifactID, repoID, src, now); err != nil {
+		if err := inserter.insertSource(s.ids.NewWithPrefix("src_"), artifactID, repoID, src, now); err != nil {
 			return err
 		}
 	}
 	var sections []docsections.Section
 	if isMarkdownSectionSource(art, sources) {
-		if err := state.fresh.flushRows(); err != nil {
+		if err := inserter.flushRows(); err != nil {
 			return err
 		}
 		var err error
@@ -1235,22 +1607,22 @@ func (s *Scanner) insertFreshArtifact(repoRoot, repoID, adapterName string, art 
 		}
 	}
 	for _, todo := range pr.Todos {
-		if err := state.fresh.insertTodo(s.ids.NewWithPrefix("todo_"), artifactID, revID, todo, now, sections); err != nil {
+		if err := inserter.insertTodo(s.ids.NewWithPrefix("todo_"), artifactID, revID, todo, now, sections); err != nil {
 			return err
 		}
 	}
 	for _, criterion := range pr.Criteria {
-		if err := state.fresh.insertCriterion(s.ids.NewWithPrefix("crit_"), artifactID, revID, criterion, now, sections); err != nil {
+		if err := inserter.insertCriterion(s.ids.NewWithPrefix("crit_"), artifactID, revID, criterion, now, sections); err != nil {
 			return err
 		}
 	}
-	if err := state.fresh.insertTags(artifactID, art, sources, now); err != nil {
+	if err := inserter.insertTags(artifactID, art, sources, now); err != nil {
 		return err
 	}
-	if err := state.fresh.deferFTS(artifactID, art); err != nil {
+	if err := inserter.deferFTS(artifactID, art); err != nil {
 		return err
 	}
-	if err := state.fresh.flushRowsIfFull(); err != nil {
+	if err := inserter.flushRowsIfFull(); err != nil {
 		return err
 	}
 	result.New++
@@ -1272,6 +1644,132 @@ func (s *scanRunState) claimShortID(sourceIdentity string) string {
 		return base
 	}
 	return fmt.Sprintf("%s%d", base, count)
+}
+
+const maxAuthoredAtLookupWorkers = 8
+const minBulkAuthoredAtPaths = 16
+
+func benefitsFromAuthoredAtPrefetch(adapterName string) bool {
+	switch adapterName {
+	case "test_case", "code_comment":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *scanRunState) prefetchAuthoredAt(ctx context.Context, repoRoot string, candidates []adapters.Candidate, now string, opts RunOptions) int {
+	if s == nil || opts.SkipAuthoredAtLookup || len(candidates) == 0 {
+		return 0
+	}
+	rels := make([]string, 0, len(candidates))
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		rel := authoredAtCandidateRelPath(repoRoot, candidate)
+		if rel == "" || seen[rel] || s.cachedAuthoredAt(rel) {
+			continue
+		}
+		seen[rel] = true
+		rels = append(rels, rel)
+	}
+	if len(rels) == 0 {
+		return 0
+	}
+	sort.Strings(rels)
+	if len(rels) >= minBulkAuthoredAtPaths {
+		for rel, authoredAt := range fileFirstCommitDates(repoRoot, rels) {
+			if authoredAt == "" {
+				continue
+			}
+			s.storeAuthoredAt(rel, authoredAt)
+		}
+		rels = filterUncachedAuthoredAtRels(s, rels)
+		if len(rels) == 0 {
+			return len(seen)
+		}
+	}
+	workers := opts.FileWorkerCount
+	if workers <= 0 {
+		workers = runtime.GOMAXPROCS(0)
+	}
+	if workers > maxAuthoredAtLookupWorkers {
+		workers = maxAuthoredAtLookupWorkers
+	}
+	if workers > len(rels) {
+		workers = len(rels)
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	if workers == 1 || len(rels) == 1 {
+		for _, rel := range rels {
+			if ctx.Err() != nil {
+				break
+			}
+			s.storeAuthoredAt(rel, firstCommitDateOrNow(repoRoot, rel, now))
+		}
+		return len(rels)
+	}
+
+	jobs := make(chan string)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for rel := range jobs {
+				if ctx.Err() != nil {
+					continue
+				}
+				s.storeAuthoredAt(rel, firstCommitDateOrNow(repoRoot, rel, now))
+			}
+		}()
+	}
+	for _, rel := range rels {
+		if ctx.Err() != nil {
+			break
+		}
+		jobs <- rel
+	}
+	close(jobs)
+	wg.Wait()
+	return len(seen)
+}
+
+func filterUncachedAuthoredAtRels(state *scanRunState, rels []string) []string {
+	out := rels[:0]
+	for _, rel := range rels {
+		if state.cachedAuthoredAt(rel) {
+			continue
+		}
+		out = append(out, rel)
+	}
+	return out
+}
+
+func authoredAtCandidateRelPath(repoRoot string, candidate adapters.Candidate) string {
+	if candidate.PrimaryPath != "" {
+		if rel, err := filepath.Rel(repoRoot, candidate.PrimaryPath); err == nil {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return filepath.ToSlash(candidate.RelPath)
+}
+
+func (s *scanRunState) cachedAuthoredAt(rel string) bool {
+	s.authoredAtMu.Lock()
+	defer s.authoredAtMu.Unlock()
+	_, ok := s.authoredAt[rel]
+	return ok
+}
+
+func (s *scanRunState) storeAuthoredAt(rel, authoredAt string) {
+	s.authoredAtMu.Lock()
+	defer s.authoredAtMu.Unlock()
+	if s.authoredAt == nil {
+		s.authoredAt = map[string]string{}
+	}
+	s.authoredAt[rel] = authoredAt
 }
 
 func (f *freshInserter) insertArtifact(id, repoID, shortID string, art adapters.Artifact, revID, now, authoredAt string) error {
@@ -1714,10 +2212,10 @@ func inferIndexedSectionKind(section docsections.Section) string {
 	}
 }
 
-func (s *Scanner) insertArtifact(id, repoRoot, repoID string, art adapters.Artifact, sources []adapters.Source, revID, now string, skipAuthoredAtLookup bool) error {
+func (s *Scanner) insertArtifact(id, repoRoot, repoID string, art adapters.Artifact, sources []adapters.Source, revID, now string, skipAuthoredAtLookup bool, state *scanRunState) error {
 	authoredAt := now
 	if !skipAuthoredAtLookup {
-		authoredAt = resolveAuthoredAt(repoRoot, art, sources, now)
+		authoredAt = state.resolveAuthoredAt(repoRoot, art, sources, now)
 	}
 	_, err := s.db.Exec(
 		`INSERT INTO artifacts (id, repo_id, kind, subtype, title, status, current_revision_id, created_at, updated_at, last_observed_at, authored_at)
@@ -1727,7 +2225,34 @@ func (s *Scanner) insertArtifact(id, repoRoot, repoID string, art adapters.Artif
 	return err
 }
 
-func resolveAuthoredAt(repoRoot string, art adapters.Artifact, sources []adapters.Source, now string) string {
+func (s *scanRunState) resolveAuthoredAt(repoRoot string, art adapters.Artifact, sources []adapters.Source, now string) string {
+	rel := authoredAtRelPath(repoRoot, art, sources)
+	if rel == "" {
+		return now
+	}
+	if s != nil {
+		s.authoredAtMu.Lock()
+		if authoredAt, ok := s.authoredAt[rel]; ok {
+			s.authoredAtMu.Unlock()
+			return authoredAt
+		}
+		s.authoredAtMu.Unlock()
+	}
+	authoredAt := firstCommitDateOrNow(repoRoot, rel, now)
+	if s != nil {
+		s.storeAuthoredAt(rel, authoredAt)
+	}
+	return authoredAt
+}
+
+func firstCommitDateOrNow(repoRoot, rel, now string) string {
+	if d := fileFirstCommitDate(repoRoot, rel); d != "" {
+		return d
+	}
+	return now
+}
+
+func authoredAtRelPath(repoRoot string, art adapters.Artifact, sources []adapters.Source) string {
 	var rel string
 	if art.PrimaryPath != "" {
 		if rel2, err := filepath.Rel(repoRoot, art.PrimaryPath); err == nil {
@@ -1737,13 +2262,7 @@ func resolveAuthoredAt(repoRoot string, art adapters.Artifact, sources []adapter
 	if rel == "" && len(sources) > 0 && sources[0].Path != "" {
 		rel = filepath.ToSlash(sources[0].Path)
 	}
-	if rel == "" {
-		return now
-	}
-	if d := repo.FileFirstCommitDate(repoRoot, rel); d != "" {
-		return d
-	}
-	return now
+	return rel
 }
 
 func (s *Scanner) insertRevision(id, artifactID, contentHash, body string, extracted map[string]any, now string) error {
@@ -1834,8 +2353,21 @@ func (s *Scanner) replaceCriteria(artifactID, revID string, criteria []todoparse
 	return nil
 }
 
-func (s *Scanner) assignShortID(artifactID, sourceIdentity string) {
-	_ = s.db.AssignArtifactShortID(artifactID, idgen.ShortID(sourceIdentity))
+func (s *Scanner) assignShortID(artifactID, sourceIdentity string, state *scanRunState) {
+	if err := s.db.AssignArtifactShortID(artifactID, idgen.ShortID(sourceIdentity)); err != nil {
+		return
+	}
+	if state == nil || state.shortIDs == nil {
+		return
+	}
+	var shortID string
+	if err := s.db.QueryRow("SELECT COALESCE(short_id, '') FROM artifacts WHERE id = ?", artifactID).Scan(&shortID); err != nil {
+		return
+	}
+	base, next := shortIDClaim(shortID)
+	if base != "" && state.shortIDs[base] < next {
+		state.shortIDs[base] = next
+	}
 }
 
 func (s *Scanner) replaceTags(artifactID string, art adapters.Artifact, now string) {

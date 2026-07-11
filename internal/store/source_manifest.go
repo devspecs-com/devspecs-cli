@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+const sourceManifestInsertChunkSize = 250
+
 // SourceManifestFileInput is a compact first-party source/test file row.
 type SourceManifestFileInput struct {
 	FileID          string
@@ -111,77 +113,102 @@ func (db *DB) ReplaceRepoSourceManifest(repoID string, files []SourceManifestFil
 		return rollback(err)
 	}
 
-	fileStmt, err := db.Prepare(
+	if err := db.execSourceManifestBatches("source_manifest",
 		`INSERT INTO source_manifest
 			(file_id, repo_id, path, content_hash, size_bytes, language, source_root, source_root_kind, source_role, first_party_score, ignored_reason, indexed_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-	)
-	if err != nil {
+		 VALUES `,
+		12,
+		len(files),
+		func(i int) []any {
+			f := files[i]
+			return []any{f.FileID, f.RepoID, f.Path, f.ContentHash, f.SizeBytes, f.Language, f.SourceRoot, f.SourceRootKind, f.SourceRole, f.FirstPartyScore, f.IgnoredReason, now}
+		},
+	); err != nil {
 		return rollback(err)
 	}
-	defer fileStmt.Close()
-	for _, f := range files {
-		if _, err := fileStmt.Exec(f.FileID, f.RepoID, f.Path, f.ContentHash, f.SizeBytes, f.Language, f.SourceRoot, f.SourceRootKind, f.SourceRole, f.FirstPartyScore, f.IgnoredReason, now); err != nil {
-			return rollback(err)
-		}
-	}
-
-	symbolStmt, err := db.Prepare(
-		`INSERT INTO source_manifest_symbols (file_id, symbol, kind, line) VALUES (?, ?, ?, ?)`,
-	)
-	if err != nil {
+	if err := db.execSourceManifestBatches("source_manifest_symbols",
+		`INSERT INTO source_manifest_symbols (file_id, symbol, kind, line) VALUES `,
+		4,
+		len(symbols),
+		func(i int) []any {
+			s := symbols[i]
+			return []any{s.FileID, s.Symbol, s.Kind, s.Line}
+		},
+	); err != nil {
 		return rollback(err)
 	}
-	defer symbolStmt.Close()
-	for _, s := range symbols {
-		if _, err := symbolStmt.Exec(s.FileID, s.Symbol, s.Kind, s.Line); err != nil {
-			return rollback(err)
-		}
-	}
-
-	testStmt, err := db.Prepare(
-		`INSERT INTO source_manifest_tests (file_id, test_name, parent, line) VALUES (?, ?, ?, ?)`,
-	)
-	if err != nil {
+	if err := db.execSourceManifestBatches("source_manifest_tests",
+		`INSERT INTO source_manifest_tests (file_id, test_name, parent, line) VALUES `,
+		4,
+		len(tests),
+		func(i int) []any {
+			t := tests[i]
+			return []any{t.FileID, t.TestName, t.Parent, t.Line}
+		},
+	); err != nil {
 		return rollback(err)
 	}
-	defer testStmt.Close()
-	for _, t := range tests {
-		if _, err := testStmt.Exec(t.FileID, t.TestName, t.Parent, t.Line); err != nil {
-			return rollback(err)
-		}
-	}
-
-	importStmt, err := db.Prepare(
-		`INSERT INTO source_manifest_imports (file_id, import_ref, line) VALUES (?, ?, ?)`,
-	)
-	if err != nil {
+	if err := db.execSourceManifestBatches("source_manifest_imports",
+		`INSERT INTO source_manifest_imports (file_id, import_ref, line) VALUES `,
+		3,
+		len(imports),
+		func(i int) []any {
+			row := imports[i]
+			return []any{row.FileID, row.ImportRef, row.Line}
+		},
+	); err != nil {
 		return rollback(err)
 	}
-	defer importStmt.Close()
-	for _, i := range imports {
-		if _, err := importStmt.Exec(i.FileID, i.ImportRef, i.Line); err != nil {
-			return rollback(err)
-		}
-	}
-
-	ftsStmt, err := db.Prepare(
+	if err := db.execSourceManifestBatches("source_manifest_fts",
 		`INSERT INTO source_manifest_fts
 			(file_id, path, path_terms, source_root, language, source_role, symbols, test_names, imports)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-	)
-	if err != nil {
+		 VALUES `,
+		9,
+		len(ftsRows),
+		func(i int) []any {
+			row := ftsRows[i]
+			return []any{row.FileID, row.Path, row.PathTerms, row.SourceRoot, row.Language, row.SourceRole, row.Symbols, row.TestNames, row.Imports}
+		},
+	); err != nil {
 		return rollback(err)
-	}
-	defer ftsStmt.Close()
-	for _, row := range ftsRows {
-		if _, err := ftsStmt.Exec(row.FileID, row.Path, row.PathTerms, row.SourceRoot, row.Language, row.SourceRole, row.Symbols, row.TestNames, row.Imports); err != nil {
-			return rollback(err)
-		}
 	}
 
 	if _, err := db.Exec("RELEASE SAVEPOINT " + savepoint); err != nil {
 		return rollback(err)
+	}
+	return nil
+}
+
+func (db *DB) execSourceManifestBatches(table, prefix string, valuesPerRow, rowCount int, argsForRow func(int) []any) error {
+	if rowCount == 0 {
+		return nil
+	}
+	chunkSize := sourceManifestInsertChunkSize
+	for start := 0; start < rowCount; start += chunkSize {
+		end := start + chunkSize
+		if end > rowCount {
+			end = rowCount
+		}
+		var b strings.Builder
+		b.WriteString(prefix)
+		args := make([]any, 0, (end-start)*valuesPerRow)
+		for i := start; i < end; i++ {
+			if i > start {
+				b.WriteString(", ")
+			}
+			b.WriteByte('(')
+			for col := 0; col < valuesPerRow; col++ {
+				if col > 0 {
+					b.WriteString(", ")
+				}
+				b.WriteByte('?')
+			}
+			b.WriteByte(')')
+			args = append(args, argsForRow(i)...)
+		}
+		if _, err := db.Exec(b.String(), args...); err != nil {
+			return fmt.Errorf("insert %s rows %d-%d: %w", table, start, end, err)
+		}
 	}
 	return nil
 }

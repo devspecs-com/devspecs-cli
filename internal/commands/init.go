@@ -316,6 +316,7 @@ func runInitIndex(cmd *cobra.Command, repoRoot, mode string, interactive bool) i
 			false, // include tests
 			false, // include code comments
 			false, // no gitignore
+			false, // phase timing
 		); err != nil {
 			return initIndexResult{Mode: mode, Err: err}
 		}

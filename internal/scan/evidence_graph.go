@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/devspecs-com/devspecs-cli/internal/store"
@@ -71,6 +72,7 @@ type EvidenceGraphDiagnostics struct {
 	NoisyConceptsSkipped int                      `json:"noisy_concepts_skipped,omitempty"`
 	TopNoisyConcepts     []EvidenceConceptExample `json:"top_noisy_concepts,omitempty"`
 	TopEdges             []EvidenceEdgeExample    `json:"top_edges,omitempty"`
+	PhaseMS              map[string]int64         `json:"phase_ms,omitempty"`
 }
 
 // EvidenceConceptExample explains one concept skipped from edge materialization.
@@ -101,6 +103,7 @@ type evidenceBuildResult struct {
 
 type evidenceGraphBuildOptions struct {
 	RichTypedIndex bool
+	PhaseTiming    bool
 }
 
 type evidenceArtifact struct {
@@ -177,13 +180,32 @@ var sourceSymbolPatterns = []*regexp.Regexp{
 }
 
 func (s *Scanner) rebuildEvidenceGraph(repoID, now string, opts evidenceGraphBuildOptions) (*EvidenceGraphDiagnostics, error) {
+	phaseMS := map[string]int64{}
+	recordPhase := func(name string, started time.Time) {
+		if opts.PhaseTiming {
+			phaseMS[name] = time.Since(started).Milliseconds()
+		}
+	}
+	phaseStarted := time.Now()
 	artifacts, err := s.loadEvidenceArtifacts(repoID)
+	recordPhase("load_artifacts", phaseStarted)
 	if err != nil {
 		return nil, err
 	}
 	built := buildEvidenceGraphWithOptions(repoID, artifacts, opts)
-	if err := s.db.ReplaceRepoEvidence(repoID, built.concepts, built.mentions, built.edges, now); err != nil {
+	mergeEvidencePhaseMS(phaseMS, built.diagnostics)
+	phaseStarted = time.Now()
+	persistPhaseMS, err := s.db.ReplaceRepoEvidenceWithPhaseTiming(repoID, built.concepts, built.mentions, built.edges, now)
+	recordPhase("persist_total", phaseStarted)
+	if err != nil {
 		return nil, err
+	}
+	if opts.PhaseTiming {
+		mergePhaseMS(phaseMS, persistPhaseMS)
+		if built.diagnostics.PhaseMS == nil {
+			built.diagnostics.PhaseMS = map[string]int64{}
+		}
+		mergePhaseMS(built.diagnostics.PhaseMS, phaseMS)
 	}
 	return built.diagnostics, nil
 }
@@ -243,13 +265,22 @@ func buildEvidenceGraph(repoID string, artifacts []evidenceArtifact) evidenceBui
 }
 
 func buildEvidenceGraphWithOptions(repoID string, artifacts []evidenceArtifact, opts evidenceGraphBuildOptions) evidenceBuildResult {
+	phaseMS := map[string]int64{}
+	recordPhase := func(name string, started time.Time) {
+		if opts.PhaseTiming {
+			phaseMS[name] = time.Since(started).Milliseconds()
+		}
+	}
 	artifactCount := len(artifacts)
+	phaseStarted := time.Now()
 	rawMentions := make([]rawConceptMention, 0, artifactCount*12)
 	for _, artifact := range artifacts {
 		rawMentions = append(rawMentions, limitArtifactEvidenceMentions(extractEvidenceMentionsWithOptions(artifact, opts))...)
 	}
 	rawMentions = limitRepoEvidenceMentions(rawMentions)
+	recordPhase("derive_mentions", phaseStarted)
 
+	phaseStarted = time.Now()
 	conceptsByKey := map[string]*conceptAccumulator{}
 	mentionSeen := map[string]bool{}
 	for _, mention := range rawMentions {
@@ -296,7 +327,9 @@ func buildEvidenceGraphWithOptions(repoID string, artifacts []evidenceArtifact, 
 		}
 		return conceptInputs[i].Kind < conceptInputs[j].Kind
 	})
+	recordPhase("build_concepts", phaseStarted)
 
+	phaseStarted = time.Now()
 	mentionInputs := make([]store.ConceptMentionInput, 0, len(rawMentions))
 	for _, mention := range rawMentions {
 		if !persistEvidenceMention(mention) {
@@ -330,7 +363,9 @@ func buildEvidenceGraphWithOptions(repoID string, artifacts []evidenceArtifact, 
 		}
 		return mentionInputs[i].ArtifactID < mentionInputs[j].ArtifactID
 	})
+	recordPhase("build_mentions", phaseStarted)
 
+	phaseStarted = time.Now()
 	edgeBuilder := newEvidenceEdgeBuilder(repoID)
 	noisy := materializeSharedConceptEdges(artifacts, conceptsByKey, rawMentions, edgeBuilder)
 	materializeLayoutGroupEdges(artifacts, edgeBuilder)
@@ -342,13 +377,35 @@ func buildEvidenceGraphWithOptions(repoID string, artifacts []evidenceArtifact, 
 	materializeLinkEdges(artifacts, edgeBuilder)
 	materializePathReferenceEdges(artifacts, edgeBuilder)
 	edges := edgeBuilder.edges()
+	recordPhase("build_edges", phaseStarted)
 
+	phaseStarted = time.Now()
 	diagnostics := buildEvidenceDiagnostics(conceptInputs, mentionInputs, edges, noisy, opts)
+	recordPhase("build_diagnostics", phaseStarted)
+	if opts.PhaseTiming {
+		diagnostics.PhaseMS = phaseMS
+	}
 	return evidenceBuildResult{
 		concepts:    conceptInputs,
 		mentions:    mentionInputs,
 		edges:       edges,
 		diagnostics: diagnostics,
+	}
+}
+
+func mergeEvidencePhaseMS(out map[string]int64, diagnostics *EvidenceGraphDiagnostics) {
+	if diagnostics == nil {
+		return
+	}
+	mergePhaseMS(out, diagnostics.PhaseMS)
+}
+
+func mergePhaseMS(out map[string]int64, values map[string]int64) {
+	if out == nil {
+		return
+	}
+	for key, value := range values {
+		out[key] = value
 	}
 }
 

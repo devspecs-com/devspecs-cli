@@ -8,7 +8,11 @@
 #   0 | false | skip | none — skip tests
 
 set -e
-cd "$(git rev-parse --show-toplevel)"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+for var in $(git rev-parse --local-env-vars); do
+	unset "$var"
+done
+cd "$REPO_ROOT"
 
 echo "pre-commit: go vet ./..."
 go vet ./...

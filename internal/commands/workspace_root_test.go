@@ -216,7 +216,7 @@ func TestMapJSONAutoScanWarnsForWorkspaceRootWithoutBreakingStdout(t *testing.T)
 		t.Fatal(err)
 	}
 	if !strings.Contains(stderr.String(), "Workspace root warning") {
-		t.Fatalf("expected workspace warning on stderr, got: %s", stderr.String())
+		t.Fatalf("expected map auto-scan workspace warning on stderr, got: %s", stderr.String())
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {

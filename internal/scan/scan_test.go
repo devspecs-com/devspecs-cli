@@ -3,6 +3,7 @@ package scan
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -928,6 +929,87 @@ func TestScan_FreshIndexParallelismIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestScan_WarmUpgradeBatchNewArtifactsMatchesFreshFullIndex(t *testing.T) {
+	repoRoot := setupFreshIndexSpeedRepo(t)
+	fullCfg := config.WithCodeCommentArtifacts(config.WithTestCaseArtifacts(config.WithDefaultIntentCandidateDiscovery(nil, true), true), true)
+	defaultCfg := config.WithDefaultIntentCandidateDiscovery(nil, true)
+	adapters := []adapters.Adapter{
+		&markdown.Adapter{},
+		&testcase.Adapter{},
+		&codecomment.Adapter{},
+	}
+
+	freshDB, err := store.Open(filepath.Join(t.TempDir(), "fresh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer freshDB.Close()
+	freshDB.SetMaxOpenConns(1)
+	freshScanner := New(freshDB, idgen.NewFactory(), adapters)
+	if _, err := freshScanner.RunWithOptions(context.Background(), repoRoot, fullCfg, RunOptions{
+		UseTransaction:       true,
+		SkipAuthoredAtLookup: true,
+		FreshIndex:           true,
+		FileWorkerCount:      2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	warmDB, err := store.Open(filepath.Join(t.TempDir(), "warm.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer warmDB.Close()
+	warmDB.SetMaxOpenConns(1)
+	warmScanner := New(warmDB, idgen.NewFactory(), adapters)
+	if _, err := warmScanner.RunWithOptions(context.Background(), repoRoot, defaultCfg, RunOptions{
+		UseTransaction:       true,
+		SkipAuthoredAtLookup: true,
+		FileWorkerCount:      2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	warmFull, err := warmScanner.RunWithOptions(context.Background(), repoRoot, fullCfg, RunOptions{
+		UseTransaction:       true,
+		SkipAuthoredAtLookup: true,
+		FileWorkerCount:      2,
+		PhaseTiming:          true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, table := range []string{
+		"artifacts",
+		"artifact_revisions",
+		"sources",
+		"artifact_todos",
+		"artifact_criteria",
+		"artifact_tags",
+		"artifact_sections",
+		"artifact_sections_fts",
+		"artifacts_fts",
+		"concepts",
+		"concept_mentions",
+		"artifact_edges",
+	} {
+		freshCount := tableCount(t, freshDB, table)
+		warmCount := tableCount(t, warmDB, table)
+		if warmCount != freshCount {
+			t.Fatalf("%s count mismatch: warm=%d fresh=%d", table, warmCount, freshCount)
+		}
+	}
+	if got, want := artifactIdentitySnapshot(t, warmDB), artifactIdentitySnapshot(t, freshDB); !reflect.DeepEqual(got, want) {
+		t.Fatalf("warm upgrade changed artifact identity snapshot:\ngot:  %#v\nwant: %#v", got, want)
+	}
+	if got, want := scanPhaseCount(warmFull, "adapter_parse_persist", "test_case", "batch_new"), 2; got != want {
+		t.Fatalf("warm test_case batch_new = %d, want %d", got, want)
+	}
+	if got := scanPhaseCount(warmFull, "batch_new_fts", "", "artifacts_fts"); got == 0 {
+		t.Fatalf("expected batch_new_fts to flush rows, got %d", got)
+	}
+}
+
 func TestScan_FreshIndexProgressIncludesGranularTimings(t *testing.T) {
 	repoRoot := setupFreshIndexSpeedRepo(t)
 	db, err := store.Open(filepath.Join(t.TempDir(), "devspecs.db"))
@@ -964,6 +1046,139 @@ func TestScan_FreshIndexProgressIncludesGranularTimings(t *testing.T) {
 	if !hasScanProgressEvent(events, "fresh_index_fts", "done") {
 		t.Fatalf("missing FTS timing event: %#v", events)
 	}
+}
+
+func TestScan_AuthoredAtLookupCachedPerPath(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, "tests/test_checkout.py", strings.Join([]string{
+		"def test_redirect_success():",
+		"    assert response.status_code == 200",
+		"",
+		"def test_redirect_rejects_bad_state():",
+		"    assert response.status_code == 400",
+		"",
+		"def test_redirect_preserves_next_url():",
+		"    assert next_url == '/docs'",
+		"",
+	}, "\n"))
+
+	db, err := store.Open(filepath.Join(t.TempDir(), "devspecs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	const authoredAt = "2020-01-02T03:04:05Z"
+	lookupsByPath := map[string]int{}
+	previous := fileFirstCommitDate
+	fileFirstCommitDate = func(repoRoot, relPath string) string {
+		lookupsByPath[relPath]++
+		return authoredAt
+	}
+	t.Cleanup(func() { fileFirstCommitDate = previous })
+
+	cfg := config.WithTestCaseArtifacts(config.WithDefaultIntentCandidateDiscovery(nil, true), true)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&testcase.Adapter{}})
+	result, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, RunOptions{
+		UseTransaction:  true,
+		FileWorkerCount: 2,
+		PhaseTiming:     true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := result.Found["test_case"], 3; got != want {
+		t.Fatalf("test_case found = %d, want %d", got, want)
+	}
+	if got, want := lookupsByPath["tests/test_checkout.py"], 1; got != want {
+		t.Fatalf("authored_at lookups for tests/test_checkout.py = %d, want %d; all lookups %#v", got, want, lookupsByPath)
+	}
+	if got, want := scanPhaseCount(result, "authored_at_prefetch", "test_case", "paths"), 1; got != want {
+		t.Fatalf("authored_at_prefetch paths = %d, want %d", got, want)
+	}
+
+	rows, err := db.Query(`SELECT authored_at FROM artifacts ORDER BY title`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var gotAuthoredAt []string
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			t.Fatal(err)
+		}
+		gotAuthoredAt = append(gotAuthoredAt, value)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotAuthoredAt, []string{authoredAt, authoredAt, authoredAt}) {
+		t.Fatalf("authored_at rows = %#v, want all %q", gotAuthoredAt, authoredAt)
+	}
+}
+
+func TestScan_AuthoredAtPrefetchUsesBulkWithExactFallback(t *testing.T) {
+	previousSingle := fileFirstCommitDate
+	previousBulk := fileFirstCommitDates
+	const bulkDate = "2020-01-02T03:04:05Z"
+	const fallbackDate = "2021-02-03T04:05:06Z"
+	bulkCalls := 0
+	singleLookups := map[string]int{}
+	fileFirstCommitDates = func(repoRoot string, rels []string) map[string]string {
+		bulkCalls++
+		if len(rels) != minBulkAuthoredAtPaths {
+			t.Fatalf("bulk rel count = %d, want %d", len(rels), minBulkAuthoredAtPaths)
+		}
+		return map[string]string{"tests/test_00.py": bulkDate}
+	}
+	fileFirstCommitDate = func(repoRoot, relPath string) string {
+		singleLookups[relPath]++
+		return fallbackDate
+	}
+	t.Cleanup(func() {
+		fileFirstCommitDate = previousSingle
+		fileFirstCommitDates = previousBulk
+	})
+
+	candidates := make([]adapters.Candidate, 0, minBulkAuthoredAtPaths)
+	for i := 0; i < minBulkAuthoredAtPaths; i++ {
+		candidates = append(candidates, adapters.Candidate{RelPath: fmt.Sprintf("tests/test_%02d.py", i)})
+	}
+	state := &scanRunState{}
+	if got := state.prefetchAuthoredAt(context.Background(), t.TempDir(), candidates, "2026-07-10T00:00:00Z", RunOptions{FileWorkerCount: 2}); got != minBulkAuthoredAtPaths {
+		t.Fatalf("prefetch paths = %d, want %d", got, minBulkAuthoredAtPaths)
+	}
+	if bulkCalls != 1 {
+		t.Fatalf("bulk calls = %d, want 1", bulkCalls)
+	}
+	if singleLookups["tests/test_00.py"] != 0 {
+		t.Fatalf("bulk hit should not fall back to exact lookup: %#v", singleLookups)
+	}
+	if got, want := len(singleLookups), minBulkAuthoredAtPaths-1; got != want {
+		t.Fatalf("fallback lookup count = %d, want %d: %#v", got, want, singleLookups)
+	}
+	gotBulk := state.resolveAuthoredAt("", adapters.Artifact{}, []adapters.Source{{Path: "tests/test_00.py"}}, "now")
+	gotFallback := state.resolveAuthoredAt("", adapters.Artifact{}, []adapters.Source{{Path: "tests/test_01.py"}}, "now")
+	if gotBulk != bulkDate || gotFallback != fallbackDate {
+		t.Fatalf("cached authored_at values = %q/%q, want %q/%q", gotBulk, gotFallback, bulkDate, fallbackDate)
+	}
+	if got, want := len(singleLookups), minBulkAuthoredAtPaths-1; got != want {
+		t.Fatalf("resolveAuthoredAt caused extra fallback lookup: got %d want %d", got, want)
+	}
+}
+
+func scanPhaseCount(result *Result, name, adapter, key string) int {
+	if result == nil || result.PhaseTiming == nil {
+		return 0
+	}
+	for _, phase := range result.PhaseTiming.Phases {
+		if phase.Name == name && phase.Adapter == adapter {
+			return phase.Counts[key]
+		}
+	}
+	return 0
 }
 
 func TestCollectFileInventoryExplainsSkippedHeavyAndIgnoredDirs(t *testing.T) {

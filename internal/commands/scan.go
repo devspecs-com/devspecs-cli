@@ -51,13 +51,14 @@ func NewScanCmd() *cobra.Command {
 		includeTests                   bool
 		includeCodeComments            bool
 		noGitignore                    bool
+		phaseTiming                    bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "scan",
 		Short: "Rescan repository intent docs, source, tests, and git evidence",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, experimentalSourceManifest, includeTests, includeCodeComments, noGitignore)
+			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, experimentalSourceManifest, includeTests, includeCodeComments, noGitignore, phaseTiming)
 		},
 	}
 
@@ -79,14 +80,16 @@ func NewScanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&includeTests, "experimental-test-cases", false, "Deprecated alias for --include-tests")
 	cmd.Flags().BoolVar(&includeCodeComments, "include-code-comments", false, "Index high-signal code comments as implementation intent artifacts")
 	cmd.Flags().BoolVar(&noGitignore, "no-gitignore", false, "Do not apply .gitignore, .git/info/exclude, or .aiignore during scan walks")
+	cmd.Flags().BoolVar(&phaseTiming, "phase-timing", false, "Emit hidden scan phase timing diagnostics in JSON output")
 	_ = cmd.Flags().MarkDeprecated("experimental-test-cases", "use --include-tests")
 	_ = cmd.Flags().MarkHidden("experimental-recent-source-context")
 	_ = cmd.Flags().MarkHidden("experimental-first-party-source-context")
 	_ = cmd.Flags().MarkHidden("experimental-source-manifest")
+	_ = cmd.Flags().MarkHidden("phase-timing")
 	return cmd
 }
 
-func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, experimentalSourceManifest, includeTests, includeCodeComments, noGitignore bool) error {
+func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, experimentalSourceManifest, includeTests, includeCodeComments, noGitignore, phaseTiming bool) error {
 	start := time.Now()
 	success := false
 	props := map[string]any{
@@ -104,6 +107,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 		"rebuild":                          rebuild,
 		"json":                             asJSON,
 		"quiet":                            quiet,
+		"phase_timing":                     phaseTiming,
 	}
 	defer func() {
 		telemetry.RecordCommand("scan", success, time.Since(start), props)
@@ -191,6 +195,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	scanOpts.FirstPartySourceContext = experimentalFirstPartySource
 	scanOpts.SourceManifest = experimentalSourceManifest
 	scanOpts.IgnoreRules = noGitignore
+	scanOpts.PhaseTiming = phaseTiming
 	if !quiet {
 		scanOpts.Progress = scanProgressStderr(cmd.ErrOrStderr(), "Scan")
 	}

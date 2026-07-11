@@ -2,6 +2,7 @@
 package repo
 
 import (
+	"bufio"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -123,4 +124,90 @@ func FileFirstCommitDate(repoRoot, relPath string) string {
 		return ""
 	}
 	return last
+}
+
+// FileFirstCommitDates returns FileFirstCommitDate-compatible add dates for
+// multiple paths by walking repo history once and following simple renames
+// backwards through name-status records. Paths that cannot be resolved are
+// omitted so callers can fall back to the exact per-file --follow path.
+func FileFirstCommitDates(repoRoot string, relPaths []string) map[string]string {
+	result := map[string]string{}
+	tracked := map[string][]string{}
+	for _, rel := range relPaths {
+		rel = strings.TrimSpace(filepath.ToSlash(rel))
+		if rel == "" {
+			continue
+		}
+		if _, ok := tracked[rel]; ok {
+			continue
+		}
+		tracked[rel] = []string{rel}
+	}
+	if len(tracked) == 0 {
+		return result
+	}
+	cmd := exec.Command("git", "-c", "core.quotePath=false", "log", "--find-renames", "--format=%x00%aI", "--name-status")
+	cmd.Dir = repoRoot
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return result
+	}
+	if err := cmd.Start(); err != nil {
+		return result
+	}
+	scanner := bufio.NewScanner(out)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	currentDate := ""
+	for scanner.Scan() {
+		line := strings.TrimRight(scanner.Text(), "\r")
+		if strings.HasPrefix(line, "\x00") {
+			currentDate = strings.TrimSpace(strings.TrimPrefix(line, "\x00"))
+			continue
+		}
+		if currentDate == "" || line == "" {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) < 2 {
+			continue
+		}
+		status := fields[0]
+		switch {
+		case status == "A":
+			path := filepath.ToSlash(fields[1])
+			for _, target := range tracked[path] {
+				result[target] = currentDate
+			}
+		case strings.HasPrefix(status, "R") && len(fields) >= 3:
+			oldPath := filepath.ToSlash(fields[1])
+			newPath := filepath.ToSlash(fields[2])
+			targets := tracked[newPath]
+			if len(targets) == 0 {
+				continue
+			}
+			delete(tracked, newPath)
+			tracked[oldPath] = appendUniqueStrings(tracked[oldPath], targets...)
+		}
+	}
+	scanErr := scanner.Err()
+	waitErr := cmd.Wait()
+	if scanErr != nil || waitErr != nil {
+		return map[string]string{}
+	}
+	return result
+}
+
+func appendUniqueStrings(dst []string, values ...string) []string {
+	seen := map[string]bool{}
+	for _, value := range dst {
+		seen[value] = true
+	}
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		dst = append(dst, value)
+	}
+	return dst
 }

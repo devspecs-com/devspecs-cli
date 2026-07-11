@@ -58,6 +58,98 @@ func TestScanJSON_ConsecutiveRunsIdentical(t *testing.T) {
 	}
 }
 
+func TestScanJSON_PhaseTimingIsOptIn(t *testing.T) {
+	setupE2ERepo(t)
+	NewInitCmd().Execute()
+
+	scanCmd := NewScanCmd()
+	scanCmd.SetArgs([]string{"--json"})
+	buf := &bytes.Buffer{}
+	scanCmd.SetOut(buf)
+	if err := scanCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := out["phase_timing"]; ok {
+		t.Fatalf("default scan JSON should not include phase_timing: %s", buf.String())
+	}
+}
+
+func TestScanJSON_PhaseTimingIncludesSourceManifestBreakdown(t *testing.T) {
+	repoDir := setupE2ERepo(t)
+	srcDir := filepath.Join(repoDir, "internal", "auth")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "service.go"), []byte("package auth\n\nfunc LoginUser() bool { return true }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	NewInitCmd().Execute()
+
+	scanCmd := NewScanCmd()
+	scanCmd.SetArgs([]string{"--json", "--quiet", "--phase-timing", "--experimental-source-manifest"})
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	scanCmd.SetOut(stdout)
+	scanCmd.SetErr(stderr)
+	if err := scanCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stderr.String(), "Scan progress") {
+		t.Fatalf("quiet phase-timing scan should not emit progress: %s", stderr.String())
+	}
+	var out struct {
+		PhaseTiming *struct {
+			Enabled bool `json:"enabled"`
+			Phases  []struct {
+				Name   string         `json:"name"`
+				Counts map[string]int `json:"counts"`
+			} `json:"phases"`
+		} `json:"phase_timing"`
+		SourceManifest *struct {
+			IndexedFiles int              `json:"indexed_files"`
+			PhaseMS      map[string]int64 `json:"phase_ms"`
+		} `json:"source_manifest"`
+		EvidenceGraph *struct {
+			ConceptsIndexed int              `json:"concepts_indexed"`
+			PhaseMS         map[string]int64 `json:"phase_ms"`
+		} `json:"evidence_graph"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("scan --phase-timing JSON invalid: %v\n%s", err, stdout.String())
+	}
+	if out.PhaseTiming == nil || !out.PhaseTiming.Enabled || len(out.PhaseTiming.Phases) == 0 {
+		t.Fatalf("missing phase timing diagnostics: %s", stdout.String())
+	}
+	if !scanPhaseTimingHas(out.PhaseTiming.Phases, "shared_discovery") || !scanPhaseTimingHas(out.PhaseTiming.Phases, "source_manifest") {
+		t.Fatalf("missing expected phase timing rows: %#v", out.PhaseTiming.Phases)
+	}
+	if out.SourceManifest == nil || out.SourceManifest.IndexedFiles == 0 || len(out.SourceManifest.PhaseMS) == 0 {
+		t.Fatalf("missing source manifest phase breakdown: %#v", out.SourceManifest)
+	}
+	if out.EvidenceGraph == nil || out.EvidenceGraph.ConceptsIndexed == 0 || len(out.EvidenceGraph.PhaseMS) == 0 {
+		t.Fatalf("missing evidence graph phase breakdown: %#v", out.EvidenceGraph)
+	}
+	if _, ok := out.EvidenceGraph.PhaseMS["persist_mentions"]; !ok {
+		t.Fatalf("missing evidence graph persist mention timing: %#v", out.EvidenceGraph.PhaseMS)
+	}
+}
+
+func scanPhaseTimingHas(phases []struct {
+	Name   string         `json:"name"`
+	Counts map[string]int `json:"counts"`
+}, name string) bool {
+	for _, phase := range phases {
+		if phase.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func runScanJSONBytes(t *testing.T) []byte {
 	t.Helper()
 	scanCmd := NewScanCmd()

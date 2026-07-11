@@ -92,6 +92,7 @@ func NewMapCmd() *cobra.Command {
 		path      string
 		asJSON    bool
 		verbose   bool
+		quiet     bool
 		recent    bool
 		boundary  bool
 		noRefresh bool
@@ -112,6 +113,7 @@ func NewMapCmd() *cobra.Command {
 				AreaQuery: areaQuery,
 				JSON:      asJSON,
 				Verbose:   verbose,
+				Quiet:     quiet,
 				Recent:    recent,
 				Boundary:  boundary,
 				NoRefresh: noRefresh,
@@ -123,6 +125,7 @@ func NewMapCmd() *cobra.Command {
 	cmd.Flags().StringVar(&path, "path", ".", "Repository path to map")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show map diagnostics and extra evidence")
+	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress non-result progress and auto-refresh notices")
 	cmd.Flags().BoolVar(&recent, "recent", false, "Show recently active topics from local git history")
 	cmd.Flags().BoolVar(&boundary, "experimental-boundaries", false, "Deprecated: ds map now uses path-primary system boundary candidates by default")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
@@ -140,6 +143,7 @@ func NewRecentCmd() *cobra.Command {
 		path      string
 		asJSON    bool
 		verbose   bool
+		quiet     bool
 		noRefresh bool
 		maxAreas  int
 	)
@@ -164,6 +168,7 @@ pack.`,
 				AreaQuery: areaQuery,
 				JSON:      asJSON,
 				Verbose:   verbose,
+				Quiet:     quiet,
 				Recent:    true,
 				NoRefresh: noRefresh,
 				MaxAreas:  maxAreas,
@@ -174,6 +179,7 @@ pack.`,
 	cmd.Flags().StringVar(&path, "path", ".", "Repository path to inspect")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "Show diagnostics and extra evidence")
+	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress non-result progress and auto-refresh notices")
 	cmd.Flags().BoolVar(&noRefresh, "no-refresh", false, "Skip auto-scan freshness check")
 	cmd.Flags().IntVar(&maxAreas, "max-areas", mapDefaultMaxAreas, "Maximum topics to show")
 	return cmd
@@ -184,6 +190,7 @@ type mapOptions struct {
 	AreaQuery string
 	JSON      bool
 	Verbose   bool
+	Quiet     bool
 	Recent    bool
 	Boundary  bool
 	NoRefresh bool
@@ -215,6 +222,11 @@ type mapRecentTopic struct {
 	FileCount      int               `json:"file_count"`
 	EvidenceCounts map[string]int    `json:"evidence_counts,omitempty"`
 	KeyPaths       []string          `json:"key_paths,omitempty"`
+	TopicType      string            `json:"topic_type,omitempty"`
+	BoundaryLabel  string            `json:"boundary_label,omitempty"`
+	BoundaryRole   string            `json:"boundary_role,omitempty"`
+	BoundaryPaths  []string          `json:"boundary_paths,omitempty"`
+	QualitySignals []string          `json:"quality_signals,omitempty"`
 	RecentSignals  []mapTraceReceipt `json:"recent_signals,omitempty"`
 	Try            string            `json:"try,omitempty"`
 	Score          int               `json:"score,omitempty"`
@@ -1376,6 +1388,7 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 	props := map[string]any{
 		"json":       opts.JSON,
 		"verbose":    opts.Verbose,
+		"quiet":      opts.Quiet,
 		"recent":     opts.Recent,
 		"boundary":   true,
 		"no_refresh": opts.NoRefresh,
@@ -1393,9 +1406,16 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 	if err != nil {
 		return err
 	}
-	if !opts.NoRefresh {
-		if err := ensureMapRepoIndexed(cmd, repoRoot); err != nil {
-			return err
+	if !opts.Recent {
+		if out, ok, err := loadMapOutputCache(repoRoot, opts.MaxAreas); err != nil {
+			debugLog("map output cache unavailable: %v", err)
+		} else if ok {
+			success = true
+			props["confidence"] = out.Repo.Confidence
+			props["area_count_bucket"] = telemetry.CountBucket(len(out.Areas))
+			props["path_boundary"] = true
+			props["cache_hit"] = true
+			return writeMapOutputForOptions(cmd, out, opts)
 		}
 	}
 	if opts.Recent {
@@ -1411,11 +1431,57 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 		return nil
 	}
 
+	if !opts.NoRefresh {
+		if err := ensureMapRepoIndexed(cmd, repoRoot, opts.Quiet); err != nil {
+			return err
+		}
+	}
 	out := buildPathBoundaryMapOutput(cmd.Context(), repoRoot, opts)
 	success = true
 	props["confidence"] = out.Repo.Confidence
 	props["area_count_bucket"] = telemetry.CountBucket(len(out.Areas))
 	props["path_boundary"] = true
+	if err := saveMapOutputCache(repoRoot, opts.MaxAreas, out); err != nil {
+		debugLog("save map output cache failed: %v", err)
+	}
+	return writeMapOutputForOptions(cmd, out, opts)
+}
+
+func runRecent(cmd *cobra.Command, opts mapOptions) error {
+	start := time.Now()
+	success := false
+	props := map[string]any{
+		"json":       opts.JSON,
+		"verbose":    opts.Verbose,
+		"quiet":      opts.Quiet,
+		"no_refresh": opts.NoRefresh,
+		"max_areas":  opts.MaxAreas,
+		"area_query": opts.AreaQuery != "",
+	}
+	defer func() {
+		telemetry.RecordCommand("recent", success, time.Since(start), props)
+	}()
+
+	if opts.MaxAreas <= 0 {
+		opts.MaxAreas = mapDefaultMaxAreas
+	}
+	repoRoot, err := resolveRepoRoot(opts.Path)
+	if err != nil {
+		return err
+	}
+	out := buildMapRecentOutput(cmd.Context(), repoRoot, opts)
+	success = true
+	props["recent_topic_count_bucket"] = telemetry.CountBucket(len(out.Topics))
+	if opts.JSON {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
+	}
+	writeMapRecentText(cmd.OutOrStdout(), out, opts.Verbose)
+	return nil
+}
+
+func writeMapOutputForOptions(cmd *cobra.Command, out mapOutput, opts mapOptions) error {
 	if opts.JSON {
 		if opts.AreaQuery != "" {
 			out = filterMapOutputByAreaQuery(out, opts.AreaQuery)
@@ -1432,53 +1498,37 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 	return nil
 }
 
-func runRecent(cmd *cobra.Command, opts mapOptions) error {
-	start := time.Now()
-	success := false
-	props := map[string]any{
-		"json":       opts.JSON,
-		"verbose":    opts.Verbose,
-		"no_refresh": opts.NoRefresh,
-		"max_areas":  opts.MaxAreas,
-		"area_query": opts.AreaQuery != "",
-	}
-	defer func() {
-		telemetry.RecordCommand("recent", success, time.Since(start), props)
-	}()
-
-	if opts.MaxAreas <= 0 {
-		opts.MaxAreas = mapDefaultMaxAreas
-	}
-	repoRoot, err := resolveRepoRoot(opts.Path)
-	if err != nil {
-		return err
-	}
-	if !opts.NoRefresh {
-		if err := ensureMapRepoIndexed(cmd, repoRoot); err != nil {
-			return err
-		}
-	}
-	out := buildMapRecentOutput(cmd.Context(), repoRoot, opts)
-	success = true
-	props["recent_topic_count_bucket"] = telemetry.CountBucket(len(out.Topics))
-	if opts.JSON {
-		enc := json.NewEncoder(cmd.OutOrStdout())
-		enc.SetIndent("", "  ")
-		return enc.Encode(out)
-	}
-	writeMapRecentText(cmd.OutOrStdout(), out, opts.Verbose)
-	return nil
-}
-
-func ensureMapRepoIndexed(cmd *cobra.Command, repoRoot string) error {
+func ensureMapRepoIndexed(cmd *cobra.Command, repoRoot string, quiet bool) error {
 	db, err := openDB()
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
+	if quiet {
+		ensureMapRepoIndexedQuiet(db, repoRoot)
+		return nil
+	}
 	ensureRepoIndexed(cmd, db, repoRoot)
 	return nil
+}
+
+func ensureMapRepoIndexedQuiet(db *store.DB, repoRoot string) {
+	repoRoot = canonicalRepoRoot(repoRoot)
+	if repoRoot == "" {
+		return
+	}
+	status := freshness.Check(db, repoRoot)
+	if status != nil && !status.Stale {
+		debugLog("ensureMapRepoIndexedQuiet: index is fresh for %s", repoRoot)
+		return
+	}
+	if status == nil {
+		debugLog("ensureMapRepoIndexedQuiet: no repo row for %s; triggering silent auto-scan", repoRoot)
+	} else {
+		debugLog("ensureMapRepoIndexedQuiet: stale reason=%s; triggering silent auto-scan", status.Reason)
+	}
+	runScanQuiet(nil, db, repoRoot)
 }
 
 func mapRepoHasIndexedArtifacts(repoRoot string) (bool, error) {
@@ -1516,16 +1566,14 @@ func loadMapOutputCache(repoRoot string, maxAreas int) (mapOutput, bool, error) 
 		debugLog("map output cache miss: repo not indexed")
 		return mapOutput{}, false, nil
 	}
-	if meta.LastScanCommit == "" {
-		if status := freshness.Check(db, repoRoot); status == nil || status.Stale {
-			_ = db.Close()
-			if status == nil {
-				debugLog("map output cache miss: freshness unavailable for non-git repo")
-			} else {
-				debugLog("map output cache miss: stale non-git index (%s)", status.Reason)
-			}
-			return mapOutput{}, false, nil
+	if status := freshness.Check(db, repoRoot); status == nil || status.Stale {
+		_ = db.Close()
+		if status == nil {
+			debugLog("map output cache miss: freshness unavailable")
+		} else {
+			debugLog("map output cache miss: stale index (%s)", status.Reason)
 		}
+		return mapOutput{}, false, nil
 	}
 	if err := db.Close(); err != nil {
 		return mapOutput{}, false, fmt.Errorf("close map output cache db: %w", err)
@@ -1893,19 +1941,20 @@ func mapWorkstreamClusters(result *scan.Result) []scan.WorkstreamClusterExample 
 }
 
 type mapPathBoundaryCandidate struct {
-	Key             string
-	Label           string
-	LabelScore      float64
-	Score           float64
-	FileCount       int
-	RecentCount     int
-	PathSet         map[string]bool
-	BoundaryPaths   map[string]bool
-	Subareas        map[string]bool
-	EvidenceCounts  map[string]int
-	EvidenceSources map[string]bool
-	Artifacts       []mapArtifact
-	TraceReceipts   []mapTraceReceipt
+	Key               string
+	Label             string
+	LabelScore        float64
+	Score             float64
+	FileCount         int
+	RecentCount       int
+	PathSet           map[string]bool
+	BoundaryPaths     map[string]bool
+	BoundaryPathOrder []string
+	Subareas          map[string]bool
+	EvidenceCounts    map[string]int
+	EvidenceSources   map[string]bool
+	Artifacts         []mapArtifact
+	TraceReceipts     []mapTraceReceipt
 }
 
 func buildPathBoundaryMapOutput(ctx context.Context, repoRoot string, opts mapOptions) mapOutput {
@@ -1915,6 +1964,9 @@ func buildPathBoundaryMapOutput(ctx context.Context, repoRoot string, opts mapOp
 	packability, packabilityErr := loadMapPackabilityIndex(repoRoot)
 	if packabilityErr != nil {
 		debugLog("map packability index unavailable: %v", packabilityErr)
+	}
+	if opts.NoRefresh && packability == nil && len(files) > 0 {
+		packability = mapPackabilityIndexFromFiles(files)
 	}
 	areas, evidence, rawCandidateCount := buildPathBoundaryAreas(repoRoot, repoName, files, recentCommits, opts.MaxAreas, packability)
 	confidence := mapBoundaryOutputConfidence(areas)
@@ -1937,10 +1989,12 @@ func buildPathBoundaryMapOutput(ctx context.Context, repoRoot string, opts mapOp
 	if strings.Contains(filepath.ToSlash(repoRoot), "/_ignore/") {
 		caveats = append(caveats, "repo path is under _ignore; use full checkouts for promotion claims")
 	}
-	if indexed, err := mapRepoHasIndexedArtifacts(repoRoot); err == nil && !indexed {
-		caveats = append(caveats, mapIndexRequiredCaveat)
-	} else if err != nil {
-		debugLog("map boundary index availability unavailable: %v", err)
+	if opts.NoRefresh {
+		if indexed, err := mapRepoHasIndexedArtifacts(repoRoot); err == nil && !indexed {
+			caveats = append(caveats, mapIndexRequiredCaveat)
+		} else if err != nil {
+			debugLog("map boundary index availability unavailable: %v", err)
+		}
 	}
 	return mapOutput{
 		Schema: mapSchemaVersion,
@@ -2225,7 +2279,7 @@ func addMapBoundaryPathCandidates(candidates map[string]*mapPathBoundaryCandidat
 			appendMapBoundaryArtifactCandidate(candidate, art, mapBoundaryMaxArtifacts*3)
 		}
 		for _, boundaryPath := range mapBoundaryContainingDirs(path, labelCandidate.Key) {
-			candidate.BoundaryPaths[boundaryPath] = true
+			appendMapBoundaryPathCandidate(candidate, boundaryPath)
 		}
 		for _, subarea := range mapBoundarySubareasForCandidate(path, labelCandidate.Key) {
 			if len(candidate.Subareas) < 20 {
@@ -2507,7 +2561,7 @@ func addMapConceptualParentCandidate(candidates map[string]*mapPathBoundaryCandi
 		appendMapBoundaryArtifactCandidate(candidate, art, mapBoundaryMaxArtifacts*3)
 	}
 	if dir := pathpkg.Dir(normalizeMapPath(filePath)); dir != "." && dir != "" {
-		candidate.BoundaryPaths[dir] = true
+		appendMapBoundaryPathCandidate(candidate, dir)
 	}
 	for _, cover := range mapConceptualCoversForPath(rule, pathValue, pathKey, needleCache) {
 		if len(candidate.Subareas) < 20 {
@@ -3217,13 +3271,37 @@ func mapBoundaryAreaInternal(candidate *mapPathBoundaryCandidate) *mapAreaIntern
 
 func mapBoundaryRawAnchors(candidate *mapPathBoundaryCandidate) []string {
 	anchors := []string{candidate.Label, candidate.Key}
-	for path := range candidate.BoundaryPaths {
+	for _, path := range candidate.BoundaryPathOrder {
 		anchors = appendUniqueString(anchors, path)
 		if len(anchors) >= 6 {
-			break
+			return anchors
+		}
+	}
+	for _, path := range sortedMapSet(candidate.BoundaryPaths) {
+		anchors = appendUniqueString(anchors, path)
+		if len(anchors) >= 6 {
+			return anchors
 		}
 	}
 	return anchors
+}
+
+func appendMapBoundaryPathCandidate(candidate *mapPathBoundaryCandidate, path string) {
+	if candidate == nil {
+		return
+	}
+	path = normalizeMapPath(path)
+	if path == "" {
+		return
+	}
+	if candidate.BoundaryPaths == nil {
+		candidate.BoundaryPaths = map[string]bool{}
+	}
+	if candidate.BoundaryPaths[path] {
+		return
+	}
+	candidate.BoundaryPaths[path] = true
+	candidate.BoundaryPathOrder = append(candidate.BoundaryPathOrder, path)
 }
 
 func mapBoundaryCandidateDisplayable(candidate *mapPathBoundaryCandidate) bool {
@@ -4072,6 +4150,7 @@ type mapRecentTopicBuilder struct {
 	CommitSHAs     map[string]bool
 	PathSet        map[string]bool
 	EvidenceCounts map[string]int
+	Maintenance    map[string]bool
 	RecentSignals  []mapTraceReceipt
 	Score          int
 	Order          int
@@ -4097,12 +4176,19 @@ func buildMapRecentOutput(ctx context.Context, repoRoot string, opts mapOptions)
 		out.Caveats = append(out.Caveats, "recent git history could not be read within the time budget")
 		return out
 	}
-	topics, skipped := buildMapRecentTopics(commits, opts.AreaQuery, mapRecentMaxTopics)
+	topics, skipped := buildMapRecentTopics(commits, opts.AreaQuery, mapRecentMaxCommits)
+	applyMapRecentBoundaryQuality(ctx, repoRoot, commits, topics)
+	topics = mergeMapRecentOverlappingTopics(topics)
+	sortMapRecentTopics(topics)
+	rawTopicCount := len(topics)
+	if len(topics) > mapRecentMaxTopics {
+		topics = topics[:mapRecentMaxTopics]
+	}
 	out.Topics = topics
 	out.Diagnostics = mapRecentDiagnostics{
 		CommitsRead:       len(commits),
 		CommitsSkipped:    skipped,
-		RawTopicCount:     len(topics),
+		RawTopicCount:     rawTopicCount,
 		MatchedTopicCount: len(topics),
 	}
 	if opts.AreaQuery != "" && len(topics) == 0 {
@@ -4237,6 +4323,7 @@ func buildMapRecentTopics(commits []parsedFindGitCommit, areaQuery string, limit
 				CommitSHAs:     map[string]bool{},
 				PathSet:        map[string]bool{},
 				EvidenceCounts: map[string]int{},
+				Maintenance:    map[string]bool{},
 				Order:          order,
 			}
 			builders[key] = builder
@@ -4252,16 +4339,578 @@ func buildMapRecentTopics(commits []parsedFindGitCommit, areaQuery string, limit
 		}
 		topics = append(topics, topic)
 	}
+	sortMapRecentTopics(topics)
+	if len(topics) > limit {
+		topics = topics[:limit]
+	}
+	return topics, skipped
+}
+
+func sortMapRecentTopics(topics []mapRecentTopic) {
 	sort.SliceStable(topics, func(i, j int) bool {
 		if topics[i].Score != topics[j].Score {
 			return topics[i].Score > topics[j].Score
 		}
 		return topics[i].Label < topics[j].Label
 	})
-	if len(topics) > limit {
-		topics = topics[:limit]
+}
+
+func applyMapRecentBoundaryQuality(ctx context.Context, repoRoot string, commits []parsedFindGitCommit, topics []mapRecentTopic) {
+	if len(topics) == 0 {
+		return
 	}
-	return topics, skipped
+	files, _, _, err := listMapBoundaryFiles(ctx, repoRoot)
+	if err != nil {
+		debugLog("recent boundary file inventory unavailable: %v", err)
+	}
+	var areas []mapArea
+	if len(files) > 0 {
+		repoName := filepath.Base(filepath.Clean(repoRoot))
+		areas, _, _ = buildPathBoundaryAreas(repoRoot, repoName, files, commits, mapRecentMaxTopics*3)
+	}
+	for i := range topics {
+		if topics[i].EvidenceCounts["source"] > 0 || topics[i].EvidenceCounts["test"] > 0 {
+			topics[i].QualitySignals = appendUniqueString(topics[i].QualitySignals, "source_test_support")
+			topics[i].Score += 10
+		}
+		if len(areas) == 0 {
+			continue
+		}
+		area, score := bestMapRecentBoundaryArea(topics[i], areas)
+		if area == nil || score < 8 {
+			continue
+		}
+		topics[i].BoundaryLabel = area.Label
+		topics[i].BoundaryRole = area.BoundaryRole
+		topics[i].BoundaryPaths = firstStrings(area.BoundaryPaths, 3)
+		if len(topics[i].BoundaryPaths) == 0 {
+			topics[i].BoundaryPaths = firstStrings(mapAreaBoundaryPaths(*area), 3)
+		}
+		topics[i].QualitySignals = appendUniqueString(topics[i].QualitySignals, "boundary_support")
+		topics[i].Score += score
+		if mapRecentTopicHasSourceTest(topics[i]) && mapRecentBoundaryAreaUseful(*area) {
+			topics[i].QualitySignals = appendUniqueString(topics[i].QualitySignals, "useful_boundary")
+			topics[i].Score += 12
+		}
+	}
+	hasUsefulTopic := false
+	for _, topic := range topics {
+		if topic.TopicType != "maintenance" && mapRecentTopicHasUsefulEvidence(topic) {
+			hasUsefulTopic = true
+			break
+		}
+	}
+	for i := range topics {
+		if topics[i].TopicType != "maintenance" {
+			continue
+		}
+		topics[i].QualitySignals = appendUniqueString(topics[i].QualitySignals, "maintenance")
+		if hasUsefulTopic {
+			topics[i].QualitySignals = appendUniqueString(topics[i].QualitySignals, "maintenance_demoted")
+			topics[i].Score -= mapRecentMaintenancePenalty(topics[i])
+		}
+	}
+}
+
+func mergeMapRecentOverlappingTopics(topics []mapRecentTopic) []mapRecentTopic {
+	if len(topics) < 2 {
+		return topics
+	}
+	merged := make([]mapRecentTopic, 0, len(topics))
+	used := make([]bool, len(topics))
+	for i := range topics {
+		if used[i] {
+			continue
+		}
+		current := topics[i]
+		used[i] = true
+		for changed := true; changed; {
+			changed = false
+			for j := range topics {
+				if used[j] || !mapRecentTopicsShouldMerge(current, topics[j]) {
+					continue
+				}
+				current = mergeMapRecentTopics(current, topics[j])
+				used[j] = true
+				changed = true
+			}
+		}
+		merged = append(merged, current)
+	}
+	return merged
+}
+
+func mapRecentTopicsShouldMerge(a, b mapRecentTopic) bool {
+	if a.Query == "" || b.Query == "" {
+		return false
+	}
+	if a.TopicType == "maintenance" || b.TopicType == "maintenance" {
+		if a.TopicType != b.TopicType {
+			return false
+		}
+		aKind := mapRecentTopicMaintenanceKindSignal(a)
+		bKind := mapRecentTopicMaintenanceKindSignal(b)
+		if aKind == "" || aKind != bKind {
+			return false
+		}
+		if mapRecentTopicPathOverlap(a, b) > 0 {
+			return true
+		}
+		return mapRecentTopicQueryOverlap(a, b) >= 2
+	}
+	if mapRecentTopicHasSourceTest(a) || mapRecentTopicHasSourceTest(b) {
+		if !mapRecentTopicHasSourceTest(a) || !mapRecentTopicHasSourceTest(b) {
+			return false
+		}
+		sourceOverlap, testOverlap := mapRecentSourceTestPathOverlap(a, b)
+		if sourceOverlap > 0 && testOverlap > 0 && mapRecentTopicQueryOverlap(a, b) >= 2 {
+			return true
+		}
+		return false
+	}
+	if mapRecentTopicPathOverlap(a, b) > 0 && mapRecentTopicQueryOverlap(a, b) > 0 {
+		return true
+	}
+	return false
+}
+
+func mergeMapRecentTopics(a, b mapRecentTopic) mapRecentTopic {
+	merged := a
+	if b.Score > a.Score {
+		merged = b
+	}
+	query := mapRecentMergedTopicQuery(a, b)
+	merged.Query = query
+	merged.Label = displayMapLabel(query)
+	merged.Try = mapFindPackCommand(query)
+	merged.CommitCount = mapRecentMergedCommitCount(a, b)
+	merged.FileCount = mapRecentMergedFileCount(a, b)
+	merged.EvidenceCounts = mapRecentMergedEvidenceCounts(a, b)
+	merged.KeyPaths = mapRecentMergedKeyPaths(a, b)
+	merged.TopicType = mapRecentMergedTopicType(a, b)
+	merged.QualitySignals = mapRecentMergedQualitySignals(a, b)
+	merged.RecentSignals = mapRecentMergedRecentSignals(a, b)
+	mergeMapRecentBoundary(&merged, a, b)
+	if merged.TopicType == "maintenance" {
+		merged.BoundaryLabel = ""
+		merged.BoundaryRole = ""
+		merged.BoundaryPaths = nil
+		merged.QualitySignals = appendUniqueString(merged.QualitySignals, "boundary_omitted_maintenance")
+	}
+	merged.Score = mapRecentMergedScore(a, b, merged)
+	return merged
+}
+
+func mapRecentTopicMaintenanceKindSignal(topic mapRecentTopic) string {
+	for _, signal := range topic.QualitySignals {
+		if strings.HasPrefix(signal, "maintenance:") {
+			return strings.TrimPrefix(signal, "maintenance:")
+		}
+	}
+	return ""
+}
+
+func mapRecentTopicPathOverlap(a, b mapRecentTopic) int {
+	paths := map[string]bool{}
+	for _, path := range a.KeyPaths {
+		if normalized := normalizeMapPath(path); normalized != "" {
+			paths[normalized] = true
+		}
+	}
+	count := 0
+	for _, path := range b.KeyPaths {
+		normalized := normalizeMapPath(path)
+		if normalized != "" && paths[normalized] {
+			count++
+		}
+	}
+	return count
+}
+
+func mapRecentSourceTestPathOverlap(a, b mapRecentTopic) (int, int) {
+	paths := map[string]bool{}
+	for _, path := range a.KeyPaths {
+		normalized := normalizeMapPath(path)
+		if normalized == "" {
+			continue
+		}
+		family := mapRecentPathFamily(normalized)
+		if family == "source" || family == "test" {
+			paths[normalized] = true
+		}
+	}
+	sourceCount := 0
+	testCount := 0
+	for _, path := range b.KeyPaths {
+		normalized := normalizeMapPath(path)
+		if normalized == "" || !paths[normalized] {
+			continue
+		}
+		family := mapRecentPathFamily(normalized)
+		switch family {
+		case "source":
+			sourceCount++
+		case "test":
+			testCount++
+		}
+	}
+	return sourceCount, testCount
+}
+
+func mapRecentTopicQueryOverlap(a, b mapRecentTopic) int {
+	aWords := mapStringSet(mapRecentComparableWords(a.Query))
+	count := 0
+	for _, word := range mapRecentComparableWords(b.Query) {
+		if aWords[word] {
+			count++
+		}
+	}
+	return count
+}
+
+func mapRecentMergedTopicQuery(a, b mapRecentTopic) string {
+	if kind := mapRecentTopicMaintenanceKindSignal(a); kind != "" && kind == mapRecentTopicMaintenanceKindSignal(b) {
+		switch kind {
+		case "sponsors":
+			return "sponsors updates"
+		case "release-docs":
+			if mapRecentTopicHasPathSubstring(a, "latest-changes") || mapRecentTopicHasPathSubstring(b, "latest-changes") {
+				return "latest changes workflow"
+			}
+			return "release docs updates"
+		case "workflow":
+			if query := mapRecentMergedPathQuery(a, b); query != "" {
+				return query
+			}
+			return "workflow updates"
+		case "translation":
+			return "translation updates"
+		case "dependency":
+			return "dependency updates"
+		case "doc-archive":
+			return "docs archive"
+		case "docs":
+			return "docs updates"
+		case "config":
+			return "config updates"
+		}
+	}
+	common := mapRecentCommonComparableWords(a.Query, b.Query)
+	if len(common) >= 2 {
+		return strings.Join(firstStrings(common, 4), " ")
+	}
+	if query := mapRecentMergedPathQuery(a, b); query != "" {
+		return query
+	}
+	if a.Score >= b.Score {
+		return a.Query
+	}
+	return b.Query
+}
+
+func mapRecentMergedPathQuery(a, b mapRecentTopic) string {
+	path := mapRecentFirstSharedPath(a, b)
+	if path == "" {
+		return ""
+	}
+	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	var words []string
+	for _, word := range wordsFromMap(stem) {
+		if !mapRecentStopWord(word) {
+			words = appendUniqueString(words, word)
+		}
+	}
+	if len(words) == 0 {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(normalizeMapPath(path)), ".github/workflows/") && !mapRecentContainsString(words, "workflow") {
+		words = append(words, "workflow")
+	}
+	return strings.Join(firstStrings(words, 4), " ")
+}
+
+func mapRecentCommonComparableWords(a, b string) []string {
+	aWords := mapStringSet(mapRecentComparableWords(a))
+	var out []string
+	for _, word := range mapRecentComparableWords(b) {
+		if aWords[word] {
+			out = appendUniqueString(out, word)
+		}
+	}
+	return out
+}
+
+func mapRecentTopicHasPathSubstring(topic mapRecentTopic, want string) bool {
+	want = strings.ToLower(want)
+	for _, path := range topic.KeyPaths {
+		if strings.Contains(strings.ToLower(normalizeMapPath(path)), want) {
+			return true
+		}
+	}
+	return false
+}
+
+func mapRecentFirstSharedPath(a, b mapRecentTopic) string {
+	paths := map[string]bool{}
+	for _, path := range a.KeyPaths {
+		if normalized := normalizeMapPath(path); normalized != "" {
+			paths[normalized] = true
+		}
+	}
+	for _, path := range b.KeyPaths {
+		normalized := normalizeMapPath(path)
+		if normalized != "" && paths[normalized] {
+			return normalized
+		}
+	}
+	return ""
+}
+
+func mapRecentMergedCommitCount(a, b mapRecentTopic) int {
+	count := a.CommitCount + b.CommitCount
+	seen := map[string]bool{}
+	overlap := 0
+	for _, receipt := range a.RecentSignals {
+		key := mapRecentReceiptKey(receipt)
+		if key != "" {
+			seen[key] = true
+		}
+	}
+	for _, receipt := range b.RecentSignals {
+		key := mapRecentReceiptKey(receipt)
+		if key != "" && seen[key] {
+			overlap++
+		}
+	}
+	count -= overlap
+	return maxInt(count, len(mapRecentMergedRecentSignals(a, b)))
+}
+
+func mapRecentMergedFileCount(a, b mapRecentTopic) int {
+	count := a.FileCount + b.FileCount - mapRecentTopicPathOverlap(a, b)
+	return maxInt(count, len(mapRecentMergedKeyPaths(a, b)))
+}
+
+func mapRecentMergedEvidenceCounts(a, b mapRecentTopic) map[string]int {
+	out := copyIntMap(a.EvidenceCounts)
+	if out == nil {
+		out = map[string]int{}
+	}
+	for key, value := range b.EvidenceCounts {
+		out[key] += value
+	}
+	return out
+}
+
+func mapRecentMergedKeyPaths(a, b mapRecentTopic) []string {
+	seen := map[string]bool{}
+	var paths []string
+	for _, topic := range []mapRecentTopic{a, b} {
+		for _, path := range topic.KeyPaths {
+			normalized := normalizeMapPath(path)
+			if normalized == "" || seen[normalized] {
+				continue
+			}
+			seen[normalized] = true
+			paths = append(paths, normalized)
+		}
+	}
+	sort.Strings(paths)
+	return firstStrings(mapRecentKeyPaths(paths), 4)
+}
+
+func mapRecentMergedTopicType(a, b mapRecentTopic) string {
+	if a.TopicType == b.TopicType {
+		return a.TopicType
+	}
+	if a.TopicType == "" {
+		return b.TopicType
+	}
+	if b.TopicType == "" {
+		return a.TopicType
+	}
+	return ""
+}
+
+func mapRecentMergedQualitySignals(a, b mapRecentTopic) []string {
+	var signals []string
+	for _, signal := range a.QualitySignals {
+		signals = appendUniqueString(signals, signal)
+	}
+	for _, signal := range b.QualitySignals {
+		signals = appendUniqueString(signals, signal)
+	}
+	return signals
+}
+
+func mapRecentMergedRecentSignals(a, b mapRecentTopic) []mapTraceReceipt {
+	seen := map[string]bool{}
+	var receipts []mapTraceReceipt
+	for _, topic := range []mapRecentTopic{a, b} {
+		for _, receipt := range topic.RecentSignals {
+			key := mapRecentReceiptKey(receipt)
+			if key == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			receipts = append(receipts, receipt)
+			if len(receipts) >= mapMaxTraceReceipts {
+				return receipts
+			}
+		}
+	}
+	return receipts
+}
+
+func mapRecentReceiptKey(receipt mapTraceReceipt) string {
+	if receipt.SHA != "" {
+		return strings.ToLower(receipt.SHA)
+	}
+	return strings.ToLower(strings.TrimSpace(receipt.Subject))
+}
+
+func mergeMapRecentBoundary(merged *mapRecentTopic, a, b mapRecentTopic) {
+	switch {
+	case a.BoundaryLabel == "":
+		merged.BoundaryLabel = b.BoundaryLabel
+		merged.BoundaryRole = b.BoundaryRole
+		merged.BoundaryPaths = append([]string{}, b.BoundaryPaths...)
+	case b.BoundaryLabel == "":
+		merged.BoundaryLabel = a.BoundaryLabel
+		merged.BoundaryRole = a.BoundaryRole
+		merged.BoundaryPaths = append([]string{}, a.BoundaryPaths...)
+	case a.BoundaryLabel == b.BoundaryLabel && a.BoundaryRole == b.BoundaryRole:
+		merged.BoundaryLabel = a.BoundaryLabel
+		merged.BoundaryRole = a.BoundaryRole
+		merged.BoundaryPaths = mapRecentMergedBoundaryPaths(a, b)
+	default:
+		merged.BoundaryLabel = ""
+		merged.BoundaryRole = ""
+		merged.BoundaryPaths = nil
+		merged.QualitySignals = appendUniqueString(merged.QualitySignals, "boundary_ambiguous")
+	}
+}
+
+func mapRecentMergedBoundaryPaths(a, b mapRecentTopic) []string {
+	var paths []string
+	for _, path := range a.BoundaryPaths {
+		paths = appendUniqueString(paths, path)
+	}
+	for _, path := range b.BoundaryPaths {
+		paths = appendUniqueString(paths, path)
+	}
+	return firstStrings(paths, 3)
+}
+
+func mapRecentMergedScore(a, b, merged mapRecentTopic) int {
+	score := maxInt(a.Score, b.Score)
+	extraCommits := maxInt(0, merged.CommitCount-maxInt(a.CommitCount, b.CommitCount))
+	bonus := mapMinInt(extraCommits*4, 12)
+	if merged.TopicType == "maintenance" {
+		bonus = mapMinInt(bonus, 6)
+	}
+	return score + bonus
+}
+
+func mapRecentMaintenancePenalty(topic mapRecentTopic) int {
+	penalty := 80
+	if topic.FileCount > 20 {
+		penalty += (topic.FileCount - 20) * 2
+	}
+	return penalty
+}
+
+func bestMapRecentBoundaryArea(topic mapRecentTopic, areas []mapArea) (*mapArea, int) {
+	var best *mapArea
+	bestScore := 0
+	for i := range areas {
+		area := &areas[i]
+		score := mapRecentBoundaryMatchScore(topic, *area)
+		if score > bestScore {
+			best = area
+			bestScore = score
+		}
+	}
+	return best, bestScore
+}
+
+func mapRecentBoundaryMatchScore(topic mapRecentTopic, area mapArea) int {
+	score := 0
+	topicKey := normalizeMapKey(topic.Query)
+	if topicKey != "" {
+		score += scoreMapKeyMatch(normalizeMapKey(area.Label), topicKey) / 10
+		for _, cover := range area.Covers {
+			score += scoreMapKeyMatch(normalizeMapKey(cover), topicKey) / 14
+		}
+	}
+	for _, topicPath := range topic.KeyPaths {
+		topicPath = normalizeMapPath(topicPath)
+		for _, areaPath := range area.KeyPaths {
+			if mapRecentPathWithinBoundary(topicPath, areaPath) {
+				score += 7
+			}
+		}
+		for _, boundaryPath := range area.BoundaryPaths {
+			if mapRecentPathWithinBoundary(topicPath, boundaryPath) {
+				score += 9
+			}
+		}
+		for _, raw := range area.Diagnostics.RawAnchors {
+			if mapRecentPathWithinBoundary(topicPath, raw) {
+				score += 6
+			}
+		}
+	}
+	if topic.EvidenceCounts["source"] > 0 && area.EvidenceCounts["source"] > 0 {
+		score += 4
+	}
+	if topic.EvidenceCounts["test"] > 0 && area.EvidenceCounts["test"] > 0 {
+		score += 4
+	}
+	if mapRecentBoundaryAreaUseful(area) {
+		score += 3
+	}
+	if !mapRecentTopicHasSourceTest(topic) {
+		score = mapMinInt(score, 20)
+	}
+	return score
+}
+
+func mapRecentPathWithinBoundary(path, boundary string) bool {
+	path = strings.Trim(normalizeMapPath(path), "/")
+	boundary = strings.Trim(normalizeMapPath(strings.TrimSuffix(boundary, "/**")), "/")
+	if path == "" || boundary == "" || boundary == "." {
+		return false
+	}
+	return path == boundary || strings.HasPrefix(path, boundary+"/") || strings.HasPrefix(boundary, path+"/")
+}
+
+func mapRecentBoundaryAreaUseful(area mapArea) bool {
+	if area.BoundaryRole == mapBoundaryRoleDocsReference ||
+		area.BoundaryRole == mapBoundaryRoleHorizontalLayer ||
+		area.BoundaryRole == mapBoundaryRoleGenericParent ||
+		area.BoundaryRole == mapBoundaryRoleFixtureOrTestbed ||
+		area.BoundaryRole == mapBoundaryRoleRepoNamespace ||
+		area.BoundaryRole == mapBoundaryRoleHandoffUnsafe {
+		return false
+	}
+	return area.EvidenceCounts["source"] > 0 || area.EvidenceCounts["test"] > 0
+}
+
+func mapRecentTopicHasUsefulEvidence(topic mapRecentTopic) bool {
+	if mapRecentTopicHasSourceTest(topic) {
+		return true
+	}
+	for _, signal := range topic.QualitySignals {
+		if signal == "useful_boundary" {
+			return true
+		}
+	}
+	return false
+}
+
+func mapRecentTopicHasSourceTest(topic mapRecentTopic) bool {
+	return topic.EvidenceCounts["source"] > 0 || topic.EvidenceCounts["test"] > 0
 }
 
 func addMapRecentCommit(builder *mapRecentTopicBuilder, commit parsedFindGitCommit) {
@@ -4296,6 +4945,135 @@ func addMapRecentCommit(builder *mapRecentTopicBuilder, commit parsedFindGitComm
 	if findGitWorkRefPattern.MatchString(commit.subject + "\n" + commit.body) {
 		builder.Score += 2
 	}
+	if kind := mapRecentMaintenanceKind(commit, builder.EvidenceCounts); kind != "" {
+		builder.Maintenance[kind] = true
+	}
+}
+
+func mapRecentTopicType(builder *mapRecentTopicBuilder) string {
+	if len(builder.Maintenance) == 0 {
+		return ""
+	}
+	if builder.EvidenceCounts["source"] > 0 || builder.EvidenceCounts["test"] > 0 {
+		return ""
+	}
+	return "maintenance"
+}
+
+func mapRecentBuilderQualitySignals(builder *mapRecentTopicBuilder) []string {
+	if len(builder.Maintenance) == 0 {
+		return nil
+	}
+	var kinds []string
+	for kind := range builder.Maintenance {
+		kinds = append(kinds, "maintenance:"+kind)
+	}
+	sort.Strings(kinds)
+	return kinds
+}
+
+func mapRecentMaintenanceKind(commit parsedFindGitCommit, evidence map[string]int) string {
+	if evidence["source"] > 0 || evidence["test"] > 0 {
+		return ""
+	}
+	subject := strings.ToLower(commit.subject)
+	switch {
+	case strings.Contains(subject, "sponsor"):
+		return "sponsors"
+	case strings.Contains(subject, "translation") || strings.Contains(subject, "translate") || mapRecentCommitTouchesLocaleDocs(commit):
+		return "translation"
+	case strings.Contains(subject, "release notes") ||
+		strings.Contains(subject, "latest-changes") ||
+		strings.Contains(subject, "latest changes"):
+		return "release-docs"
+	case strings.Contains(subject, "dependency") ||
+		strings.Contains(subject, "dependencies") ||
+		strings.Contains(subject, "bump ") ||
+		strings.Contains(subject, "update to "):
+		return "dependency"
+	case mapRecentCommitWorkflowOnly(commit):
+		return "workflow"
+	case mapRecentCommitBulkDocsOnly(commit):
+		return "doc-archive"
+	case mapRecentCommitDocsOnly(commit) && strings.Contains(subject, "update"):
+		return "docs"
+	case mapRecentCommitConfigOnly(commit) && (strings.Contains(subject, "update") || strings.Contains(subject, "fix")):
+		return "config"
+	default:
+		return ""
+	}
+}
+
+func mapRecentCommitTouchesLocaleDocs(commit parsedFindGitCommit) bool {
+	for _, path := range commit.paths {
+		lower := strings.ToLower(normalizeMapPath(path))
+		if strings.HasPrefix(lower, "docs/") && strings.Count(lower, "/") >= 2 {
+			parts := strings.Split(lower, "/")
+			if len(parts) > 1 && len(parts[1]) == 2 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func mapRecentCommitWorkflowOnly(commit parsedFindGitCommit) bool {
+	if len(commit.paths) == 0 {
+		return false
+	}
+	for _, path := range commit.paths {
+		if !strings.HasPrefix(strings.ToLower(normalizeMapPath(path)), ".github/workflows/") {
+			return false
+		}
+	}
+	return true
+}
+
+func mapRecentCommitDocsOnly(commit parsedFindGitCommit) bool {
+	if len(commit.paths) == 0 {
+		return false
+	}
+	for _, path := range commit.paths {
+		if mapRecentPathFamily(path) != "doc" {
+			return false
+		}
+	}
+	return true
+}
+
+func mapRecentCommitBulkDocsOnly(commit parsedFindGitCommit) bool {
+	if !mapRecentCommitDocsOnly(commit) {
+		return false
+	}
+	if len(commit.paths) > 20 {
+		return true
+	}
+	subject := strings.ToLower(commit.subject)
+	if strings.Contains(subject, "archive") || strings.HasPrefix(strings.TrimSpace(subject), "record ") {
+		return true
+	}
+	for _, path := range commit.paths {
+		lower := strings.ToLower(normalizeMapPath(path))
+		if strings.Contains(lower, "/archive/") ||
+			strings.Contains(lower, "/research-archive/") ||
+			strings.Contains(lower, "/raw-samples/") ||
+			strings.Contains(lower, "/raw-output-samples/") {
+			return true
+		}
+	}
+	return false
+}
+
+func mapRecentCommitConfigOnly(commit parsedFindGitCommit) bool {
+	if len(commit.paths) == 0 {
+		return false
+	}
+	for _, path := range commit.paths {
+		if mapRecentPathFamily(path) != "config" {
+			return false
+		}
+	}
+	return true
 }
 
 func (builder *mapRecentTopicBuilder) mapRecentTopic() mapRecentTopic {
@@ -4311,6 +5089,8 @@ func (builder *mapRecentTopicBuilder) mapRecentTopic() mapRecentTopic {
 		FileCount:      len(builder.PathSet),
 		EvidenceCounts: builder.EvidenceCounts,
 		KeyPaths:       firstStrings(mapRecentKeyPaths(paths), 4),
+		TopicType:      mapRecentTopicType(builder),
+		QualitySignals: mapRecentBuilderQualitySignals(builder),
 		RecentSignals:  builder.RecentSignals,
 		Try:            mapFindPackCommand(builder.Query),
 		Score:          builder.Score,
@@ -4461,7 +5241,7 @@ func mapRecentPathTerms(paths []string) []string {
 }
 
 func mapRecentCommitNoisy(commit parsedFindGitCommit) bool {
-	if findGitReceiptCommitNoisy(commit) || mapCommitNoisy(commit) {
+	if findGitReceiptCommitNoisy(commit) {
 		return true
 	}
 	if len(commit.paths) == 0 {
@@ -4469,6 +5249,23 @@ func mapRecentCommitNoisy(commit parsedFindGitCommit) bool {
 	}
 	subject := strings.ToLower(commit.subject)
 	switch {
+	case strings.HasPrefix(subject, "merge ") ||
+		strings.HasPrefix(subject, "revert ") ||
+		strings.HasPrefix(subject, "release") ||
+		strings.Contains(subject, "dependabot") ||
+		strings.Contains(subject, "renovate") ||
+		strings.Contains(subject, "lockfile") ||
+		strings.Contains(subject, "pre-commit") ||
+		strings.Contains(subject, "typo") ||
+		strings.Contains(subject, "typos") ||
+		strings.Contains(subject, "update docs") ||
+		strings.Contains(subject, "docs references"):
+		return true
+	case (strings.Contains(subject, "dependencies") ||
+		strings.Contains(subject, "translation") ||
+		strings.Contains(subject, "translations")) &&
+		!mapRecentCommitHasSourceTestPath(commit):
+		return true
 	case strings.Contains(subject, "coverage reports") ||
 		strings.Contains(subject, "update release notes") ||
 		strings.Contains(subject, "move tests to correct location") ||
@@ -4495,6 +5292,16 @@ func mapRecentCommitNoisy(commit parsedFindGitCommit) bool {
 	return lockOnly || !hasUsefulPath
 }
 
+func mapRecentCommitHasSourceTestPath(commit parsedFindGitCommit) bool {
+	for _, path := range commit.paths {
+		family := mapRecentPathFamily(path)
+		if family == "source" || family == "test" {
+			return true
+		}
+	}
+	return false
+}
+
 func mapRecentPathNoisy(path string) bool {
 	parts := strings.Split(normalizeMapPath(path), "/")
 	for _, part := range parts {
@@ -4504,6 +5311,9 @@ func mapRecentPathNoisy(path string) bool {
 	}
 	lower := strings.ToLower(filepath.ToSlash(path))
 	return strings.Contains(lower, "/coverage/") ||
+		strings.Contains(lower, "/.devspecs/tasks/") ||
+		strings.HasPrefix(lower, ".devspecs/tasks/") ||
+		strings.HasPrefix(lower, "devspecs/tasks/") ||
 		strings.Contains(lower, "/snapshots/") ||
 		strings.HasSuffix(lower, "cover.out") ||
 		strings.HasSuffix(lower, "lcov.info") ||
@@ -4527,8 +5337,11 @@ func mapRecentComparableWords(value string) []string {
 
 func mapRecentStopWord(word string) bool {
 	switch word {
-	case "public", "private", "yaml", "yml", "json", "sql", "markdown":
+	case "api", "app", "auth", "backend", "cookie", "frontend", "oauth", "private", "public", "router", "routing", "sql", "swagger", "yaml", "yml", "json", "markdown":
 		return false
+	}
+	if word == "e" || word == "g" || word == "eg" || word == "i" || word == "ie" {
+		return true
 	}
 	if mapTraceStopWord(word) {
 		return true
@@ -4552,9 +5365,12 @@ func mapRecentStopWord(word string) bool {
 func mapRecentPathFamily(path string) string {
 	lower := strings.ToLower(filepath.ToSlash(path))
 	ext := strings.ToLower(filepath.Ext(lower))
+	base := strings.ToLower(filepath.Base(lower))
 	switch {
 	case strings.Contains(lower, "/test/") ||
 		strings.Contains(lower, "/tests/") ||
+		strings.HasPrefix(lower, "test/") ||
+		strings.HasPrefix(lower, "tests/") ||
 		strings.Contains(lower, "__tests__") ||
 		strings.Contains(lower, "_test.") ||
 		strings.Contains(lower, ".test.") ||
@@ -4566,6 +5382,10 @@ func mapRecentPathFamily(path string) string {
 		return "doc"
 	case ext == ".sql" ||
 		strings.Contains(lower, "/migrations/") ||
+		base == ".gitignore" ||
+		base == ".dockerignore" ||
+		base == "makefile" ||
+		base == "dockerfile" ||
 		strings.HasSuffix(lower, "package.json") ||
 		strings.HasSuffix(lower, "go.mod") ||
 		strings.HasSuffix(lower, "cargo.toml") ||
@@ -4592,13 +5412,28 @@ func writeMapRecentText(out io.Writer, m mapRecentOutput, verbose bool) {
 	}
 	for i, topic := range m.Topics {
 		fmt.Fprintf(out, "%d. %s\n", i+1, topic.Label)
+		if topic.TopicType == "maintenance" {
+			fmt.Fprintln(out, "   Topic type: maintenance")
+		}
+		if topic.BoundaryLabel != "" {
+			fmt.Fprintf(out, "   Boundary: %s\n", topic.BoundaryLabel)
+		}
 		fmt.Fprintf(out, "   Evidence: %s\n", mapRecentEvidenceText(topic))
-		if len(topic.RecentSignals) > 0 {
+		if len(topic.RecentSignals) == 1 {
 			receipt := topic.RecentSignals[0]
 			if receipt.SHA != "" {
 				fmt.Fprintf(out, "   Recent signal: %s %s\n", receipt.SHA, receipt.Subject)
 			} else {
 				fmt.Fprintf(out, "   Recent signal: %s\n", receipt.Subject)
+			}
+		} else if len(topic.RecentSignals) > 1 {
+			fmt.Fprintln(out, "   Recent signals:")
+			for _, receipt := range topic.RecentSignals {
+				if receipt.SHA != "" {
+					fmt.Fprintf(out, "   - %s %s\n", receipt.SHA, receipt.Subject)
+				} else {
+					fmt.Fprintf(out, "   - %s\n", receipt.Subject)
+				}
 			}
 		}
 		if len(topic.KeyPaths) > 0 {
@@ -4612,6 +5447,9 @@ func writeMapRecentText(out io.Writer, m mapRecentOutput, verbose bool) {
 		}
 		if verbose {
 			fmt.Fprintf(out, "   Diagnostics: score=%d query=%q files=%d commits=%d\n", topic.Score, topic.Query, topic.FileCount, topic.CommitCount)
+			if len(topic.QualitySignals) > 0 {
+				fmt.Fprintf(out, "   Quality signals: %s\n", strings.Join(topic.QualitySignals, ", "))
+			}
 		}
 		fmt.Fprintln(out)
 	}
@@ -5652,6 +6490,24 @@ func (idx *mapPackabilityIndex) add(pathValue, sourceType string) {
 	}
 }
 
+func mapPackabilityIndexFromFiles(files []string) *mapPackabilityIndex {
+	if len(files) == 0 {
+		return nil
+	}
+	index := &mapPackabilityIndex{
+		paths: map[string]string{},
+		dirs:  map[string]int{},
+		words: map[string]int{},
+	}
+	for _, pathValue := range files {
+		index.add(pathValue, mapBoundaryPathFamily(pathValue))
+	}
+	if len(index.paths) == 0 {
+		return nil
+	}
+	return index
+}
+
 func mapPackabilityDir(pathValue string) string {
 	pathValue = normalizeMapPath(pathValue)
 	if pathValue == "" {
@@ -5804,7 +6660,7 @@ func mapTryCandidates(label string, covers []string, receipts []mapTraceReceipt,
 	if !mapTryRoleNeedsSpecificContext(boundaryRole) && !mapTryLabelNeedsSpecificContext(label) {
 		add(label, "label")
 	}
-	for _, receipt := range firstMapTraceReceipts(receipts, 2) {
+	for _, receipt := range firstMapTraceReceipts(receipts, mapTryTraceReceiptCandidateLimit(receipts)) {
 		if traceTaskQuery := mapTraceTaskQuery(receipt.Subject); traceTaskQuery != "" {
 			add(traceTaskQuery, "trace_task")
 		}
@@ -5827,6 +6683,31 @@ func mapTryCandidates(label string, covers []string, receipts []mapTraceReceipt,
 		}
 	}
 	return candidates
+}
+
+func mapTryTraceReceiptCandidateLimit(receipts []mapTraceReceipt) int {
+	limit := 2
+	if len(receipts) <= limit {
+		return limit
+	}
+	for _, receipt := range firstMapTraceReceipts(receipts, limit) {
+		if mapTraceTaskQuery(receipt.Subject) == "" {
+			continue
+		}
+		words := wordsFromMap(stripMapCommitPrefixes(receipt.Subject))
+		if mapTryTechnicalMigrationQuery(words) {
+			return mapMaxTraceReceipts
+		}
+		for _, word := range words {
+			if mapTryScaffoldHandoffWord(word) {
+				return mapMaxTraceReceipts
+			}
+			if mapTryImplementationDetailWord(word) {
+				return mapMaxTraceReceipts
+			}
+		}
+	}
+	return limit
 }
 
 func bestMapTryCandidate(candidates []mapTryCandidate, label string, covers []string, keyPaths []string, boundaryRole string) mapTryCandidate {
@@ -5878,6 +6759,9 @@ func mapTryCandidatePackable(candidate mapTryCandidate, diag *mapPackabilityDiag
 	if diag.KeyPathCount == 0 {
 		return diag.IndexedQueryAnchorCount >= 1
 	}
+	if mapTryRoleNeedsSpecificContext(boundaryRole) && diag.IndexedQueryAnchorCount == 0 {
+		return false
+	}
 	if diag.IndexedKeyPathCount > 0 {
 		return true
 	}
@@ -5914,13 +6798,16 @@ func mapTryCandidateScore(candidate mapTryCandidate, label string, covers []stri
 	}
 	pathWords := mapTryWordSet(keyPaths)
 	coverWords := mapTryWordSet(covers)
-	specific, broad, pathSupport, coverSupport, lowValue, generatedLeaf := 0, 0, 0, 0, 0, 0
+	specific, broad, pathSupport, coverSupport, implementationDetail, lowValue, generatedLeaf := 0, 0, 0, 0, 0, 0, 0
 	for _, word := range words {
 		if mapTrySpecificWord(word) {
 			specific++
 		}
 		if mapGenericTerms[word] || mapBoundaryHandoffBroadTerms[word] || mapTraceStopWord(word) {
 			broad++
+		}
+		if mapTryImplementationDetailWord(word) {
+			implementationDetail++
 		}
 		if mapTryLowValueHandoffWord(word) {
 			lowValue++
@@ -5953,6 +6840,12 @@ func mapTryCandidateScore(candidate mapTryCandidate, label string, covers []stri
 	score := specific*12 + pathSupport*8 + coverSupport*6 - broad*5
 	score -= lowValue * 10
 	score -= generatedLeaf * 28
+	if candidate.Source == "trace_task" && mapTryRoleNeedsSpecificContext(boundaryRole) {
+		score -= implementationDetail * 24
+		if mapTryTechnicalMigrationQuery(words) {
+			score -= 36
+		}
+	}
 	switch candidate.Source {
 	case "path":
 		score -= 4
@@ -6066,11 +6959,38 @@ func mapTrySpecificWord(word string) bool {
 	}
 }
 
+func mapTryScaffoldHandoffWord(word string) bool {
+	switch word {
+	case "skeleton":
+		return true
+	default:
+		return false
+	}
+}
+
+func mapTryImplementationDetailWord(word string) bool {
+	switch word {
+	case "cache", "cached", "caching", "column", "columns", "disable", "disabled",
+		"execute", "execution", "skip", "skips", "validation":
+		return true
+	default:
+		return false
+	}
+}
+
+func mapTryTechnicalMigrationQuery(words []string) bool {
+	seen := mapStringSet(words)
+	if !seen["migrate"] && !seen["migration"] && !seen["migrating"] {
+		return false
+	}
+	return seen["alchemy"] || seen["connector"] || seen["sql"] || seen["sqlalchemy"]
+}
+
 func mapTryLowValueHandoffWord(word string) bool {
 	switch word {
 	case "addlicense", "cname", "compat", "config", "configs", "configuration", "csproj",
 		"dockerfile", "dockerignore", "eslint", "fixture", "fixtures", "impl", "implementation",
-		"license", "manifest", "postcss", "prettier", "template", "templates", "version":
+		"license", "manifest", "postcss", "prettier", "skeleton", "template", "templates", "version":
 		return true
 	default:
 		return false

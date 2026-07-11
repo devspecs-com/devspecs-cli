@@ -239,7 +239,7 @@ hidden_tree:
         purpose: List extracted acceptance/success/OKR criteria from artifacts.
       eval:
         status: hidden
-        purpose: Run deterministic retrieval evals for fixture repos.
+        purpose: Run deterministic retrieval and activation regression evals for fixture repos and locked repo matrices.
       link:
         status: hidden
         purpose: Link an artifact to an external target.

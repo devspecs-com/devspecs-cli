@@ -79,20 +79,38 @@ type SourceCompanionRejectionExample struct {
 
 // SourceManifestDiagnostics summarizes the hidden compact first-party source/test manifest.
 type SourceManifestDiagnostics struct {
-	Enabled         bool           `json:"enabled"`
-	InventoryFiles  int            `json:"inventory_files,omitempty"`
-	SourceLikeFiles int            `json:"source_like_files,omitempty"`
-	TestLikeFiles   int            `json:"test_like_files,omitempty"`
-	IndexedFiles    int            `json:"indexed_files,omitempty"`
-	IndexedTests    int            `json:"indexed_tests,omitempty"`
-	SymbolRows      int            `json:"symbol_rows,omitempty"`
-	TestRows        int            `json:"test_rows,omitempty"`
-	ImportRows      int            `json:"import_rows,omitempty"`
-	FTSRows         int            `json:"fts_rows,omitempty"`
-	IgnoredByReason map[string]int `json:"ignored_by_reason,omitempty"`
-	RowsByRoot      map[string]int `json:"rows_by_root,omitempty"`
-	RowsByLanguage  map[string]int `json:"rows_by_language,omitempty"`
-	RowsByRole      map[string]int `json:"rows_by_role,omitempty"`
+	Enabled         bool             `json:"enabled"`
+	InventoryFiles  int              `json:"inventory_files,omitempty"`
+	SourceLikeFiles int              `json:"source_like_files,omitempty"`
+	TestLikeFiles   int              `json:"test_like_files,omitempty"`
+	IndexedFiles    int              `json:"indexed_files,omitempty"`
+	IndexedTests    int              `json:"indexed_tests,omitempty"`
+	SymbolRows      int              `json:"symbol_rows,omitempty"`
+	TestRows        int              `json:"test_rows,omitempty"`
+	ImportRows      int              `json:"import_rows,omitempty"`
+	FTSRows         int              `json:"fts_rows,omitempty"`
+	IgnoredByReason map[string]int   `json:"ignored_by_reason,omitempty"`
+	RowsByRoot      map[string]int   `json:"rows_by_root,omitempty"`
+	RowsByLanguage  map[string]int   `json:"rows_by_language,omitempty"`
+	RowsByRole      map[string]int   `json:"rows_by_role,omitempty"`
+	PhaseMS         map[string]int64 `json:"phase_ms,omitempty"`
+}
+
+// PhaseTimingDiagnostics is hidden, opt-in scan timing for performance tracks.
+// It is omitted from normal scan JSON so stable user-facing output stays quiet.
+type PhaseTimingDiagnostics struct {
+	Enabled bool             `json:"enabled"`
+	TotalMS int64            `json:"total_ms"`
+	Phases  []PhaseTimingRow `json:"phases"`
+}
+
+// PhaseTimingRow summarizes one coarse scan phase.
+type PhaseTimingRow struct {
+	Name       string            `json:"name"`
+	Adapter    string            `json:"adapter,omitempty"`
+	DurationMS int64             `json:"duration_ms"`
+	Counts     map[string]int    `json:"counts,omitempty"`
+	Details    map[string]string `json:"details,omitempty"`
 }
 
 // ProgressEvent is a coarse scan heartbeat for long eval/index runs.
@@ -154,6 +172,7 @@ type Result struct {
 	SourceCompanions   *SourceCompanionAdmissionDiagnostics `json:"source_companion_admission,omitempty"`
 	SourceManifest     *SourceManifestDiagnostics           `json:"source_manifest,omitempty"`
 	Traversal          *TraversalDiagnostics                `json:"traversal,omitempty"`
+	PhaseTiming        *PhaseTimingDiagnostics              `json:"phase_timing,omitempty"`
 
 	sourcesAgg map[string]*sourceAgg `json:"-"`
 }

@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -261,6 +262,334 @@ func TestMapRecentTopicsSkipNoiseAndBuildPackHandoff(t *testing.T) {
 	if topic.EvidenceCounts["source"] == 0 || topic.EvidenceCounts["config"] == 0 {
 		t.Fatalf("expected source/config evidence, got %#v", topic.EvidenceCounts)
 	}
+}
+
+func TestRecentBoundaryQualityDemotesMaintenanceAheadOfSourceWork(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	t.Setenv("DEVSPECS_HOME", t.TempDir())
+	mustMkdirAll(t, filepath.Join(repoRoot, "fastapi", "openapi"))
+	mustMkdirAll(t, filepath.Join(repoRoot, "tests"))
+	mustMkdirAll(t, filepath.Join(repoRoot, "docs", "en", "data"))
+	mustMkdirAll(t, filepath.Join(repoRoot, ".github", "workflows"))
+	mustWriteFile(t, filepath.Join(repoRoot, "fastapi", "openapi", "docs.py"), "def swagger_ui_html():\n    return 'oauth redirect'\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "fastapi", "openapi", "models.py"), "class OpenAPI: pass\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "tests", "test_custom_swagger_ui_redirect.py"), "def test_redirect():\n    assert True\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "fix: swagger oauth redirect behavior")
+	mustWriteFile(t, filepath.Join(repoRoot, "README.md"), "Sponsor TutorCruncher\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "docs", "en", "data", "sponsors.yml"), "name: TutorCruncher\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "docs", "en", "data", "sponsors_badge.yml"), "name: TutorCruncher\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Update sponsors: add TutorCruncher")
+	mustWriteFile(t, filepath.Join(repoRoot, ".github", "workflows", "latest-changes.yml"), "name: latest changes\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Fix latest-changes checkout target")
+
+	cmd := NewRecentCmd()
+	cmd.SetArgs([]string{"--path", repoRoot, "--no-refresh", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out mapRecentOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("recent json: %v\n%s", err, buf.String())
+	}
+	if len(out.Topics) < 2 {
+		t.Fatalf("expected source and maintenance topics, got %#v", out.Topics)
+	}
+	if out.Topics[0].TopicType == "maintenance" || !strings.Contains(out.Topics[0].Query, "swagger") {
+		t.Fatalf("source-backed swagger topic should rank first, got %#v", out.Topics)
+	}
+	if !mapTestHasSignal(out.Topics[0].QualitySignals, "source_test_support") {
+		t.Fatalf("top topic missing source/test quality signal: %#v", out.Topics[0])
+	}
+	foundDemotedMaintenance := false
+	for _, topic := range out.Topics[1:] {
+		if topic.TopicType == "maintenance" && mapTestHasSignal(topic.QualitySignals, "maintenance_demoted") {
+			foundDemotedMaintenance = true
+			break
+		}
+	}
+	if !foundDemotedMaintenance {
+		t.Fatalf("expected demoted maintenance topic, got %#v", out.Topics)
+	}
+}
+
+func TestRecentKeepsSourceBackedDependencyLanguage(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	t.Setenv("DEVSPECS_HOME", t.TempDir())
+	mustMkdirAll(t, filepath.Join(repoRoot, "fastapi"))
+	mustMkdirAll(t, filepath.Join(repoRoot, "tests"))
+	mustMkdirAll(t, filepath.Join(repoRoot, "docs", "en", "data"))
+	mustMkdirAll(t, filepath.Join(repoRoot, ".github", "workflows"))
+	mustWriteFile(t, filepath.Join(repoRoot, "fastapi", "routing.py"), "def frontend():\n    return 'cookie auth'\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "tests", "test_frontend.py"), "def test_frontend_dependencies():\n    assert True\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Support dependencies in `app.frontend()`, e.g. for automatic cookie authentication for the frontend")
+	mustWriteFile(t, filepath.Join(repoRoot, "README.md"), "Sponsor TutorCruncher\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "docs", "en", "data", "sponsors.yml"), "name: TutorCruncher\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "docs", "en", "data", "sponsors_badge.yml"), "name: TutorCruncher\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Update sponsors: add TutorCruncher")
+	mustWriteFile(t, filepath.Join(repoRoot, ".github", "workflows", "latest-changes.yml"), "name: latest changes\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Fix latest-changes checkout target")
+
+	cmd := NewRecentCmd()
+	cmd.SetArgs([]string{"--path", repoRoot, "--no-refresh", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out mapRecentOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("recent json: %v\n%s", err, buf.String())
+	}
+	if len(out.Topics) < 2 {
+		t.Fatalf("expected source and maintenance topics, got %#v", out.Topics)
+	}
+	if out.Topics[0].TopicType == "maintenance" || !strings.Contains(out.Topics[0].Query, "frontend") {
+		t.Fatalf("source-backed frontend topic should rank first, got %#v", out.Topics)
+	}
+	if !mapTestHasSignal(out.Topics[0].QualitySignals, "source_test_support") {
+		t.Fatalf("top topic missing source/test quality signal: %#v", out.Topics[0])
+	}
+}
+
+func TestRecentDemotesBulkDocsArchiveWhenSourceWorkExists(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	t.Setenv("DEVSPECS_HOME", t.TempDir())
+	mustMkdirAll(t, filepath.Join(repoRoot, "demos", "fastapi-task-flow"))
+	mustMkdirAll(t, filepath.Join(repoRoot, "docs", "raw-samples", "p06-fastapi"))
+	mustWriteFile(t, filepath.Join(repoRoot, "demos", "fastapi-task-flow", "fastapi-task-flow.tape"), "Type \"ds recent\"\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "demos", "fastapi-task-flow", "fastapi-task-flow.windows.tape"), "Type \"ds recent\"\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Refresh FastAPI VHS flows")
+	for i := 0; i < 32; i++ {
+		name := fmt.Sprintf("sample-%02d.md", i)
+		mustWriteFile(t, filepath.Join(repoRoot, "docs", "raw-samples", "p06-fastapi", name), "captured output\n")
+	}
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Record P06 FastAPI task demo gate")
+
+	cmd := NewRecentCmd()
+	cmd.SetArgs([]string{"--path", repoRoot, "--no-refresh", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out mapRecentOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("recent json: %v\n%s", err, buf.String())
+	}
+	if len(out.Topics) < 2 {
+		t.Fatalf("expected source and bulk-doc topics, got %#v", out.Topics)
+	}
+	if out.Topics[0].TopicType == "maintenance" || !strings.Contains(out.Topics[0].Query, "fast api") {
+		t.Fatalf("source-backed demo topic should rank first, got %#v", out.Topics)
+	}
+	foundDemotedBulkDocs := false
+	for _, topic := range out.Topics[1:] {
+		if topic.TopicType == "maintenance" && mapTestHasSignal(topic.QualitySignals, "maintenance:doc-archive") && mapTestHasSignal(topic.QualitySignals, "maintenance_demoted") {
+			foundDemotedBulkDocs = true
+			break
+		}
+	}
+	if !foundDemotedBulkDocs {
+		t.Fatalf("expected demoted bulk docs archive, got %#v", out.Topics)
+	}
+}
+
+func TestRecentMergesOverlappingMaintenanceTopics(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	t.Setenv("DEVSPECS_HOME", t.TempDir())
+	mustMkdirAll(t, filepath.Join(repoRoot, "fastapi"))
+	mustMkdirAll(t, filepath.Join(repoRoot, "tests"))
+	mustMkdirAll(t, filepath.Join(repoRoot, "docs", "en", "data"))
+	mustMkdirAll(t, filepath.Join(repoRoot, ".github", "workflows"))
+
+	mustWriteFile(t, filepath.Join(repoRoot, "fastapi", "routing.py"), "def frontend():\n    return 'cookie auth'\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "tests", "test_frontend.py"), "def test_frontend_dependencies():\n    assert True\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Support dependencies in app.frontend(), e.g. for automatic cookie authentication for the frontend")
+
+	mustWriteFile(t, filepath.Join(repoRoot, "README.md"), "Sponsor TutorCruncher\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "docs", "en", "data", "sponsors.yml"), "name: TutorCruncher\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "docs", "en", "data", "sponsors_badge.yml"), "name: TutorCruncher\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Update sponsors: add TutorCruncher")
+	mustWriteFile(t, filepath.Join(repoRoot, "README.md"), "Sponsor RapidProxy\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "docs", "en", "data", "sponsors.yml"), "name: RapidProxy\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Update sponsors: remove RapidProxy")
+
+	mustWriteFile(t, filepath.Join(repoRoot, ".github", "workflows", "latest-changes.yml"), "name: latest changes\nversion: 0.6.1\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Update latest-changes to 0.6.1")
+	mustWriteFile(t, filepath.Join(repoRoot, ".github", "workflows", "latest-changes.yml"), "name: latest changes\ncheckout: main\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Fix latest-changes checkout target")
+
+	out := mapTestRunRecentJSON(t, repoRoot)
+	if len(out.Topics) < 3 {
+		t.Fatalf("expected source, sponsors, and latest topics, got %#v", out.Topics)
+	}
+	if out.Topics[0].TopicType == "maintenance" || !strings.Contains(out.Topics[0].Query, "frontend") {
+		t.Fatalf("source-backed frontend topic should stay first, got %#v", out.Topics)
+	}
+
+	sponsors := mapTestTopicsContaining(out, "sponsor")
+	if len(sponsors) != 1 {
+		t.Fatalf("expected one merged sponsor topic, got %#v", sponsors)
+	}
+	if sponsors[0].CommitCount != 2 || len(sponsors[0].RecentSignals) < 2 {
+		t.Fatalf("sponsor topic should carry both commits/signals, got %#v", sponsors[0])
+	}
+	if sponsors[0].TopicType != "maintenance" || !mapTestHasSignal(sponsors[0].QualitySignals, "maintenance:sponsors") {
+		t.Fatalf("sponsor topic should preserve maintenance framing, got %#v", sponsors[0])
+	}
+	if sponsors[0].BoundaryLabel != "" {
+		t.Fatalf("merged maintenance topic should omit misleading boundaries, got %#v", sponsors[0])
+	}
+
+	latest := mapTestTopicsContaining(out, "latest")
+	if len(latest) != 1 {
+		t.Fatalf("expected one merged latest-changes workflow topic, got %#v", latest)
+	}
+	if latest[0].CommitCount != 2 || len(latest[0].RecentSignals) < 2 {
+		t.Fatalf("latest topic should carry both commits/signals, got %#v", latest[0])
+	}
+	if latest[0].TopicType != "maintenance" || !mapTestHasSignal(latest[0].QualitySignals, "maintenance:release-docs") {
+		t.Fatalf("latest topic should preserve release-docs maintenance framing, got %#v", latest[0])
+	}
+
+	var text bytes.Buffer
+	writeMapRecentText(&text, out, false)
+	if !strings.Contains(text.String(), "Recent signals:") {
+		t.Fatalf("merged text output should show plural recent signals:\n%s", text.String())
+	}
+}
+
+func TestRecentMergesOverlappingSourceTestTopics(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	t.Setenv("DEVSPECS_HOME", t.TempDir())
+	mustMkdirAll(t, filepath.Join(repoRoot, "fastapi", "openapi"))
+	mustMkdirAll(t, filepath.Join(repoRoot, "tests"))
+	mustWriteFile(t, filepath.Join(repoRoot, "fastapi", "openapi", "docs.py"), "def swagger_ui_html():\n    return 'oauth redirect'\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "tests", "test_swagger_redirect.py"), "def test_redirect():\n    assert True\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Fix swagger oauth redirect behavior")
+	mustWriteFile(t, filepath.Join(repoRoot, "fastapi", "openapi", "docs.py"), "def swagger_ui_html():\n    return 'hardened oauth redirect'\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "tests", "test_swagger_redirect.py"), "def test_redirect():\n    assert 'oauth'\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Harden swagger oauth redirect tests")
+
+	out := mapTestRunRecentJSON(t, repoRoot)
+	swagger := mapTestTopicsContaining(out, "swagger")
+	if len(swagger) != 1 {
+		t.Fatalf("expected one merged swagger topic, got %#v", swagger)
+	}
+	if swagger[0].TopicType == "maintenance" || !mapTestHasSignal(swagger[0].QualitySignals, "source_test_support") {
+		t.Fatalf("merged swagger topic should stay source/test-backed, got %#v", swagger[0])
+	}
+	if swagger[0].CommitCount != 2 || len(swagger[0].RecentSignals) < 2 {
+		t.Fatalf("merged swagger topic should carry both source/test commits, got %#v", swagger[0])
+	}
+}
+
+func TestRecentDoesNotMergeUnrelatedSourceTopicsByGenericWords(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	t.Setenv("DEVSPECS_HOME", t.TempDir())
+	mustMkdirAll(t, filepath.Join(repoRoot, "fastapi", "openapi"))
+	mustMkdirAll(t, filepath.Join(repoRoot, "fastapi"))
+	mustMkdirAll(t, filepath.Join(repoRoot, "tests"))
+	mustWriteFile(t, filepath.Join(repoRoot, "fastapi", "openapi", "docs.py"), "def swagger_ui_html():\n    return 'oauth redirect'\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "tests", "test_swagger_redirect.py"), "def test_redirect():\n    assert True\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Fix swagger oauth redirect behavior")
+	mustWriteFile(t, filepath.Join(repoRoot, "fastapi", "routing.py"), "def frontend():\n    return 'cookie auth'\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "tests", "test_frontend_cookie.py"), "def test_frontend_cookie():\n    assert True\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Fix frontend cookie authentication")
+
+	out := mapTestRunRecentJSON(t, repoRoot)
+	swagger := mapTestTopicsContaining(out, "swagger")
+	frontend := mapTestTopicsContaining(out, "frontend")
+	if len(swagger) != 1 || len(frontend) != 1 {
+		t.Fatalf("expected separate swagger and frontend topics, got %#v", out.Topics)
+	}
+	if swagger[0].CommitCount != 1 || frontend[0].CommitCount != 1 {
+		t.Fatalf("unrelated source topics should not merge by generic words, got swagger=%#v frontend=%#v", swagger[0], frontend[0])
+	}
+}
+
+func TestRecentMaintenanceOnlyOutputStaysVisibleAndFramed(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	t.Setenv("DEVSPECS_HOME", t.TempDir())
+	mustMkdirAll(t, filepath.Join(repoRoot, "docs", "en", "data"))
+	mustWriteFile(t, filepath.Join(repoRoot, "README.md"), "Sponsor RapidProxy\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "docs", "en", "data", "sponsors.yml"), "name: RapidProxy\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Update sponsors: remove RapidProxy")
+
+	cmd := NewRecentCmd()
+	cmd.SetArgs([]string{"--path", repoRoot, "--no-refresh"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	text := buf.String()
+	if !strings.Contains(text, "Sponsors Rapid Proxy") {
+		t.Fatalf("maintenance topic should remain visible:\n%s", text)
+	}
+	if !strings.Contains(text, "Topic type: maintenance") {
+		t.Fatalf("maintenance topic should be framed:\n%s", text)
+	}
+}
+
+func mapTestRunRecentJSON(t *testing.T, repoRoot string) mapRecentOutput {
+	t.Helper()
+	cmd := NewRecentCmd()
+	cmd.SetArgs([]string{"--path", repoRoot, "--no-refresh", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out mapRecentOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("recent json: %v\n%s", err, buf.String())
+	}
+	return out
+}
+
+func mapTestTopicsContaining(out mapRecentOutput, term string) []mapRecentTopic {
+	var topics []mapRecentTopic
+	term = strings.ToLower(term)
+	for _, topic := range out.Topics {
+		haystack := strings.ToLower(topic.Query + " " + topic.Label)
+		for _, path := range topic.KeyPaths {
+			haystack += " " + strings.ToLower(path)
+		}
+		if strings.Contains(haystack, term) {
+			topics = append(topics, topic)
+		}
+	}
+	return topics
+}
+
+func mapTestHasSignal(signals []string, want string) bool {
+	for _, signal := range signals {
+		if signal == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestFastMapFallbackAddsIndexRequiredCaveatForUnindexedRepo(t *testing.T) {
@@ -947,6 +1276,81 @@ func TestMapTryCommandPrefersHighQualityTraceTaskOverPathTokens(t *testing.T) {
 	}
 }
 
+func TestMapTryCommandConsidersThirdTraceReceiptForStablePathSupportedQuery(t *testing.T) {
+	got := mapTryCommandForRole(
+		"Flows & Automation",
+		nil,
+		[]mapTraceReceipt{
+			{SHA: "21b6442", Subject: "docs: add launch demo animations"},
+			{SHA: "be86e4b", Subject: "Add launch website route skeleton"},
+			{SHA: "663230d", Subject: "Implement website IA pivot homepage"},
+		},
+		mapHighConfidence,
+		[]string{
+			"public/demo/fastapi-map-find-task-flow-v1-1.mp4",
+			"public/demo/fastapi-task-flow-v1-1.mp4",
+			"src/app/changelog/page.tsx",
+			"src/app/page.tsx",
+			"src/components/investigation-comparison.tsx",
+			"src/components/quickstart-tabs.tsx",
+			"devspecs/tasks/website-ia-pivot-experiment/checkpoints/20260702-103009-validated.json",
+			"devspecs/tasks/website-ia-pivot-experiment/checkpoints/20260702-122153-validated.json",
+			"devspecs/tasks/website-ia-pivot-experiment/task.json",
+			"devspecs/tasks/launch-content-readiness/B04-refresh-core-vhs-demos-for-task-flow-map-onboard-plan.md",
+			"devspecs/tasks/launch-content-readiness/B04-refresh-core-vhs-demos-for-task-flow-map-onboard-result.md",
+		},
+		mapBoundaryRoleHandoffUnsafe,
+	)
+	if got != `ds find "website ia pivot homepage"` {
+		t.Fatalf("third path-supported trace task should stabilize handoff query, got %q", got)
+	}
+}
+
+func TestMapTryCommandPrefersPathForBroadRoleOverUnsupportedTraceDetails(t *testing.T) {
+	got := mapTryCommandForRole(
+		"Flows & Automation",
+		nil,
+		[]mapTraceReceipt{{
+			SHA:     "183cbeb",
+			Subject: "Fix abacus flow: use execute_sql, disable task caching, skip column validation",
+		}},
+		mapHighConfidence,
+		[]string{
+			"flows/__init__.py",
+			"flows/abacus/__init__.py",
+			"flows/abacus/absences.py",
+			"flows/abacus/flow.py",
+			"flows/abacus/invoice_flow.py",
+		},
+		mapBoundaryRoleHandoffUnsafe,
+	)
+	if got != `ds find "abacus absences flow"` {
+		t.Fatalf("broad boundary should prefer stable path query over unsupported trace details, got %q", got)
+	}
+}
+
+func TestMapTryCommandPrefersDomainTraceOverTechnicalMigrationForBroadRole(t *testing.T) {
+	got := mapTryCommandForRole(
+		"Flows & Automation",
+		nil,
+		[]mapTraceReceipt{
+			{SHA: "1111111", Subject: "Fix abacus flow: use execute_sql, disable task caching, skip column validation"},
+			{SHA: "abc1234", Subject: "Migrate all flows from SqlAlchemyConnector to ena_functions API"},
+			{SHA: "def5678", Subject: "Add new flows and enhance document handling for invoices"},
+		},
+		mapHighConfidence,
+		[]string{
+			"flows/__init__.py",
+			"flows/abacus/invoice_flow.py",
+			"flows/solarpotential-wall/buildings.py",
+		},
+		mapBoundaryRoleHandoffUnsafe,
+	)
+	if got != `ds find "flows enhance document invoices"` {
+		t.Fatalf("domain workflow trace should beat technical migration trace, got %q", got)
+	}
+}
+
 func TestMapTryCommandKeepsSpecificCoverAboveUnrelatedTraceTask(t *testing.T) {
 	got := mapTryCommandForRole(
 		"Submission",
@@ -1345,6 +1749,48 @@ func TestRecentCommandShowsRecentTopics(t *testing.T) {
 	}
 }
 
+func TestRecentQuietFastFirstKeepsStdoutResultOnly(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	t.Setenv("DEVSPECS_HOME", t.TempDir())
+	mustMkdirAll(t, filepath.Join(repoRoot, "internal", "security"))
+	mustWriteFile(t, filepath.Join(repoRoot, "internal", "security", "credentials.go"), "package security\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "feat: credentials rotation context")
+
+	cmd := NewRecentCmd()
+	cmd.SetArgs([]string{"credentials", "--path", repoRoot, "--json", "--quiet"})
+	outBuf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	cmd.SetOut(outBuf)
+	cmd.SetErr(errBuf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if errBuf.Len() != 0 {
+		t.Fatalf("recent --quiet should suppress auto-scan stderr, got: %s", errBuf.String())
+	}
+	var out mapRecentOutput
+	if err := json.Unmarshal(outBuf.Bytes(), &out); err != nil {
+		t.Fatalf("recent --quiet stdout should remain valid JSON: %v\nstdout=%s\nstderr=%s", err, outBuf.String(), errBuf.String())
+	}
+	if out.Schema != mapRecentSchemaVersion || len(out.Topics) != 1 {
+		t.Fatalf("unexpected recent quiet JSON payload: %#v", out)
+	}
+
+	db, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	count, err := db.CountArtifacts(store.FilterParams{RepoRoot: canonicalRepoRoot(repoRoot)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("recent fast-first should not block on auto-scan, indexed artifact count = %d", count)
+	}
+}
+
 func TestMapRecentFlagRemainsCompatibilityPath(t *testing.T) {
 	repoRoot := setupGitRepo(t)
 	t.Setenv("DEVSPECS_HOME", t.TempDir())
@@ -1525,7 +1971,190 @@ func TestMapOutputCacheRoundTripsFreshMap(t *testing.T) {
 	}
 }
 
-func TestMapAutoScanLeavesUsableIndexForFindPack(t *testing.T) {
+func TestMapUsesFreshOutputCacheBeforeAutoScan(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	t.Setenv("DEVSPECS_HOME", t.TempDir())
+	writeMapTestFile(t, repoRoot, "app/auth/credentials.go", "package auth\n\nfunc RotateCredentials() {}\n")
+	runGitForFindPack(t, repoRoot, "add", ".")
+	runGitForFindPack(t, repoRoot, "commit", "-m", "add credentials rotation context")
+	insertFreshMapCacheRepo(t, repoRoot)
+
+	cached := mapOutput{
+		Schema: mapSchemaVersion,
+		Repo: mapRepo{
+			Name:       filepath.Base(filepath.Clean(repoRoot)),
+			Path:       canonicalRepoRoot(repoRoot),
+			Confidence: mapHighConfidence,
+		},
+		Areas: []mapArea{{
+			Label: "Cached Credentials Boundary",
+			Try:   `ds find "cached credentials boundary"`,
+		}},
+	}
+	if err := saveMapOutputCache(canonicalRepoRoot(repoRoot), mapDefaultMaxAreas, cached); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewMapCmd()
+	cmd.SetArgs([]string{"--json", "--path", repoRoot})
+	outBuf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	cmd.SetOut(outBuf)
+	cmd.SetErr(errBuf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(errBuf.String(), "Index updated") {
+		t.Fatalf("fresh map output cache should skip auto-scan, stderr: %s", errBuf.String())
+	}
+	var out mapOutput
+	if err := json.Unmarshal(outBuf.Bytes(), &out); err != nil {
+		t.Fatalf("map cache stdout should remain JSON: %v\n%s", err, outBuf.String())
+	}
+	if !mapOutputHasAreaLabel(out, "Cached Credentials Boundary") {
+		t.Fatalf("expected cached map output, got %#v", out.Areas)
+	}
+}
+
+func TestMapOutputCacheMissScansWhenGitHeadMoved(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	t.Setenv("DEVSPECS_HOME", t.TempDir())
+	writeMapTestFile(t, repoRoot, "app/auth/credentials.go", "package auth\n\nfunc RotateCredentials() {}\n")
+	runGitForFindPack(t, repoRoot, "add", ".")
+	runGitForFindPack(t, repoRoot, "commit", "-m", "add credentials rotation context")
+	insertFreshMapCacheRepo(t, repoRoot)
+
+	cached := mapOutput{
+		Schema: mapSchemaVersion,
+		Repo: mapRepo{
+			Name:       filepath.Base(filepath.Clean(repoRoot)),
+			Path:       canonicalRepoRoot(repoRoot),
+			Confidence: mapHighConfidence,
+		},
+		Areas: []mapArea{{
+			Label: "Stale Cached Boundary",
+			Try:   `ds find "stale cached boundary"`,
+		}},
+	}
+	if err := saveMapOutputCache(canonicalRepoRoot(repoRoot), mapDefaultMaxAreas, cached); err != nil {
+		t.Fatal(err)
+	}
+
+	writeMapTestFile(t, repoRoot, "app/billing/invoices.go", "package billing\n\nfunc SendInvoices() {}\n")
+	runGitForFindPack(t, repoRoot, "add", ".")
+	runGitForFindPack(t, repoRoot, "commit", "-m", "add invoice boundary")
+
+	cmd := NewMapCmd()
+	cmd.SetArgs([]string{"--json", "--path", repoRoot})
+	outBuf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	cmd.SetOut(outBuf)
+	cmd.SetErr(errBuf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errBuf.String(), "Index updated") {
+		t.Fatalf("stale map output cache should rebuild substrate before map output, stderr: %s", errBuf.String())
+	}
+	var out mapOutput
+	if err := json.Unmarshal(outBuf.Bytes(), &out); err != nil {
+		t.Fatalf("map stale cache stdout should remain JSON: %v\n%s", err, outBuf.String())
+	}
+	if mapOutputHasAreaLabel(out, "Stale Cached Boundary") {
+		t.Fatalf("stale cached output was served: %#v", out.Areas)
+	}
+}
+
+func TestMapBoundaryRawAnchorsAreStable(t *testing.T) {
+	candidate := &mapPathBoundaryCandidate{
+		Key:   "operations",
+		Label: "Operations",
+		BoundaryPaths: map[string]bool{
+			"docs/operations":                           true,
+			"apps/api/internal/app/operations":          true,
+			".devspecs/tasks/v0-foundation/checkpoints": true,
+		},
+	}
+	got := mapBoundaryRawAnchors(candidate)
+	want := []string{
+		"Operations",
+		"operations",
+		".devspecs/tasks/v0-foundation/checkpoints",
+		"apps/api/internal/app/operations",
+		"docs/operations",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("raw anchors not stable:\n got=%#v\nwant=%#v", got, want)
+	}
+}
+
+func TestMapBoundaryRawAnchorsPreferEvidenceOrder(t *testing.T) {
+	candidate := &mapPathBoundaryCandidate{
+		Key:               "flows-automation",
+		Label:             "Flows & Automation",
+		BoundaryPaths:     map[string]bool{},
+		BoundaryPathOrder: nil,
+	}
+	appendMapBoundaryPathCandidate(candidate, "docs/architecture")
+	appendMapBoundaryPathCandidate(candidate, ".devspecs/tasks/v0-founder-workflows/checkpoints")
+	appendMapBoundaryPathCandidate(candidate, "apps/api/internal/ports")
+	appendMapBoundaryPathCandidate(candidate, ".devspecs/tasks/v0-foundation")
+	appendMapBoundaryPathCandidate(candidate, ".devspecs/tasks/v0-foundation/checkpoints")
+
+	got := mapBoundaryRawAnchors(candidate)
+	want := []string{
+		"Flows & Automation",
+		"flows-automation",
+		"docs/architecture",
+		".devspecs/tasks/v0-founder-workflows/checkpoints",
+		"apps/api/internal/ports",
+		".devspecs/tasks/v0-foundation",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("raw anchors did not preserve evidence order:\n got=%#v\nwant=%#v", got, want)
+	}
+}
+
+func insertFreshMapCacheRepo(t *testing.T, repoRoot string) {
+	t.Helper()
+	db, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := "2026-06-01T00:00:00Z"
+	head := strings.TrimSpace(string(runMapTestGitOutput(t, repoRoot, "rev-parse", "HEAD")))
+	if _, err := db.Exec("INSERT INTO repos (id, root_path, last_scan_commit, last_scan_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", "repo_cache_"+safeFilenamePart(filepath.Base(repoRoot)), canonicalRepoRoot(repoRoot), head, now, now, now); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runMapTestGitOutput(t *testing.T, dir string, args ...string) []byte {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=test@test.com",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+	return out
+}
+
+func mapOutputHasAreaLabel(out mapOutput, label string) bool {
+	for _, area := range out.Areas {
+		if area.Label == label {
+			return true
+		}
+	}
+	return false
+}
+
+func TestMapDefaultAutoScanLeavesUsableIndexForFindPack(t *testing.T) {
 	repoRoot := setupGitRepo(t)
 	home := t.TempDir()
 	t.Setenv("DEVSPECS_HOME", home)
@@ -1545,10 +2174,28 @@ func TestMapAutoScanLeavesUsableIndexForFindPack(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(mapErr.String(), "Index updated") {
-		t.Fatalf("expected map to auto-scan missing index, stderr: %s", mapErr.String())
+		t.Fatalf("map should build substrate on first run, stderr: %s", mapErr.String())
 	}
 	if strings.Contains(mapOut.String(), mapIndexRequiredCaveat) {
-		t.Fatalf("map should not ask for manual scan after auto-scan:\n%s", mapOut.String())
+		t.Fatalf("default map should not disclose a missing index when handoff commands can auto-index:\n%s", mapOut.String())
+	}
+	if !strings.Contains(mapOut.String(), "Workspace Identity") || !strings.Contains(mapOut.String(), "app/auth/credentials.go") {
+		t.Fatalf("map should still return path-boundary output:\n%s", mapOut.String())
+	}
+
+	db, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	count, countErr := db.CountArtifacts(store.FilterParams{RepoRoot: canonicalRepoRoot(repoRoot)})
+	if closeErr := db.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if countErr != nil {
+		t.Fatal(countErr)
+	}
+	if count == 0 {
+		t.Fatalf("map default first run should create index artifacts")
 	}
 
 	oldWd, _ := os.Getwd()
@@ -1620,7 +2267,7 @@ func TestMapJSONAutoScanKeepsStdoutJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(errBuf.String(), "Index updated") {
-		t.Fatalf("expected JSON map to auto-scan missing index, stderr: %s", errBuf.String())
+		t.Fatalf("map --json should build substrate on first run, stderr: %s", errBuf.String())
 	}
 	var out mapOutput
 	if err := json.Unmarshal(outBuf.Bytes(), &out); err != nil {
@@ -1629,8 +2276,71 @@ func TestMapJSONAutoScanKeepsStdoutJSON(t *testing.T) {
 	if out.Schema != mapSchemaVersion || out.Repo.Path == "" {
 		t.Fatalf("unexpected JSON map payload: %#v", out)
 	}
+	if strings.Contains(strings.Join(out.Caveats, "\n"), mapIndexRequiredCaveat) {
+		t.Fatalf("default JSON map should not disclose missing index: %#v", out.Caveats)
+	}
+	hasPackability := false
+	for _, area := range out.Areas {
+		if area.Diagnostics.Packability != nil {
+			hasPackability = true
+			if area.Diagnostics.Packability.KeyPathCount == 0 {
+				t.Fatalf("substrate-backed packability should include key paths: %#v", area.Diagnostics.Packability)
+			}
+		}
+	}
+	if !hasPackability {
+		t.Fatalf("map --json should preserve packability diagnostics after auto-scan: %#v", out.Areas)
+	}
 	if strings.Contains(outBuf.String(), "Index updated") {
 		t.Fatalf("scan notice leaked into JSON stdout:\n%s", outBuf.String())
+	}
+}
+
+func TestMapQuietAutoScanKeepsStdoutResultOnly(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	home := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", home)
+
+	writeMapTestFile(t, repoRoot, "plans/credentials-plan.md", "# Credentials Rotation\n\nRotate credentials for webhook ingestion.\n")
+	writeMapTestFile(t, repoRoot, "app/auth/credentials.go", "package auth\n\nfunc RotateCredentials() {}\n")
+	runGitForFindPack(t, repoRoot, "add", ".")
+	runGitForFindPack(t, repoRoot, "commit", "-m", "add credentials rotation context")
+
+	cmd := NewMapCmd()
+	cmd.SetArgs([]string{"--json", "--quiet", "--path", repoRoot})
+	outBuf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	cmd.SetOut(outBuf)
+	cmd.SetErr(errBuf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if errBuf.Len() != 0 {
+		t.Fatalf("map --quiet should suppress auto-scan stderr, got: %s", errBuf.String())
+	}
+	var out mapOutput
+	if err := json.Unmarshal(outBuf.Bytes(), &out); err != nil {
+		t.Fatalf("map --quiet stdout should remain valid JSON: %v\nstdout=%s\nstderr=%s", err, outBuf.String(), errBuf.String())
+	}
+	if out.Schema != mapSchemaVersion || out.Repo.Path == "" {
+		t.Fatalf("unexpected quiet map JSON payload: %#v", out)
+	}
+	db, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	count, countErr := db.CountArtifacts(store.FilterParams{RepoRoot: canonicalRepoRoot(repoRoot)})
+	if closeErr := db.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if countErr != nil {
+		t.Fatal(countErr)
+	}
+	if count == 0 {
+		t.Fatalf("map --quiet should still build substrate-backed index")
+	}
+	if strings.Contains(outBuf.String(), "Index updated") || strings.Contains(outBuf.String(), "Auto-index progress") {
+		t.Fatalf("auto-scan chatter leaked into quiet stdout:\n%s", outBuf.String())
 	}
 }
 
