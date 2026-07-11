@@ -27,6 +27,7 @@ devspecs.db-journal
 devspecs.db-wal
 .devspecs/config.yaml
 .devspecs/eval-runs/
+.devspecs/tmp/
 .devspecs/raw-output-samples/
 .devspecs/tasks/
 devspecs/tasks/
