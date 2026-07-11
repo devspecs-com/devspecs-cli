@@ -361,7 +361,7 @@ func buildEvidenceGraphWithOptions(repoID string, artifacts []evidenceArtifact, 
 			SectionID:    mention.sectionID,
 			Field:        mention.field,
 			Weight:       mention.weight,
-			EvidenceJSON: evidenceJSON(compactMentionEvidence(mention)),
+			EvidenceJSON: compactMentionEvidenceJSON(mention),
 		})
 	}
 	sort.Slice(mentionInputs, func(i, j int) bool {
@@ -2170,6 +2170,22 @@ func compactMentionEvidence(mention rawConceptMention) map[string]any {
 		out["form"] = form
 	}
 	return out
+}
+
+func compactMentionEvidenceJSON(mention rawConceptMention) string {
+	sourceJSON := evidenceJSONString(mention.source)
+	if form := truncateEvidenceValue(mention.form, maxMentionEvidenceFormLength); form != "" {
+		return `{"form":` + evidenceJSONString(form) + `,"source":` + sourceJSON + `}`
+	}
+	return `{"source":` + sourceJSON + `}`
+}
+
+func evidenceJSONString(value string) string {
+	b, err := json.Marshal(value)
+	if err != nil || len(b) == 0 {
+		return `""`
+	}
+	return string(b)
 }
 
 func truncateEvidenceValue(value string, limit int) string {

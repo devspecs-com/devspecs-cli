@@ -174,6 +174,23 @@ func TestEvidenceMentionBudgetCapsDenseRepos(t *testing.T) {
 	}
 }
 
+func TestCompactMentionEvidenceJSONMatchesMapEncoding(t *testing.T) {
+	mentions := []rawConceptMention{
+		{source: "source_path"},
+		{source: "metadata", form: "Swagger OAuth redirect"},
+		{source: "section", form: `quotes " slash \ html <tag> & more`},
+		{source: "metadata", form: strings.Repeat("a", maxMentionEvidenceFormLength+8)},
+	}
+
+	for _, mention := range mentions {
+		want := evidenceJSON(compactMentionEvidence(mention))
+		got := compactMentionEvidenceJSON(mention)
+		if got != want {
+			t.Fatalf("compact mention JSON mismatch:\ngot  %s\nwant %s", got, want)
+		}
+	}
+}
+
 func TestTestSourceTriangulationExactStem(t *testing.T) {
 	result := buildEvidenceGraph("repo", []evidenceArtifact{
 		evidenceSourceArtifact("src_webhooks", "src/billing/webhooks.ts", "export function handleWebhook() { return true }\n"),
