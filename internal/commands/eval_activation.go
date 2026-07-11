@@ -26,6 +26,9 @@ const (
 	activationMatrixRunnerBinaryComparison = "binary-compare"
 	activationIndexStateCold               = "cold"
 	activationIndexStateWarm               = "warm"
+	activationCompareModeExact             = "exact"
+	activationCompareModeJSONSmoke         = "json_smoke"
+	activationTaskDirPlaceholder           = "<activation-task-dir>"
 )
 
 type activationMatrixOptions struct {
@@ -65,8 +68,9 @@ type activationMatrixRepo struct {
 }
 
 type activationMatrixCommand struct {
-	Name string   `json:"name" yaml:"name"`
-	Args []string `json:"args" yaml:"args"`
+	Name    string   `json:"name" yaml:"name"`
+	Args    []string `json:"args" yaml:"args"`
+	Compare string   `json:"compare,omitempty" yaml:"compare,omitempty"`
 }
 
 type activationMatrixResult struct {
@@ -154,6 +158,7 @@ type activationMatrixCaseResult struct {
 	Profile          string                                `json:"profile"`
 	Command          string                                `json:"command"`
 	Args             []string                              `json:"args"`
+	CompareMode      string                                `json:"compare_mode,omitempty"`
 	IndexState       string                                `json:"index_state"`
 	GoldenPath       string                                `json:"golden_path,omitempty"`
 	Status           string                                `json:"status"`
@@ -179,23 +184,24 @@ type activationMapActionQualityComparison struct {
 }
 
 type activationMatrixCommandRun struct {
-	Binary            string   `json:"binary,omitempty"`
-	BinaryID          string   `json:"binary_id,omitempty"`
-	Args              []string `json:"args"`
-	ExitCode          int      `json:"exit_code"`
-	StdoutBytes       int      `json:"stdout_bytes"`
-	StderrBytes       int      `json:"stderr_bytes"`
-	StdoutSHA256      string   `json:"stdout_sha256,omitempty"`
-	StderrSHA256      string   `json:"stderr_sha256,omitempty"`
-	StdoutPath        string   `json:"stdout_path,omitempty"`
-	StderrPath        string   `json:"stderr_path,omitempty"`
-	IndexState        string   `json:"index_state,omitempty"`
-	WarmupMillis      int      `json:"warmup_ms,omitempty"`
-	WarmupStdoutBytes int      `json:"warmup_stdout_bytes,omitempty"`
-	WarmupStderrBytes int      `json:"warmup_stderr_bytes,omitempty"`
-	ValidJSON         bool     `json:"valid_json"`
-	DurationMillis    int      `json:"duration_ms"`
-	Error             string   `json:"error,omitempty"`
+	Binary             string   `json:"binary,omitempty"`
+	BinaryID           string   `json:"binary_id,omitempty"`
+	Args               []string `json:"args"`
+	ExitCode           int      `json:"exit_code"`
+	StdoutBytes        int      `json:"stdout_bytes"`
+	StderrBytes        int      `json:"stderr_bytes"`
+	StdoutSHA256       string   `json:"stdout_sha256,omitempty"`
+	StderrSHA256       string   `json:"stderr_sha256,omitempty"`
+	StdoutPath         string   `json:"stdout_path,omitempty"`
+	StderrPath         string   `json:"stderr_path,omitempty"`
+	IndexState         string   `json:"index_state,omitempty"`
+	WarmupMillis       int      `json:"warmup_ms,omitempty"`
+	WarmupStdoutBytes  int      `json:"warmup_stdout_bytes,omitempty"`
+	WarmupStderrBytes  int      `json:"warmup_stderr_bytes,omitempty"`
+	ValidJSON          bool     `json:"valid_json"`
+	DurationMillis     int      `json:"duration_ms"`
+	Error              string   `json:"error,omitempty"`
+	normalizationPaths []string
 }
 
 type activationRepoMetadata struct {
@@ -261,6 +267,8 @@ func runActivationMatrix(manifestPath string, opts activationMatrixOptions) (*ac
 	if err != nil {
 		return nil, err
 	}
+	opts.BaselineBin = baselineBin
+	opts.CandidateBin = candidateBin
 	result := &activationMatrixResult{
 		Schema:               activationMatrixSchemaVersion,
 		NormalizationVersion: activationMatrixNormalizationVersion,
@@ -387,7 +395,8 @@ func activationRepoPath(manifestPath string, repo activationMatrixRepo) (string,
 func runActivationMatrixCase(repo activationMatrixRepo, repoPath string, meta activationRepoMetadata, spec activationMatrixCommand, opts activationMatrixOptions, goldenDir, resultDir string) activationMatrixCaseResult {
 	start := time.Now()
 	commandName := strings.ToLower(strings.TrimSpace(spec.Name))
-	args := activationCommandArgs(spec.Args, repoPath, opts.Quiet)
+	compareMode := activationCompareMode(spec.Compare)
+	args := activationCommandArgs(commandName, spec.Args, repoPath, opts.Quiet)
 	goldenPath := activationGoldenPath(goldenDir, opts.Profile, repo.ID, commandName, spec.Args)
 	out := activationMatrixCaseResult{
 		RepoID:        repo.ID,
@@ -399,6 +408,7 @@ func runActivationMatrixCase(repo activationMatrixRepo, repoPath string, meta ac
 		Profile:       opts.Profile,
 		Command:       commandName,
 		Args:          args,
+		CompareMode:   compareMode,
 		IndexState:    opts.IndexState,
 		GoldenPath:    filepath.ToSlash(goldenPath),
 	}
@@ -407,24 +417,39 @@ func runActivationMatrixCase(repo activationMatrixRepo, repoPath string, meta ac
 		out.Error = meta.Error
 		return out
 	}
+	if !validActivationCompareMode(compareMode) {
+		out.Status = "failed"
+		out.Error = fmt.Sprintf("unsupported activation compare mode %q; valid values: %s, %s", compareMode, activationCompareModeExact, activationCompareModeJSONSmoke)
+		return out
+	}
 	if activationBinaryCompare(opts) {
 		return runActivationMatrixBinaryCompareCase(out, repoPath, commandName, args, opts, resultDir, start)
 	}
-	stdout, stderr, err := runActivationCommandIsolated(commandName, args, repoPath, opts.IndexState)
+	stdout, stderr, normalizationPaths, err := runActivationCommandIsolated(commandName, args, repoPath, opts.IndexState)
 	out.StdoutBytes = len(stdout)
 	out.StderrBytes = len(stderr)
 	out.DurationMillis = int(time.Since(start).Milliseconds())
-	normalized := normalizeActivationOutput(stdout, repoPath)
+	normalized := normalizeActivationOutput(stdout, repoPath, normalizationPaths...)
 	out.StdoutSHA256 = activationSHA256(normalized)
 	if err != nil {
 		out.Status = "failed"
 		out.Error = err.Error()
 		return out
 	}
-	if len(stderr) > 0 {
+	if activationCommandRequiresStrictStderr(commandName, opts.Quiet) && len(stderr) > 0 {
 		out.Status = "failed"
 		out.Error = "quiet command wrote stderr"
 		out.Diff = firstActivationOutputBytes(stderr, 600)
+		return out
+	}
+	if compareMode == activationCompareModeJSONSmoke {
+		if !json.Valid(bytes.TrimSpace(stdout)) {
+			out.Status = "failed"
+			out.Error = "stdout was not valid JSON"
+			out.Diff = firstActivationOutputBytes(stdout, 600)
+			return out
+		}
+		out.Status = "passed"
 		return out
 	}
 	if opts.Update {
@@ -471,8 +496,8 @@ func runActivationMatrixBinaryCompareCase(out activationMatrixCaseResult, repoPa
 	out.StdoutBytes = candidate.StdoutBytes
 	out.StderrBytes = candidate.StderrBytes
 	out.DurationMillis = int(time.Since(start).Milliseconds())
-	normalizedBaseline := normalizeActivationOutput(baselineStdout, repoPath)
-	normalizedCandidate := normalizeActivationOutput(candidateStdout, repoPath)
+	normalizedBaseline := normalizeActivationOutput(baselineStdout, repoPath, baseline.normalizationPaths...)
+	normalizedCandidate := normalizeActivationOutput(candidateStdout, repoPath, candidate.normalizationPaths...)
 	out.StdoutSHA256 = activationSHA256(normalizedCandidate)
 	out.StdoutMatch = bytes.Equal(normalizedBaseline, normalizedCandidate)
 	if baseline.Error != "" {
@@ -495,9 +520,13 @@ func runActivationMatrixBinaryCompareCase(out activationMatrixCaseResult, repoPa
 		out.Error = fmt.Sprintf("baseline valid_json=%t candidate valid_json=%t", baseline.ValidJSON, candidate.ValidJSON)
 		return out
 	}
-	if opts.Quiet && (baseline.StderrBytes > 0 || candidate.StderrBytes > 0) {
+	if activationCommandRequiresStrictStderr(commandName, opts.Quiet) && (baseline.StderrBytes > 0 || candidate.StderrBytes > 0) {
 		out.Status = "failed"
 		out.Error = fmt.Sprintf("quiet binary comparison wrote stderr: baseline=%d candidate=%d", baseline.StderrBytes, candidate.StderrBytes)
+		return out
+	}
+	if out.CompareMode == activationCompareModeJSONSmoke {
+		out.Status = "passed"
 		return out
 	}
 	if !out.StdoutMatch {
@@ -781,16 +810,51 @@ func activationCompactJSON(value any) string {
 	return text
 }
 
-func activationCommandArgs(args []string, repoPath string, quiet bool) []string {
-	out := append([]string{}, args...)
-	out = stripActivationFlag(out, "json", false)
-	out = stripActivationFlag(out, "quiet", false)
-	out = stripActivationFlag(out, "path", true)
-	out = append(out, "--json")
-	if quiet {
-		out = append(out, "--quiet")
+func activationCompareMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", activationCompareModeExact:
+		return activationCompareModeExact
+	case activationCompareModeJSONSmoke:
+		return activationCompareModeJSONSmoke
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
 	}
-	return append(out, "--path", repoPath)
+}
+
+func validActivationCompareMode(value string) bool {
+	switch value {
+	case activationCompareModeExact, activationCompareModeJSONSmoke:
+		return true
+	default:
+		return false
+	}
+}
+
+func activationCommandArgs(commandName string, args []string, repoPath string, quiet bool) []string {
+	out := append([]string{}, args...)
+	switch commandName {
+	case "recent", "map":
+		out = stripActivationFlag(out, "json", false)
+		out = stripActivationFlag(out, "quiet", false)
+		out = stripActivationFlag(out, "path", true)
+		out = append(out, "--json")
+		if quiet {
+			out = append(out, "--quiet")
+		}
+		return append(out, "--path", repoPath)
+	case "find":
+		out = stripActivationFlag(out, "json", false)
+		return append(out, "--json")
+	case "task":
+		out = stripActivationFlag(out, "json", false)
+		out = stripActivationFlag(out, repoTargetFlagName, true)
+		out = stripActivationFlag(out, "dir", true)
+		out = append(out, "--json", "--"+repoTargetFlagName, repoPath, "--dir", activationTaskDirPlaceholder)
+		return out
+	default:
+		out = stripActivationFlag(out, "json", false)
+		return append(out, "--json")
+	}
 }
 
 func stripActivationFlag(args []string, name string, takesValue bool) []string {
@@ -816,7 +880,46 @@ func stripActivationFlag(args []string, name string, takesValue bool) []string {
 	return out
 }
 
-func runActivationCommand(name string, args []string) ([]byte, []byte, error) {
+func activationRuntimeCommandArgs(args []string, isolationRoot string) ([]string, []string) {
+	out := append([]string{}, args...)
+	var normalizationPaths []string
+	if strings.TrimSpace(isolationRoot) == "" {
+		return out, normalizationPaths
+	}
+	taskDir := filepath.Join(isolationRoot, "task-workspaces")
+	for i, arg := range out {
+		if arg == activationTaskDirPlaceholder {
+			out[i] = taskDir
+			normalizationPaths = append(normalizationPaths, taskDir)
+		}
+	}
+	normalizationPaths = append(normalizationPaths, isolationRoot)
+	return out, normalizationPaths
+}
+
+func activationCommandRequiresStrictStderr(commandName string, quiet bool) bool {
+	return quiet && activationCommandSupportsQuiet(commandName)
+}
+
+func activationCommandSupportsQuiet(commandName string) bool {
+	switch commandName {
+	case "recent", "map":
+		return true
+	default:
+		return false
+	}
+}
+
+func activationCommandRunsFromRepoRoot(commandName string) bool {
+	switch commandName {
+	case "find", "task":
+		return true
+	default:
+		return false
+	}
+}
+
+func runActivationCommand(name string, args []string, repoPath string) ([]byte, []byte, error) {
 	var cmd interface {
 		SetArgs([]string)
 		SetOut(io.Writer)
@@ -828,8 +931,22 @@ func runActivationCommand(name string, args []string) ([]byte, []byte, error) {
 		cmd = NewRecentCmd()
 	case "map":
 		cmd = NewMapCmd()
+	case "find":
+		cmd = NewFindCmd()
+	case "task":
+		cmd = NewTaskCmd()
 	default:
-		return nil, nil, fmt.Errorf("unsupported activation matrix command %q; valid values: recent, map", name)
+		return nil, nil, fmt.Errorf("unsupported activation matrix command %q; valid values: recent, map, find, task", name)
+	}
+	if activationCommandRunsFromRepoRoot(name) {
+		wd, err := os.Getwd()
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := os.Chdir(repoPath); err != nil {
+			return nil, nil, err
+		}
+		defer os.Chdir(wd)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.SetArgs(args)
@@ -839,15 +956,15 @@ func runActivationCommand(name string, args []string) ([]byte, []byte, error) {
 	return stdout.Bytes(), stderr.Bytes(), err
 }
 
-func runActivationCommandIsolated(name string, args []string, repoPath, indexState string) ([]byte, []byte, error) {
+func runActivationCommandIsolated(name string, args []string, repoPath, indexState string) ([]byte, []byte, []string, error) {
 	tempHome, err := os.MkdirTemp("", "devspecs-activation-matrix-*")
 	if err != nil {
-		return nil, nil, fmt.Errorf("create activation matrix home: %w", err)
+		return nil, nil, nil, fmt.Errorf("create activation matrix home: %w", err)
 	}
 	defer os.RemoveAll(tempHome)
 	oldHome, hadHome := os.LookupEnv("DEVSPECS_HOME")
 	if err := os.Setenv("DEVSPECS_HOME", tempHome); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer func() {
 		if hadHome {
@@ -858,19 +975,19 @@ func runActivationCommandIsolated(name string, args []string, repoPath, indexSta
 	}()
 	if normalizeActivationIndexState(indexState) == activationIndexStateWarm {
 		if err := runActivationWarmup(repoPath); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
-	return runActivationCommand(name, args)
+	runtimeArgs, normalizationPaths := activationRuntimeCommandArgs(args, tempHome)
+	stdout, stderr, err := runActivationCommand(name, runtimeArgs, repoPath)
+	return stdout, stderr, normalizationPaths, err
 }
 
 func runExternalActivationCommandIsolated(binary, commandName string, args []string, repoPath, repoID, role, resultDir, indexState string) (activationMatrixCommandRun, []byte) {
 	start := time.Now()
-	fullArgs := append([]string{commandName}, args...)
 	out := activationMatrixCommandRun{
 		Binary:     filepath.ToSlash(binary),
 		BinaryID:   activationBinaryID(binary),
-		Args:       fullArgs,
 		IndexState: normalizeActivationIndexState(indexState),
 	}
 	tempHome, err := os.MkdirTemp("", "devspecs-activation-matrix-*")
@@ -879,6 +996,10 @@ func runExternalActivationCommandIsolated(binary, commandName string, args []str
 		return out, nil
 	}
 	defer os.RemoveAll(tempHome)
+	runtimeArgs, normalizationPaths := activationRuntimeCommandArgs(args, tempHome)
+	fullArgs := append([]string{commandName}, runtimeArgs...)
+	out.Args = fullArgs
+	out.normalizationPaths = normalizationPaths
 	if out.IndexState == activationIndexStateWarm {
 		warmupStart := time.Now()
 		warmupStdout, warmupStderr, warmupErr := runExternalActivationWarmup(binary, repoPath, tempHome)
@@ -893,6 +1014,9 @@ func runExternalActivationCommandIsolated(binary, commandName string, args []str
 	}
 	cmd := exec.Command(binary, fullArgs...)
 	cmd.Env = append(os.Environ(), "DEVSPECS_HOME="+tempHome)
+	if activationCommandRunsFromRepoRoot(commandName) {
+		cmd.Dir = repoPath
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -900,7 +1024,7 @@ func runExternalActivationCommandIsolated(binary, commandName string, args []str
 	out.DurationMillis = int(time.Since(start).Milliseconds())
 	out.StdoutBytes = stdout.Len()
 	out.StderrBytes = stderr.Len()
-	normalized := normalizeActivationOutput(stdout.Bytes(), repoPath)
+	normalized := normalizeActivationOutput(stdout.Bytes(), repoPath, normalizationPaths...)
 	out.StdoutSHA256 = activationSHA256(normalized)
 	out.StderrSHA256 = activationSHA256(stderr.Bytes())
 	out.ValidJSON = json.Valid(bytes.TrimSpace(stdout.Bytes()))
@@ -1238,7 +1362,7 @@ func writeActivationMatrixResultFile(resultDir string, result *activationMatrixR
 	return os.WriteFile(filepath.Join(resultDir, activationMatrixDefaultResultFilename), data, 0o644)
 }
 
-func normalizeActivationOutput(output []byte, repoPath string) []byte {
+func normalizeActivationOutput(output []byte, repoPath string, extraPaths ...string) []byte {
 	normalized := bytes.ReplaceAll(output, []byte("\r\n"), []byte("\n"))
 	replacements := activationPathReplacements(repoPath)
 	for _, value := range replacements {
@@ -1246,6 +1370,14 @@ func normalizeActivationOutput(output []byte, repoPath string) []byte {
 			continue
 		}
 		normalized = bytes.ReplaceAll(normalized, []byte(value), []byte("<REPO_ROOT>"))
+	}
+	for _, path := range extraPaths {
+		for _, value := range activationPathReplacements(path) {
+			if value == "" {
+				continue
+			}
+			normalized = bytes.ReplaceAll(normalized, []byte(value), []byte("<ACTIVATION_TMP>"))
+		}
 	}
 	if len(normalized) > 0 && normalized[len(normalized)-1] != '\n' {
 		normalized = append(normalized, '\n')

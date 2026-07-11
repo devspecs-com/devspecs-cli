@@ -85,6 +85,73 @@ func TestEvalActivationMatrixUpdateAndCompare(t *testing.T) {
 	}
 }
 
+func TestEvalActivationMatrixSupportsFindAndTaskSmoke(t *testing.T) {
+	repo := setupActivationMatrixRepo(t, "billing", "feat: billing analytics export")
+	manifest := writeActivationCrossCommandManifest(t, repo)
+	goldenDir := filepath.Join(t.TempDir(), "goldens")
+
+	updateCmd := NewEvalCmd()
+	updateCmd.SetArgs([]string{
+		manifest,
+		"--activation-matrix",
+		"--activation-profile", "skinny",
+		"--activation-golden-dir", goldenDir,
+		"--activation-update",
+		"--json",
+	})
+	updateBuf := &bytes.Buffer{}
+	updateCmd.SetOut(updateBuf)
+	if err := updateCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var update activationMatrixResult
+	if err := json.Unmarshal(updateBuf.Bytes(), &update); err != nil {
+		t.Fatalf("activation cross-command update JSON: %v\n%s", err, updateBuf.String())
+	}
+	if update.Summary.Total != 2 || update.Summary.Passed != 1 || update.Summary.Updated != 1 {
+		t.Fatalf("unexpected cross-command update summary: %#v", update.Summary)
+	}
+	taskUpdate := activationCaseByCommand(t, update.Cases, "task")
+	if taskUpdate.CompareMode != activationCompareModeExact || taskUpdate.Status != "updated" {
+		t.Fatalf("task update case = %#v", taskUpdate)
+	}
+	if body := readActivationGolden(t, taskUpdate.GoldenPath); strings.Contains(body, filepath.ToSlash(repo)) || strings.Contains(body, activationTaskDirPlaceholder) {
+		t.Fatalf("task golden leaked repo path or placeholder:\n%s", body)
+	}
+
+	compareCmd := NewEvalCmd()
+	compareCmd.SetArgs([]string{
+		manifest,
+		"--activation-matrix",
+		"--activation-profile", "skinny",
+		"--activation-golden-dir", goldenDir,
+		"--json",
+	})
+	compareBuf := &bytes.Buffer{}
+	compareCmd.SetOut(compareBuf)
+	if err := compareCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var compare activationMatrixResult
+	if err := json.Unmarshal(compareBuf.Bytes(), &compare); err != nil {
+		t.Fatalf("activation cross-command compare JSON: %v\n%s", err, compareBuf.String())
+	}
+	if compare.Summary.Total != 2 || compare.Summary.Passed != 2 {
+		t.Fatalf("unexpected cross-command compare summary: %#v", compare.Summary)
+	}
+	findCase := activationCaseByCommand(t, compare.Cases, "find")
+	if findCase.CompareMode != activationCompareModeJSONSmoke || findCase.Status != "passed" {
+		t.Fatalf("find smoke case = %#v", findCase)
+	}
+	if containsActivationArg(findCase.Args, "--path") || containsActivationArg(findCase.Args, "--quiet") || !containsActivationArg(findCase.Args, "--json") {
+		t.Fatalf("find activation args should use cwd plus json only: %#v", findCase.Args)
+	}
+	taskCase := activationCaseByCommand(t, compare.Cases, "task")
+	if !containsActivationArg(taskCase.Args, "--"+repoTargetFlagName) || !containsActivationArg(taskCase.Args, "--dir") || !containsActivationArg(taskCase.Args, "--json") {
+		t.Fatalf("task activation args missing repo/dir/json isolation: %#v", taskCase.Args)
+	}
+}
+
 func TestEvalActivationMatrixProfileFilteringAndMissingGoldens(t *testing.T) {
 	skinnyRepo := setupActivationMatrixRepo(t, "credentials", "feat: credentials rotation context")
 	fatRepo := setupActivationMatrixRepo(t, "billing", "feat: billing analytics export")
@@ -616,6 +683,27 @@ repos:
 	return path
 }
 
+func writeActivationCrossCommandManifest(t *testing.T, repo string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "activation-cross-command.yaml")
+	body := fmt.Sprintf(`version: 1
+repos:
+  - id: cross-command-repo
+    path: %q
+    profiles: [skinny]
+    commands:
+      - name: find
+        args: ["billing", "--plain"]
+        compare: json_smoke
+      - name: task
+        args: ["quick", "trace billing activation", "--id", "activation-task-smoke", "--index=false"]
+`, filepath.ToSlash(repo))
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func writeActivationScanBenchmarkManifest(t *testing.T, repo string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "activation-scan-benchmark.yaml")
@@ -634,6 +722,17 @@ repos:
 		t.Fatal(err)
 	}
 	return path
+}
+
+func activationCaseByCommand(t *testing.T, cases []activationMatrixCaseResult, command string) activationMatrixCaseResult {
+	t.Helper()
+	for _, c := range cases {
+		if c.Command == command {
+			return c
+		}
+	}
+	t.Fatalf("missing activation case for command %q in %#v", command, cases)
+	return activationMatrixCaseResult{}
 }
 
 type evalRegressionSetRegistry struct {
