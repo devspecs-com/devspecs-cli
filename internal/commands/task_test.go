@@ -19,6 +19,25 @@ func setupTaskCommandRepo(t *testing.T) string {
 	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
 	repoDir := filepath.Join(tmp, "repo")
 
+	setupTaskCommandRepoFiles(t, repoDir)
+
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(repoDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(origWd) })
+
+	scanCmd := NewScanCmd()
+	scanCmd.SetArgs([]string{"--quiet"})
+	scanCmd.SetOut(&bytes.Buffer{})
+	if err := scanCmd.Execute(); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	return repoDir
+}
+
+func setupTaskCommandRepoFiles(t *testing.T, repoDir string) {
+	t.Helper()
 	mustMkdirAll(t, filepath.Join(repoDir, ".devspecs"))
 	mustWriteFile(t, filepath.Join(repoDir, ".devspecs", "config.yaml"), `version: 1
 artifacts:
@@ -54,26 +73,52 @@ func TestImproveTestCompanionRecall(t *testing.T) {
 - [ ] Primary retrieval file is found.
 - [ ] Test companion file is found or the miss is recorded.
 `)
+}
+
+func setupTaskCommandUmbrellaRepo(t *testing.T) (string, string) {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
+	umbrella := filepath.Join(tmp, "eag-stg")
+	child := filepath.Join(umbrella, "enalytics-backend")
+	setupTaskCommandRepoFiles(t, child)
+	mustMkdirAll(t, filepath.Join(umbrella, ".git"))
+	mustMkdirAll(t, filepath.Join(child, ".git"))
+	mustWriteFile(t, filepath.Join(umbrella, "AGENTS.md"), "# eag-stg\n")
+	mustWriteFile(t, filepath.Join(umbrella, "CLAUDE.md"), "# eag-stg\n")
 
 	origWd, _ := os.Getwd()
-	if err := os.Chdir(repoDir); err != nil {
+	if err := os.Chdir(umbrella); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chdir(origWd) })
-
-	scanCmd := NewScanCmd()
-	scanCmd.SetArgs([]string{"--quiet"})
-	scanCmd.SetOut(&bytes.Buffer{})
-	if err := scanCmd.Execute(); err != nil {
-		t.Fatalf("scan: %v", err)
-	}
-	return repoDir
+	return umbrella, child
 }
 
 func taskGitCmd(args ...string) *exec.Cmd {
 	cmd := exec.Command("git", args...)
 	cmd.Env = cleanTaskGitTestEnv()
 	return cmd
+}
+
+func initTaskGitRepo(t *testing.T, repoDir string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available:", err)
+	}
+	if err := taskGitCmd("init", "-b", "main", repoDir).Run(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func commitTaskGitRepo(t *testing.T, repoDir, message string) {
+	t.Helper()
+	if err := taskGitCmd("-C", repoDir, "add", ".").Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := taskGitCmd("-C", repoDir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", message).Run(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func cleanTaskGitTestEnv() []string {
@@ -209,11 +254,288 @@ func TestTask_StartCreatesUncertaintyAwareWorkspace(t *testing.T) {
 	}
 }
 
+func TestTask_StatusShowsNextTarget(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "status-next-test",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"--slice", "first status slice",
+		"--slice", "second status slice",
+		"status next workflow",
+	})
+	cmd.SetOut(&bytes.Buffer{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	statusCmd := NewTaskCmd()
+	statusCmd.SetArgs([]string{"status", "status-next-test", "--json"})
+	statusBuf := &bytes.Buffer{}
+	statusCmd.SetOut(statusBuf)
+	if err := statusCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var statusOut taskStatusOutput
+	if err := json.Unmarshal(statusBuf.Bytes(), &statusOut); err != nil {
+		t.Fatalf("status json: %v\n%s", err, statusBuf.String())
+	}
+	if statusOut.NextTarget != "A01" || statusOut.NextTitle != "first status slice" || statusOut.NextCommand != "ds apply status-next-test" {
+		t.Fatalf("status next output = %#v", statusOut)
+	}
+
+	humanStatusCmd := NewTaskCmd()
+	humanStatusCmd.SetArgs([]string{"status", "status-next-test"})
+	humanStatusBuf := &bytes.Buffer{}
+	humanStatusCmd.SetOut(humanStatusBuf)
+	if err := humanStatusCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	humanStatus := humanStatusBuf.String()
+	for _, want := range []string{
+		"Next: A01 - first status slice",
+		"Run: ds apply status-next-test",
+	} {
+		if !strings.Contains(humanStatus, want) {
+			t.Fatalf("human status missing %q:\n%s", want, humanStatus)
+		}
+	}
+
+	decideCmd := NewTaskCmd()
+	decideCmd.SetArgs([]string{
+		"decide", "status-next-test",
+		"--target", "A01",
+		"--decision", "promote",
+		"--index=false",
+		"--json",
+	})
+	decideCmd.SetOut(&bytes.Buffer{})
+	if err := decideCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	afterStatusCmd := NewTaskCmd()
+	afterStatusCmd.SetArgs([]string{"status", "status-next-test", "--json"})
+	afterStatusBuf := &bytes.Buffer{}
+	afterStatusCmd.SetOut(afterStatusBuf)
+	if err := afterStatusCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var afterStatus taskStatusOutput
+	if err := json.Unmarshal(afterStatusBuf.Bytes(), &afterStatus); err != nil {
+		t.Fatalf("after status json: %v\n%s", err, afterStatusBuf.String())
+	}
+	if afterStatus.NextTarget != "A02" || afterStatus.NextTitle != "second status slice" {
+		t.Fatalf("status did not advance next target after promote: %#v", afterStatus)
+	}
+}
+
+func TestTaskRepoFlagRoutesArtifactsToTargetRepoFromUmbrella(t *testing.T) {
+	umbrella, child := setupTaskCommandUmbrellaRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--repo", "./enalytics-backend",
+		"--id", "repo-route-smoke",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"--slice", "backend repo slice",
+		"backend workspace change",
+	})
+	startBuf := &bytes.Buffer{}
+	startCmd.SetOut(startBuf)
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var startOut taskStartOutput
+	if err := json.Unmarshal(startBuf.Bytes(), &startOut); err != nil {
+		t.Fatalf("start json: %v\n%s", err, startBuf.String())
+	}
+	childWorkspace := filepath.Join(child, "devspecs", "tasks", "repo-route-smoke")
+	if !strings.HasPrefix(startOut.Workspace, childWorkspace) {
+		t.Fatalf("workspace = %q, want under %q", startOut.Workspace, childWorkspace)
+	}
+	if _, err := os.Stat(filepath.Join(childWorkspace, taskManifestFilename)); err != nil {
+		t.Fatalf("child manifest missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(umbrella, "devspecs", "tasks", "repo-route-smoke")); !os.IsNotExist(err) {
+		t.Fatalf("task unexpectedly wrote under umbrella root: %v", err)
+	}
+	var manifest taskManifest
+	if err := json.Unmarshal([]byte(mustReadFile(t, startOut.ManifestPath)), &manifest); err != nil {
+		t.Fatalf("manifest json: %v", err)
+	}
+	if manifest.RepoRoot != canonicalRepoRoot(child) {
+		t.Fatalf("manifest repo root = %q, want %q", manifest.RepoRoot, canonicalRepoRoot(child))
+	}
+
+	showCmd := NewTaskCmd()
+	showCmd.SetArgs([]string{"show", "repo-route-smoke", "--repo", "./enalytics-backend", "--json"})
+	showBuf := &bytes.Buffer{}
+	showCmd.SetOut(showBuf)
+	if err := showCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var showOut taskTargetOutput
+	if err := json.Unmarshal(showBuf.Bytes(), &showOut); err != nil {
+		t.Fatalf("show json: %v\n%s", err, showBuf.String())
+	}
+	if showOut.TaskID != "repo-route-smoke" || showOut.Target != "A01" || !strings.HasPrefix(showOut.Workspace, childWorkspace) {
+		t.Fatalf("show resolved wrong target: %#v", showOut)
+	}
+
+	promptCmd := NewTaskCmd()
+	promptCmd.SetArgs([]string{"prompt", "repo-route-smoke", "--repo", "./enalytics-backend", "--json"})
+	promptBuf := &bytes.Buffer{}
+	promptCmd.SetOut(promptBuf)
+	if err := promptCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var promptOut taskPromptOutput
+	if err := json.Unmarshal(promptBuf.Bytes(), &promptOut); err != nil {
+		t.Fatalf("prompt json: %v\n%s", err, promptBuf.String())
+	}
+	if !strings.Contains(promptOut.Prompt, "ds task checkpoint repo-route-smoke --target A01 --repo ./enalytics-backend") {
+		t.Fatalf("prompt missing repo-aware checkpoint command:\n%s", promptOut.Prompt)
+	}
+
+	startTargetCmd := NewTaskCmd()
+	startTargetCmd.SetArgs([]string{
+		"start", "repo-route-smoke",
+		"--target", "A01",
+		"--repo", "./enalytics-backend",
+		"--index=false",
+		"--json",
+	})
+	startTargetCmd.SetOut(&bytes.Buffer{})
+	if err := startTargetCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	checkpointCmd := NewTaskCmd()
+	checkpointCmd.SetArgs([]string{
+		"checkpoint", "repo-route-smoke",
+		"--target", "A01",
+		"--repo", "./enalytics-backend",
+		"--stage", "validated",
+		"--decision", "promote",
+		"--file-read", "internal/retrieval/ranking.go",
+		"--index=false",
+		"--json",
+	})
+	checkpointBuf := &bytes.Buffer{}
+	checkpointCmd.SetOut(checkpointBuf)
+	if err := checkpointCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var checkpointOut taskCheckpointOutput
+	if err := json.Unmarshal(checkpointBuf.Bytes(), &checkpointOut); err != nil {
+		t.Fatalf("checkpoint json: %v\n%s", err, checkpointBuf.String())
+	}
+	if !strings.HasPrefix(checkpointOut.CheckpointPath, filepath.Join(childWorkspace, "checkpoints")) {
+		t.Fatalf("checkpoint path = %q, want under child workspace", checkpointOut.CheckpointPath)
+	}
+
+	statusCmd := NewTaskCmd()
+	statusCmd.SetArgs([]string{"status", "repo-route-smoke", "--repo", "./enalytics-backend", "--json"})
+	statusBuf := &bytes.Buffer{}
+	statusCmd.SetOut(statusBuf)
+	if err := statusCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var statusOut taskStatusOutput
+	if err := json.Unmarshal(statusBuf.Bytes(), &statusOut); err != nil {
+		t.Fatalf("status json: %v\n%s", err, statusBuf.String())
+	}
+	if len(statusOut.Slices) != 1 || statusOut.Slices[0].Decision != "promote" {
+		t.Fatalf("status did not read child task state: %#v", statusOut)
+	}
+}
+
+func TestTaskWithoutRepoFromUmbrellaUsesCurrentRoot(t *testing.T) {
+	umbrella, child := setupTaskCommandUmbrellaRepo(t)
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "umbrella-local-task",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"umbrella local task",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out taskStartOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("task json: %v\n%s", err, buf.String())
+	}
+	if !strings.HasPrefix(out.Workspace, filepath.Join(umbrella, "devspecs", "tasks", "umbrella-local-task")) {
+		t.Fatalf("workspace = %q, want under umbrella root %q", out.Workspace, umbrella)
+	}
+	if _, err := os.Stat(filepath.Join(umbrella, "devspecs", "tasks", "umbrella-local-task", taskManifestFilename)); err != nil {
+		t.Fatalf("umbrella manifest missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(child, "devspecs", "tasks", "umbrella-local-task")); !os.IsNotExist(err) {
+		t.Fatalf("task unexpectedly wrote under child without --repo: %v", err)
+	}
+}
+
+func TestTaskRepoFlagDirRouting(t *testing.T) {
+	_, child := setupTaskCommandUmbrellaRepo(t)
+
+	relativeCmd := NewTaskCmd()
+	relativeCmd.SetArgs([]string{
+		"--repo", "./enalytics-backend",
+		"--dir", "custom/tasks",
+		"--id", "relative-dir-task",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"relative dir task",
+	})
+	relativeCmd.SetOut(&bytes.Buffer{})
+	if err := relativeCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(child, "custom", "tasks", "relative-dir-task", taskManifestFilename)); err != nil {
+		t.Fatalf("relative dir manifest missing under child: %v", err)
+	}
+
+	absoluteParent := filepath.Join(t.TempDir(), "absolute-task-parent")
+	absoluteCmd := NewTaskCmd()
+	absoluteCmd.SetArgs([]string{
+		"--repo", "./enalytics-backend",
+		"--dir", absoluteParent,
+		"--id", "absolute-dir-task",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"absolute dir task",
+	})
+	absoluteCmd.SetOut(&bytes.Buffer{})
+	if err := absoluteCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(absoluteParent, "absolute-dir-task", taskManifestFilename)); err != nil {
+		t.Fatalf("absolute dir manifest missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(child, "devspecs", "tasks", "absolute-dir-task")); !os.IsNotExist(err) {
+		t.Fatalf("absolute dir task unexpectedly wrote under child default dir: %v", err)
+	}
+}
+
 func TestTask_QuickCreatesOneOffWorkspaceWithCompactOutput(t *testing.T) {
 	repoDir := setupTaskCommandRepo(t)
 
 	cmd := NewTaskCmd()
-	cmd.SetArgs([]string{"quick", "--id", "quick-fix", "--no-refresh", "--index=false", "fix small billing typo"})
+	cmd.SetArgs([]string{"--quick", "--id", "quick-fix", "--no-refresh", "--index=false", "fix small billing typo"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	if err := cmd.Execute(); err != nil {
@@ -224,7 +546,7 @@ func TestTask_QuickCreatesOneOffWorkspaceWithCompactOutput(t *testing.T) {
 		"Created one-off task: quick-fix",
 		"Target: A01",
 		"Next:",
-		"ds task prompt A01",
+		"ds apply quick-fix --target A01",
 		"ds task checkpoint quick-fix --target A01",
 	} {
 		if !strings.Contains(output, want) {
@@ -237,6 +559,152 @@ func TestTask_QuickCreatesOneOffWorkspaceWithCompactOutput(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "A01-fix-small-billing-typo-result.md")); err != nil {
 		t.Fatalf("quick result missing: %v", err)
+	}
+}
+
+func TestTask_QuickSubcommandHiddenButStillWorks(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	helpCmd := NewTaskCmd()
+	helpCmd.SetArgs([]string{"--help"})
+	helpBuf := &bytes.Buffer{}
+	helpCmd.SetOut(helpBuf)
+	if err := helpCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(helpBuf.String(), "\n  quick       ") {
+		t.Fatalf("task quick should be hidden from normal help:\n%s", helpBuf.String())
+	}
+	if !strings.Contains(helpBuf.String(), "--quick") {
+		t.Fatalf("task help should teach --quick:\n%s", helpBuf.String())
+	}
+
+	compatCmd := NewTaskCmd()
+	compatCmd.SetArgs([]string{"quick", "--id", "quick-compat", "--no-refresh", "--index=false", "fix small billing typo"})
+	buf := &bytes.Buffer{}
+	compatCmd.SetOut(buf)
+	if err := compatCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "Created one-off task: quick-compat") {
+		t.Fatalf("quick compatibility output missing one-off marker:\n%s", buf.String())
+	}
+}
+
+func TestTask_LegacyLifecycleSubcommandsHiddenButStillWork(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	helpCmd := NewTaskCmd()
+	helpCmd.SetArgs([]string{"--help"})
+	helpBuf := &bytes.Buffer{}
+	helpCmd.SetOut(helpBuf)
+	if err := helpCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	help := helpBuf.String()
+	for _, hiddenLine := range []string{
+		"\n  decide      ",
+		"\n  finish      ",
+		"\n  prompt      ",
+		"\n  start       ",
+		"\n  sync        ",
+	} {
+		if strings.Contains(help, hiddenLine) {
+			t.Fatalf("legacy lifecycle command %q should be hidden from normal help:\n%s", hiddenLine, help)
+		}
+	}
+	for _, visibleLine := range []string{
+		"\n  checkpoint  ",
+		"\n  refresh     ",
+		"\n  status      ",
+		"\n  next        ",
+	} {
+		if !strings.Contains(help, visibleLine) {
+			t.Fatalf("expected visible task command %q in help:\n%s", visibleLine, help)
+		}
+	}
+
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"prompt", "--help"}, "Prefer `ds apply <task-id>`"},
+		{[]string{"finish", "--help"}, "Prefer `ds task checkpoint <task-id>"},
+		{[]string{"decide", "--help"}, "Prefer `ds task checkpoint <task-id>"},
+		{[]string{"start", "--help"}, "Prefer `ds task checkpoint <task-id>"},
+		{[]string{"sync", "--help"}, "Prefer `ds task refresh <task-id>`"},
+	}
+	for _, tc := range cases {
+		cmd := NewTaskCmd()
+		cmd.SetArgs(tc.args)
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		if !strings.Contains(buf.String(), tc.want) {
+			t.Fatalf("%v help missing %q:\n%s", tc.args, tc.want, buf.String())
+		}
+	}
+}
+
+func TestTask_IterationSubcommandHiddenButStillWorks(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	helpCmd := NewTaskCmd()
+	helpCmd.SetArgs([]string{"--help"})
+	helpBuf := &bytes.Buffer{}
+	helpCmd.SetOut(helpBuf)
+	if err := helpCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(helpBuf.String(), "\n  iteration   ") {
+		t.Fatalf("task iteration should be hidden from normal help:\n%s", helpBuf.String())
+	}
+	iterationHelpCmd := NewTaskCmd()
+	iterationHelpCmd.SetArgs([]string{"iteration", "add", "--help"})
+	iterationHelpBuf := &bytes.Buffer{}
+	iterationHelpCmd.SetOut(iterationHelpBuf)
+	if err := iterationHelpCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(iterationHelpBuf.String(), "Prefer `ds task slice add") {
+		t.Fatalf("iteration compatibility help should point to slice add --after:\n%s", iterationHelpBuf.String())
+	}
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "iteration-compat",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"--slice", "first iteration slice",
+		"iteration compatibility",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	compatCmd := NewTaskCmd()
+	compatCmd.SetArgs([]string{
+		"iteration", "add", "iteration-compat", "repair iteration slice",
+		"--slice", "A01",
+		"--reason", "improve",
+		"--index=false",
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	compatCmd.SetOut(buf)
+	if err := compatCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out taskArtifactAddOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("iteration compat json: %v\n%s", err, buf.String())
+	}
+	if out.Slice.ID != "A01-1" {
+		t.Fatalf("iteration compat output = %#v", out)
 	}
 }
 
@@ -1454,11 +1922,38 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 		t.Fatalf("slice add rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
 	}
 
+	followupCmd := NewTaskCmd()
+	followupCmd.SetArgs([]string{
+		"slice", "add", "lifecycle-add-test", "repair lifecycle status",
+		"--after", "B01",
+		"--reason", "improve",
+		"--index=false",
+		"--json",
+	})
+	followupBuf := &bytes.Buffer{}
+	followupCmd.SetOut(followupBuf)
+	if err := followupCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var followupOut taskArtifactAddOutput
+	if err := json.Unmarshal(followupBuf.Bytes(), &followupOut); err != nil {
+		t.Fatalf("slice add --after json: %v\n%s", err, followupBuf.String())
+	}
+	if followupOut.Series != "B" || followupOut.Slice.ID != "B01-1" {
+		t.Fatalf("slice add --after output = %#v", followupOut)
+	}
+	if filepath.Base(followupOut.Slice.PlanPath) != "B01-1-repair-lifecycle-status-plan.md" {
+		t.Fatalf("follow-up slice plan = %q", followupOut.Slice.PlanPath)
+	}
+	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
+		t.Fatalf("slice add --after rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
+	}
+
 	iterationCmd := NewTaskCmd()
 	iterationCmd.SetArgs([]string{
-		"iteration", "add", "lifecycle-add-test", "repair lifecycle status",
+		"iteration", "add", "lifecycle-add-test", "rework lifecycle status",
 		"--slice", "B01",
-		"--reason", "improve",
+		"--reason", "rework",
 		"--index=false",
 		"--json",
 	})
@@ -1469,28 +1964,29 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 	}
 	var iterationOut taskArtifactAddOutput
 	if err := json.Unmarshal(iterationBuf.Bytes(), &iterationOut); err != nil {
-		t.Fatalf("iteration add json: %v\n%s", err, iterationBuf.String())
+		t.Fatalf("hidden iteration add json: %v\n%s", err, iterationBuf.String())
 	}
-	if iterationOut.Series != "B" || iterationOut.Slice.ID != "B01-1" {
-		t.Fatalf("iteration add output = %#v", iterationOut)
+	if iterationOut.Series != "B" || iterationOut.Slice.ID != "B01-2" {
+		t.Fatalf("hidden iteration add output = %#v", iterationOut)
 	}
-	if filepath.Base(iterationOut.Slice.PlanPath) != "B01-1-repair-lifecycle-status-plan.md" {
-		t.Fatalf("iteration plan = %q", iterationOut.Slice.PlanPath)
-	}
-	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
-		t.Fatalf("iteration add rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
+	if filepath.Base(iterationOut.Slice.PlanPath) != "B01-2-rework-lifecycle-status-plan.md" {
+		t.Fatalf("hidden iteration plan = %q", iterationOut.Slice.PlanPath)
 	}
 
 	var manifest taskManifest
 	if err := json.Unmarshal([]byte(mustReadFile(t, filepath.Join(workspace, taskManifestFilename))), &manifest); err != nil {
 		t.Fatalf("manifest json: %v", err)
 	}
-	if len(manifest.Artifacts.Slices) != 3 {
+	if len(manifest.Artifacts.Slices) != 4 {
 		t.Fatalf("manifest slices = %#v", manifest.Artifacts.Slices)
 	}
 	iteration := manifest.Artifacts.Slices[2]
 	if iteration.ID != "B01-1" || iteration.Kind != "iteration" || iteration.ParentID != "B01" || iteration.Reason != "improve" {
 		t.Fatalf("iteration manifest entry = %#v", iteration)
+	}
+	compatIteration := manifest.Artifacts.Slices[3]
+	if compatIteration.ID != "B01-2" || compatIteration.Kind != "iteration" || compatIteration.ParentID != "B01" || compatIteration.Reason != "rework" {
+		t.Fatalf("hidden iteration manifest entry = %#v", compatIteration)
 	}
 
 	checkpointCmd := NewTaskCmd()
@@ -1737,6 +2233,40 @@ func TestTaskSliceAddRefusesExistingArtifactFile(t *testing.T) {
 	}
 	if got := mustReadFile(t, existingPlan); !strings.Contains(got, "Do not replace this file") {
 		t.Fatalf("existing plan was overwritten:\n%s", got)
+	}
+}
+
+func TestTaskSliceAddReasonRequiresAfter(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "slice-reason-test",
+		"--no-refresh",
+		"--index=false",
+		"--slice", "first lifecycle slice",
+		"task lifecycle flow",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	sliceCmd := NewTaskCmd()
+	sliceCmd.SetArgs([]string{
+		"slice", "add", "slice-reason-test", "ambiguous follow-up",
+		"--reason", "improve",
+		"--index=false",
+	})
+	sliceCmd.SetOut(&bytes.Buffer{})
+	err := sliceCmd.Execute()
+	if err == nil {
+		t.Fatal("expected --reason without --after to fail")
+	}
+	for _, want := range []string{"--reason requires --after", "ds task slice add", "--after <slice>", "--reason improve"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("slice reason error missing %q: %v", want, err)
+		}
 	}
 }
 
@@ -2291,6 +2821,7 @@ func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
 	resultBody := mustReadFile(t, out.ResultPath)
 	assertNoTrailingWhitespace(t, "checkpoint result", resultBody)
 	for _, want := range []string{
+		"## Checkpoint History",
 		"### Checkpoint",
 		"Stage: implemented",
 		"Decision: improve",
@@ -2304,6 +2835,14 @@ func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
 	} {
 		if !strings.Contains(resultBody, want) {
 			t.Fatalf("result missing %q:\n%s", want, resultBody)
+		}
+	}
+	for _, unwanted := range []string{
+		"## Checkpoints",
+		"Use `ds task checkpoint checkpoint-test --target A01`",
+	} {
+		if strings.Contains(resultBody, unwanted) {
+			t.Fatalf("result should convert checkpoint template before append, still has %q:\n%s", unwanted, resultBody)
 		}
 	}
 
@@ -2380,6 +2919,525 @@ func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
 	}
 	if evalOut.CheckpointSummary.JSONRecords != 1 || evalOut.CheckpointSummary.MarkdownFallbacks != 0 {
 		t.Fatalf("expected JSON checkpoint read summary, got %#v", evalOut.CheckpointSummary)
+	}
+}
+
+func TestTask_CheckpointResultHistoryAppendsWithoutDuplicatingTemplate(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "checkpoint-history-test",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"improve test companion recall",
+	})
+	startBuf := &bytes.Buffer{}
+	startCmd.SetOut(startBuf)
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var startOut taskStartOutput
+	if err := json.Unmarshal(startBuf.Bytes(), &startOut); err != nil {
+		t.Fatalf("task json: %v\n%s", err, startBuf.String())
+	}
+
+	firstCmd := NewTaskCmd()
+	firstCmd.SetArgs([]string{
+		"checkpoint", "checkpoint-history-test",
+		"--target", "A01",
+		"--stage", "implemented",
+		"--decision", "improve",
+		"--description", "first checkpoint rewrites result template",
+		"--file-edited", "internal/retrieval/ranking.go",
+		"--index=false",
+		"--json",
+	})
+	firstCmd.SetOut(&bytes.Buffer{})
+	if err := firstCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	secondCmd := NewTaskCmd()
+	secondCmd.SetArgs([]string{
+		"checkpoint", "checkpoint-history-test",
+		"--target", "A01",
+		"--stage", "validated",
+		"--decision", "promote",
+		"--description", "second checkpoint stays in history",
+		"--test-run", "go test ./internal/retrieval -count=1",
+		"--index=false",
+		"--json",
+	})
+	secondCmd.SetOut(&bytes.Buffer{})
+	if err := secondCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	resultBody := mustReadFile(t, startOut.ResultPath)
+	assertNoTrailingWhitespace(t, "checkpoint history result", resultBody)
+	if got := strings.Count(resultBody, "## Checkpoint History"); got != 1 {
+		t.Fatalf("checkpoint history heading count = %d:\n%s", got, resultBody)
+	}
+	if got := strings.Count(resultBody, "### Checkpoint"); got != 2 {
+		t.Fatalf("checkpoint entry count = %d:\n%s", got, resultBody)
+	}
+	for _, want := range []string{
+		"first checkpoint rewrites result template",
+		"second checkpoint stays in history",
+		"Stage: implemented",
+		"Stage: validated",
+	} {
+		if !strings.Contains(resultBody, want) {
+			t.Fatalf("result history missing %q:\n%s", want, resultBody)
+		}
+	}
+	for _, unwanted := range []string{
+		"## Checkpoints",
+		"Use `ds task checkpoint checkpoint-history-test --target A01`",
+	} {
+		if strings.Contains(resultBody, unwanted) {
+			t.Fatalf("result history should not keep template prompt %q:\n%s", unwanted, resultBody)
+		}
+	}
+}
+
+func TestTask_CheckpointDraftPreviewsWithoutMutation(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "checkpoint-draft-test",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"improve test companion recall",
+	})
+	startBuf := &bytes.Buffer{}
+	startCmd.SetOut(startBuf)
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var startOut taskStartOutput
+	if err := json.Unmarshal(startBuf.Bytes(), &startOut); err != nil {
+		t.Fatalf("task json: %v\n%s", err, startBuf.String())
+	}
+	manifestBefore := mustReadFile(t, startOut.ManifestPath)
+	resultBefore := mustReadFile(t, startOut.ResultPath)
+	checkpointDir := filepath.Join(startOut.Workspace, "checkpoints")
+	if _, err := os.Stat(checkpointDir); !os.IsNotExist(err) {
+		t.Fatalf("checkpoint dir should not exist before draft, stat err = %v", err)
+	}
+
+	checkpointCmd := NewTaskCmd()
+	checkpointCmd.SetArgs([]string{
+		"checkpoint", "checkpoint-draft-test",
+		"--target", "A01",
+		"--draft",
+		"--stage", "validated",
+		"--decision", "promote",
+		"--description", "wired a checkpoint draft preview",
+		"--file-read", "internal/commands/task.go",
+		"--file-edited", "internal/commands/task.go",
+		"--test-run", "go test ./internal/commands -run TestTask_CheckpointDraftPreviewsWithoutMutation -count=1",
+		"--next-target", "B02",
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	checkpointCmd.SetOut(buf)
+	if err := checkpointCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var draft taskCheckpointDraftOutput
+	if err := json.Unmarshal(buf.Bytes(), &draft); err != nil {
+		t.Fatalf("draft json: %v\n%s", err, buf.String())
+	}
+	if !draft.Draft || draft.Mutates {
+		t.Fatalf("draft mutation flags = %#v", draft)
+	}
+	if draft.CheckpointID != "draft_a01_validated" || draft.Slice != "A01" {
+		t.Fatalf("draft identity = %#v", draft)
+	}
+	if draft.CheckpointPathHint != "checkpoints/<timestamp>-validated.md" || draft.CheckpointJSONHint != "checkpoints/<timestamp>-validated.json" {
+		t.Fatalf("draft path hints = %#v", draft)
+	}
+	if draft.ResultPath != startOut.ResultPath {
+		t.Fatalf("draft result path = %q, want %q", draft.ResultPath, startOut.ResultPath)
+	}
+	for _, want := range []string{
+		"checkpoint_id: draft_a01_validated",
+		"created_at: <generated-at-checkpoint>",
+		"checkpoint_json: checkpoints/<timestamp>-validated.json",
+		"wired a checkpoint draft preview",
+		"## Files Actually Edited",
+		"`internal/commands/task.go`",
+		"Next iteration: B02 with decision -",
+	} {
+		if !strings.Contains(draft.CheckpointMarkdown, want) {
+			t.Fatalf("draft markdown missing %q:\n%s", want, draft.CheckpointMarkdown)
+		}
+	}
+	for _, want := range []string{
+		"### Checkpoint",
+		"Created At: <generated-at-checkpoint>",
+		"Source: `checkpoints/<timestamp>-validated.md`",
+		"Structured Evidence: `checkpoints/<timestamp>-validated.json`",
+		"Evidence for decision: 1 file(s) read; 1 file(s) edited; 1 test command(s)",
+	} {
+		if !strings.Contains(draft.ResultAppendMarkdown, want) {
+			t.Fatalf("draft result append missing %q:\n%s", want, draft.ResultAppendMarkdown)
+		}
+	}
+	if draft.CheckpointRecord.CreatedAt != "<generated-at-checkpoint>" || draft.CheckpointRecord.CheckpointID != draft.CheckpointID {
+		t.Fatalf("draft record identity = %#v", draft.CheckpointRecord)
+	}
+	if !containsPath(draft.CheckpointRecord.FilesEdited, "internal/commands/task.go") {
+		t.Fatalf("draft record files edited = %#v", draft.CheckpointRecord.FilesEdited)
+	}
+	if draft.CheckpointRecord.Next.RecommendedTarget != "B02" {
+		t.Fatalf("draft record next = %#v", draft.CheckpointRecord.Next)
+	}
+	if got := mustReadFile(t, startOut.ManifestPath); got != manifestBefore {
+		t.Fatalf("draft mutated manifest.\nBefore:\n%s\nAfter:\n%s", manifestBefore, got)
+	}
+	if got := mustReadFile(t, startOut.ResultPath); got != resultBefore {
+		t.Fatalf("draft mutated result.\nBefore:\n%s\nAfter:\n%s", resultBefore, got)
+	}
+	if _, err := os.Stat(checkpointDir); !os.IsNotExist(err) {
+		t.Fatalf("draft created checkpoint dir, stat err = %v", err)
+	}
+}
+
+func TestTask_CheckpointDraftHumanOutput(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "checkpoint-draft-human-test",
+		"--no-refresh",
+		"--index=false",
+		"improve test companion recall",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	checkpointCmd := NewTaskCmd()
+	checkpointCmd.SetArgs([]string{
+		"checkpoint", "checkpoint-draft-human-test",
+		"--target", "A01",
+		"--draft",
+		"--stage", "implemented",
+		"--decision", "continue",
+		"--file-read", "internal/commands/task.go",
+	})
+	buf := &bytes.Buffer{}
+	checkpointCmd.SetOut(buf)
+	if err := checkpointCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"Draft checkpoint for checkpoint-draft-human-test A01",
+		"No files were written. Lifecycle state, result files, and index state are unchanged.",
+		"Would write checkpoint: checkpoints/<timestamp>-implemented.md",
+		"Checkpoint preview:",
+		"Result append preview:",
+		"Draft checkpoint generated by `ds task checkpoint --draft`; no files were written.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("draft human output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestTask_CheckpointFromGitCapturesEditedFiles(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	initTaskGitRepo(t, repoDir)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "checkpoint-from-git-test",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"improve test companion recall",
+	})
+	startBuf := &bytes.Buffer{}
+	startCmd.SetOut(startBuf)
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var startOut taskStartOutput
+	if err := json.Unmarshal(startBuf.Bytes(), &startOut); err != nil {
+		t.Fatalf("task json: %v\n%s", err, startBuf.String())
+	}
+	commitTaskGitRepo(t, repoDir, "baseline")
+
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "retrieval", "ranking.go"), mustReadFile(t, filepath.Join(repoDir, "internal", "retrieval", "ranking.go"))+"\nfunc FromGitUnstaged() {}\n")
+	mustWriteFile(t, filepath.Join(repoDir, "docs", "plans", "test-companion-recall.md"), mustReadFile(t, filepath.Join(repoDir, "docs", "plans", "test-companion-recall.md"))+"\n- staged from-git note\n")
+	if err := taskGitCmd("-C", repoDir, "add", "docs/plans/test-companion-recall.md").Run(); err != nil {
+		t.Fatal(err)
+	}
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "retrieval", "new_helper.go"), "package retrieval\n\nfunc FromGitUntracked() {}\n")
+
+	checkpointCmd := NewTaskCmd()
+	checkpointCmd.SetArgs([]string{
+		"checkpoint", "checkpoint-from-git-test",
+		"--target", "A01",
+		"--from-git",
+		"--stage", "implemented",
+		"--decision", "promote",
+		"--index=false",
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	checkpointCmd.SetOut(buf)
+	if err := checkpointCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out taskCheckpointOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("checkpoint json: %v\n%s", err, buf.String())
+	}
+	for _, want := range []string{
+		"internal/retrieval/ranking.go",
+		"docs/plans/test-companion-recall.md",
+		"internal/retrieval/new_helper.go",
+	} {
+		if !containsPath(out.GitDiffFiles, want) {
+			t.Fatalf("checkpoint output git diff files missing %q: %#v", want, out.GitDiffFiles)
+		}
+	}
+
+	var record taskCheckpointRecord
+	if err := json.Unmarshal([]byte(mustReadFile(t, out.CheckpointJSONPath)), &record); err != nil {
+		t.Fatalf("checkpoint record json: %v", err)
+	}
+	for _, want := range []string{
+		"internal/retrieval/ranking.go",
+		"docs/plans/test-companion-recall.md",
+		"internal/retrieval/new_helper.go",
+	} {
+		if !containsPath(record.FilesEdited, want) {
+			t.Fatalf("record files edited missing %q: %#v", want, record.FilesEdited)
+		}
+		if !containsPath(record.ActualContext.FilesEdited, want) {
+			t.Fatalf("actual context files edited missing %q: %#v", want, record.ActualContext.FilesEdited)
+		}
+		if !containsPath(record.Evidence.GitDiff.ChangedFiles, want) {
+			t.Fatalf("git evidence changed files missing %q: %#v", want, record.Evidence.GitDiff)
+		}
+	}
+	if record.Evidence.GitDiff == nil || !strings.Contains(record.Evidence.GitDiff.Status, "internal/retrieval/ranking.go") {
+		t.Fatalf("expected git status evidence, got %#v", record.Evidence.GitDiff)
+	}
+	if containsPath(record.FilesEdited, filepath.ToSlash(taskRelativePath(repoDir, out.CheckpointPath))) {
+		t.Fatalf("from-git should collect before checkpoint writes, got %#v", record.FilesEdited)
+	}
+	resultBody := mustReadFile(t, out.ResultPath)
+	for _, want := range []string{
+		"Evidence for decision: 3 file(s) edited",
+		"Files edited:",
+		"`internal/retrieval/ranking.go`",
+		"`docs/plans/test-companion-recall.md`",
+		"`internal/retrieval/new_helper.go`",
+	} {
+		if !strings.Contains(resultBody, want) {
+			t.Fatalf("result missing %q:\n%s", want, resultBody)
+		}
+	}
+	if !strings.Contains(mustReadFile(t, out.CheckpointPath), "## Files Actually Edited") {
+		t.Fatalf("checkpoint markdown missing edited-files section")
+	}
+}
+
+func TestTask_CheckpointGitDiffWithoutFromGitStaysEvidenceOnly(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	initTaskGitRepo(t, repoDir)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "checkpoint-git-diff-only-test",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"improve test companion recall",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	commitTaskGitRepo(t, repoDir, "baseline")
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "retrieval", "ranking.go"), mustReadFile(t, filepath.Join(repoDir, "internal", "retrieval", "ranking.go"))+"\nfunc GitDiffOnly() {}\n")
+
+	checkpointCmd := NewTaskCmd()
+	checkpointCmd.SetArgs([]string{
+		"checkpoint", "checkpoint-git-diff-only-test",
+		"--target", "A01",
+		"--draft",
+		"--git-diff",
+		"--stage", "implemented",
+		"--decision", "continue",
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	checkpointCmd.SetOut(buf)
+	if err := checkpointCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var draft taskCheckpointDraftOutput
+	if err := json.Unmarshal(buf.Bytes(), &draft); err != nil {
+		t.Fatalf("draft json: %v\n%s", err, buf.String())
+	}
+	if !containsPath(draft.GitDiffFiles, "internal/retrieval/ranking.go") {
+		t.Fatalf("draft git diff files missing changed file: %#v", draft.GitDiffFiles)
+	}
+	if containsPath(draft.CheckpointRecord.FilesEdited, "internal/retrieval/ranking.go") {
+		t.Fatalf("--git-diff without --from-git should not populate edited actual context: %#v", draft.CheckpointRecord.FilesEdited)
+	}
+	if !strings.Contains(draft.CheckpointMarkdown, "## Files Actually Edited\n-\n") {
+		t.Fatalf("draft markdown should keep edited files empty without --from-git:\n%s", draft.CheckpointMarkdown)
+	}
+}
+
+func TestTask_CheckpointRunLogsIngestExplicitEvidence(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "checkpoint-run-log-test",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"improve test companion recall",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	typecheckLog := filepath.Join(".devspecs", "run-logs", "typecheck.log")
+	buildLog := filepath.Join(".devspecs", "run-logs", "build.log")
+	mustMkdirAll(t, filepath.Join(repoDir, ".devspecs", "run-logs"))
+	mustWriteFile(t, filepath.Join(repoDir, typecheckLog), "command: npm run typecheck\nexit_code: 0\nsrc/index.ts ok\n")
+	mustWriteFile(t, filepath.Join(repoDir, buildLog), "$ npm run build\nbuilding app\nexit_code: 0\n")
+
+	checkpointCmd := NewTaskCmd()
+	checkpointCmd.SetArgs([]string{
+		"checkpoint", "checkpoint-run-log-test",
+		"--target", "A01",
+		"--draft",
+		"--run-log", filepath.ToSlash(typecheckLog),
+		"--run-log", filepath.ToSlash(buildLog),
+		"--stage", "validated",
+		"--decision", "promote",
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	checkpointCmd.SetOut(buf)
+	if err := checkpointCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var draft taskCheckpointDraftOutput
+	if err := json.Unmarshal(buf.Bytes(), &draft); err != nil {
+		t.Fatalf("draft json: %v\n%s", err, buf.String())
+	}
+	if draft.TestEvidenceCount != 2 {
+		t.Fatalf("test evidence count = %d, want 2: %#v", draft.TestEvidenceCount, draft)
+	}
+	for _, command := range []string{"npm run typecheck", "npm run build"} {
+		if !containsString(draft.CheckpointRecord.TestsRun, command) {
+			t.Fatalf("draft tests_run missing %q: %#v", command, draft.CheckpointRecord.TestsRun)
+		}
+		if !containsString(draft.CheckpointRecord.ActualContext.TestsRun, command) {
+			t.Fatalf("draft actual tests_run missing %q: %#v", command, draft.CheckpointRecord.ActualContext.TestsRun)
+		}
+	}
+	if len(draft.CheckpointRecord.Evidence.TestCommands) != 2 {
+		t.Fatalf("run log evidence = %#v", draft.CheckpointRecord.Evidence.TestCommands)
+	}
+	typecheck := draft.CheckpointRecord.Evidence.TestCommands[0]
+	if typecheck.Command != "npm run typecheck" || typecheck.ExitCode != 0 || typecheck.Source != filepath.ToSlash(typecheckLog) {
+		t.Fatalf("typecheck evidence = %#v", typecheck)
+	}
+	if !strings.Contains(typecheck.Output, "src/index.ts ok") {
+		t.Fatalf("typecheck output missing log body: %#v", typecheck)
+	}
+	build := draft.CheckpointRecord.Evidence.TestCommands[1]
+	if build.Command != "npm run build" || !strings.Contains(build.Output, "building app") {
+		t.Fatalf("build evidence = %#v", build)
+	}
+	for _, want := range []string{
+		"## Tests Actually Run",
+		"`npm run typecheck`",
+		"`npm run build`",
+		"Evidence for decision: 2 test command(s)",
+	} {
+		if !strings.Contains(draft.CheckpointMarkdown, want) {
+			t.Fatalf("draft markdown missing %q:\n%s", want, draft.CheckpointMarkdown)
+		}
+		if !strings.Contains(draft.ResultAppendMarkdown, want) && want != "## Tests Actually Run" {
+			t.Fatalf("draft result append missing %q:\n%s", want, draft.ResultAppendMarkdown)
+		}
+	}
+}
+
+func TestTask_EvaluateRunLogCommandsAreActualRuns(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "checkpoint-run-log-eval-test",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"improve test companion recall",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	runLog := filepath.Join(".devspecs", "run-logs", "test.log")
+	mustMkdirAll(t, filepath.Join(repoDir, ".devspecs", "run-logs"))
+	mustWriteFile(t, filepath.Join(repoDir, runLog), "$ go test ./internal/retrieval\nok example.com/repo/internal/retrieval\nexit_code: 0\n")
+
+	checkpointCmd := NewTaskCmd()
+	checkpointCmd.SetArgs([]string{
+		"checkpoint", "checkpoint-run-log-eval-test",
+		"--target", "A01",
+		"--run-log", filepath.ToSlash(runLog),
+		"--stage", "validated",
+		"--decision", "promote",
+		"--index=false",
+		"--json",
+	})
+	checkpointCmd.SetOut(&bytes.Buffer{})
+	if err := checkpointCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	evalCmd := NewTaskCmd()
+	evalCmd.SetArgs([]string{"evaluate", "checkpoint-run-log-eval-test", "--json"})
+	evalBuf := &bytes.Buffer{}
+	evalCmd.SetOut(evalBuf)
+	if err := evalCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var evalOut taskEvaluationOutput
+	if err := json.Unmarshal(evalBuf.Bytes(), &evalOut); err != nil {
+		t.Fatalf("evaluate json: %v\n%s", err, evalBuf.String())
+	}
+	if !containsString(evalOut.Observed.TestsRun, "go test ./internal/retrieval") {
+		t.Fatalf("run log command should be actual tests_run, got %#v", evalOut.Observed.TestsRun)
+	}
+	if !containsString(evalOut.Observed.TestCommands, "go test ./internal/retrieval") {
+		t.Fatalf("run log command should retain structured evidence, got %#v", evalOut.Observed.TestCommands)
+	}
+	if containsString(evalOut.CheckpointSummary.EvidenceOnlyTestCommands, "go test ./internal/retrieval") {
+		t.Fatalf("run log command should not be evidence-only, got %#v", evalOut.CheckpointSummary)
 	}
 }
 

@@ -1,0 +1,355 @@
+schema: kalo.cli-surface/v0.2
+kind: cli_surface_tree
+
+metadata:
+  product: devspecs-cli
+  binary: ds
+  audited_at: "2026-06-30"
+  source:
+    - go run ./cmd/ds --help
+    - go run ./cmd/ds task --help
+    - go run ./cmd/ds workspace --help
+    - cmd/ds/main.go
+    - internal/commands
+  intent: >
+    Human-readable source of truth for which DevSpecs commands exist, where they
+    live in the prefix tree, and what each command is for.
+
+legend:
+  core: Primary launch workflow.
+  support: Useful public surface, but not the main path.
+  diagnostic: Helps inspect or verify context/state.
+  maintenance: Setup, refresh, or install upkeep.
+  experimental: Available for dogfood; expect naming/shape changes.
+  hidden: Registered but intentionally absent from root help.
+  removed: Code may exist, but the command is not registered.
+
+tree:
+  ds:
+    purpose: Root command for local intent indexing and bounded AI coding work.
+    children:
+      recent:
+        status: core
+        purpose: Recover the current local thread from recent work and follow-up commands.
+      task:
+        status: core
+        purpose: Create and manage bounded task workspaces with packed context.
+      apply:
+        status: core
+        usage: ds apply [task-id|target]
+        purpose: Emit one bounded one-slice prompt for an agent; omit the argument for the unambiguous next slice.
+      tldr:
+        status: core
+        purpose: Show LLM-oriented workflow quickstarts.
+      find:
+        status: support
+        purpose: Build a focused evidence pack for a query.
+      map:
+        status: support
+        purpose: Show architecture/system boundaries and follow-up commands.
+      context:
+        status: support
+        purpose: Export one known artifact as agent-ready context.
+      show:
+        status: support
+        aliases:
+          - get
+        purpose: Show details for one known artifact ID.
+      init:
+        status: maintenance
+        purpose: Initialize repo config and optional agent adapter files.
+      scan:
+        status: maintenance
+        purpose: Rescan repository intent docs, source, tests, and git evidence.
+      config:
+        status: maintenance
+        purpose: Inspect or edit DevSpecs discovery config.
+      update:
+        status: maintenance
+        purpose: Detect install channel and print update guidance.
+      version:
+        status: maintenance
+        purpose: Print version information.
+      workspace:
+        status: experimental
+        aliases:
+          - ws
+        purpose: Coordinate umbrella workspace changes across child repos.
+      completion:
+        status: cobra_builtin
+        purpose: Generate shell completion scripts.
+      help:
+        status: cobra_builtin
+        purpose: Show command help.
+
+  ds task:
+    purpose: Repo-local task planning, bounded execution, checkpoints, and lifecycle state.
+    default_invocation:
+      usage: ds task "<goal>"
+      status: core
+      purpose: Create a sliced task workspace from a grounded goal.
+    children:
+      next:
+        status: support
+        usage: ds task next <task-id>
+        purpose: Show the next bounded target in a task.
+      show:
+        status: support
+        usage: ds task show <task-id|target>
+        purpose: Show exact context for one task target.
+      status:
+        status: support
+        usage: ds task status <task-id>
+        purpose: Show task, slice, follow-up, checkpoint, and decision state.
+      checkpoint:
+        status: core
+        usage: ds task checkpoint <task-id|target>
+        purpose: Record what happened, evidence, run logs, learnings, and the decision gate.
+      decide:
+        status: hidden_compat
+        usage: ds task decide <task-id|target>
+        purpose: Compatibility shortcut for decision-only updates; prefer ds task checkpoint --decision so the gate carries evidence.
+      start:
+        status: hidden_compat
+        usage: ds task start <task-id|target>
+        purpose: Compatibility shortcut for started state; prefer ds task checkpoint --stage started when a durable receipt matters.
+      audit:
+        status: diagnostic
+        usage: ds task audit <task-id|target>
+        purpose: Check whether observed edits stayed inside one task target.
+      evaluate:
+        status: diagnostic
+        usage: ds task evaluate <task-id>
+        purpose: Compare predicted task context with checkpointed actual context.
+      refresh:
+        status: maintenance
+        usage: ds task refresh <task-id>
+        purpose: Recapture task artifacts into the local index without rewriting docs.
+      prompt:
+        status: hidden_compat
+        usage: ds task prompt <task-id|target>
+        purpose: Compatibility alias; prefer ds apply for the bounded one-slice agent prompt.
+      finish:
+        status: hidden_compat
+        usage: ds task finish <task-id|target>
+        purpose: Compatibility alias; prefer ds task checkpoint so decisions carry evidence and run receipts.
+      sync:
+        status: hidden_compat
+        usage: ds task sync <task-id>
+        purpose: Compatibility alias; prefer ds task refresh as the clearer product word.
+      quick:
+        status: hidden_compat
+        usage: ds task quick "<goal>"
+        purpose: Compatibility alias; prefer ds task "<goal>" --quick.
+      slice:
+        status: support
+        purpose: Manage task slices, including improve/rework follow-up slices.
+      iteration:
+        status: hidden_compat
+        purpose: Compatibility alias; prefer ds task slice add --after.
+
+  ds task slice:
+    purpose: Add sibling or follow-up slices to an existing task.
+    children:
+      add:
+        status: support
+        usage: ds task slice add <task-id> <title> [--after A01 --reason improve]
+        purpose: Add a new sibling slice, or add A01-1-style follow-up work when --after is set.
+
+  ds task iteration:
+    status: hidden_compat
+    purpose: Compatibility alias for ds task slice add --after.
+    children:
+      add:
+        status: hidden_compat
+        usage: ds task iteration add <task-id> <title>
+        purpose: Add a new follow-up slice under an existing slice; prefer ds task slice add --after.
+
+  ds workspace:
+    aliases:
+      - ds ws
+    purpose: Umbrella-root coordination that creates repo-local task slices in child repos.
+    children:
+      init:
+        status: experimental
+        usage: ds workspace init [path]
+        purpose: Create workspace manifest, document, and changes directory.
+      show:
+        status: experimental
+        usage: ds workspace show
+        purpose: Show resolved workspace and detected child repos.
+      change:
+        status: experimental
+        purpose: Manage umbrella-level change artifacts.
+      slice:
+        status: experimental
+        purpose: Create repo-local task slices from workspace changes.
+      trace:
+        status: experimental
+        usage: ds workspace trace <change-id|task-id>
+        purpose: Trace a known workspace change or repo task to linked child-repo slices.
+
+  ds workspace change:
+    aliases:
+      - ds ws change
+    purpose: Workspace-level change records.
+    children:
+      create:
+        status: experimental
+        usage: ds workspace change create <title>
+        purpose: Create an umbrella change artifact for one or more child repo aliases.
+
+  ds workspace slice:
+    aliases:
+      - ds ws slice
+    purpose: Repo-local task creation from workspace changes.
+    children:
+      create:
+        status: experimental
+        usage: ds workspace slice create <change-id>
+        purpose: Create a child-repo task workspace linked to a workspace change.
+
+  ds config:
+    purpose: Repository discovery configuration.
+    children:
+      show:
+        status: maintenance
+        usage: ds config show
+        purpose: Print effective configuration.
+      paths:
+        status: maintenance
+        usage: ds config paths
+        purpose: List scan paths with existence status.
+      add-source:
+        status: maintenance
+        usage: ds config add-source <type> <path>
+        purpose: Add a source path to config.yaml.
+      set:
+        status: maintenance
+        usage: ds config set <key> <value>
+        purpose: Set a top-level config value.
+
+hidden_tree:
+  ds:
+    purpose: Registered but intentionally hidden root commands.
+    children:
+      capture:
+        status: hidden
+        purpose: Capture a specific file as an artifact.
+      criteria:
+        status: hidden
+        purpose: List extracted acceptance/success/OKR criteria from artifacts.
+      eval:
+        status: hidden
+        purpose: Run deterministic retrieval evals for fixture repos.
+      link:
+        status: hidden
+        purpose: Link an artifact to an external target.
+      resolve:
+        status: hidden
+        purpose: Resolve an artifact ID to its source.
+      resume:
+        status: hidden
+        purpose: Legacy lifecycle grouping; prefer recent.
+      status:
+        status: hidden
+        purpose: Update generic artifact status.
+      tag:
+        status: hidden
+        purpose: Add tags to artifacts.
+      todos:
+        status: hidden
+        purpose: List extracted todos from artifacts.
+      untag:
+        status: hidden
+        purpose: Remove tags from artifacts.
+      change:
+        status: hidden_compat
+        purpose: Compatibility alias for ds workspace change.
+      slice:
+        status: hidden_compat
+        purpose: Compatibility alias for ds workspace slice.
+      trace:
+        status: hidden_compat
+        purpose: Compatibility alias for ds workspace trace.
+
+removed_tree:
+  ds:
+    children:
+      list:
+        aliases:
+          - ls
+        status: removed
+        purpose: Flat artifact listing removed from root surface as too noisy.
+
+surface_questions:
+  - Should ds task quick remain as a hidden compatibility alias now that ds task --quick exists?
+  - Should user-defined aliases exist, or are built-in aliases enough for now?
+  - Should the experimental workspace surface rename workspace change to workspace plan before broader testing?
+
+planned_simplification:
+  keep_public:
+    ds:
+      - tldr
+      - init
+      - recent
+      - task
+      - apply
+      - find
+      - map
+      - config
+      - update
+      - version
+    ds_task:
+      - checkpoint
+      - status
+      - next
+      - show
+      - audit
+      - refresh
+      - slice add
+  shift_to_flags:
+    ds_task_quick:
+      target: ds task "<goal>" --quick
+      status: implemented
+      reason: Quick is a creation mode, not a separate verb.
+    ds_task_iteration_add:
+      target: ds task slice add <task-id> "<title>" --after A01 --reason improve
+      status: implemented
+      reason: Follow-up work is a slice with newer information, not a separate user noun.
+  keep_until_replacement_is_proven:
+    ds_task_next:
+      status: replacement_behavior_implemented
+      reason: ds apply now defaults to next and status now presents next_target, but keep ds task next public until dogfood proves the simpler path is enough.
+      replacement_tests:
+        - "implemented: ds apply defaults to next only when unambiguous."
+        - "implemented: ds task status shows Next in human output."
+        - "implemented: ds task status JSON includes next_target."
+  workspace_surface_backlog:
+    ds_workspace_change:
+      target: ds workspace plan create <title>
+      status: planned
+      reason: Workspace change versus repo task is accurate but not idiomatic enough for early users; workspace plans coordinate multi-repo intent while repo tasks execute bounded slices.
+      acceptance:
+        - "ds workspace --help shows plan, slice, and trace, not change."
+        - "ds workspace plan --help describes multi-repo workspace plan records."
+        - "Top-level ds change, ds slice, and ds trace compatibility aliases are removed."
+        - "README, CHANGELOG, TASK_WORKFLOW_EXAMPLE, and this cli-surface file use workspace plan language."
+        - "OpenSpec change terminology remains unchanged because it is an external dialect."
+  hide_or_deemphasize:
+    ds_task_prompt:
+      replacement: ds apply
+      status: implemented
+    ds_task_finish:
+      replacement: ds task checkpoint
+      status: implemented
+    ds_task_decide:
+      replacement: ds task checkpoint --decision
+      reason: Decision-only mutation can skip evidence.
+      status: implemented
+    ds_task_start:
+      replacement: ds task checkpoint --stage started, if needed.
+      status: implemented
+    ds_task_sync:
+      replacement: ds task refresh
+      status: implemented

@@ -15,6 +15,7 @@ import (
 
 type applyOptions struct {
 	Dir    string
+	Repo   string
 	Target string
 	AsJSON bool
 }
@@ -41,35 +42,47 @@ func NewApplyCmd() *cobra.Command {
 	opts.Dir = defaultTaskWorkspaceDir
 
 	cmd := &cobra.Command{
-		Use:   "apply <next|task-id|target>",
+		Use:   "apply [task-id|target]",
 		Short: "Emit a one-slice DevSpecs apply prompt",
 		Long: `Emit an agent prompt for exactly one DevSpecs task target.
 
 This command is prompt-only in v1.1: it resolves the next or requested slice and
 prints the bounded instruction an agent should follow. It does not launch an
 agent, mark the target started, or advance lifecycle state.`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			start := time.Now()
-			err := runApply(cmd, args[0], opts)
+			identifier := "next"
+			implicitNext := true
+			if len(args) > 0 {
+				identifier = args[0]
+				implicitNext = false
+			}
+			err := runApply(cmd, identifier, opts, implicitNext)
 			telemetry.RecordCommand("apply", err == nil, time.Since(start), map[string]any{
-				"json": opts.AsJSON,
-				"next": strings.EqualFold(strings.TrimSpace(args[0]), "next"),
+				"json":          opts.AsJSON,
+				"next":          strings.EqualFold(strings.TrimSpace(identifier), "next"),
+				"implicit_next": implicitNext,
+				"repo":          opts.Repo != "",
 			})
 			return err
 		},
 	}
 
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
-	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice/iteration target; useful when the first argument is a task id")
+	cmd.Flags().StringVar(&opts.Repo, repoTargetFlagName, "", "Target repository path for repo-local DevSpecs artifacts and context")
+	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice or follow-up target; useful when the first argument is a task id")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	return cmd
 }
 
-func runApply(cmd *cobra.Command, identifier string, opts applyOptions) error {
-	ctx, command, err := resolveApplyTargetContext(opts.Dir, identifier, opts.Target)
+func runApply(cmd *cobra.Command, identifier string, opts applyOptions, implicitNext bool) error {
+	ctx, command, err := resolveApplyTargetContext(opts.Dir, identifier, opts.Target, opts.Repo)
 	if err != nil {
 		return err
+	}
+	if implicitNext {
+		command = applyCommandLabel("", "", opts.Repo)
 	}
 	target := taskTargetOutputFromContext(ctx, true)
 	priorEvidence := taskPriorSliceEvidenceForPrompt(ctx.RepoRoot, ctx.Manifest.TaskID, ctx.Slice.ID)
@@ -92,7 +105,7 @@ func runApply(cmd *cobra.Command, identifier string, opts applyOptions) error {
 	return err
 }
 
-func resolveApplyTargetContext(baseDir, identifier, selector string) (taskTargetContext, string, error) {
+func resolveApplyTargetContext(baseDir, identifier, selector, repoPath string) (taskTargetContext, string, error) {
 	identifier = strings.TrimSpace(identifier)
 	selector = strings.TrimSpace(selector)
 	if identifier == "" {
@@ -102,22 +115,22 @@ func resolveApplyTargetContext(baseDir, identifier, selector string) (taskTarget
 		if selector != "" {
 			return taskTargetContext{}, "", fmt.Errorf("ds apply next does not accept --target; use ds apply <task-id> --target <target>")
 		}
-		taskID, err := resolveApplyNextTaskID(baseDir)
+		taskID, err := resolveApplyNextTaskID(baseDir, repoPath)
 		if err != nil {
 			return taskTargetContext{}, "", err
 		}
-		ctx, err := loadTaskTargetContext(baseDir, taskID, "")
-		return ctx, "ds apply next", err
+		ctx, err := loadTaskTargetContextForRepo(baseDir, taskID, "", repoPath)
+		return ctx, applyCommandLabel(identifier, selector, repoPath), err
 	}
 
-	ctx, err := loadResolvedTaskTargetContext(baseDir, identifier, selector)
+	ctx, err := loadResolvedTaskTargetContextForRepo(baseDir, identifier, selector, repoPath)
 	if err == nil {
-		return ctx, applyCommandLabel(identifier, selector), nil
+		return ctx, applyCommandLabel(identifier, selector, repoPath), nil
 	}
 	if selector == "" {
-		if taskID, target, seriesErr := resolveApplySeriesTarget(baseDir, identifier); seriesErr == nil {
-			ctx, loadErr := loadTaskTargetContext(baseDir, taskID, target)
-			return ctx, applyCommandLabel(identifier, selector), loadErr
+		if taskID, target, seriesErr := resolveApplySeriesTarget(baseDir, identifier, repoPath); seriesErr == nil {
+			ctx, loadErr := loadTaskTargetContextForRepo(baseDir, taskID, target, repoPath)
+			return ctx, applyCommandLabel(identifier, selector, repoPath), loadErr
 		} else if shouldPreferApplySeriesError(identifier, err) {
 			return taskTargetContext{}, "", seriesErr
 		}
@@ -125,17 +138,26 @@ func resolveApplyTargetContext(baseDir, identifier, selector string) (taskTarget
 	return taskTargetContext{}, "", err
 }
 
-func applyCommandLabel(identifier, selector string) string {
+func applyCommandLabel(identifier, selector, repoPath string) string {
 	identifier = strings.TrimSpace(identifier)
 	selector = strings.TrimSpace(selector)
-	if selector == "" {
-		return "ds apply " + identifier
+	repoPath = strings.TrimSpace(repoPath)
+	var command string
+	if identifier == "" && selector == "" {
+		command = "ds apply"
+	} else if selector == "" {
+		command = "ds apply " + identifier
+	} else {
+		command = "ds apply " + identifier + " --target " + selector
 	}
-	return "ds apply " + identifier + " --target " + selector
+	if repoPath != "" {
+		command += " --repo " + commandArg(repoPath)
+	}
+	return command
 }
 
-func resolveApplyNextTaskID(baseDir string) (string, error) {
-	candidates, blocked, err := findApplyNextTaskCandidates(baseDir)
+func resolveApplyNextTaskID(baseDir, repoPath string) (string, error) {
+	candidates, blocked, err := findApplyNextTaskCandidates(baseDir, repoPath)
 	if err != nil {
 		return "", err
 	}
@@ -167,8 +189,8 @@ func resolveApplyNextTaskID(baseDir string) (string, error) {
 	}
 }
 
-func findApplyNextTaskCandidates(baseDir string) ([]applyTaskCandidate, []error, error) {
-	repoRoot, err := applyRepoRoot()
+func findApplyNextTaskCandidates(baseDir, repoPath string) ([]applyTaskCandidate, []error, error) {
+	repoRoot, err := applyRepoRoot(repoPath)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -233,12 +255,12 @@ func applyNextErrorBlocksAutomaticNext(err error) bool {
 		!strings.Contains(msg, "task has no slice targets")
 }
 
-func resolveApplySeriesTarget(baseDir, selector string) (string, string, error) {
+func resolveApplySeriesTarget(baseDir, selector, repoPath string) (string, string, error) {
 	selector = strings.TrimSpace(selector)
 	if selector == "" {
 		return "", "", fmt.Errorf("series target is empty")
 	}
-	repoRoot, err := applyRepoRoot()
+	repoRoot, err := applyRepoRoot(repoPath)
 	if err != nil {
 		return "", "", err
 	}
@@ -334,14 +356,6 @@ func shouldPreferApplySeriesError(identifier string, resolvedErr error) bool {
 	return true
 }
 
-func applyRepoRoot() (string, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	repoRoot := canonicalRepoRoot(resolveRepoRootFromWd(wd))
-	if repoRoot == "" {
-		repoRoot = canonicalRepoRoot(wd)
-	}
-	return repoRoot, nil
+func applyRepoRoot(repoPath string) (string, error) {
+	return resolveTargetRepoRoot(repoPath)
 }

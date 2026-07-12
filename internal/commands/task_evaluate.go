@@ -81,7 +81,7 @@ func runTaskEvaluate(cmd *cobra.Command, taskID string, opts taskEvaluateOptions
 	if err := validateTaskID(taskID); err != nil {
 		return err
 	}
-	_, workspace, manifest, err := loadTaskWorkspaceManifest(opts.Dir, taskID)
+	_, workspace, manifest, err := loadTaskWorkspaceManifest(cmd, opts.Dir, taskID)
 	if err != nil {
 		return err
 	}
@@ -187,8 +187,24 @@ func appendCheckpointReadSummary(summary *taskCheckpointReadSummary, record task
 	}
 	summary.EvidenceOnlyGitDiffFiles = appendNormalizedUnique(summary.EvidenceOnlyGitDiffFiles, record.Evidence.GitDiffPaths...)
 	for _, command := range record.Evidence.TestCommands {
+		if taskCheckpointCommandIsActualRun(record, command.Command) {
+			continue
+		}
 		summary.EvidenceOnlyTestCommands = appendUniqueString(summary.EvidenceOnlyTestCommands, command.Command)
 	}
+}
+
+func taskCheckpointCommandIsActualRun(record taskCheckpointRecord, command string) bool {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return false
+	}
+	for _, value := range append(record.TestsRun, record.ActualContext.TestsRun...) {
+		if strings.TrimSpace(value) == command {
+			return true
+		}
+	}
+	return false
 }
 
 func finalizeTaskCheckpointReadSummary(summary *taskCheckpointReadSummary) {

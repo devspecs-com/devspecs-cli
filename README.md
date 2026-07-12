@@ -59,9 +59,9 @@ Create one bounded task in your repo:
 
 ```bash
 ds task "fix OAuth redirect"
-ds apply next
+ds apply
 ds task checkpoint A01 --decision improve
-ds apply next
+ds apply
 ```
 
 Or try it in a disposable FastAPI checkout:
@@ -90,6 +90,7 @@ ds init
 | Recover the thread | `ds recent` | You came back cold and need the current local work thread. |
 | Ground the change | `ds map` / `ds find "topic"` | Git and rg found code, but you still need intent, boundaries, and exclusions. |
 | Create a bounded handoff | `ds task "goal"` | You know the work and want packed repo context plus a stop line. |
+| Coordinate multi-repo work | `ds workspace init .` | You have an umbrella workspace with several child repos. Experimental. |
 | Continue one slice | `ds apply next` | A task already exists and the agent needs the current target only. |
 | Record the receipt | `ds task checkpoint A01 --decision promote` | You need to capture what changed, what ran, what missed, and what comes next. |
 | Inspect exact context | `ds context <artifact-id>` | You want one indexed artifact as paste-ready agent context. |
@@ -109,8 +110,8 @@ DevSpecs gives that layer local shape:
 - task slices that tell the agent where to stop;
 - packed source, test, docs, and intent context before implementation starts;
 - explicit gates: `promote`, `improve`, `rework`, `rollback`, and `block`;
-- iteration slices such as `A01-1` and `A01-2` when the first attempt teaches
-  you something;
+- follow-up slices such as `A01-1` and `A01-2` when the first attempt teaches
+  you something, created with `ds task slice add <task-id> "<title>" --after A01`;
 - checkpoint and result artifacts that survive compaction, handoff, and the
   next agent session.
 
@@ -171,9 +172,9 @@ ds task "Serve Swagger UI OAuth2 redirect from a custom docs redirect URL" \
   --slice "Add regression coverage and docs examples"
 
 ds task show A01
-ds apply next
+ds apply
 ds task checkpoint A01 --decision promote --next-target A02
-ds apply next
+ds apply
 ```
 
 What you get:
@@ -182,19 +183,67 @@ What you get:
 - `A01`, `A02`, ... slice plan/result artifacts;
 - packed source, test, docs, and receipt context;
 - a one-slice agent prompt;
-- lifecycle state from `start`, `checkpoint`, `finish`, `decide`, and
-  `refresh`;
+- lifecycle state from `checkpoint`, `status`, and `refresh`;
 - a durable record of what changed, what ran, what missed, and what should
   happen next.
 
 For a smaller one-off:
 
 ```bash
-ds task quick "Fix discount rounding in invoice totals"
+ds task "Fix discount rounding in invoice totals" --quick
 ```
 
-Use full `ds task` when you want durable slices and handoff receipts. Use
-`ds task quick` when the ceremony would outweigh the change.
+Use full `ds task` when you want durable slices and handoff receipts. Add
+`--quick` when the ceremony would outweigh the change.
+
+## Workspace Coordination
+
+Workspace coordination is experimental and explicit. Use it only when one
+umbrella directory coordinates work across several child repos. Normal
+single-repo `ds task`, `ds task --quick`, `ds apply`, and `ds task checkpoint`
+remain the default path.
+
+`ds ws` is a built-in shortcut for `ds workspace`; docs use the full command
+when first introducing the workflow.
+
+Current dogfood flow:
+
+```powershell
+ds workspace init . --json
+ds workspace change create "Customer export across frontend/backend" --workspace . --repos backend,frontend --json
+ds workspace slice create EAG-C001 --workspace . --repo backend --name "Backend API" --json
+ds task show eag-c001-backend --repo ./enalytics-backend --json
+ds apply eag-c001-backend --repo ./enalytics-backend --json
+ds task checkpoint eag-c001-backend --repo ./enalytics-backend --target A01 --stage validated --decision promote --json
+ds workspace trace EAG-C001 --workspace . --json
+```
+
+Workspace files are written under the umbrella `devspecs/` directory. Repo-local
+task files are written under the selected child repo. The `--repo` flag is the
+explicit boundary between the current shell directory and the target repo for
+task/apply/checkpoint work.
+
+`ds workspace trace` is for known workspace change or repo task IDs. Use
+`ds find` when you need to discover relevant source, tests, docs, or prior task
+receipts.
+
+Migration guarantee: new docs, help text, and examples use the
+`ds workspace ...` namespace. Top-level `ds change`, `ds slice`, and `ds trace`
+remain hidden compatibility aliases for older local scripts. Regression tests
+cover three gates: root help hides the aliases, alias help points to the
+workspace form, and the aliases still dispatch the same workspace operations.
+
+## Command Roles
+
+| Need | Command | Meaning |
+| --- | --- | --- |
+| Discover evidence | `ds find "topic"` | Pack likely source, tests, docs, receipts, and exclusions for a focused question. |
+| Check task progress | `ds task status/show` + `ds apply` | Read lifecycle state, inspect one target, then emit the bounded prompt. |
+| Follow workspace links | `ds workspace trace <id>` | Trace a known workspace change or repo task to linked repo-local slices. |
+
+`ds workspace trace` reports both lifecycle `status` and index-capture
+`index_status`. Keep them separate: `index_missing` means an artifact is not
+currently captured in the local index; it is not the same as `missing_result`.
 
 ## Trust Layer
 
@@ -202,9 +251,9 @@ Use these commands when scope is unclear or you want to verify what the agent is
 about to use:
 
 ```bash
-ds map
 ds recent
 ds find "oauth redirect"
+ds map
 ds context <artifact-id>
 ```
 
@@ -234,22 +283,26 @@ Index state lives in local SQLite and can be rebuilt.
 
 | Command | Use |
 | --- | --- |
+| `ds recent [topic]` | Start here to recover the local thread, recently active topics, and follow-up context commands. |
 | `ds init` | Create local index state, repo config, and optional agent adapter files. |
 | `ds tldr [workflow]` | Show LLM-oriented quickstarts for setup, hotfixes, epics, incidents, brownfield recovery, handoff, and deep dives. |
 | `ds task <query>` | Create a bounded task workspace with slice artifacts. |
-| `ds task quick <query>` | Create a compact one-off task workspace. |
-| `ds apply <next\|task-id\|target>` | Emit the next bounded one-slice agent prompt without mutating task state. |
-| `ds task checkpoint <target>` | Record files, tests, misses, noise, learnings, decision evidence, and next iteration. |
+| `ds task <query> --quick` | Create a compact one-off task workspace. |
+| `ds task status/show` | Inspect task lifecycle state and target context. |
+| `ds apply [task-id\|target]` | Emit the next bounded one-slice agent prompt without mutating task state; omit the argument for the unambiguous next slice. |
+| `ds task checkpoint <task-id\|target>` | Record files, tests, misses, noise, learnings, decision evidence, and next iteration. |
+| `ds task slice add <task-id> "<title>" --after A01 --reason improve` | Add an A01-1-style follow-up slice after an improve/rework gate. |
 | `ds task refresh <task-id>` | Recapture edited task artifacts into the local index without rewriting task docs. |
+| `ds workspace init/show/change/slice/trace` | Coordinate experimental workspace-level changes, repo-local task slices, and known change/task traces. |
 | `ds map` | Show architecture/system boundaries with evidence and follow-up commands. |
-| `ds recent` | Show recently active local git topics and follow-up context commands. |
 | `ds find <query>` | Build agent-readable packed context. |
 | `ds context <id>` | Export one artifact as paste-ready agent context. |
 | `ds scan` | Manually refresh or rebuild configured intent-artifact paths. |
 | `ds config show` | Inspect effective repo discovery config. |
 
 Most read commands support `--json`. Run `ds <command> --help` for the current
-flag surface.
+flag surface. Prefer the `ds workspace ...` form for workspace coordination;
+top-level workspace aliases are hidden compatibility shims.
 
 ## Storage And Privacy
 
@@ -259,6 +312,8 @@ flag surface.
 | `.devspecs/config.yaml` | Repo discovery configuration. | Usually yes. |
 | `devspecs/tasks/<task-id>/` | Default generated task workspace. | Yes, when durable. |
 | `.devspecs/tasks/<task-id>/` | Legacy or explicitly local task workspace. | No, unless you chose it deliberately. |
+| `devspecs/workspace.yaml` | Experimental workspace manifest for umbrella repos. | Yes, when used by the team. |
+| `devspecs/changes/<change-id>-*.md` | Experimental workspace-level change records. | Yes, when used by the team. |
 
 Commit task artifacts when they explain durable work, should be reviewed with a
 change, or are useful to the next person or agent. If a task is scratch-only,
@@ -315,7 +370,7 @@ tools, but those wrappers route back through `ds task` and `ds apply`.
 ### Why not just use epics, stories, and tasks?
 
 Traditional issue trackers describe planned work. Agent work creates local
-attempts, misses, evidence, and iteration slices between ticket updates.
+attempts, misses, evidence, and follow-up slices between ticket updates.
 DevSpecs manages that local AI work layer without replacing the tracker.
 
 ### Should I commit `devspecs/tasks`?
@@ -326,7 +381,7 @@ work. Use `.devspecs/tasks` or a gitignored path for scratch-only local plans.
 ### Is `ds adopt` available?
 
 Not yet. Current brownfield workflows already index existing intent artifacts
-in place through `ds map`, `ds find`, `ds recent`, and `ds scan`. `ds adopt` is
+in place through `ds recent`, `ds find`, `ds map`, and `ds scan`. `ds adopt` is
 planned for creating thin wrapper artifacts without mutating old PRDs, RFCs,
 ADRs, or plans.
 

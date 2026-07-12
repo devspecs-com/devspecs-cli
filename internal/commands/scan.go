@@ -55,7 +55,7 @@ func NewScanCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "scan",
-		Short: "Scan repository for specs, plans, and ADRs",
+		Short: "Rescan repository intent docs, source, tests, and git evidence",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runScan(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, experimentalSourceManifest, includeTests, includeCodeComments, noGitignore)
 		},
