@@ -1432,7 +1432,7 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 	}
 
 	if !opts.NoRefresh {
-		if err := ensureMapRepoIndexed(cmd, repoRoot, opts.Quiet); err != nil {
+		if err := ensureMapRepoIndexed(cmd, repoRoot, opts.Quiet || opts.JSON); err != nil {
 			return err
 		}
 	}
@@ -1469,7 +1469,8 @@ func runRecent(cmd *cobra.Command, opts mapOptions) error {
 	if err != nil {
 		return err
 	}
-	if !opts.Quiet {
+	showProgress := !opts.Quiet && !opts.JSON
+	if showProgress {
 		fmt.Fprintln(cmd.ErrOrStderr(), "Recent progress: analyzing recent repository activity")
 		if opts.Verbose {
 			fmt.Fprintln(cmd.ErrOrStderr(), "Recent progress: checking local git history")
@@ -1477,10 +1478,10 @@ func runRecent(cmd *cobra.Command, opts mapOptions) error {
 		}
 	}
 	out := buildMapRecentOutput(cmd.Context(), repoRoot, opts)
-	if !opts.Quiet && opts.Verbose {
+	if showProgress && opts.Verbose {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Recent progress: analyzed %d commit(s), matched %d topic(s)\n", out.Diagnostics.CommitsRead, len(out.Topics))
 	}
-	if !opts.Quiet {
+	if showProgress {
 		fmt.Fprintln(cmd.ErrOrStderr(), "Recent progress: complete")
 	}
 	success = true

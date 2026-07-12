@@ -199,7 +199,7 @@ func TestScanJSONIncludesWorkspaceRootWarning(t *testing.T) {
 	}
 }
 
-func TestMapJSONAutoScanWarnsForWorkspaceRootWithoutBreakingStdout(t *testing.T) {
+func TestMapJSONAutoScanSuppressesWorkspaceRootWarningStderr(t *testing.T) {
 	root := setupGitRepo(t)
 	t.Setenv("DEVSPECS_HOME", filepath.Join(t.TempDir(), "home"))
 	writeWorkspaceRootTestFile(t, root, "repos/api/.git/HEAD", "ref: refs/heads/main\n")
@@ -215,8 +215,8 @@ func TestMapJSONAutoScanWarnsForWorkspaceRootWithoutBreakingStdout(t *testing.T)
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stderr.String(), "Workspace root warning") {
-		t.Fatalf("expected map auto-scan workspace warning on stderr, got: %s", stderr.String())
+	if stderr.Len() != 0 {
+		t.Fatalf("map --json should suppress workspace-root warning stderr, got: %s", stderr.String())
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {

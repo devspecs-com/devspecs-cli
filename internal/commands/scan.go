@@ -383,14 +383,26 @@ func scanProgressStderr(out io.Writer, label string, verbose ...bool) func(scan.
 }
 
 func commandVerboseProgress(cmd *cobra.Command) bool {
+	return commandBoolFlag(cmd, "verbose")
+}
+
+func commandSuppressNonResultProgress(cmd *cobra.Command) bool {
+	return commandBoolFlag(cmd, "quiet") || commandBoolFlag(cmd, "json")
+}
+
+func commandBoolFlag(cmd *cobra.Command, name string) bool {
 	if cmd == nil {
 		return false
 	}
-	if verbose, err := cmd.Flags().GetBool("verbose"); err == nil {
-		return verbose
+	if flag := cmd.Flags().Lookup(name); flag != nil {
+		if value, err := cmd.Flags().GetBool(name); err == nil {
+			return value
+		}
 	}
-	if verbose, err := cmd.InheritedFlags().GetBool("verbose"); err == nil {
-		return verbose
+	if flag := cmd.InheritedFlags().Lookup(name); flag != nil {
+		if value, err := cmd.InheritedFlags().GetBool(name); err == nil {
+			return value
+		}
 	}
 	return false
 }

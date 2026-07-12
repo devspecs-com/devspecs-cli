@@ -1821,9 +1821,14 @@ func TestRecentCommandShowsRecentTopics(t *testing.T) {
 	jsonCmd := NewRecentCmd()
 	jsonCmd.SetArgs([]string{"credentials", "--path", repoRoot, "--no-refresh", "--json"})
 	jsonBuf := &bytes.Buffer{}
+	jsonErr := &bytes.Buffer{}
 	jsonCmd.SetOut(jsonBuf)
+	jsonCmd.SetErr(jsonErr)
 	if err := jsonCmd.Execute(); err != nil {
 		t.Fatal(err)
+	}
+	if jsonErr.Len() != 0 {
+		t.Fatalf("recent --json should suppress progress stderr, got: %s", jsonErr.String())
 	}
 	var out mapRecentOutput
 	if err := json.Unmarshal(jsonBuf.Bytes(), &out); err != nil {
@@ -2173,8 +2178,8 @@ func TestMapOutputCacheMissScansWhenGitHeadMoved(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(errBuf.String(), "Index updated") {
-		t.Fatalf("stale map output cache should rebuild substrate before map output, stderr: %s", errBuf.String())
+	if errBuf.Len() != 0 {
+		t.Fatalf("map --json stale cache rebuild should suppress auto-scan stderr, got: %s", errBuf.String())
 	}
 	var out mapOutput
 	if err := json.Unmarshal(outBuf.Bytes(), &out); err != nil {
@@ -2367,7 +2372,7 @@ func TestMapNoRefreshSkipsAutoScan(t *testing.T) {
 	}
 }
 
-func TestMapJSONAutoScanKeepsStdoutJSON(t *testing.T) {
+func TestMapJSONAutoScanKeepsResultStreamsClean(t *testing.T) {
 	repoRoot := setupGitRepo(t)
 	home := t.TempDir()
 	t.Setenv("DEVSPECS_HOME", home)
@@ -2386,8 +2391,8 @@ func TestMapJSONAutoScanKeepsStdoutJSON(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(errBuf.String(), "Index updated") {
-		t.Fatalf("map --json should build substrate on first run, stderr: %s", errBuf.String())
+	if errBuf.Len() != 0 {
+		t.Fatalf("map --json should suppress auto-scan stderr, got: %s", errBuf.String())
 	}
 	var out mapOutput
 	if err := json.Unmarshal(outBuf.Bytes(), &out); err != nil {
