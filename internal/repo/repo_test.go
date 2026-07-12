@@ -170,6 +170,48 @@ func TestFileFirstCommitDate(t *testing.T) {
 	}
 }
 
+func TestFileFirstCommitDates_matchesSinglePathAndFollowsRenames(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available:", err)
+	}
+	tmp := t.TempDir()
+	if err := gitCmd("init", "-b", "main", tmp).Run(); err != nil {
+		t.Fatal(err)
+	}
+	oldDate := "2020-01-02T03:04:05Z"
+	if err := os.WriteFile(filepath.Join(tmp, "old.md"), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitCmd("-C", tmp, "add", "old.md").Run(); err != nil {
+		t.Fatal(err)
+	}
+	commitGitTest(t, tmp, "add old", oldDate)
+
+	plainDate := "2020-02-03T04:05:06Z"
+	if err := os.WriteFile(filepath.Join(tmp, "plain.md"), []byte("plain\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitCmd("-C", tmp, "add", "plain.md").Run(); err != nil {
+		t.Fatal(err)
+	}
+	commitGitTest(t, tmp, "add plain", plainDate)
+
+	renameDate := "2021-03-04T05:06:07Z"
+	if err := gitCmd("-C", tmp, "mv", "old.md", "new.md").Run(); err != nil {
+		t.Fatal(err)
+	}
+	commitGitTest(t, tmp, "rename old to new", renameDate)
+
+	got := FileFirstCommitDates(tmp, []string{"new.md", "plain.md", "missing.md", ""})
+	assertSameGitDate(t, got["new.md"], FileFirstCommitDate(tmp, "new.md"))
+	assertSameGitDate(t, got["plain.md"], FileFirstCommitDate(tmp, "plain.md"))
+	if _, ok := got["missing.md"]; ok {
+		t.Fatalf("missing path unexpectedly resolved: %#v", got)
+	}
+	assertSameGitDate(t, got["new.md"], oldDate)
+	assertSameGitDate(t, got["plain.md"], plainDate)
+}
+
 func TestHeadCommit_gitRepo(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available:", err)
@@ -248,5 +290,32 @@ func TestChangedFiles_nonGit(t *testing.T) {
 func TestFileFirstCommitDate_emptyPath(t *testing.T) {
 	if FileFirstCommitDate(t.TempDir(), "") != "" {
 		t.Fatal()
+	}
+}
+
+func commitGitTest(t *testing.T, repoRoot, message, date string) {
+	t.Helper()
+	commit := gitCmd("-C", repoRoot, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", message, "--date", date)
+	commit.Env = append(commit.Env,
+		"GIT_AUTHOR_DATE="+date,
+		"GIT_COMMITTER_DATE="+date,
+	)
+	if err := commit.Run(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertSameGitDate(t *testing.T, got, want string) {
+	t.Helper()
+	gotT, err := time.Parse(time.RFC3339, got)
+	if err != nil {
+		t.Fatalf("parse got %q: %v", got, err)
+	}
+	wantT, err := time.Parse(time.RFC3339, want)
+	if err != nil {
+		t.Fatalf("parse want %q: %v", want, err)
+	}
+	if !gotT.Equal(wantT) {
+		t.Fatalf("date mismatch: got %s want %s", got, want)
 	}
 }

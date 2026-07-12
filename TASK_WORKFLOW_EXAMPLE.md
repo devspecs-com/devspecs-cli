@@ -187,7 +187,6 @@ compact. Omitting it also recaptures the updated task artifacts into the local
 DevSpecs index.
 
 ```bash
-$ ds task start A01 --index=false
 $ ds task checkpoint weekly-digest \
   --target A01 \
   --stage validated \

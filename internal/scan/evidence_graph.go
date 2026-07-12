@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/devspecs-com/devspecs-cli/internal/store"
@@ -71,6 +72,7 @@ type EvidenceGraphDiagnostics struct {
 	NoisyConceptsSkipped int                      `json:"noisy_concepts_skipped,omitempty"`
 	TopNoisyConcepts     []EvidenceConceptExample `json:"top_noisy_concepts,omitempty"`
 	TopEdges             []EvidenceEdgeExample    `json:"top_edges,omitempty"`
+	PhaseMS              map[string]int64         `json:"phase_ms,omitempty"`
 }
 
 // EvidenceConceptExample explains one concept skipped from edge materialization.
@@ -101,6 +103,7 @@ type evidenceBuildResult struct {
 
 type evidenceGraphBuildOptions struct {
 	RichTypedIndex bool
+	PhaseTiming    bool
 }
 
 type evidenceArtifact struct {
@@ -168,22 +171,51 @@ var testImportPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?m)\brequire\(\s*['"]([^'"]+)['"]\s*\)`),
 	regexp.MustCompile(`(?m)\buse\s+([A-Za-z0-9_:]+)`),
 }
+var goFuncSymbolPattern = regexp.MustCompile(`(?m)\bfunc\s+(?:\([^)]+\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
+var goTypeSymbolPattern = regexp.MustCompile(`(?m)\btype\s+([A-Za-z_][A-Za-z0-9_]*)\b`)
+var generalDeclSymbolPattern = regexp.MustCompile(`(?m)\b(?:def|class|fn|struct|enum|trait|interface)\s+([A-Za-z_][A-Za-z0-9_]*)\b`)
+var jsDeclSymbolPattern = regexp.MustCompile(`(?m)\b(?:function|class|interface|type)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b`)
+var jsVariableSymbolPattern = regexp.MustCompile(`(?m)\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b`)
+
 var sourceSymbolPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?m)\bfunc\s+(?:\([^)]+\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(`),
-	regexp.MustCompile(`(?m)\btype\s+([A-Za-z_][A-Za-z0-9_]*)\b`),
-	regexp.MustCompile(`(?m)\b(?:def|class|fn|struct|enum|trait|interface)\s+([A-Za-z_][A-Za-z0-9_]*)\b`),
-	regexp.MustCompile(`(?m)\b(?:function|class|interface|type)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b`),
-	regexp.MustCompile(`(?m)\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b`),
+	goFuncSymbolPattern,
+	goTypeSymbolPattern,
+	generalDeclSymbolPattern,
+	jsDeclSymbolPattern,
+	jsVariableSymbolPattern,
 }
+var goSourceSymbolPatterns = []*regexp.Regexp{goFuncSymbolPattern, goTypeSymbolPattern}
+var pythonSourceSymbolPatterns = []*regexp.Regexp{generalDeclSymbolPattern}
+var jsSourceSymbolPatterns = []*regexp.Regexp{jsDeclSymbolPattern, jsVariableSymbolPattern, generalDeclSymbolPattern}
+var generalSourceSymbolPatterns = []*regexp.Regexp{generalDeclSymbolPattern}
 
 func (s *Scanner) rebuildEvidenceGraph(repoID, now string, opts evidenceGraphBuildOptions) (*EvidenceGraphDiagnostics, error) {
+	phaseMS := map[string]int64{}
+	recordPhase := func(name string, started time.Time) {
+		if opts.PhaseTiming {
+			phaseMS[name] = time.Since(started).Milliseconds()
+		}
+	}
+	phaseStarted := time.Now()
 	artifacts, err := s.loadEvidenceArtifacts(repoID)
+	recordPhase("load_artifacts", phaseStarted)
 	if err != nil {
 		return nil, err
 	}
 	built := buildEvidenceGraphWithOptions(repoID, artifacts, opts)
-	if err := s.db.ReplaceRepoEvidence(repoID, built.concepts, built.mentions, built.edges, now); err != nil {
+	mergeEvidencePhaseMS(phaseMS, built.diagnostics)
+	phaseStarted = time.Now()
+	persistPhaseMS, err := s.db.ReplaceRepoEvidenceWithPhaseTiming(repoID, built.concepts, built.mentions, built.edges, now)
+	recordPhase("persist_total", phaseStarted)
+	if err != nil {
 		return nil, err
+	}
+	if opts.PhaseTiming {
+		mergePhaseMS(phaseMS, persistPhaseMS)
+		if built.diagnostics.PhaseMS == nil {
+			built.diagnostics.PhaseMS = map[string]int64{}
+		}
+		mergePhaseMS(built.diagnostics.PhaseMS, phaseMS)
 	}
 	return built.diagnostics, nil
 }
@@ -243,13 +275,22 @@ func buildEvidenceGraph(repoID string, artifacts []evidenceArtifact) evidenceBui
 }
 
 func buildEvidenceGraphWithOptions(repoID string, artifacts []evidenceArtifact, opts evidenceGraphBuildOptions) evidenceBuildResult {
+	phaseMS := map[string]int64{}
+	recordPhase := func(name string, started time.Time) {
+		if opts.PhaseTiming {
+			phaseMS[name] = time.Since(started).Milliseconds()
+		}
+	}
 	artifactCount := len(artifacts)
+	phaseStarted := time.Now()
 	rawMentions := make([]rawConceptMention, 0, artifactCount*12)
 	for _, artifact := range artifacts {
 		rawMentions = append(rawMentions, limitArtifactEvidenceMentions(extractEvidenceMentionsWithOptions(artifact, opts))...)
 	}
 	rawMentions = limitRepoEvidenceMentions(rawMentions)
+	recordPhase("derive_mentions", phaseStarted)
 
+	phaseStarted = time.Now()
 	conceptsByKey := map[string]*conceptAccumulator{}
 	mentionSeen := map[string]bool{}
 	for _, mention := range rawMentions {
@@ -296,7 +337,9 @@ func buildEvidenceGraphWithOptions(repoID string, artifacts []evidenceArtifact, 
 		}
 		return conceptInputs[i].Kind < conceptInputs[j].Kind
 	})
+	recordPhase("build_concepts", phaseStarted)
 
+	phaseStarted = time.Now()
 	mentionInputs := make([]store.ConceptMentionInput, 0, len(rawMentions))
 	for _, mention := range rawMentions {
 		if !persistEvidenceMention(mention) {
@@ -318,7 +361,7 @@ func buildEvidenceGraphWithOptions(repoID string, artifacts []evidenceArtifact, 
 			SectionID:    mention.sectionID,
 			Field:        mention.field,
 			Weight:       mention.weight,
-			EvidenceJSON: evidenceJSON(compactMentionEvidence(mention)),
+			EvidenceJSON: compactMentionEvidenceJSON(mention),
 		})
 	}
 	sort.Slice(mentionInputs, func(i, j int) bool {
@@ -330,25 +373,65 @@ func buildEvidenceGraphWithOptions(repoID string, artifacts []evidenceArtifact, 
 		}
 		return mentionInputs[i].ArtifactID < mentionInputs[j].ArtifactID
 	})
+	recordPhase("build_mentions", phaseStarted)
 
+	phaseStarted = time.Now()
 	edgeBuilder := newEvidenceEdgeBuilder(repoID)
+	edgePhaseStarted := time.Now()
 	noisy := materializeSharedConceptEdges(artifacts, conceptsByKey, rawMentions, edgeBuilder)
+	recordPhase("build_edges:shared_concepts", edgePhaseStarted)
+	edgePhaseStarted = time.Now()
 	materializeLayoutGroupEdges(artifacts, edgeBuilder)
+	recordPhase("build_edges:layout_groups", edgePhaseStarted)
+	edgePhaseStarted = time.Now()
 	materializeSameSourcePathEdges(artifacts, edgeBuilder)
+	recordPhase("build_edges:same_source_path", edgePhaseStarted)
+	edgePhaseStarted = time.Now()
 	materializeTestSourceTriangulationEdges(artifacts, edgeBuilder, opts)
+	recordPhase("build_edges:test_source", edgePhaseStarted)
 	if opts.RichTypedIndex {
+		edgePhaseStarted = time.Now()
 		materializeRichSymbolReferenceEdges(artifacts, edgeBuilder)
+		recordPhase("build_edges:rich_symbol_refs", edgePhaseStarted)
 	}
+	edgePhaseStarted = time.Now()
 	materializeLinkEdges(artifacts, edgeBuilder)
+	recordPhase("build_edges:links", edgePhaseStarted)
+	edgePhaseStarted = time.Now()
 	materializePathReferenceEdges(artifacts, edgeBuilder)
+	recordPhase("build_edges:path_references", edgePhaseStarted)
+	edgePhaseStarted = time.Now()
 	edges := edgeBuilder.edges()
+	recordPhase("build_edges:sort", edgePhaseStarted)
+	recordPhase("build_edges", phaseStarted)
 
+	phaseStarted = time.Now()
 	diagnostics := buildEvidenceDiagnostics(conceptInputs, mentionInputs, edges, noisy, opts)
+	recordPhase("build_diagnostics", phaseStarted)
+	if opts.PhaseTiming {
+		diagnostics.PhaseMS = phaseMS
+	}
 	return evidenceBuildResult{
 		concepts:    conceptInputs,
 		mentions:    mentionInputs,
 		edges:       edges,
 		diagnostics: diagnostics,
+	}
+}
+
+func mergeEvidencePhaseMS(out map[string]int64, diagnostics *EvidenceGraphDiagnostics) {
+	if diagnostics == nil {
+		return
+	}
+	mergePhaseMS(out, diagnostics.PhaseMS)
+}
+
+func mergePhaseMS(out map[string]int64, values map[string]int64) {
+	if out == nil {
+		return
+	}
+	for key, value := range values {
+		out[key] = value
 	}
 }
 
@@ -946,6 +1029,9 @@ func materializeTestSourceTriangulationEdges(artifacts []evidenceArtifact, build
 			sourcesBySymbol[symbol] = append(sourcesBySymbol[symbol], source)
 		}
 	}
+	sortTriangulationSourceIndexes(sourcesByStem, maxTestSourceCandidatesPerKey)
+	sortTriangulationSourceIndexes(sourcesByModuleKey, maxTestSourceCandidatesPerKey)
+	sortTriangulationSourceIndexes(sourcesBySymbol, 4)
 
 	var selected []*testSourceCandidate
 	for i := range tests {
@@ -977,13 +1063,13 @@ func materializeTestSourceTriangulationEdges(artifacts []evidenceArtifact, build
 		}
 
 		if test.stem != "" {
-			for _, source := range cappedTriangulationSources(sourcesByStem[test.stem]) {
+			for _, source := range sourcesByStem[test.stem] {
 				if !allowTestSourceStemMatch(test, source, sourceStemCount[test.stem]) {
 					continue
 				}
 				confidence := 0.86
 				weight := 0.84
-				if triangulationPathsAreNear(test.path, source.path) {
+				if triangulationDirsAreNear(test.dir, source.dir) {
 					confidence = 0.91
 					weight = 0.9
 				}
@@ -1003,7 +1089,7 @@ func materializeTestSourceTriangulationEdges(artifacts []evidenceArtifact, build
 		}
 
 		for _, key := range sortedMapKeys(test.importKeys) {
-			for _, source := range cappedTriangulationSources(sourcesByModuleKey[key]) {
+			for _, source := range sourcesByModuleKey[key] {
 				candidate := addCandidate(source, "direct_import", 0.92, 0.92)
 				if candidate != nil {
 					for form := range test.importForms {
@@ -1016,10 +1102,10 @@ func materializeTestSourceTriangulationEdges(artifacts []evidenceArtifact, build
 		}
 
 		for _, symbol := range sortedStringValueMapKeys(test.symbols) {
-			for _, source := range cappedTriangulationSymbolSources(sourcesBySymbol[symbol]) {
+			for _, source := range sourcesBySymbol[symbol] {
 				weight := 0.74
 				confidence := 0.72
-				if triangulationPathsAreNear(test.path, source.path) {
+				if triangulationDirsAreNear(test.dir, source.dir) {
 					weight = 0.8
 					confidence = 0.8
 				}
@@ -1282,10 +1368,7 @@ func triangulationTestSymbols(artifact evidenceArtifact) map[string]string {
 func extractSourceTriangulationSymbols(artifact evidenceArtifact) map[string]string {
 	symbols := map[string]string{}
 	for _, symbol := range evidenceStringSlice(artifact.extracted["symbols"]) {
-		if compact := compactIdentifier(symbol); usefulTriangulationSymbol(compact) {
-			symbols[compact] = symbol
-		}
-		if len(symbols) >= maxTriangulationSymbolsPerSource {
+		if addSourceTriangulationSymbol(symbols, symbol) >= maxTriangulationSymbolsPerSource {
 			return symbols
 		}
 	}
@@ -1293,16 +1376,19 @@ func extractSourceTriangulationSymbols(artifact evidenceArtifact) map[string]str
 	if len(body) > 128*1024 {
 		body = body[:128*1024]
 	}
-	for _, pattern := range sourceSymbolPatterns {
+	language := strings.TrimSpace(strings.ToLower(evidenceString(artifact.extracted["language"])))
+	path := primaryEvidencePath(artifact)
+	ext := strings.ToLower(filepath.Ext(path))
+	if language == "python" || ext == ".py" {
+		addPythonSourceTriangulationSymbols(symbols, body)
+		return symbols
+	}
+	for _, pattern := range sourceSymbolPatternsForLanguagePath(language, ext) {
 		for _, match := range pattern.FindAllStringSubmatch(body, 80) {
 			if len(match) < 2 {
 				continue
 			}
-			symbol := strings.TrimSpace(match[1])
-			if compact := compactIdentifier(symbol); usefulTriangulationSymbol(compact) {
-				symbols[compact] = symbol
-			}
-			if len(symbols) >= maxTriangulationSymbolsPerSource {
+			if addSourceTriangulationSymbol(symbols, strings.TrimSpace(match[1])) >= maxTriangulationSymbolsPerSource {
 				return symbols
 			}
 		}
@@ -1310,18 +1396,79 @@ func extractSourceTriangulationSymbols(artifact evidenceArtifact) map[string]str
 	return symbols
 }
 
-func cappedTriangulationSources(sources []*sourceTriangulationInfo) []*sourceTriangulationInfo {
-	if len(sources) > maxTestSourceCandidatesPerKey {
-		return nil
+func addSourceTriangulationSymbol(symbols map[string]string, value string) int {
+	if compact := compactIdentifier(value); usefulTriangulationSymbol(compact) {
+		symbols[compact] = value
 	}
-	return sources
+	return len(symbols)
 }
 
-func cappedTriangulationSymbolSources(sources []*sourceTriangulationInfo) []*sourceTriangulationInfo {
-	if len(sources) > 4 {
-		return nil
+func addPythonSourceTriangulationSymbols(symbols map[string]string, body string) {
+	for start := 0; start < len(body) && len(symbols) < maxTriangulationSymbolsPerSource; {
+		end := strings.IndexByte(body[start:], '\n')
+		if end < 0 {
+			end = len(body)
+		} else {
+			end += start
+		}
+		line := strings.TrimSpace(body[start:end])
+		switch {
+		case strings.HasPrefix(line, "async def "):
+			addSourceTriangulationSymbol(symbols, pythonDeclaredSymbol(line[len("async def "):]))
+		case strings.HasPrefix(line, "def "):
+			addSourceTriangulationSymbol(symbols, pythonDeclaredSymbol(line[len("def "):]))
+		case strings.HasPrefix(line, "class "):
+			addSourceTriangulationSymbol(symbols, pythonDeclaredSymbol(line[len("class "):]))
+		}
+		if end == len(body) {
+			break
+		}
+		start = end + 1
 	}
-	return sources
+}
+
+func pythonDeclaredSymbol(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	for i, r := range value {
+		if !(r == '_' || unicode.IsLetter(r) || (i > 0 && unicode.IsDigit(r))) {
+			return value[:i]
+		}
+	}
+	return value
+}
+
+func sourceSymbolPatternsForLanguagePath(language, ext string) []*regexp.Regexp {
+	switch {
+	case language == "go" || ext == ".go":
+		return goSourceSymbolPatterns
+	case language == "python" || ext == ".py":
+		return pythonSourceSymbolPatterns
+	case language == "typescript" || language == "javascript" ||
+		ext == ".ts" || ext == ".tsx" || ext == ".js" || ext == ".jsx" || ext == ".vue":
+		return jsSourceSymbolPatterns
+	case language == "rust" || ext == ".rs":
+		return generalSourceSymbolPatterns
+	case language == "java" || language == "kotlin" || ext == ".java" || ext == ".kt" || ext == ".kts":
+		return generalSourceSymbolPatterns
+	default:
+		return sourceSymbolPatterns
+	}
+}
+
+func sortTriangulationSourceIndexes(index map[string][]*sourceTriangulationInfo, maxSources int) {
+	for key, sources := range index {
+		if len(sources) == 0 || (maxSources > 0 && len(sources) > maxSources) {
+			delete(index, key)
+			continue
+		}
+		sort.Slice(sources, func(i, j int) bool {
+			return sources[i].path < sources[j].path
+		})
+		index[key] = sources
+	}
 }
 
 func allowTestSourceStemMatch(test *testTriangulationInfo, source *sourceTriangulationInfo, sourceStemCount int) bool {
@@ -1331,12 +1478,10 @@ func allowTestSourceStemMatch(test *testTriangulationInfo, source *sourceTriangu
 	if sourceStemCount <= 3 {
 		return true
 	}
-	return triangulationPathsAreNear(test.path, source.path)
+	return triangulationDirsAreNear(test.dir, source.dir)
 }
 
-func triangulationPathsAreNear(testPath, sourcePath string) bool {
-	testDir := filepath.ToSlash(filepath.Dir(testPath))
-	sourceDir := filepath.ToSlash(filepath.Dir(sourcePath))
+func triangulationDirsAreNear(testDir, sourceDir string) bool {
 	if testDir == sourceDir {
 		return true
 	}
@@ -2027,6 +2172,22 @@ func compactMentionEvidence(mention rawConceptMention) map[string]any {
 	return out
 }
 
+func compactMentionEvidenceJSON(mention rawConceptMention) string {
+	sourceJSON := evidenceJSONString(mention.source)
+	if form := truncateEvidenceValue(mention.form, maxMentionEvidenceFormLength); form != "" {
+		return `{"form":` + evidenceJSONString(form) + `,"source":` + sourceJSON + `}`
+	}
+	return `{"source":` + sourceJSON + `}`
+}
+
+func evidenceJSONString(value string) string {
+	b, err := json.Marshal(value)
+	if err != nil || len(b) == 0 {
+		return `""`
+	}
+	return string(b)
+}
+
 func truncateEvidenceValue(value string, limit int) string {
 	value = strings.TrimSpace(value)
 	if limit <= 0 || len(value) <= limit {
@@ -2205,6 +2366,9 @@ func noisyConceptReason(concept store.ConceptInput, artifactCount int) string {
 }
 
 func extractPathReferences(body string) []string {
+	if !strings.Contains(body, "/") || !strings.Contains(body, ".") {
+		return nil
+	}
 	if len(body) > 128*1024 {
 		body = body[:128*1024]
 	}

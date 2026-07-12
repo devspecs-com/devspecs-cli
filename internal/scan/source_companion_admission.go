@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/ignore"
@@ -23,6 +25,7 @@ const (
 	maxRawSourceCompanionsPerTest    = 10
 	maxCompanionTestPathsPerArtifact = 8
 	maxCompanionExamples             = 10
+	maxSourceCompanionReadWorkers    = 8
 )
 
 type rawSourceCompanionCandidate struct {
@@ -39,6 +42,12 @@ type sourceCompanionAggregate struct {
 	testPaths  map[string]bool
 	confidence string
 	score      int
+}
+
+type rawSourceCompanionTestResult struct {
+	testPath string
+	raw      []rawSourceCompanionCandidate
+	readOK   bool
 }
 
 var sourceCompanionImportPatterns = []*regexp.Regexp{
@@ -70,23 +79,22 @@ func buildTestSourceCompanionCandidates(ctx context.Context, repoRoot string, te
 	}
 
 	goModule := readGoModulePath(repoRoot)
+	rawByTest := deriveRawSourceCompanionTests(ctx, repoRoot, testFiles, goModule)
 	aggregates := map[string]*sourceCompanionAggregate{}
 	alreadyPresent := map[string]bool{}
-	for _, testPath := range testFiles {
+	for _, testResult := range rawByTest {
+		testPath := testResult.testPath
 		if err := ctx.Err(); err != nil {
 			recordCompanionRejection(diagnostics, testPath, "context_cancelled", "")
 			break
 		}
-		body, ok := readCompanionFile(repoRoot, testPath)
-		if !ok {
+		if !testResult.readOK {
 			recordCompanionRejection(diagnostics, testPath, "test_read_failed", "")
 			continue
 		}
-		raw := deriveRawSourceCompanions(testPath, body, goModule)
-		sortRawSourceCompanions(raw)
 		admittedForTest := 0
 		stemForTest := 0
-		for _, candidate := range raw {
+		for _, candidate := range testResult.raw {
 			if admittedForTest >= maxSourceCompanionsPerTest {
 				recordCompanionRejection(diagnostics, candidate.path, "per_test_cap", candidate.signal)
 				continue
@@ -190,6 +198,70 @@ func uniqueTestCandidatePaths(candidates []adapters.Candidate) []string {
 		}
 	}
 	return sortedMapKeys(seen)
+}
+
+func deriveRawSourceCompanionTests(ctx context.Context, repoRoot string, testFiles []string, goModule string) []rawSourceCompanionTestResult {
+	results := make([]rawSourceCompanionTestResult, len(testFiles))
+	if len(testFiles) == 0 {
+		return results
+	}
+	for i, testPath := range testFiles {
+		results[i].testPath = testPath
+	}
+	workers := runtime.GOMAXPROCS(0)
+	if workers > maxSourceCompanionReadWorkers {
+		workers = maxSourceCompanionReadWorkers
+	}
+	if workers > len(testFiles) {
+		workers = len(testFiles)
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	if workers == 1 {
+		for i, testPath := range testFiles {
+			results[i] = deriveRawSourceCompanionTest(ctx, repoRoot, testPath, goModule)
+		}
+		return results
+	}
+
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range jobs {
+				testPath := testFiles[index]
+				results[index] = deriveRawSourceCompanionTest(ctx, repoRoot, testPath, goModule)
+			}
+		}()
+	}
+	for i := range testFiles {
+		if ctx.Err() != nil {
+			break
+		}
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	return results
+}
+
+func deriveRawSourceCompanionTest(ctx context.Context, repoRoot, testPath, goModule string) rawSourceCompanionTestResult {
+	result := rawSourceCompanionTestResult{testPath: testPath}
+	if ctx.Err() != nil {
+		return result
+	}
+	body, ok := readCompanionFile(repoRoot, testPath)
+	if !ok {
+		return result
+	}
+	raw := deriveRawSourceCompanions(testPath, body, goModule)
+	sortRawSourceCompanions(raw)
+	result.raw = raw
+	result.readOK = true
+	return result
 }
 
 func deriveRawSourceCompanions(testPath, body, goModule string) []rawSourceCompanionCandidate {

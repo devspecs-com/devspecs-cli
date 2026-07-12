@@ -726,10 +726,11 @@ func newTaskIterationAddCmd() *cobra.Command {
 	opts.Reason = "improve"
 	opts.Index = true
 	cmd := &cobra.Command{
-		Use:   "add <task-id> <title>",
-		Short: "Compatibility alias for ds task slice add --after",
-		Long:  "Add a follow-up slice under an existing slice.\n\nThis command remains for compatibility. Prefer `ds task slice add <task-id> \"<title>\" --after A01 --reason improve` in new docs and scripts.",
-		Args:  cobra.ExactArgs(2),
+		Use:    "add <task-id> <title>",
+		Short:  "Compatibility alias for ds task slice add --after",
+		Hidden: true,
+		Long:   "Add a follow-up slice under an existing slice.\n\nThis command remains for compatibility. Prefer `ds task slice add <task-id> \"<title>\" --after A01 --reason improve` in new docs and scripts.",
+		Args:   cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskIterationAdd(cmd, args[0], args[1], opts)
 		},

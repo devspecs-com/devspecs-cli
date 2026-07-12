@@ -46,9 +46,9 @@ func NewApplyCmd() *cobra.Command {
 		Short: "Emit a one-slice DevSpecs apply prompt",
 		Long: `Emit an agent prompt for exactly one DevSpecs task target.
 
-This command is prompt-only in v1.1: it resolves the next or requested slice and
-prints the bounded instruction an agent should follow. It does not launch an
-agent, mark the target started, or advance lifecycle state.`,
+This command is prompt-only: it resolves the next or requested slice and prints
+the bounded instruction an agent should follow. It does not launch an agent,
+mark the target started, or advance lifecycle state.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			start := time.Now()

@@ -49,7 +49,9 @@ func ensureFresh(cmd *cobra.Command, db *store.DB) {
 	}
 
 	debugLog("ensureFresh: stale — reason=%s, triggering auto-scan", status.Reason)
-	maybeWarnWorkspaceRoot(cmd, repoRoot)
+	if !commandSuppressNonResultProgress(cmd) {
+		maybeWarnWorkspaceRoot(cmd, repoRoot)
+	}
 	runScanQuietAndNotify(cmd, db, repoRoot)
 }
 
@@ -68,7 +70,9 @@ func ensureRepoIndexed(cmd *cobra.Command, db *store.DB, repoRoot string) {
 	} else {
 		debugLog("ensureRepoIndexed: stale reason=%s; triggering auto-scan", status.Reason)
 	}
-	maybeWarnWorkspaceRoot(cmd, repoRoot)
+	if !commandSuppressNonResultProgress(cmd) {
+		maybeWarnWorkspaceRoot(cmd, repoRoot)
+	}
 	runScanQuietAndNotify(cmd, db, repoRoot)
 }
 
@@ -90,7 +94,9 @@ func ensureRepoIndexedForTask(cmd *cobra.Command, db *store.DB, repoRoot string)
 	} else {
 		debugLog("ensureRepoIndexedForTask: substrate reason=%s; triggering task auto-scan", substrateReason)
 	}
-	maybeWarnWorkspaceRoot(cmd, repoRoot)
+	if !commandSuppressNonResultProgress(cmd) {
+		maybeWarnWorkspaceRoot(cmd, repoRoot)
+	}
 	runTaskScanQuietAndNotify(cmd, db, repoRoot)
 }
 
@@ -122,15 +128,25 @@ func countRepoSourcesByType(db *store.DB, repoID, sourceType string) int {
 }
 
 func runScanQuietAndNotify(cmd *cobra.Command, db *store.DB, repoRoot string) {
-	result := runScanQuiet(cmd, db, repoRoot)
-	if result != nil && (result.New > 0 || result.Updated > 0) {
+	quiet := commandSuppressNonResultProgress(cmd)
+	scanCmd := cmd
+	if quiet {
+		scanCmd = nil
+	}
+	result := runScanQuiet(scanCmd, db, repoRoot)
+	if !quiet && result != nil && (result.New > 0 || result.Updated > 0) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Index updated (%d new, %d updated)\n", result.New, result.Updated)
 	}
 }
 
 func runTaskScanQuietAndNotify(cmd *cobra.Command, db *store.DB, repoRoot string) {
-	result := runTaskScanQuiet(cmd, db, repoRoot)
-	if result != nil && (result.New > 0 || result.Updated > 0) {
+	quiet := commandSuppressNonResultProgress(cmd)
+	scanCmd := cmd
+	if quiet {
+		scanCmd = nil
+	}
+	result := runTaskScanQuiet(scanCmd, db, repoRoot)
+	if !quiet && result != nil && (result.New > 0 || result.Updated > 0) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Task index updated (%d new, %d updated)\n", result.New, result.Updated)
 	}
 }
@@ -183,7 +199,7 @@ func runScanQuiet(cmd *cobra.Command, db *store.DB, repoRoot string) *scan.Resul
 		return nil
 	}
 	if cmd != nil {
-		scanOpts.Progress = scanProgressStderr(cmd.ErrOrStderr(), "Auto-index")
+		scanOpts.Progress = scanProgressStderr(cmd.ErrOrStderr(), "Auto-index", commandVerboseProgress(cmd))
 	}
 	result, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, scanOpts)
 	if err != nil {
@@ -216,7 +232,7 @@ func runTaskScanQuiet(cmd *cobra.Command, db *store.DB, repoRoot string) *scan.R
 	}
 	scanOpts.SourceManifest = true
 	if cmd != nil {
-		scanOpts.Progress = scanProgressStderr(cmd.ErrOrStderr(), "Task auto-index")
+		scanOpts.Progress = scanProgressStderr(cmd.ErrOrStderr(), "Task auto-index", commandVerboseProgress(cmd))
 	}
 	result, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, scanOpts)
 	if err != nil {

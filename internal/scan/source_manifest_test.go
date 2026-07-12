@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -96,6 +97,20 @@ func TestScan_SourceManifestPopulatesCompactRowsWithoutArtifacts(t *testing.T) {
 	}
 }
 
+func TestScan_SourceManifestParallelExtractionIsDeterministic(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, "plugins/auth.lua", "local function login() return true end\nlocal function logout() return true end\nrequire('kong.plugins.base')\n")
+	writeScanTestFile(t, repoRoot, "plugins/session.lua", "local function session() return true end\nrequire('kong.plugins.auth')\n")
+	writeScanTestFile(t, repoRoot, "tests/auth.lua", "describe('auth plugin', function() it('logs in', function() end) end)\n")
+	writeScanTestFile(t, repoRoot, "tests/session.lua", "describe('session plugin', function() it('refreshes', function() end) end)\n")
+
+	oneWorker := runSourceManifestSnapshot(t, repoRoot, 1)
+	manyWorkers := runSourceManifestSnapshot(t, repoRoot, 4)
+	if !reflect.DeepEqual(manyWorkers, oneWorker) {
+		t.Fatalf("parallel source manifest extraction changed snapshot:\ngot:  %#v\nwant: %#v", manyWorkers, oneWorker)
+	}
+}
+
 func TestScan_SourceManifestCapsNestedModuleRootRows(t *testing.T) {
 	oldSoftFull := sourceManifestModuleRootSoftFullFiles
 	oldMin := sourceManifestMinModuleRootFilesPerRepo
@@ -148,6 +163,45 @@ func TestScan_SourceManifestCapsNestedModuleRootRows(t *testing.T) {
 	if counts.Files != 2 {
 		t.Fatalf("expected capped manifest rows, got %#v", counts)
 	}
+}
+
+func runSourceManifestSnapshot(t *testing.T, repoRoot string, workers int) []string {
+	t.Helper()
+	db := openScanManifestTestDB(t)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
+	if _, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{
+		UseTransaction:  true,
+		SourceManifest:  true,
+		FileWorkerCount: workers,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return sourceManifestSnapshot(t, db)
+}
+
+func sourceManifestSnapshot(t *testing.T, db *store.DB) []string {
+	t.Helper()
+	rows, err := db.Query(`SELECT sm.path, sm.content_hash, sm.language, sm.source_root, sm.source_role,
+		COALESCE(fts.symbols,''), COALESCE(fts.test_names,''), COALESCE(fts.imports,'')
+		FROM source_manifest sm
+		LEFT JOIN source_manifest_fts fts ON fts.file_id = sm.file_id
+		ORDER BY sm.path`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var path, hash, language, root, role, symbols, tests, imports string
+		if err := rows.Scan(&path, &hash, &language, &root, &role, &symbols, &tests, &imports); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, strings.Join([]string{path, hash, language, root, role, symbols, tests, imports}, "\x00"))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 func TestSourceManifestModuleRootLimitIndexesSmallRootsFully(t *testing.T) {

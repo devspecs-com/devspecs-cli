@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	scanpkg "github.com/devspecs-com/devspecs-cli/internal/scan"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 )
 
@@ -56,6 +57,98 @@ func TestScanJSON_ConsecutiveRunsIdentical(t *testing.T) {
 	if string(first) != string(second) {
 		t.Errorf("consecutive --json scans differ:\n%s\n---\n%s", first, second)
 	}
+}
+
+func TestScanJSON_PhaseTimingIsOptIn(t *testing.T) {
+	setupE2ERepo(t)
+	NewInitCmd().Execute()
+
+	scanCmd := NewScanCmd()
+	scanCmd.SetArgs([]string{"--json"})
+	buf := &bytes.Buffer{}
+	scanCmd.SetOut(buf)
+	if err := scanCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := out["phase_timing"]; ok {
+		t.Fatalf("default scan JSON should not include phase_timing: %s", buf.String())
+	}
+}
+
+func TestScanJSON_PhaseTimingIncludesSourceManifestBreakdown(t *testing.T) {
+	repoDir := setupE2ERepo(t)
+	srcDir := filepath.Join(repoDir, "internal", "auth")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "service.go"), []byte("package auth\n\nfunc LoginUser() bool { return true }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	NewInitCmd().Execute()
+
+	scanCmd := NewScanCmd()
+	scanCmd.SetArgs([]string{"--json", "--quiet", "--phase-timing", "--experimental-source-manifest"})
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	scanCmd.SetOut(stdout)
+	scanCmd.SetErr(stderr)
+	if err := scanCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stderr.String(), "Scan progress") {
+		t.Fatalf("quiet phase-timing scan should not emit progress: %s", stderr.String())
+	}
+	var out struct {
+		PhaseTiming *struct {
+			Enabled bool `json:"enabled"`
+			Phases  []struct {
+				Name   string         `json:"name"`
+				Counts map[string]int `json:"counts"`
+			} `json:"phases"`
+		} `json:"phase_timing"`
+		SourceManifest *struct {
+			IndexedFiles int              `json:"indexed_files"`
+			PhaseMS      map[string]int64 `json:"phase_ms"`
+		} `json:"source_manifest"`
+		EvidenceGraph *struct {
+			ConceptsIndexed int              `json:"concepts_indexed"`
+			PhaseMS         map[string]int64 `json:"phase_ms"`
+		} `json:"evidence_graph"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("scan --phase-timing JSON invalid: %v\n%s", err, stdout.String())
+	}
+	if out.PhaseTiming == nil || !out.PhaseTiming.Enabled || len(out.PhaseTiming.Phases) == 0 {
+		t.Fatalf("missing phase timing diagnostics: %s", stdout.String())
+	}
+	if !scanPhaseTimingHas(out.PhaseTiming.Phases, "shared_discovery") || !scanPhaseTimingHas(out.PhaseTiming.Phases, "source_manifest") {
+		t.Fatalf("missing expected phase timing rows: %#v", out.PhaseTiming.Phases)
+	}
+	if out.SourceManifest == nil || out.SourceManifest.IndexedFiles == 0 || len(out.SourceManifest.PhaseMS) == 0 {
+		t.Fatalf("missing source manifest phase breakdown: %#v", out.SourceManifest)
+	}
+	if out.EvidenceGraph == nil || out.EvidenceGraph.ConceptsIndexed == 0 || len(out.EvidenceGraph.PhaseMS) == 0 {
+		t.Fatalf("missing evidence graph phase breakdown: %#v", out.EvidenceGraph)
+	}
+	if _, ok := out.EvidenceGraph.PhaseMS["persist_mentions"]; !ok {
+		t.Fatalf("missing evidence graph persist mention timing: %#v", out.EvidenceGraph.PhaseMS)
+	}
+}
+
+func scanPhaseTimingHas(phases []struct {
+	Name   string         `json:"name"`
+	Counts map[string]int `json:"counts"`
+}, name string) bool {
+	for _, phase := range phases {
+		if phase.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func runScanJSONBytes(t *testing.T) []byte {
@@ -167,6 +260,124 @@ func TestScanJSONProgressUsesStderrAndReportsTraversalDiagnostics(t *testing.T) 
 	}
 	if out.Traversal == nil || out.Traversal.InventoryFiles < scanProgressInventoryThreshold || out.Traversal.SkippedByReason["generated_vendor_or_build"] < 2 {
 		t.Fatalf("missing traversal diagnostics: %#v", out.Traversal)
+	}
+}
+
+func TestScanProgressStderrReportsGranularColdIndexPhases(t *testing.T) {
+	var stderr bytes.Buffer
+	progress := scanProgressStderr(&stderr, "Auto-index", true)
+	progress(scanpkg.ProgressEvent{Phase: "scan", Event: "start"})
+	progress(scanpkg.ProgressEvent{
+		Phase:           "shared_discovery",
+		Event:           "inventory_done",
+		InventoryFiles:  scanProgressInventoryThreshold,
+		FilesTotal:      scanProgressInventoryThreshold,
+		SkippedDirs:     1,
+		SkippedByReason: map[string]int{"generated_vendor_or_build": 1},
+	})
+	progress(scanpkg.ProgressEvent{
+		Phase:                "shared_discovery",
+		Event:                "done",
+		FilesTotal:           scanProgressInventoryThreshold,
+		FilesScanned:         scanProgressInventoryThreshold,
+		CandidatesDiscovered: map[string]int{"markdown": 5, "source_context": 2},
+	})
+	progress(scanpkg.ProgressEvent{Phase: "parse_upsert", Event: "adapter_start", CurrentAdapter: "source_context", CandidatesTotal: 2})
+	progress(scanpkg.ProgressEvent{Phase: "extract", Event: "adapter_done", CurrentAdapter: "source_context", CandidatesTotal: 2, CandidatesProcessed: 2})
+	progress(scanpkg.ProgressEvent{Phase: "persist", Event: "adapter_done", CurrentAdapter: "source_context", CandidatesTotal: 2, CandidatesProcessed: 2})
+	progress(scanpkg.ProgressEvent{Phase: "fresh_index_writer", Event: "rows_flushed", RowsWritten: map[string]int{"artifacts": 7, "sources": 7}})
+	progress(scanpkg.ProgressEvent{Phase: "evidence_graph", Event: "start"})
+	progress(scanpkg.ProgressEvent{Phase: "evidence_graph", Event: "done", RowsWritten: map[string]int{"concepts": 3, "mentions": 4, "edges": 5}})
+	progress(scanpkg.ProgressEvent{Phase: "source_manifest", Event: "start"})
+	progress(scanpkg.ProgressEvent{Phase: "source_manifest", Event: "done", FilesTotal: 12, FilesScanned: 8, RowsWritten: map[string]int{"files": 8, "symbols": 10}})
+	progress(scanpkg.ProgressEvent{Phase: "fresh_index_fts", Event: "start", DeferredFTSRows: 7})
+	progress(scanpkg.ProgressEvent{Phase: "fresh_index_fts", Event: "done", RowsWritten: map[string]int{"artifacts_fts": 7}})
+	progress(scanpkg.ProgressEvent{Phase: "scan", Event: "done"})
+
+	out := stderr.String()
+	for _, want := range []string{
+		"Auto-index progress: preparing index substrate",
+		"Auto-index progress: discovered 200 candidate file(s)",
+		"Auto-index progress: discovery complete",
+		"Auto-index progress: extracting source context",
+		"Auto-index progress: extracted source context",
+		"Auto-index progress: persisted source context",
+		"Auto-index progress: wrote index rows",
+		"Auto-index progress: building evidence graph",
+		"Auto-index progress: evidence graph complete",
+		"Auto-index progress: building source manifest",
+		"Auto-index progress: source manifest complete",
+		"Auto-index progress: updating search index",
+		"Auto-index progress: search index complete",
+		"Auto-index progress: complete",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("progress output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestScanProgressStderrDefaultReportsHighLevelColdIndexPhases(t *testing.T) {
+	var stderr bytes.Buffer
+	progress := scanProgressStderr(&stderr, "Auto-index")
+	progress(scanpkg.ProgressEvent{Phase: "scan", Event: "start"})
+	progress(scanpkg.ProgressEvent{
+		Phase:           "shared_discovery",
+		Event:           "inventory_done",
+		InventoryFiles:  scanProgressInventoryThreshold,
+		FilesTotal:      scanProgressInventoryThreshold,
+		SkippedDirs:     1,
+		SkippedByReason: map[string]int{"generated_vendor_or_build": 1},
+	})
+	progress(scanpkg.ProgressEvent{
+		Phase:                "shared_discovery",
+		Event:                "done",
+		FilesTotal:           scanProgressInventoryThreshold,
+		FilesScanned:         scanProgressInventoryThreshold,
+		CandidatesDiscovered: map[string]int{"markdown": 5, "source_context": 2},
+	})
+	progress(scanpkg.ProgressEvent{Phase: "parse_upsert", Event: "adapter_start", CurrentAdapter: "source_context", CandidatesTotal: 2})
+	progress(scanpkg.ProgressEvent{Phase: "extract", Event: "adapter_done", CurrentAdapter: "source_context", CandidatesTotal: 2, CandidatesProcessed: 2})
+	progress(scanpkg.ProgressEvent{Phase: "persist", Event: "adapter_done", CurrentAdapter: "source_context", CandidatesTotal: 2, CandidatesProcessed: 2})
+	progress(scanpkg.ProgressEvent{Phase: "fresh_index_writer", Event: "rows_flushed", RowsWritten: map[string]int{"artifacts": 7, "sources": 7}})
+	progress(scanpkg.ProgressEvent{Phase: "evidence_graph", Event: "start"})
+	progress(scanpkg.ProgressEvent{Phase: "evidence_graph", Event: "done", RowsWritten: map[string]int{"concepts": 3, "mentions": 4, "edges": 5}})
+	progress(scanpkg.ProgressEvent{Phase: "source_manifest", Event: "start"})
+	progress(scanpkg.ProgressEvent{Phase: "source_manifest", Event: "done", FilesTotal: 12, FilesScanned: 8, RowsWritten: map[string]int{"files": 8, "symbols": 10}})
+	progress(scanpkg.ProgressEvent{Phase: "fresh_index_fts", Event: "start", DeferredFTSRows: 7})
+	progress(scanpkg.ProgressEvent{Phase: "fresh_index_fts", Event: "done", RowsWritten: map[string]int{"artifacts_fts": 7}})
+	progress(scanpkg.ProgressEvent{Phase: "scan", Event: "done"})
+
+	out := stderr.String()
+	for _, want := range []string{
+		"Auto-index progress: preparing index substrate",
+		"Auto-index progress: discovered 200 candidate file(s)",
+		"Auto-index progress: discovery complete",
+		"Auto-index progress: extracting and indexing artifacts",
+		"Auto-index progress: index rows written",
+		"Auto-index progress: building evidence graph",
+		"Auto-index progress: evidence graph complete",
+		"Auto-index progress: building source manifest",
+		"Auto-index progress: source manifest complete",
+		"Auto-index progress: updating search index",
+		"Auto-index progress: search index complete",
+		"Auto-index progress: complete",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("progress output missing %q:\n%s", want, out)
+		}
+	}
+	for _, notWant := range []string{
+		"Auto-index progress: extracting source context",
+		"Auto-index progress: extracted source context",
+		"Auto-index progress: persisted source context",
+		"Auto-index progress: wrote index rows (",
+		"rows: files",
+		"deferred row",
+	} {
+		if strings.Contains(out, notWant) {
+			t.Fatalf("default progress output should not include verbose detail %q:\n%s", notWant, out)
+		}
 	}
 }
 

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -51,6 +52,60 @@ func TestSourceManifest_ReplaceRepoSourceManifestIsIdempotent(t *testing.T) {
 		if counts.Files != 1 || counts.Symbols != 1 || counts.Tests != 1 || counts.Imports != 1 || counts.FTSRows != 1 {
 			t.Fatalf("unexpected counts after replace %d: %#v", i, counts)
 		}
+	}
+}
+
+func TestSourceManifest_ReplaceRepoSourceManifestBatchesLargeInputs(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	now := "2026-01-01T00:00:00Z"
+	if _, err := db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('repo_src', '/tmp/repo-src', ?, ?)", now, now); err != nil {
+		t.Fatal(err)
+	}
+	var files []SourceManifestFileInput
+	var symbols []SourceManifestSymbolInput
+	var tests []SourceManifestTestInput
+	var imports []SourceManifestImportInput
+	var fts []SourceManifestFTSInput
+	for i := 0; i < sourceManifestInsertChunkSize+25; i++ {
+		fileID := fmt.Sprintf("src_%03d", i)
+		path := fmt.Sprintf("src/module/file_%03d.go", i)
+		files = append(files, SourceManifestFileInput{
+			FileID:          fileID,
+			RepoID:          "repo_src",
+			Path:            path,
+			ContentHash:     fmt.Sprintf("hash_%03d", i),
+			Language:        "go",
+			SourceRoot:      "src",
+			SourceRootKind:  "common_root",
+			SourceRole:      "implementation",
+			FirstPartyScore: 1,
+		})
+		symbols = append(symbols, SourceManifestSymbolInput{FileID: fileID, Symbol: fmt.Sprintf("Symbol%d", i), Kind: "symbol"})
+		tests = append(tests, SourceManifestTestInput{FileID: fileID, TestName: fmt.Sprintf("TestSymbol%d", i)})
+		imports = append(imports, SourceManifestImportInput{FileID: fileID, ImportRef: "context"})
+		fts = append(fts, SourceManifestFTSInput{
+			FileID:     fileID,
+			Path:       path,
+			PathTerms:  "src module file go",
+			SourceRoot: "src",
+			Language:   "go",
+			SourceRole: "implementation",
+			Symbols:    fmt.Sprintf("Symbol%d", i),
+			TestNames:  fmt.Sprintf("TestSymbol%d", i),
+			Imports:    "context",
+		})
+	}
+	if err := db.ReplaceRepoSourceManifest("repo_src", files, symbols, tests, imports, fts, now); err != nil {
+		t.Fatal(err)
+	}
+	counts, err := db.CountSourceManifest("repo_src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := sourceManifestInsertChunkSize + 25
+	if counts.Files != want || counts.Symbols != want || counts.Tests != want || counts.Imports != want || counts.FTSRows != want {
+		t.Fatalf("counts = %#v, want all %d", counts, want)
 	}
 }
 

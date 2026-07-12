@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ConceptInput is a durable repo-local concept row.
@@ -26,6 +27,20 @@ type ConceptMentionInput struct {
 	Field        string
 	Weight       float64
 	EvidenceJSON string
+}
+
+const conceptMentionIndexRebuildThreshold = 5000
+
+var conceptMentionIndexDropStatements = []string{
+	"DROP INDEX IF EXISTS idx_concept_mentions_concept",
+	"DROP INDEX IF EXISTS idx_concept_mentions_artifact",
+	"DROP INDEX IF EXISTS idx_concept_mentions_artifact_section",
+}
+
+var conceptMentionIndexCreateStatements = []string{
+	"CREATE INDEX IF NOT EXISTS idx_concept_mentions_concept ON concept_mentions(concept_id)",
+	"CREATE INDEX IF NOT EXISTS idx_concept_mentions_artifact ON concept_mentions(artifact_id)",
+	"CREATE INDEX IF NOT EXISTS idx_concept_mentions_artifact_section ON concept_mentions(artifact_id, section_id)",
 }
 
 // ArtifactEdgeInput is an evidence-backed relationship between two artifacts.
@@ -110,6 +125,15 @@ func (db *DB) ReplaceConceptMentions(artifactID string, mentions []ConceptMentio
 	return nil
 }
 
+func (db *DB) execConceptMentionIndexStatements(statements []string) error {
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // UpsertArtifactEdge creates or updates one edge by its stable edge identity.
 func (db *DB) UpsertArtifactEdge(e ArtifactEdgeInput, now string) error {
 	if e.EvidenceCount <= 0 {
@@ -159,24 +183,47 @@ func (db *DB) DeleteArtifactEvidence(artifactID string) error {
 
 // ReplaceRepoEvidence rebuilds derived graph evidence for a repo.
 func (db *DB) ReplaceRepoEvidence(repoID string, concepts []ConceptInput, mentions []ConceptMentionInput, edges []ArtifactEdgeInput, now string) error {
-	const savepoint = "evidence_graph_replace"
-	if _, err := db.Exec("SAVEPOINT " + savepoint); err != nil {
-		return err
+	_, err := db.ReplaceRepoEvidenceWithPhaseTiming(repoID, concepts, mentions, edges, now)
+	return err
+}
+
+// ReplaceRepoEvidenceWithPhaseTiming rebuilds derived graph evidence and returns coarse write-phase timings.
+func (db *DB) ReplaceRepoEvidenceWithPhaseTiming(repoID string, concepts []ConceptInput, mentions []ConceptMentionInput, edges []ArtifactEdgeInput, now string) (map[string]int64, error) {
+	phaseMS := map[string]int64{}
+	recordPhase := func(name string, started time.Time) {
+		phaseMS[name] = time.Since(started).Milliseconds()
 	}
+	const savepoint = "evidence_graph_replace"
+	phaseStarted := time.Now()
+	if _, err := db.Exec("SAVEPOINT " + savepoint); err != nil {
+		recordPhase("persist_savepoint", phaseStarted)
+		return phaseMS, err
+	}
+	recordPhase("persist_savepoint", phaseStarted)
 	rollback := func(err error) error {
 		_, _ = db.Exec("ROLLBACK TO SAVEPOINT " + savepoint)
 		_, _ = db.Exec("RELEASE SAVEPOINT " + savepoint)
 		return err
 	}
+	phaseStarted = time.Now()
 	if _, err := db.Exec("DELETE FROM artifact_edges WHERE repo_id = ?", repoID); err != nil {
-		return rollback(err)
+		recordPhase("persist_delete_edges", phaseStarted)
+		return phaseMS, rollback(err)
 	}
+	recordPhase("persist_delete_edges", phaseStarted)
+	phaseStarted = time.Now()
 	if _, err := db.Exec("DELETE FROM concept_mentions WHERE artifact_id IN (SELECT id FROM artifacts WHERE repo_id = ?)", repoID); err != nil {
-		return rollback(err)
+		recordPhase("persist_delete_mentions", phaseStarted)
+		return phaseMS, rollback(err)
 	}
+	recordPhase("persist_delete_mentions", phaseStarted)
+	phaseStarted = time.Now()
 	if _, err := db.Exec("DELETE FROM concepts WHERE repo_id = ?", repoID); err != nil {
-		return rollback(err)
+		recordPhase("persist_delete_concepts", phaseStarted)
+		return phaseMS, rollback(err)
 	}
+	recordPhase("persist_delete_concepts", phaseStarted)
+	phaseStarted = time.Now()
 	conceptStmt, err := db.Prepare(
 		`INSERT INTO concepts
 			(id, repo_id, canonical, kind, forms_json, document_frequency, inverse_document_frequency, created_at, updated_at)
@@ -189,17 +236,35 @@ func (db *DB) ReplaceRepoEvidence(repoID string, concepts []ConceptInput, mentio
 			updated_at = excluded.updated_at`,
 	)
 	if err != nil {
-		return rollback(err)
+		recordPhase("persist_concepts", phaseStarted)
+		return phaseMS, rollback(err)
 	}
 	defer conceptStmt.Close()
 	for _, c := range concepts {
 		forms, err := json.Marshal(c.Forms)
 		if err != nil {
-			return rollback(fmt.Errorf("marshal concept forms: %w", err))
+			recordPhase("persist_concepts", phaseStarted)
+			return phaseMS, rollback(fmt.Errorf("marshal concept forms: %w", err))
 		}
 		if _, err := conceptStmt.Exec(c.ID, c.RepoID, c.Canonical, c.Kind, string(forms), c.DocumentFrequency, c.InverseDocumentFrequency, now, now); err != nil {
-			return rollback(err)
+			recordPhase("persist_concepts", phaseStarted)
+			return phaseMS, rollback(err)
 		}
+	}
+	if err := conceptStmt.Close(); err != nil {
+		recordPhase("persist_concepts", phaseStarted)
+		return phaseMS, rollback(err)
+	}
+	recordPhase("persist_concepts", phaseStarted)
+	phaseStarted = time.Now()
+	rebuildMentionIndexes := len(mentions) >= conceptMentionIndexRebuildThreshold
+	if rebuildMentionIndexes {
+		if err := db.execConceptMentionIndexStatements(conceptMentionIndexDropStatements); err != nil {
+			recordPhase("persist_drop_mention_indexes", phaseStarted)
+			return phaseMS, rollback(err)
+		}
+		recordPhase("persist_drop_mention_indexes", phaseStarted)
+		phaseStarted = time.Now()
 	}
 	mentionStmt, err := db.Prepare(
 		`INSERT INTO concept_mentions
@@ -207,7 +272,8 @@ func (db *DB) ReplaceRepoEvidence(repoID string, concepts []ConceptInput, mentio
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 	)
 	if err != nil {
-		return rollback(err)
+		recordPhase("persist_mentions", phaseStarted)
+		return phaseMS, rollback(err)
 	}
 	defer mentionStmt.Close()
 	for _, m := range mentions {
@@ -215,9 +281,24 @@ func (db *DB) ReplaceRepoEvidence(repoID string, concepts []ConceptInput, mentio
 			m.EvidenceJSON = "{}"
 		}
 		if _, err := mentionStmt.Exec(m.ID, m.ConceptID, m.ArtifactID, m.SectionID, m.Field, m.Weight, m.EvidenceJSON, now); err != nil {
-			return rollback(err)
+			recordPhase("persist_mentions", phaseStarted)
+			return phaseMS, rollback(err)
 		}
 	}
+	if err := mentionStmt.Close(); err != nil {
+		recordPhase("persist_mentions", phaseStarted)
+		return phaseMS, rollback(err)
+	}
+	recordPhase("persist_mentions", phaseStarted)
+	if rebuildMentionIndexes {
+		phaseStarted = time.Now()
+		if err := db.execConceptMentionIndexStatements(conceptMentionIndexCreateStatements); err != nil {
+			recordPhase("persist_rebuild_mention_indexes", phaseStarted)
+			return phaseMS, rollback(err)
+		}
+		recordPhase("persist_rebuild_mention_indexes", phaseStarted)
+	}
+	phaseStarted = time.Now()
 	edgeStmt, err := db.Prepare(
 		`INSERT INTO artifact_edges
 			(id, repo_id, src_artifact_id, dst_artifact_id, edge_type, weight, confidence, evidence_count, freshness, source_signal, explanation, metadata_json, created_at, updated_at)
@@ -233,7 +314,8 @@ func (db *DB) ReplaceRepoEvidence(repoID string, concepts []ConceptInput, mentio
 			updated_at = excluded.updated_at`,
 	)
 	if err != nil {
-		return rollback(err)
+		recordPhase("persist_edges", phaseStarted)
+		return phaseMS, rollback(err)
 	}
 	defer edgeStmt.Close()
 	for _, e := range edges {
@@ -244,13 +326,18 @@ func (db *DB) ReplaceRepoEvidence(repoID string, concepts []ConceptInput, mentio
 			e.MetadataJSON = "{}"
 		}
 		if _, err := edgeStmt.Exec(e.ID, e.RepoID, e.SrcArtifactID, e.DstArtifactID, e.EdgeType, e.Weight, e.Confidence, e.EvidenceCount, e.Freshness, e.SourceSignal, e.Explanation, e.MetadataJSON, now, now); err != nil {
-			return rollback(err)
+			recordPhase("persist_edges", phaseStarted)
+			return phaseMS, rollback(err)
 		}
 	}
+	recordPhase("persist_edges", phaseStarted)
+	phaseStarted = time.Now()
 	if _, err := db.Exec("RELEASE SAVEPOINT " + savepoint); err != nil {
-		return rollback(err)
+		recordPhase("persist_release", phaseStarted)
+		return phaseMS, rollback(err)
 	}
-	return nil
+	recordPhase("persist_release", phaseStarted)
+	return phaseMS, nil
 }
 
 // ReplaceRepoEvidenceScope rebuilds a narrow concept/edge evidence scope for a repo.

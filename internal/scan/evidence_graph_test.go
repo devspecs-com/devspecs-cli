@@ -2,6 +2,7 @@ package scan
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/store"
@@ -173,6 +174,23 @@ func TestEvidenceMentionBudgetCapsDenseRepos(t *testing.T) {
 	}
 }
 
+func TestCompactMentionEvidenceJSONMatchesMapEncoding(t *testing.T) {
+	mentions := []rawConceptMention{
+		{source: "source_path"},
+		{source: "metadata", form: "Swagger OAuth redirect"},
+		{source: "section", form: `quotes " slash \ html <tag> & more`},
+		{source: "metadata", form: strings.Repeat("a", maxMentionEvidenceFormLength+8)},
+	}
+
+	for _, mention := range mentions {
+		want := evidenceJSON(compactMentionEvidence(mention))
+		got := compactMentionEvidenceJSON(mention)
+		if got != want {
+			t.Fatalf("compact mention JSON mismatch:\ngot  %s\nwant %s", got, want)
+		}
+	}
+}
+
 func TestTestSourceTriangulationExactStem(t *testing.T) {
 	result := buildEvidenceGraph("repo", []evidenceArtifact{
 		evidenceSourceArtifact("src_webhooks", "src/billing/webhooks.ts", "export function handleWebhook() { return true }\n"),
@@ -229,6 +247,23 @@ func TestTestSourceTriangulationSymbolMatch(t *testing.T) {
 	}
 	if got := countEdgesByType(result.edges, edgeTypeMentionsSymbol); got != 1 {
 		t.Fatalf("symbol match should emit one mentions_symbol edge, got %d: %#v", got, result.edges)
+	}
+}
+
+func TestTestSourceTriangulationPythonSymbolMatch(t *testing.T) {
+	source := evidenceSourceArtifact("src_users", "app/users.py", "def create_user():\n    return True\n")
+	source.extracted["language"] = "python"
+	result := buildEvidenceGraph("repo", []evidenceArtifact{
+		source,
+		evidenceTestCaseArtifact("test_users", "tests/test_users.py", "test create user", "", []string{"create_user"}),
+	})
+
+	edge := singleEdgeByType(t, result.edges, edgeTypeTestsSource)
+	if edge.SourceSignal != "test_source_stem" || !strings.Contains(edge.MetadataJSON, "create_user") {
+		t.Fatalf("expected python symbol evidence on stem match, got %#v", edge)
+	}
+	if got := countEdgesByType(result.edges, edgeTypeMentionsSymbol); got != 1 {
+		t.Fatalf("python symbol match should emit one mentions_symbol edge, got %d: %#v", got, result.edges)
 	}
 }
 

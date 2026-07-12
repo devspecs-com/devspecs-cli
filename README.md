@@ -91,9 +91,31 @@ ds init
 | Ground the change | `ds map` / `ds find "topic"` | Git and rg found code, but you still need intent, boundaries, and exclusions. |
 | Create a bounded handoff | `ds task "goal"` | You know the work and want packed repo context plus a stop line. |
 | Coordinate multi-repo work | `ds workspace init .` | You have an umbrella workspace with several child repos. Experimental. |
-| Continue one slice | `ds apply next` | A task already exists and the agent needs the current target only. |
+| Continue one slice | `ds apply` | A task already exists and the agent needs the current target only. |
 | Record the receipt | `ds task checkpoint A01 --decision promote` | You need to capture what changed, what ran, what missed, and what comes next. |
 | Inspect exact context | `ds context <artifact-id>` | You want one indexed artifact as paste-ready agent context. |
+
+## What Changed In v1.2.0
+
+DevSpecs v1.2 focuses on first-run activation quality and release discipline:
+
+- `ds recent` produces more useful first-run topics by merging overlapping
+  recent work and demoting generic maintenance noise.
+- `ds map` builds the local substrate before default output so first-run system
+  boundaries are not weaker than warm-index output.
+- Cold indexing is faster on the broad local regression set, with visible
+  progress on stderr for non-quiet runs and detailed phase checkpoints under
+  `--verbose`.
+- Experimental workspace coordination is available through
+  `ds workspace ...` and the `ds ws` shortcut for umbrella repos.
+- Regression infrastructure now includes canonical small/fat/full-history
+  manifests, baseline-vs-candidate comparisons, reviewed fat-100 quality
+  evidence, and cross-command cold activation gates for `recent`, `map`,
+  `find`, and `task --quick`.
+
+Large cold repos can still take seconds on the first index build. The product
+bar is same-or-better first result quality, not a faster weak path; use
+`--quiet` or `--json` for result-only automation.
 
 ## Why DevSpecs Exists
 
@@ -429,9 +451,18 @@ The hook runs `go vet`, `staticcheck`, `gofmt -l`, and by default
 
 Releases use GoReleaser via GitHub Actions.
 
+Before tagging a release candidate, run the local gate:
+
 ```bash
-git tag v1.1.0
-git push origin v1.1.0
+gofmt -l .
+go vet ./...
+staticcheck ./...
+go test -count=1 ./...
+```
+
+```bash
+git tag v1.2.0
+git push origin v1.2.0
 ```
 
 ## License

@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -488,6 +489,53 @@ func TestFindAutoScan_TriggersWhenIndexMissing(t *testing.T) {
 	output := outBuf.String()
 	if !strings.Contains(output, "Working set: credentials rotation") || !strings.Contains(output, "Credentials Rotation") {
 		t.Fatalf("find output missing auto-scanned plan.\nOutput: %s\nStderr: %s", output, errBuf.String())
+	}
+}
+
+func TestFindJSONAutoScanKeepsResultStreamsClean(t *testing.T) {
+	dir := setupGitRepo(t)
+	home := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", home)
+
+	planDir := filepath.Join(dir, "plans")
+	os.MkdirAll(planDir, 0o755)
+	os.WriteFile(filepath.Join(planDir, "credentials-plan.md"), []byte("# Credentials Rotation\n\nRotate credentials for webhook ingestion.\n"), 0o644)
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test",
+			"GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=Test",
+			"GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		cmd.CombinedOutput()
+	}
+	run("add", ".")
+	run("commit", "-m", "add credentials plan")
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(oldWd)
+
+	findCmd := NewFindCmd()
+	findCmd.SetArgs([]string{"credentials rotation", "--json"})
+	outBuf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	findCmd.SetOut(outBuf)
+	findCmd.SetErr(errBuf)
+	if err := findCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if errBuf.Len() != 0 {
+		t.Fatalf("find --json should suppress auto-scan stderr, got: %s", errBuf.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(outBuf.Bytes(), &payload); err != nil {
+		t.Fatalf("find --json stdout should remain valid JSON: %v\nstdout=%s\nstderr=%s", err, outBuf.String(), errBuf.String())
+	}
+	if !strings.Contains(outBuf.String(), "Credentials Rotation") {
+		t.Fatalf("find --json output missing auto-scanned plan.\nOutput: %s", outBuf.String())
 	}
 }
 

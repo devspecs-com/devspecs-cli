@@ -27,45 +27,63 @@ var nowUTC = func() time.Time {
 // NewEvalCmd creates the ds eval command.
 func NewEvalCmd() *cobra.Command {
 	var (
-		asJSON                          bool
-		minRecall                       float64
-		minMeanRecall                   float64
-		minMustRecall                   float64
-		minSufficiency                  float64
-		minReductionFull                float64
-		resultsDir                      string
-		noSave                          bool
-		indexed                         bool
-		filesystem                      bool
-		commandUnderTest                string
-		findRuntime                     string
-		classifierEval                  bool
-		firstIndexReport                bool
-		batchFixtures                   bool
-		includeTests                    bool
-		includeCodeComments             bool
-		disableSectionAwareRetrieval    bool
-		experimentalBalancedEvidence    bool
-		experimentalBudgetedPacking     bool
-		experimentalConceptBackfill     bool
-		experimentalGlossaryConcepts    bool
-		experimentalTieredConceptOutput bool
-		experimentalAnchorFirstRanking  = true
-		experimentalAnchorFirstMode     string
-		experimentalSupportDocs         bool
-		packDiagnostics                 bool
-		graphDiagnostics                bool
-		contextTokenBudget              int
-		evalIndexCacheDir               string
-		refreshIndexCache               bool
-		maxCorpusFiles                  int
-		maxSourceFiles                  int
-		maxTestCaseArtifacts            int
-		maxCodeComments                 int
-		maxCaseSeconds                  int
-		progressIntervalSec             int
-		classifierFixtures              []string
-		inputUSDPer1M                   float64
+		asJSON                           bool
+		minRecall                        float64
+		minMeanRecall                    float64
+		minMustRecall                    float64
+		minSufficiency                   float64
+		minReductionFull                 float64
+		resultsDir                       string
+		noSave                           bool
+		indexed                          bool
+		filesystem                       bool
+		commandUnderTest                 string
+		findRuntime                      string
+		classifierEval                   bool
+		firstIndexReport                 bool
+		batchFixtures                    bool
+		activationMatrix                 bool
+		activationProfile                string
+		activationCloneMode              string
+		activationGoldenDir              string
+		activationResultDir              string
+		activationBaselineBin            string
+		activationCandidateBin           string
+		activationIndexState             string
+		activationBaselineIndexState     string
+		activationCandidateIndexState    string
+		activationMapStructured          bool
+		activationQuiet                  bool
+		activationUpdate                 bool
+		activationScanBenchmark          bool
+		activationScanBaselineResult     string
+		activationScanMaxRegressionRatio float64
+		activationScanMaxRegressionMS    int
+		activationScanMaxCaseMS          int
+		includeTests                     bool
+		includeCodeComments              bool
+		disableSectionAwareRetrieval     bool
+		experimentalBalancedEvidence     bool
+		experimentalBudgetedPacking      bool
+		experimentalConceptBackfill      bool
+		experimentalGlossaryConcepts     bool
+		experimentalTieredConceptOutput  bool
+		experimentalAnchorFirstRanking   = true
+		experimentalAnchorFirstMode      string
+		experimentalSupportDocs          bool
+		packDiagnostics                  bool
+		graphDiagnostics                 bool
+		contextTokenBudget               int
+		evalIndexCacheDir                string
+		refreshIndexCache                bool
+		maxCorpusFiles                   int
+		maxSourceFiles                   int
+		maxTestCaseArtifacts             int
+		maxCodeComments                  int
+		maxCaseSeconds                   int
+		progressIntervalSec              int
+		classifierFixtures               []string
+		inputUSDPer1M                    float64
 	)
 
 	cmd := &cobra.Command{
@@ -76,6 +94,105 @@ func NewEvalCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if inputUSDPer1M < 0 {
 				return fmt.Errorf("--input-usd-per-1m must be non-negative")
+			}
+			if activationMatrix && activationScanBenchmark {
+				return fmt.Errorf("--activation-matrix cannot be combined with --activation-scan-benchmark")
+			}
+			if activationMatrix {
+				if classifierEval || firstIndexReport || batchFixtures || filesystem || strings.TrimSpace(commandUnderTest) != "" {
+					return fmt.Errorf("--activation-matrix cannot be combined with classifier, first-index, filesystem, or live retrieval command eval modes")
+				}
+				if err := validateActivationCloneMode(activationCloneMode); err != nil {
+					return err
+				}
+				if err := validateActivationIndexState(activationIndexState); err != nil {
+					return err
+				}
+				if err := validateActivationIndexState(activationBaselineIndexState); err != nil {
+					return err
+				}
+				if err := validateActivationIndexState(activationCandidateIndexState); err != nil {
+					return err
+				}
+				if (strings.TrimSpace(activationBaselineBin) == "") != (strings.TrimSpace(activationCandidateBin) == "") {
+					return fmt.Errorf("--activation-baseline-bin and --activation-candidate-bin must be provided together")
+				}
+				result, err := runActivationMatrix(args[0], activationMatrixOptions{
+					Profile:             activationProfile,
+					CloneMode:           activationCloneMode,
+					GoldenDir:           activationGoldenDir,
+					ResultDir:           activationResultDir,
+					BaselineBin:         activationBaselineBin,
+					CandidateBin:        activationCandidateBin,
+					IndexState:          activationIndexState,
+					BaselineIndexState:  activationBaselineIndexState,
+					CandidateIndexState: activationCandidateIndexState,
+					MapStructured:       activationMapStructured,
+					Quiet:               activationQuiet,
+					Update:              activationUpdate,
+					Generated:           nowUTC(),
+				})
+				if err != nil {
+					return err
+				}
+				if asJSON {
+					if err := writeActivationMatrixJSON(cmd.OutOrStdout(), result); err != nil {
+						return err
+					}
+				} else {
+					writeActivationMatrixText(cmd.OutOrStdout(), result)
+				}
+				if result.Summary.Missing > 0 || result.Summary.Failed > 0 {
+					cmd.SilenceUsage = true
+					return fmt.Errorf("activation matrix regressions failed")
+				}
+				return nil
+			}
+			if activationScanBenchmark {
+				if classifierEval || firstIndexReport || batchFixtures || filesystem || strings.TrimSpace(commandUnderTest) != "" {
+					return fmt.Errorf("--activation-scan-benchmark cannot be combined with classifier, first-index, filesystem, or live retrieval command eval modes")
+				}
+				if activationScanMaxRegressionRatio < 0 {
+					return fmt.Errorf("--activation-scan-max-regression-ratio must be non-negative")
+				}
+				if activationScanMaxRegressionMS < 0 {
+					return fmt.Errorf("--activation-scan-max-regression-ms must be non-negative")
+				}
+				if activationScanMaxCaseMS < 0 {
+					return fmt.Errorf("--activation-scan-max-case-ms must be non-negative")
+				}
+				if err := validateActivationCloneMode(activationCloneMode); err != nil {
+					return err
+				}
+				if err := validateActivationIndexState(activationIndexState); err != nil {
+					return err
+				}
+				result, err := runActivationScanBenchmark(args[0], activationScanBenchmarkOptions{
+					Profile:            activationProfile,
+					CloneMode:          activationCloneMode,
+					ResultDir:          activationResultDir,
+					IndexState:         activationIndexState,
+					BaselineResult:     activationScanBaselineResult,
+					MaxRegressionRatio: activationScanMaxRegressionRatio,
+					MaxRegressionMS:    activationScanMaxRegressionMS,
+					MaxCaseMS:          activationScanMaxCaseMS,
+					Generated:          nowUTC(),
+				})
+				if err != nil {
+					return err
+				}
+				if asJSON {
+					if err := writeActivationScanBenchmarkJSON(cmd.OutOrStdout(), result); err != nil {
+						return err
+					}
+				} else {
+					writeActivationScanBenchmarkText(cmd.OutOrStdout(), result)
+				}
+				if result.Summary.Failed > 0 {
+					cmd.SilenceUsage = true
+					return fmt.Errorf("activation scan benchmark failed")
+				}
+				return nil
 			}
 			if classifierEval && firstIndexReport {
 				return fmt.Errorf("--classifier cannot be combined with --first-index-report")
@@ -205,6 +322,24 @@ func NewEvalCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&classifierEval, "classifier", false, "Run deterministic classifier evals from classifier_cases.yaml")
 	cmd.Flags().BoolVar(&firstIndexReport, "first-index-report", false, "Run retrieval and classifier evals and emit an auditable first-index report")
 	cmd.Flags().BoolVar(&batchFixtures, "batch-fixtures", false, "With --first-index-report, discover child fixture directories containing cases.yaml and emit one aggregate report")
+	cmd.Flags().BoolVar(&activationMatrix, "activation-matrix", false, "Run activation command output matrix from a YAML manifest")
+	cmd.Flags().StringVar(&activationProfile, "activation-profile", "skinny", "Activation matrix profile to run, such as skinny or fat")
+	cmd.Flags().StringVar(&activationCloneMode, "activation-clone-mode", "full", "Activation matrix clone mode metadata: full, blobless, or shallow")
+	cmd.Flags().StringVar(&activationGoldenDir, "activation-golden-dir", filepath.Join(defaultEvalResultsDir, "activation-goldens"), "Directory for activation matrix golden output files")
+	cmd.Flags().StringVar(&activationResultDir, "activation-result-dir", "", "Directory for activation matrix result JSON and binary comparison output files")
+	cmd.Flags().StringVar(&activationBaselineBin, "activation-baseline-bin", "", "Baseline ds binary for activation matrix binary comparison")
+	cmd.Flags().StringVar(&activationCandidateBin, "activation-candidate-bin", "", "Candidate ds binary for activation matrix binary comparison")
+	cmd.Flags().StringVar(&activationIndexState, "activation-index-state", "cold", "Activation matrix index state before command runs: cold or warm")
+	cmd.Flags().StringVar(&activationBaselineIndexState, "activation-baseline-index-state", "", "Index state for baseline binary comparison runs; defaults to --activation-index-state")
+	cmd.Flags().StringVar(&activationCandidateIndexState, "activation-candidate-index-state", "", "Index state for candidate binary comparison runs; defaults to --activation-index-state")
+	cmd.Flags().BoolVar(&activationMapStructured, "activation-map-structured", false, "Accept structured non-action ds map deltas during activation binary comparison")
+	cmd.Flags().BoolVar(&activationQuiet, "activation-quiet", true, "Force --quiet for activation matrix commands that support it")
+	cmd.Flags().BoolVar(&activationUpdate, "activation-update", false, "Write activation matrix golden output files instead of comparing")
+	cmd.Flags().BoolVar(&activationScanBenchmark, "activation-scan-benchmark", false, "Run hidden scan phase/DB performance benchmark from an activation manifest")
+	cmd.Flags().StringVar(&activationScanBaselineResult, "activation-scan-baseline-result", "", "Previous activation scan benchmark result JSON for regression comparison")
+	cmd.Flags().Float64Var(&activationScanMaxRegressionRatio, "activation-scan-max-regression-ratio", 0, "Maximum allowed scan duration ratio versus --activation-scan-baseline-result; 0 disables ratio gate")
+	cmd.Flags().IntVar(&activationScanMaxRegressionMS, "activation-scan-max-regression-ms", 0, "Additional scan duration slack in ms for --activation-scan-max-regression-ratio")
+	cmd.Flags().IntVar(&activationScanMaxCaseMS, "activation-scan-max-case-ms", 0, "Absolute per-case scan duration budget in ms; 0 disables budget")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Index executable test cases as behavioral intent artifacts during indexed evals")
 	cmd.Flags().BoolVar(&includeTests, "experimental-test-cases", false, "Deprecated alias for --include-tests")
 	cmd.Flags().BoolVar(&includeCodeComments, "include-code-comments", false, "Index high-signal code comments as implementation intent artifacts during indexed evals")

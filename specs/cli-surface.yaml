@@ -4,7 +4,7 @@ kind: cli_surface_tree
 metadata:
   product: devspecs-cli
   binary: ds
-  audited_at: "2026-06-30"
+  audited_at: "2026-07-12"
   source:
     - go run ./cmd/ds --help
     - go run ./cmd/ds task --help
@@ -30,7 +30,7 @@ tree:
     children:
       recent:
         status: core
-        purpose: Recover the current local thread from recent work and follow-up commands.
+        purpose: Recover the current local thread from recent work, boundary hints, and follow-up commands.
       task:
         status: core
         purpose: Create and manage bounded task workspaces with packed context.
@@ -46,7 +46,7 @@ tree:
         purpose: Build a focused evidence pack for a query.
       map:
         status: support
-        purpose: Show architecture/system boundaries and follow-up commands.
+        purpose: Show substrate-backed architecture/system boundaries and follow-up commands.
       context:
         status: support
         purpose: Export one known artifact as agent-ready context.
@@ -60,7 +60,7 @@ tree:
         purpose: Initialize repo config and optional agent adapter files.
       scan:
         status: maintenance
-        purpose: Rescan repository intent docs, source, tests, and git evidence.
+        purpose: Rescan repository intent docs, source, tests, and git evidence with progress and timing diagnostics.
       config:
         status: maintenance
         purpose: Inspect or edit DevSpecs discovery config.
@@ -241,7 +241,7 @@ hidden_tree:
         purpose: List extracted acceptance/success/OKR criteria from artifacts.
       eval:
         status: hidden
-        purpose: Run deterministic retrieval evals for fixture repos.
+        purpose: Run deterministic retrieval, activation, cross-command, and scan-performance regression evals for fixture repos and locked repo matrices.
       link:
         status: hidden
         purpose: Link an artifact to an external target.
