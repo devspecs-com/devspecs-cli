@@ -84,6 +84,7 @@ type taskStartOptions struct {
 type taskArtifactAddOptions struct {
 	Dir    string
 	Slice  string
+	After  string
 	Reason string
 	AsJSON bool
 	Index  bool
@@ -213,6 +214,10 @@ type taskStatusOutput struct {
 	Status               string                  `json:"status"`
 	Decision             string                  `json:"decision,omitempty"`
 	UpdatedAt            string                  `json:"updated_at,omitempty"`
+	NextTarget           string                  `json:"next_target,omitempty"`
+	NextTitle            string                  `json:"next_title,omitempty"`
+	NextKind             string                  `json:"next_kind,omitempty"`
+	NextCommand          string                  `json:"next_command,omitempty"`
 	LatestCheckpointID   string                  `json:"latest_checkpoint_id,omitempty"`
 	LatestCheckpoint     string                  `json:"latest_checkpoint,omitempty"`
 	LatestCheckpointJSON string                  `json:"latest_checkpoint_json,omitempty"`
@@ -626,6 +631,7 @@ templates for recording actual reads, edits, tests, misses, and noise.`,
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&opts.Force, "force", false, "Overwrite an existing task workspace")
 	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the series index and slice plans into the DevSpecs index")
+	cmd.Flags().BoolVar(&opts.Quick, "quick", false, "Create a compact one-off task workspace")
 
 	cmd.AddCommand(newTaskQuickCmd())
 	cmd.AddCommand(newTaskSliceCmd())
@@ -652,13 +658,13 @@ func newTaskQuickCmd() *cobra.Command {
 	opts.Index = true
 	opts.Quick = true
 	cmd := &cobra.Command{
-		Use:   "quick <query>",
-		Short: "Create a compact one-off task workspace",
-		Long: `Create a one-off task workspace for a small change.
-
-This uses the normal task manifest, source/test pack, risk cards, and lifecycle
-commands, but prints a shorter handoff so tiny fixes do not start with a full
-multi-slice ceremony.`,
+		Use:    "quick <query>",
+		Short:  "Compatibility alias for ds task --quick",
+		Hidden: true,
+		Long: "Create a one-off task workspace for a small change.\n\n" +
+			"This uses the normal task manifest, source/test pack, risk cards, and lifecycle\n" +
+			"commands, but prints a shorter handoff so tiny fixes do not start with a full\n" +
+			"multi-slice ceremony. Prefer `ds task \"<goal>\" --quick` in new docs and scripts.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskStart(cmd, args[0], opts)
@@ -690,13 +696,15 @@ func newTaskSliceAddCmd() *cobra.Command {
 	opts.Index = true
 	cmd := &cobra.Command{
 		Use:   "add <task-id> <title>",
-		Short: "Add a new slice plan/result pair to a task workspace",
+		Short: "Add a slice or follow-up slice plan/result pair to a task workspace",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskSliceAdd(cmd, args[0], args[1], opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
+	cmd.Flags().StringVar(&opts.After, "after", "", "Parent slice ID/title/plan/result when adding an improve/rework follow-up such as A01-1")
+	cmd.Flags().StringVar(&opts.Reason, "reason", "", "Follow-up reason when --after is set, usually improve or rework")
 	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the updated index and new slice plan into the DevSpecs index")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	return cmd
@@ -704,8 +712,9 @@ func newTaskSliceAddCmd() *cobra.Command {
 
 func newTaskIterationCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "iteration",
-		Short: "Manage task slice iteration artifacts",
+		Use:    "iteration",
+		Short:  "Compatibility alias for ds task slice add --after",
+		Hidden: true,
 	}
 	cmd.AddCommand(newTaskIterationAddCmd())
 	return cmd
@@ -718,7 +727,8 @@ func newTaskIterationAddCmd() *cobra.Command {
 	opts.Index = true
 	cmd := &cobra.Command{
 		Use:   "add <task-id> <title>",
-		Short: "Add a new iteration plan/result pair under an existing slice",
+		Short: "Compatibility alias for ds task slice add --after",
+		Long:  "Add a follow-up slice under an existing slice.\n\nThis command remains for compatibility. Prefer `ds task slice add <task-id> \"<title>\" --after A01 --reason improve` in new docs and scripts.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskIterationAdd(cmd, args[0], args[1], opts)
@@ -726,8 +736,8 @@ func newTaskIterationAddCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
 	cmd.Flags().StringVar(&opts.Slice, "slice", "", "Parent slice ID/title/plan/result; defaults to the first slice")
-	cmd.Flags().StringVar(&opts.Reason, "reason", opts.Reason, "Iteration reason, usually improve or rework")
-	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the updated index and new iteration plan into the DevSpecs index")
+	cmd.Flags().StringVar(&opts.Reason, "reason", opts.Reason, "Follow-up reason, usually improve or rework")
+	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the updated index and new follow-up slice plan into the DevSpecs index")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	return cmd
 }
@@ -736,9 +746,11 @@ func newTaskSyncCmd() *cobra.Command {
 	var opts taskSyncOptions
 	opts.Dir = defaultTaskWorkspaceDir
 	cmd := &cobra.Command{
-		Use:   "sync <task-id>",
-		Short: "Recapture task workspace artifacts into the DevSpecs index",
-		Args:  cobra.ExactArgs(1),
+		Use:    "sync <task-id>",
+		Short:  "Compatibility alias for ds task refresh",
+		Long:   "Compatibility alias for ds task refresh.\n\nPrefer `ds task refresh <task-id>` for updating task artifacts in the local DevSpecs index without rewriting task docs.",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskSync(cmd, args[0], opts)
 		},
@@ -793,7 +805,7 @@ func newTaskShowCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
-	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice/iteration target; defaults to the next target")
+	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice or follow-up target; defaults to the next target")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	return cmd
 }
@@ -802,15 +814,17 @@ func newTaskPromptCmd() *cobra.Command {
 	var opts taskTargetOptions
 	opts.Dir = defaultTaskWorkspaceDir
 	cmd := &cobra.Command{
-		Use:   "prompt <task-id|target>",
-		Short: "Emit an agent prompt bounded to one task target",
-		Args:  cobra.ExactArgs(1),
+		Use:    "prompt <task-id|target>",
+		Short:  "Compatibility alias for ds apply",
+		Long:   "Compatibility alias for ds apply.\n\nPrefer `ds apply <task-id>` or `ds apply <task-id> --target <target>` for the bounded one-slice agent prompt.",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskPrompt(cmd, args[0], opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
-	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice/iteration target; defaults to the next target")
+	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice or follow-up target; defaults to the next target")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	return cmd
 }
@@ -820,15 +834,17 @@ func newTaskStartTargetCmd() *cobra.Command {
 	opts.Dir = defaultTaskWorkspaceDir
 	opts.Index = true
 	cmd := &cobra.Command{
-		Use:   "start <task-id|target>",
-		Short: "Mark one task target as started",
-		Args:  cobra.ExactArgs(1),
+		Use:    "start <task-id|target>",
+		Short:  "Compatibility alias for recording started state",
+		Long:   "Compatibility alias for recording started state.\n\nPrefer `ds task checkpoint <task-id> --target <target> --stage started --decision continue` when you need a durable started receipt.",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskStartTarget(cmd, args[0], opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
-	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice/iteration target; defaults to the next target")
+	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice or follow-up target; defaults to the next target")
 	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the updated task index into the DevSpecs index")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	return cmd
@@ -839,15 +855,17 @@ func newTaskFinishCmd() *cobra.Command {
 	opts.Dir = defaultTaskWorkspaceDir
 	opts.Index = true
 	cmd := &cobra.Command{
-		Use:   "finish <task-id|target>",
-		Short: "Finish one task target with a decision gate",
-		Args:  cobra.ExactArgs(1),
+		Use:    "finish <task-id|target>",
+		Short:  "Compatibility alias for ds task checkpoint",
+		Long:   "Compatibility alias for ds task checkpoint.\n\nPrefer `ds task checkpoint <task-id> --target <target> --stage validated --decision <gate>` so the decision carries evidence and run receipts.",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskFinish(cmd, args[0], opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
-	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice/iteration target; defaults to the started or next target")
+	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice or follow-up target; defaults to the started or next target")
 	cmd.Flags().StringVar(&opts.Stage, "stage", "", "Lifecycle stage to set; inferred from decision when omitted")
 	cmd.Flags().StringVar(&opts.Decision, "decision", "", "Decision gate: promote, improve, rework, rollback, block, complete, split, supersede, cancel, continue")
 	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the updated task index into the DevSpecs index")
@@ -867,7 +885,7 @@ func newTaskAuditCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
-	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice/iteration target; defaults to the next target")
+	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice or follow-up target; defaults to the next target")
 	cmd.Flags().BoolVar(&opts.GitDiff, "git-diff", false, "Include current git diff changed files in the audit")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	return cmd
@@ -878,10 +896,10 @@ func newTaskStatusCmd() *cobra.Command {
 	opts.Dir = defaultTaskWorkspaceDir
 	cmd := &cobra.Command{
 		Use:   "status <task-id>",
-		Short: "Show task series, slice, and iteration state",
+		Short: "Show task series, slice, and follow-up state",
 		Long: `Show lifecycle state for an existing DevSpecs task.
 
-Use ds task status to inspect task, slice, iteration, checkpoint, and decision
+Use ds task status to inspect task, slice, follow-up, checkpoint, and decision
 state. It does not discover new source or docs; use ds find for focused evidence
 packs. It does not follow workspace graph links; use ds workspace trace when you
 already know a workspace change or repo task ID.`,
@@ -900,15 +918,17 @@ func newTaskDecideCmd() *cobra.Command {
 	opts.Dir = defaultTaskWorkspaceDir
 	opts.Index = true
 	cmd := &cobra.Command{
-		Use:   "decide <task-id|target>",
-		Short: "Update a task series, slice, or iteration decision gate",
-		Args:  cobra.ExactArgs(1),
+		Use:    "decide <task-id|target>",
+		Short:  "Compatibility shortcut for decision-only lifecycle updates",
+		Long:   "Compatibility shortcut for decision-only lifecycle updates.\n\nPrefer `ds task checkpoint <task-id> --target <target> --decision <gate>` so the gate records what changed, what ran, and what remains.",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskDecide(cmd, args[0], opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
-	cmd.Flags().StringVar(&opts.Target, "target", "", "Series, slice, or iteration target ID/title/plan/result")
+	cmd.Flags().StringVar(&opts.Target, "target", "", "Series or slice target ID/title/plan/result")
 	cmd.Flags().StringVar(&opts.Stage, "stage", "", "Lifecycle stage to set; inferred from terminal decisions when omitted")
 	cmd.Flags().StringVar(&opts.Decision, "decision", "", "Decision gate: promote, improve, rework, rollback, block, complete, split, supersede, cancel, continue")
 	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the updated task index into the DevSpecs index")
@@ -934,7 +954,7 @@ func newTaskCheckpointCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
-	cmd.Flags().StringVar(&opts.Target, "target", "", "Task slice/iteration target ID/title/plan/result to append to; defaults to the first slice")
+	cmd.Flags().StringVar(&opts.Target, "target", "", "Task slice or follow-up target ID/title/plan/result to append to; defaults to the first slice")
 	cmd.Flags().StringVar(&opts.Slice, "slice", "", "Deprecated alias for --target")
 	cmd.Flags().StringVar(&opts.Stage, "stage", opts.Stage, "Lifecycle stage: packed, planned, started, implemented, validated, done, blocked, completed, split, superseded, cancelled, rolled_back")
 	cmd.Flags().StringVar(&opts.Decision, "decision", opts.Decision, "Decision gate: promote, improve, rework, rollback, block, complete, split, supersede, cancel, continue")
@@ -1114,6 +1134,15 @@ func runTaskSliceAdd(cmd *cobra.Command, taskID, title string, opts taskArtifact
 	if title == "" {
 		return fmt.Errorf("slice title is empty")
 	}
+	opts.After = strings.TrimSpace(opts.After)
+	opts.Reason = strings.TrimSpace(opts.Reason)
+	if opts.After != "" {
+		opts.Slice = opts.After
+		return runTaskIterationAdd(cmd, taskID, title, opts)
+	}
+	if opts.Reason != "" {
+		return fmt.Errorf("--reason requires --after; use `ds task slice add %s %q --after <slice> --reason %s`", taskID, title, opts.Reason)
+	}
 	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(cmd, opts.Dir, taskID)
 	if err != nil {
 		return err
@@ -1137,7 +1166,7 @@ func runTaskIterationAdd(cmd *cobra.Command, taskID, title string, opts taskArti
 	}
 	title = strings.TrimSpace(title)
 	if title == "" {
-		return fmt.Errorf("iteration title is empty")
+		return fmt.Errorf("follow-up slice title is empty")
 	}
 	reason := strings.TrimSpace(opts.Reason)
 	if reason == "" {
@@ -1152,7 +1181,7 @@ func runTaskIterationAdd(cmd *cobra.Command, taskID, title string, opts taskArti
 		return err
 	}
 	if strings.Contains(parent.ID, "-") {
-		return fmt.Errorf("cannot add an iteration under iteration %q; choose a parent slice", parent.ID)
+		return fmt.Errorf("cannot add a follow-up slice under follow-up %q; choose a parent slice", parent.ID)
 	}
 	iteration := newTaskIterationArtifact(parent, nextTaskIterationOrdinal(manifest, parent.ID), title, reason, taskUsedSliceSlugs(manifest))
 	manifest.Artifacts.Slices = append(manifest.Artifacts.Slices, iteration)
@@ -1443,7 +1472,7 @@ func runTaskStatus(cmd *cobra.Command, taskID string, opts taskStatusOptions) er
 	if err != nil {
 		return err
 	}
-	out := taskStatusFromManifest(manifest)
+	out := taskStatusFromManifest(manifest, commandRepoTarget(cmd))
 	out.ArtifactFreshness = taskArtifactFreshnessWarnings(workspace, manifest)
 	if opts.AsJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
@@ -1453,7 +1482,7 @@ func runTaskStatus(cmd *cobra.Command, taskID string, opts taskStatusOptions) er
 	return writeTaskStatusHuman(cmd.OutOrStdout(), out)
 }
 
-func taskStatusFromManifest(manifest taskManifest) taskStatusOutput {
+func taskStatusFromManifest(manifest taskManifest, repoPath string) taskStatusOutput {
 	out := taskStatusOutput{
 		TaskID:               manifest.TaskID,
 		Series:               defaultTaskSeries(manifest.Series),
@@ -1468,6 +1497,12 @@ func taskStatusFromManifest(manifest taskManifest) taskStatusOutput {
 		LatestCheckpointID:   manifest.LatestCheckpointID,
 		LatestCheckpoint:     manifest.LatestCheckpoint,
 		LatestCheckpointJSON: manifest.LatestCheckpointJSON,
+	}
+	if next, err := taskNextSlice(manifest); err == nil {
+		out.NextTarget = next.ID
+		out.NextTitle = next.Title
+		out.NextKind = next.Kind
+		out.NextCommand = applyCommandLabel(manifest.TaskID, "", repoPath)
 	}
 	for _, slice := range manifest.Artifacts.Slices {
 		out.Slices = append(out.Slices, taskStatusSliceOutput{
@@ -1512,6 +1547,19 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 	}
 	if status.UpdatedAt != "" {
 		fmt.Fprintf(out, "Updated At: %s\n", status.UpdatedAt)
+	}
+	if status.NextTarget != "" {
+		fmt.Fprintf(out, "Next: %s", status.NextTarget)
+		if status.NextTitle != "" {
+			fmt.Fprintf(out, " - %s", status.NextTitle)
+		}
+		if status.NextKind != "" {
+			fmt.Fprintf(out, " [%s]", status.NextKind)
+		}
+		fmt.Fprintln(out)
+		if status.NextCommand != "" {
+			fmt.Fprintf(out, "Run: %s\n", status.NextCommand)
+		}
 	}
 	if status.LatestCheckpoint != "" {
 		fmt.Fprintf(out, "Latest Checkpoint: %s\n", status.LatestCheckpoint)
@@ -1940,8 +1988,8 @@ func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput, prior
 		checkpointCommand += " --repo " + commandArg(ctx.RepoArg)
 	}
 	fmt.Fprintf(&b, "Record the outcome in `%s` or with `%s`.\n", filepath.ToSlash(taskRelativePath(ctx.RepoRoot, target.ResultPath)), checkpointCommand)
-	fmt.Fprintln(&b, "Checklist edits are useful notes, but lifecycle state comes from `ds task checkpoint`, `ds task finish`, or `ds task decide`.")
-	fmt.Fprintln(&b, "Command roles: use `ds find` to discover and pack evidence, `ds task status` or `ds task next` to inspect lifecycle, and `ds workspace trace` only for known workspace change/task links. In trace output, `status` and `index_status` are separate signals.")
+	fmt.Fprintln(&b, "Checklist edits are useful notes, but lifecycle state should be recorded with `ds task checkpoint`; legacy `finish` and `decide` shortcuts are compatibility-only.")
+	fmt.Fprintln(&b, "Command roles: use `ds find` to discover and pack evidence, `ds task status` to inspect lifecycle, `ds apply` to emit the current bounded prompt, and `ds workspace trace` only for known workspace change/task links. In trace output, `status` and `index_status` are separate signals.")
 	fmt.Fprintln(&b, "At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.")
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "Completion contract:")
@@ -2140,9 +2188,9 @@ func taskNextBlockedByDecisionError(manifest taskManifest, slice taskSliceArtifa
 	}
 	switch decision {
 	case "improve", "rework":
-		return fmt.Errorf("task target %s ended with %s; add or choose an iteration before advancing, for example `ds task iteration add %s \"<title>\" --slice %s --reason %s` or `ds apply %s --target %s-1`", slice.ID, decision, taskID, slice.ID, decision, taskID, slice.ID)
+		return fmt.Errorf("task target %s ended with %s; add or choose a follow-up slice before advancing, for example `ds task slice add %s \"<title>\" --after %s --reason %s` or `ds apply %s --target %s-1`", slice.ID, decision, taskID, slice.ID, decision, taskID, slice.ID)
 	case "rollback", "rolled_back", "block", "blocked":
-		return fmt.Errorf("task target %s ended with %s; automatic next is blocked until the gate is resolved, use `ds task decide %s --target %s --decision promote` or choose an explicit target", slice.ID, decision, taskID, slice.ID)
+		return fmt.Errorf("task target %s ended with %s; automatic next is blocked until the gate is resolved, use `ds task checkpoint %s --target %s --decision promote` or choose an explicit target", slice.ID, decision, taskID, slice.ID)
 	default:
 		return fmt.Errorf("task target %s ended with %s; automatic next is blocked until the gate is resolved or an explicit target is chosen", slice.ID, firstNonEmptyTaskString(decision, "a terminal state"))
 	}
@@ -5871,7 +5919,7 @@ func writeTaskQuickStartHuman(out io.Writer, result taskStartOutput, confidence 
 		fmt.Fprintf(out, "Freshness warnings: %d informational path(s); run `ds task show %s` for details\n", len(result.FreshnessWarnings), target)
 	}
 	fmt.Fprintf(out, "\nNext:\n")
-	fmt.Fprintf(out, "  ds task prompt %s\n", target)
+	fmt.Fprintf(out, "  ds apply %s --target %s\n", result.TaskID, target)
 	fmt.Fprintf(out, "  ds task checkpoint %s --target %s --stage validated --decision promote\n", result.TaskID, target)
 	return nil
 }

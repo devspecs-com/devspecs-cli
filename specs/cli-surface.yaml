@@ -36,7 +36,8 @@ tree:
         purpose: Create and manage bounded task workspaces with packed context.
       apply:
         status: core
-        purpose: Emit one bounded one-slice prompt for an agent.
+        usage: ds apply [task-id|target]
+        purpose: Emit one bounded one-slice prompt for an agent; omit the argument for the unambiguous next slice.
       tldr:
         status: core
         purpose: Show LLM-oriented workflow quickstarts.
@@ -88,10 +89,6 @@ tree:
       status: core
       purpose: Create a sliced task workspace from a grounded goal.
     children:
-      quick:
-        status: support
-        usage: ds task quick "<goal>"
-        purpose: Create a compact one-off task workspace for small changes.
       next:
         status: support
         usage: ds task next <task-id>
@@ -103,19 +100,19 @@ tree:
       status:
         status: support
         usage: ds task status <task-id>
-        purpose: Show task, slice, iteration, checkpoint, and decision state.
+        purpose: Show task, slice, follow-up, checkpoint, and decision state.
       checkpoint:
         status: core
         usage: ds task checkpoint <task-id|target>
         purpose: Record what happened, evidence, run logs, learnings, and the decision gate.
       decide:
-        status: support
+        status: hidden_compat
         usage: ds task decide <task-id|target>
-        purpose: Update a decision gate without recording a full checkpoint.
+        purpose: Compatibility shortcut for decision-only updates; prefer ds task checkpoint --decision so the gate carries evidence.
       start:
-        status: support
+        status: hidden_compat
         usage: ds task start <task-id|target>
-        purpose: Mark one task target as started.
+        purpose: Compatibility shortcut for started state; prefer ds task checkpoint --stage started when a durable receipt matters.
       audit:
         status: diagnostic
         usage: ds task audit <task-id|target>
@@ -129,39 +126,44 @@ tree:
         usage: ds task refresh <task-id>
         purpose: Recapture task artifacts into the local index without rewriting docs.
       prompt:
-        status: consolidation_candidate
+        status: hidden_compat
         usage: ds task prompt <task-id|target>
-        purpose: Emit a bounded target prompt; prefer ds apply for the launch story.
+        purpose: Compatibility alias; prefer ds apply for the bounded one-slice agent prompt.
       finish:
-        status: consolidation_candidate
+        status: hidden_compat
         usage: ds task finish <task-id|target>
-        purpose: Close a target with a decision gate; likely checkpoint sugar or legacy.
+        purpose: Compatibility alias; prefer ds task checkpoint so decisions carry evidence and run receipts.
       sync:
-        status: consolidation_candidate
+        status: hidden_compat
         usage: ds task sync <task-id>
-        purpose: Recapture task artifacts; prefer refresh as the clearer product word.
+        purpose: Compatibility alias; prefer ds task refresh as the clearer product word.
+      quick:
+        status: hidden_compat
+        usage: ds task quick "<goal>"
+        purpose: Compatibility alias; prefer ds task "<goal>" --quick.
       slice:
         status: support
-        purpose: Manage sibling task slices.
+        purpose: Manage task slices, including improve/rework follow-up slices.
       iteration:
-        status: support
-        purpose: Manage improve/rework iteration slices under an existing slice.
+        status: hidden_compat
+        purpose: Compatibility alias; prefer ds task slice add --after.
 
   ds task slice:
-    purpose: Add sibling slices to an existing task.
+    purpose: Add sibling or follow-up slices to an existing task.
     children:
       add:
         status: support
-        usage: ds task slice add <task-id> <title>
-        purpose: Add a new slice plan/result pair.
+        usage: ds task slice add <task-id> <title> [--after A01 --reason improve]
+        purpose: Add a new sibling slice, or add A01-1-style follow-up work when --after is set.
 
   ds task iteration:
-    purpose: Add follow-up iteration slices when a target needs improve/rework.
+    status: hidden_compat
+    purpose: Compatibility alias for ds task slice add --after.
     children:
       add:
-        status: support
+        status: hidden_compat
         usage: ds task iteration add <task-id> <title>
-        purpose: Add a new iteration plan/result pair under an existing slice.
+        purpose: Add a new follow-up slice under an existing slice; prefer ds task slice add --after.
 
   ds workspace:
     aliases:
@@ -281,14 +283,9 @@ removed_tree:
         purpose: Flat artifact listing removed from root surface as too noisy.
 
 surface_questions:
-  - Should ds apply with no arguments default to ds apply next when unambiguous?
-  - Should ds task status include a first-class next_target before ds task next is hidden?
-  - Should ds task quick become ds task --quick?
-  - Should ds task slice add --after replace ds task iteration add?
-  - Should ds task prompt be hidden in favor of ds apply?
-  - Should ds task finish become checkpoint sugar or be hidden?
-  - Should ds task sync be hidden in favor of ds task refresh?
+  - Should ds task quick remain as a hidden compatibility alias now that ds task --quick exists?
   - Should user-defined aliases exist, or are built-in aliases enough for now?
+  - Should the experimental workspace surface rename workspace change to workspace plan before broader testing?
 
 planned_simplification:
   keep_public:
@@ -314,26 +311,45 @@ planned_simplification:
   shift_to_flags:
     ds_task_quick:
       target: ds task "<goal>" --quick
+      status: implemented
       reason: Quick is a creation mode, not a separate verb.
     ds_task_iteration_add:
       target: ds task slice add <task-id> "<title>" --after A01 --reason improve
-      reason: Iteration is a slice with newer information, not a separate user noun.
+      status: implemented
+      reason: Follow-up work is a slice with newer information, not a separate user noun.
   keep_until_replacement_is_proven:
     ds_task_next:
-      reason: ds apply does not yet default to next, and status does not yet present next_target clearly enough.
+      status: replacement_behavior_implemented
+      reason: ds apply now defaults to next and status now presents next_target, but keep ds task next public until dogfood proves the simpler path is enough.
       replacement_tests:
-        - ds apply defaults to next only when unambiguous.
-        - ds task status shows Next in human output.
-        - ds task status JSON includes next_target.
+        - "implemented: ds apply defaults to next only when unambiguous."
+        - "implemented: ds task status shows Next in human output."
+        - "implemented: ds task status JSON includes next_target."
+  workspace_surface_backlog:
+    ds_workspace_change:
+      target: ds workspace plan create <title>
+      status: planned
+      reason: Workspace change versus repo task is accurate but not idiomatic enough for early users; workspace plans coordinate multi-repo intent while repo tasks execute bounded slices.
+      acceptance:
+        - "ds workspace --help shows plan, slice, and trace, not change."
+        - "ds workspace plan --help describes multi-repo workspace plan records."
+        - "Top-level ds change, ds slice, and ds trace compatibility aliases are removed."
+        - "README, CHANGELOG, TASK_WORKFLOW_EXAMPLE, and this cli-surface file use workspace plan language."
+        - "OpenSpec change terminology remains unchanged because it is an external dialect."
   hide_or_deemphasize:
     ds_task_prompt:
       replacement: ds apply
+      status: implemented
     ds_task_finish:
       replacement: ds task checkpoint
+      status: implemented
     ds_task_decide:
       replacement: ds task checkpoint --decision
       reason: Decision-only mutation can skip evidence.
+      status: implemented
     ds_task_start:
       replacement: ds task checkpoint --stage started, if needed.
+      status: implemented
     ds_task_sync:
       replacement: ds task refresh
+      status: implemented

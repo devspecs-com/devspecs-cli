@@ -42,21 +42,28 @@ func NewApplyCmd() *cobra.Command {
 	opts.Dir = defaultTaskWorkspaceDir
 
 	cmd := &cobra.Command{
-		Use:   "apply <next|task-id|target>",
+		Use:   "apply [task-id|target]",
 		Short: "Emit a one-slice DevSpecs apply prompt",
 		Long: `Emit an agent prompt for exactly one DevSpecs task target.
 
-This command is prompt-only in v1.1: it resolves the next or requested slice and
-prints the bounded instruction an agent should follow. It does not launch an
-agent, mark the target started, or advance lifecycle state.`,
-		Args: cobra.ExactArgs(1),
+This command is prompt-only: it resolves the next or requested slice and prints
+the bounded instruction an agent should follow. It does not launch an agent,
+mark the target started, or advance lifecycle state.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			start := time.Now()
-			err := runApply(cmd, args[0], opts)
+			identifier := "next"
+			implicitNext := true
+			if len(args) > 0 {
+				identifier = args[0]
+				implicitNext = false
+			}
+			err := runApply(cmd, identifier, opts, implicitNext)
 			telemetry.RecordCommand("apply", err == nil, time.Since(start), map[string]any{
-				"json": opts.AsJSON,
-				"next": strings.EqualFold(strings.TrimSpace(args[0]), "next"),
-				"repo": opts.Repo != "",
+				"json":          opts.AsJSON,
+				"next":          strings.EqualFold(strings.TrimSpace(identifier), "next"),
+				"implicit_next": implicitNext,
+				"repo":          opts.Repo != "",
 			})
 			return err
 		},
@@ -64,15 +71,18 @@ agent, mark the target started, or advance lifecycle state.`,
 
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
 	cmd.Flags().StringVar(&opts.Repo, repoTargetFlagName, "", "Target repository path for repo-local DevSpecs artifacts and context")
-	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice/iteration target; useful when the first argument is a task id")
+	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice or follow-up target; useful when the first argument is a task id")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	return cmd
 }
 
-func runApply(cmd *cobra.Command, identifier string, opts applyOptions) error {
+func runApply(cmd *cobra.Command, identifier string, opts applyOptions, implicitNext bool) error {
 	ctx, command, err := resolveApplyTargetContext(opts.Dir, identifier, opts.Target, opts.Repo)
 	if err != nil {
 		return err
+	}
+	if implicitNext {
+		command = applyCommandLabel("", "", opts.Repo)
 	}
 	target := taskTargetOutputFromContext(ctx, true)
 	priorEvidence := taskPriorSliceEvidenceForPrompt(ctx.RepoRoot, ctx.Manifest.TaskID, ctx.Slice.ID)
@@ -133,7 +143,9 @@ func applyCommandLabel(identifier, selector, repoPath string) string {
 	selector = strings.TrimSpace(selector)
 	repoPath = strings.TrimSpace(repoPath)
 	var command string
-	if selector == "" {
+	if identifier == "" && selector == "" {
+		command = "ds apply"
+	} else if selector == "" {
 		command = "ds apply " + identifier
 	} else {
 		command = "ds apply " + identifier + " --target " + selector

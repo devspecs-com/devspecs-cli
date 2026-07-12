@@ -1,17 +1,24 @@
 # DevSpecs CLI
 
-> Give agents the next slice, not the whole roadmap.
+> Stop losing the thread.
 
-DevSpecs is a local-first CLI for AI coding workflows. It turns repo intent,
-source, tests, docs, and recent work into bounded task slices with packed
-context, checkpoints, and explicit decision gates.
+DevSpecs keeps the durable parts of AI coding work attached to your repo, so
+humans and agents can continue without reconstructing the thread from chat.
 
-No cloud required. No account. No LLM calls. No code upload. Your source files
-stay authoritative.
+Git shows what changed. DevSpecs shows what matters next: recent work, packed
+repo evidence, task state, decision gates, checkpoints, and the next bounded
+handoff.
+
+Use it as a lightweight task/spec workflow, or as a local codebase navigation
+layer for the plans, ADRs, PRDs, RFCs, docs, source, tests, and git history you
+already have.
+
+Local-first. No cloud sync. No account. No LLM calls. No code upload. Your
+source files stay authoritative.
 
 <p>
   <a href="https://devspecs.com">
-    <img src="https://devspecs.com/demo/fastapi-task-flow-v1-1.gif" alt="DevSpecs FastAPI task flow demo" width="900">
+    <img src="https://devspecs.com/demo/fastapi-recent-gate-v1-1.gif" alt="DevSpecs FastAPI recent work demo" width="900">
   </a>
 </p>
 
@@ -28,7 +35,7 @@ stay authoritative.
 | Reddit | [u/bnunamak](https://www.reddit.com/user/bnunamak/) |
 | LinkedIn | [Brennan Nunamaker](https://www.linkedin.com/in/brennan-nunamaker-30657a70) |
 
-## Try It In Five Minutes
+## Install, Then Try It
 
 Install:
 
@@ -36,25 +43,35 @@ Install:
 brew install devspecs-com/tap/devspecs
 ```
 
-Recover the local thread in the repo:
+Recover the local thread:
 
 ```bash
 ds recent
 ```
 
-Then open the LLM-oriented guide:
+When you want a compact agent cheat sheet:
 
 ```bash
 ds tldr
 ```
 
-Create one bounded task:
+Create one bounded task in your repo:
 
 ```bash
 ds task "fix OAuth redirect"
-ds apply next
+ds apply
 ds task checkpoint A01 --decision improve
-ds apply next
+ds apply
+```
+
+Or try it in a disposable FastAPI checkout:
+
+```bash
+git clone https://github.com/fastapi/fastapi
+cd fastapi
+ds init
+ds recent
+ds task "trace Swagger OAuth redirect behavior"
 ```
 
 Or let DevSpecs write thin adapter files for Codex, Cursor, Claude, and
@@ -70,13 +87,13 @@ ds init
 
 | Job | Command | Use When |
 | --- | --- | --- |
-| Recover the thread | `ds recent` | You are returning to a repo, checking active local work, or deciding what to ask next. |
-| Bound an agent task | `ds task "goal"` | You know the work and want packed repo context plus a stop line. |
+| Recover the thread | `ds recent` | You came back cold and need the current local work thread. |
+| Ground the change | `ds map` / `ds find "topic"` | Git and rg found code, but you still need intent, boundaries, and exclusions. |
+| Create a bounded handoff | `ds task "goal"` | You know the work and want packed repo context plus a stop line. |
 | Coordinate multi-repo work | `ds workspace init .` | You have an umbrella workspace with several child repos. Experimental. |
-| Continue the next slice | `ds apply next` | A task already exists and the agent needs the current target only. |
-| Record the receipt | `ds task checkpoint A01 --decision promote` | You need to capture what changed, what ran, and what comes next. |
-| Map a repo | `ds map` | You are entering unfamiliar code and need system boundaries. |
-| Inspect evidence | `ds find "topic"` | You want source, tests, docs, receipts, and exclusions in one context pack. |
+| Continue one slice | `ds apply` | A task already exists and the agent needs the current target only. |
+| Record the receipt | `ds task checkpoint A01 --decision promote` | You need to capture what changed, what ran, what missed, and what comes next. |
+| Inspect exact context | `ds context <artifact-id>` | You want one indexed artifact as paste-ready agent context. |
 
 ## What Changed In v1.2.0
 
@@ -94,7 +111,7 @@ DevSpecs v1.2 focuses on first-run activation quality and release discipline:
 - Regression infrastructure now includes canonical small/fat/full-history
   manifests, baseline-vs-candidate comparisons, reviewed fat-100 quality
   evidence, and cross-command cold activation gates for `recent`, `map`,
-  `find`, and `task quick`.
+  `find`, and `task --quick`.
 
 Large cold repos can still take seconds on the first index build. The product
 bar is same-or-better first result quality, not a faster weak path; use
@@ -102,18 +119,21 @@ bar is same-or-better first result quality, not a faster weak path; use
 
 ## Why DevSpecs Exists
 
-Issue trackers describe intended work. AI coding adds a new local work layer:
-prompts, partial attempts, missed files, test evidence, course corrections,
-and follow-up slices. Without structure, that layer disappears into chat logs
-and editor state.
+Issue trackers describe intended work. Git records what changed. AI coding adds
+a new local work layer between them: prompts, partial attempts, missed files,
+test evidence, course corrections, and follow-up slices.
+
+Without structure, that layer disappears into chat logs and editor state. The
+next human or agent has to infer why the branch exists, what passed, what was
+superseded, and where to continue.
 
 DevSpecs gives that layer local shape:
 
 - task slices that tell the agent where to stop;
 - packed source, test, docs, and intent context before implementation starts;
 - explicit gates: `promote`, `improve`, `rework`, `rollback`, and `block`;
-- iteration slices such as `A01-1` and `A01-2` when the first attempt teaches
-  you something;
+- follow-up slices such as `A01-1` and `A01-2` when the first attempt teaches
+  you something, created with `ds task slice add <task-id> "<title>" --after A01`;
 - checkpoint and result artifacts that survive compaction, handoff, and the
   next agent session.
 
@@ -174,9 +194,9 @@ ds task "Serve Swagger UI OAuth2 redirect from a custom docs redirect URL" \
   --slice "Add regression coverage and docs examples"
 
 ds task show A01
-ds apply next
+ds apply
 ds task checkpoint A01 --decision promote --next-target A02
-ds apply next
+ds apply
 ```
 
 What you get:
@@ -185,25 +205,24 @@ What you get:
 - `A01`, `A02`, ... slice plan/result artifacts;
 - packed source, test, docs, and receipt context;
 - a one-slice agent prompt;
-- lifecycle state from `start`, `checkpoint`, `finish`, `decide`, and
-  `refresh`;
+- lifecycle state from `checkpoint`, `status`, and `refresh`;
 - a durable record of what changed, what ran, what missed, and what should
   happen next.
 
 For a smaller one-off:
 
 ```bash
-ds task quick "Fix discount rounding in invoice totals"
+ds task "Fix discount rounding in invoice totals" --quick
 ```
 
-Use full `ds task` when you want durable slices and handoff receipts. Use
-`ds task quick` when the ceremony would outweigh the change.
+Use full `ds task` when you want durable slices and handoff receipts. Add
+`--quick` when the ceremony would outweigh the change.
 
 ## Workspace Coordination
 
 Workspace coordination is experimental and explicit. Use it only when one
 umbrella directory coordinates work across several child repos. Normal
-single-repo `ds task`, `ds task quick`, `ds apply`, and `ds task checkpoint`
+single-repo `ds task`, `ds task --quick`, `ds apply`, and `ds task checkpoint`
 remain the default path.
 
 `ds ws` is a built-in shortcut for `ds workspace`; docs use the full command
@@ -241,7 +260,7 @@ workspace form, and the aliases still dispatch the same workspace operations.
 | Need | Command | Meaning |
 | --- | --- | --- |
 | Discover evidence | `ds find "topic"` | Pack likely source, tests, docs, receipts, and exclusions for a focused question. |
-| Check task progress | `ds task status/next/show` | Read lifecycle state from task manifests, checkpoints, stages, and decisions. |
+| Check task progress | `ds task status/show` + `ds apply` | Read lifecycle state, inspect one target, then emit the bounded prompt. |
 | Follow workspace links | `ds workspace trace <id>` | Trace a known workspace change or repo task to linked repo-local slices. |
 
 `ds workspace trace` reports both lifecycle `status` and index-capture
@@ -290,10 +309,11 @@ Index state lives in local SQLite and can be rebuilt.
 | `ds init` | Create local index state, repo config, and optional agent adapter files. |
 | `ds tldr [workflow]` | Show LLM-oriented quickstarts for setup, hotfixes, epics, incidents, brownfield recovery, handoff, and deep dives. |
 | `ds task <query>` | Create a bounded task workspace with slice artifacts. |
-| `ds task quick <query>` | Create a compact one-off task workspace. |
-| `ds task status/next/show` | Inspect task lifecycle state and choose the next target. |
-| `ds apply <next\|task-id\|target>` | Emit the next bounded one-slice agent prompt without mutating task state. |
-| `ds task checkpoint <target>` | Record files, tests, misses, noise, learnings, decision evidence, and next iteration. |
+| `ds task <query> --quick` | Create a compact one-off task workspace. |
+| `ds task status/show` | Inspect task lifecycle state and target context. |
+| `ds apply [task-id\|target]` | Emit the next bounded one-slice agent prompt without mutating task state; omit the argument for the unambiguous next slice. |
+| `ds task checkpoint <task-id\|target>` | Record files, tests, misses, noise, learnings, decision evidence, and next iteration. |
+| `ds task slice add <task-id> "<title>" --after A01 --reason improve` | Add an A01-1-style follow-up slice after an improve/rework gate. |
 | `ds task refresh <task-id>` | Recapture edited task artifacts into the local index without rewriting task docs. |
 | `ds workspace init/show/change/slice/trace` | Coordinate experimental workspace-level changes, repo-local task slices, and known change/task traces. |
 | `ds map` | Show architecture/system boundaries with evidence and follow-up commands. |
@@ -356,6 +376,14 @@ No. The index is local SQLite. Source files remain authoritative. Optional
 telemetry is anonymous and excludes repo names, file paths, document text,
 source code, and raw queries.
 
+### Is this a spec framework like OpenSpec?
+
+Partly, but DevSpecs is broader. It can create lightweight task specs with
+packed source, tests, intent, decision gates, iteration slices, and checkpoints.
+It also works as a local codebase navigation layer by indexing existing plans,
+ADRs, PRDs, RFCs, docs, source, tests, git history, and task state without
+requiring a new spec process first.
+
 ### Do I need MCP or slash commands?
 
 No. The CLI is the product. `ds init` can generate thin adapter files for agent
@@ -364,7 +392,7 @@ tools, but those wrappers route back through `ds task` and `ds apply`.
 ### Why not just use epics, stories, and tasks?
 
 Traditional issue trackers describe planned work. Agent work creates local
-attempts, misses, evidence, and iteration slices between ticket updates.
+attempts, misses, evidence, and follow-up slices between ticket updates.
 DevSpecs manages that local AI work layer without replacing the tracker.
 
 ### Should I commit `devspecs/tasks`?

@@ -62,6 +62,28 @@ func TestApplyNextEmitsOneSlicePromptWithoutChangingState(t *testing.T) {
 	}
 }
 
+func TestApplyDefaultsToNextWhenUnambiguous(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	createApplyTestTask(t, "apply-default-next", "first default apply slice", "second default apply slice")
+
+	manifestPath := filepath.Join(repoDir, "devspecs", "tasks", "apply-default-next", taskManifestFilename)
+	before := mustReadFile(t, manifestPath)
+
+	out, err := runApplyJSON(t, []string{"--json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Command != "ds apply" || out.TaskID != "apply-default-next" || out.Target != "A01" {
+		t.Fatalf("implicit apply resolved wrong target: %#v", out)
+	}
+	if !strings.Contains(out.Prompt, "task apply-default-next target A01 only") {
+		t.Fatalf("implicit apply prompt not bounded to A01:\n%s", out.Prompt)
+	}
+	if got := mustReadFile(t, manifestPath); got != before {
+		t.Fatalf("ds apply should not mutate task state.\nBefore:\n%s\nAfter:\n%s", before, got)
+	}
+}
+
 func TestApplyRepoFlagResolvesTargetRepoFromUmbrella(t *testing.T) {
 	_, child := setupTaskCommandUmbrellaRepo(t)
 
@@ -93,6 +115,14 @@ func TestApplyRepoFlagResolvesTargetRepoFromUmbrella(t *testing.T) {
 	}
 	if !strings.Contains(out.Prompt, "ds task checkpoint apply-repo-route --target A01 --repo ./enalytics-backend") {
 		t.Fatalf("apply prompt missing repo-aware checkpoint command:\n%s", out.Prompt)
+	}
+
+	implicit, err := runApplyJSON(t, []string{"--repo", "./enalytics-backend", "--json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if implicit.Command != "ds apply --repo ./enalytics-backend" || implicit.TaskID != "apply-repo-route" || implicit.Target != "A01" {
+		t.Fatalf("implicit repo apply resolved wrong target: %#v", implicit)
 	}
 
 	explicit, err := runApplyJSON(t, []string{"apply-repo-route", "--target", "A02", "--repo", "./enalytics-backend", "--json"})
@@ -164,7 +194,7 @@ func TestApplyNextRespectsDecisionGateProgression(t *testing.T) {
 		{name: "promote-advances-to-next-slice", decision: "promote", wantTarget: "A02"},
 		{name: "improve-selects-existing-iteration", decision: "improve", iteration: true, wantTarget: "A01-1"},
 		{name: "rework-selects-existing-iteration", decision: "rework", iteration: true, wantTarget: "A01-1"},
-		{name: "improve-without-iteration-stops-before-sibling", decision: "improve", wantErr: []string{"A01 ended with improve", "ds task iteration add", "--slice A01", "--reason improve"}},
+		{name: "improve-without-iteration-stops-before-sibling", decision: "improve", wantErr: []string{"A01 ended with improve", "ds task slice add", "--after A01", "--reason improve"}},
 		{name: "rollback-blocks-automatic-next", decision: "rollback", wantErr: []string{"A01 ended with rollback", "automatic next is blocked", "choose an explicit target"}},
 		{name: "block-blocks-automatic-next", decision: "block", wantErr: []string{"A01 ended with block", "automatic next is blocked", "choose an explicit target"}},
 	} {

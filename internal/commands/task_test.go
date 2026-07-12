@@ -254,6 +254,85 @@ func TestTask_StartCreatesUncertaintyAwareWorkspace(t *testing.T) {
 	}
 }
 
+func TestTask_StatusShowsNextTarget(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "status-next-test",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"--slice", "first status slice",
+		"--slice", "second status slice",
+		"status next workflow",
+	})
+	cmd.SetOut(&bytes.Buffer{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	statusCmd := NewTaskCmd()
+	statusCmd.SetArgs([]string{"status", "status-next-test", "--json"})
+	statusBuf := &bytes.Buffer{}
+	statusCmd.SetOut(statusBuf)
+	if err := statusCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var statusOut taskStatusOutput
+	if err := json.Unmarshal(statusBuf.Bytes(), &statusOut); err != nil {
+		t.Fatalf("status json: %v\n%s", err, statusBuf.String())
+	}
+	if statusOut.NextTarget != "A01" || statusOut.NextTitle != "first status slice" || statusOut.NextCommand != "ds apply status-next-test" {
+		t.Fatalf("status next output = %#v", statusOut)
+	}
+
+	humanStatusCmd := NewTaskCmd()
+	humanStatusCmd.SetArgs([]string{"status", "status-next-test"})
+	humanStatusBuf := &bytes.Buffer{}
+	humanStatusCmd.SetOut(humanStatusBuf)
+	if err := humanStatusCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	humanStatus := humanStatusBuf.String()
+	for _, want := range []string{
+		"Next: A01 - first status slice",
+		"Run: ds apply status-next-test",
+	} {
+		if !strings.Contains(humanStatus, want) {
+			t.Fatalf("human status missing %q:\n%s", want, humanStatus)
+		}
+	}
+
+	decideCmd := NewTaskCmd()
+	decideCmd.SetArgs([]string{
+		"decide", "status-next-test",
+		"--target", "A01",
+		"--decision", "promote",
+		"--index=false",
+		"--json",
+	})
+	decideCmd.SetOut(&bytes.Buffer{})
+	if err := decideCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	afterStatusCmd := NewTaskCmd()
+	afterStatusCmd.SetArgs([]string{"status", "status-next-test", "--json"})
+	afterStatusBuf := &bytes.Buffer{}
+	afterStatusCmd.SetOut(afterStatusBuf)
+	if err := afterStatusCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var afterStatus taskStatusOutput
+	if err := json.Unmarshal(afterStatusBuf.Bytes(), &afterStatus); err != nil {
+		t.Fatalf("after status json: %v\n%s", err, afterStatusBuf.String())
+	}
+	if afterStatus.NextTarget != "A02" || afterStatus.NextTitle != "second status slice" {
+		t.Fatalf("status did not advance next target after promote: %#v", afterStatus)
+	}
+}
+
 func TestTaskRepoFlagRoutesArtifactsToTargetRepoFromUmbrella(t *testing.T) {
 	umbrella, child := setupTaskCommandUmbrellaRepo(t)
 
@@ -456,7 +535,7 @@ func TestTask_QuickCreatesOneOffWorkspaceWithCompactOutput(t *testing.T) {
 	repoDir := setupTaskCommandRepo(t)
 
 	cmd := NewTaskCmd()
-	cmd.SetArgs([]string{"quick", "--id", "quick-fix", "--no-refresh", "--index=false", "fix small billing typo"})
+	cmd.SetArgs([]string{"--quick", "--id", "quick-fix", "--no-refresh", "--index=false", "fix small billing typo"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	if err := cmd.Execute(); err != nil {
@@ -467,7 +546,7 @@ func TestTask_QuickCreatesOneOffWorkspaceWithCompactOutput(t *testing.T) {
 		"Created one-off task: quick-fix",
 		"Target: A01",
 		"Next:",
-		"ds task prompt A01",
+		"ds apply quick-fix --target A01",
 		"ds task checkpoint quick-fix --target A01",
 	} {
 		if !strings.Contains(output, want) {
@@ -480,6 +559,152 @@ func TestTask_QuickCreatesOneOffWorkspaceWithCompactOutput(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "A01-fix-small-billing-typo-result.md")); err != nil {
 		t.Fatalf("quick result missing: %v", err)
+	}
+}
+
+func TestTask_QuickSubcommandHiddenButStillWorks(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	helpCmd := NewTaskCmd()
+	helpCmd.SetArgs([]string{"--help"})
+	helpBuf := &bytes.Buffer{}
+	helpCmd.SetOut(helpBuf)
+	if err := helpCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(helpBuf.String(), "\n  quick       ") {
+		t.Fatalf("task quick should be hidden from normal help:\n%s", helpBuf.String())
+	}
+	if !strings.Contains(helpBuf.String(), "--quick") {
+		t.Fatalf("task help should teach --quick:\n%s", helpBuf.String())
+	}
+
+	compatCmd := NewTaskCmd()
+	compatCmd.SetArgs([]string{"quick", "--id", "quick-compat", "--no-refresh", "--index=false", "fix small billing typo"})
+	buf := &bytes.Buffer{}
+	compatCmd.SetOut(buf)
+	if err := compatCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "Created one-off task: quick-compat") {
+		t.Fatalf("quick compatibility output missing one-off marker:\n%s", buf.String())
+	}
+}
+
+func TestTask_LegacyLifecycleSubcommandsHiddenButStillWork(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	helpCmd := NewTaskCmd()
+	helpCmd.SetArgs([]string{"--help"})
+	helpBuf := &bytes.Buffer{}
+	helpCmd.SetOut(helpBuf)
+	if err := helpCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	help := helpBuf.String()
+	for _, hiddenLine := range []string{
+		"\n  decide      ",
+		"\n  finish      ",
+		"\n  prompt      ",
+		"\n  start       ",
+		"\n  sync        ",
+	} {
+		if strings.Contains(help, hiddenLine) {
+			t.Fatalf("legacy lifecycle command %q should be hidden from normal help:\n%s", hiddenLine, help)
+		}
+	}
+	for _, visibleLine := range []string{
+		"\n  checkpoint  ",
+		"\n  refresh     ",
+		"\n  status      ",
+		"\n  next        ",
+	} {
+		if !strings.Contains(help, visibleLine) {
+			t.Fatalf("expected visible task command %q in help:\n%s", visibleLine, help)
+		}
+	}
+
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"prompt", "--help"}, "Prefer `ds apply <task-id>`"},
+		{[]string{"finish", "--help"}, "Prefer `ds task checkpoint <task-id>"},
+		{[]string{"decide", "--help"}, "Prefer `ds task checkpoint <task-id>"},
+		{[]string{"start", "--help"}, "Prefer `ds task checkpoint <task-id>"},
+		{[]string{"sync", "--help"}, "Prefer `ds task refresh <task-id>`"},
+	}
+	for _, tc := range cases {
+		cmd := NewTaskCmd()
+		cmd.SetArgs(tc.args)
+		buf := &bytes.Buffer{}
+		cmd.SetOut(buf)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		if !strings.Contains(buf.String(), tc.want) {
+			t.Fatalf("%v help missing %q:\n%s", tc.args, tc.want, buf.String())
+		}
+	}
+}
+
+func TestTask_IterationSubcommandHiddenButStillWorks(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	helpCmd := NewTaskCmd()
+	helpCmd.SetArgs([]string{"--help"})
+	helpBuf := &bytes.Buffer{}
+	helpCmd.SetOut(helpBuf)
+	if err := helpCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(helpBuf.String(), "\n  iteration   ") {
+		t.Fatalf("task iteration should be hidden from normal help:\n%s", helpBuf.String())
+	}
+	iterationHelpCmd := NewTaskCmd()
+	iterationHelpCmd.SetArgs([]string{"iteration", "add", "--help"})
+	iterationHelpBuf := &bytes.Buffer{}
+	iterationHelpCmd.SetOut(iterationHelpBuf)
+	if err := iterationHelpCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(iterationHelpBuf.String(), "Prefer `ds task slice add") {
+		t.Fatalf("iteration compatibility help should point to slice add --after:\n%s", iterationHelpBuf.String())
+	}
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "iteration-compat",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"--slice", "first iteration slice",
+		"iteration compatibility",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	compatCmd := NewTaskCmd()
+	compatCmd.SetArgs([]string{
+		"iteration", "add", "iteration-compat", "repair iteration slice",
+		"--slice", "A01",
+		"--reason", "improve",
+		"--index=false",
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	compatCmd.SetOut(buf)
+	if err := compatCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var out taskArtifactAddOutput
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("iteration compat json: %v\n%s", err, buf.String())
+	}
+	if out.Slice.ID != "A01-1" {
+		t.Fatalf("iteration compat output = %#v", out)
 	}
 }
 
@@ -1697,11 +1922,38 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 		t.Fatalf("slice add rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
 	}
 
+	followupCmd := NewTaskCmd()
+	followupCmd.SetArgs([]string{
+		"slice", "add", "lifecycle-add-test", "repair lifecycle status",
+		"--after", "B01",
+		"--reason", "improve",
+		"--index=false",
+		"--json",
+	})
+	followupBuf := &bytes.Buffer{}
+	followupCmd.SetOut(followupBuf)
+	if err := followupCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var followupOut taskArtifactAddOutput
+	if err := json.Unmarshal(followupBuf.Bytes(), &followupOut); err != nil {
+		t.Fatalf("slice add --after json: %v\n%s", err, followupBuf.String())
+	}
+	if followupOut.Series != "B" || followupOut.Slice.ID != "B01-1" {
+		t.Fatalf("slice add --after output = %#v", followupOut)
+	}
+	if filepath.Base(followupOut.Slice.PlanPath) != "B01-1-repair-lifecycle-status-plan.md" {
+		t.Fatalf("follow-up slice plan = %q", followupOut.Slice.PlanPath)
+	}
+	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
+		t.Fatalf("slice add --after rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
+	}
+
 	iterationCmd := NewTaskCmd()
 	iterationCmd.SetArgs([]string{
-		"iteration", "add", "lifecycle-add-test", "repair lifecycle status",
+		"iteration", "add", "lifecycle-add-test", "rework lifecycle status",
 		"--slice", "B01",
-		"--reason", "improve",
+		"--reason", "rework",
 		"--index=false",
 		"--json",
 	})
@@ -1712,28 +1964,29 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 	}
 	var iterationOut taskArtifactAddOutput
 	if err := json.Unmarshal(iterationBuf.Bytes(), &iterationOut); err != nil {
-		t.Fatalf("iteration add json: %v\n%s", err, iterationBuf.String())
+		t.Fatalf("hidden iteration add json: %v\n%s", err, iterationBuf.String())
 	}
-	if iterationOut.Series != "B" || iterationOut.Slice.ID != "B01-1" {
-		t.Fatalf("iteration add output = %#v", iterationOut)
+	if iterationOut.Series != "B" || iterationOut.Slice.ID != "B01-2" {
+		t.Fatalf("hidden iteration add output = %#v", iterationOut)
 	}
-	if filepath.Base(iterationOut.Slice.PlanPath) != "B01-1-repair-lifecycle-status-plan.md" {
-		t.Fatalf("iteration plan = %q", iterationOut.Slice.PlanPath)
-	}
-	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
-		t.Fatalf("iteration add rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
+	if filepath.Base(iterationOut.Slice.PlanPath) != "B01-2-rework-lifecycle-status-plan.md" {
+		t.Fatalf("hidden iteration plan = %q", iterationOut.Slice.PlanPath)
 	}
 
 	var manifest taskManifest
 	if err := json.Unmarshal([]byte(mustReadFile(t, filepath.Join(workspace, taskManifestFilename))), &manifest); err != nil {
 		t.Fatalf("manifest json: %v", err)
 	}
-	if len(manifest.Artifacts.Slices) != 3 {
+	if len(manifest.Artifacts.Slices) != 4 {
 		t.Fatalf("manifest slices = %#v", manifest.Artifacts.Slices)
 	}
 	iteration := manifest.Artifacts.Slices[2]
 	if iteration.ID != "B01-1" || iteration.Kind != "iteration" || iteration.ParentID != "B01" || iteration.Reason != "improve" {
 		t.Fatalf("iteration manifest entry = %#v", iteration)
+	}
+	compatIteration := manifest.Artifacts.Slices[3]
+	if compatIteration.ID != "B01-2" || compatIteration.Kind != "iteration" || compatIteration.ParentID != "B01" || compatIteration.Reason != "rework" {
+		t.Fatalf("hidden iteration manifest entry = %#v", compatIteration)
 	}
 
 	checkpointCmd := NewTaskCmd()
@@ -1980,6 +2233,40 @@ func TestTaskSliceAddRefusesExistingArtifactFile(t *testing.T) {
 	}
 	if got := mustReadFile(t, existingPlan); !strings.Contains(got, "Do not replace this file") {
 		t.Fatalf("existing plan was overwritten:\n%s", got)
+	}
+}
+
+func TestTaskSliceAddReasonRequiresAfter(t *testing.T) {
+	setupTaskCommandRepo(t)
+
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "slice-reason-test",
+		"--no-refresh",
+		"--index=false",
+		"--slice", "first lifecycle slice",
+		"task lifecycle flow",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	if err := startCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	sliceCmd := NewTaskCmd()
+	sliceCmd.SetArgs([]string{
+		"slice", "add", "slice-reason-test", "ambiguous follow-up",
+		"--reason", "improve",
+		"--index=false",
+	})
+	sliceCmd.SetOut(&bytes.Buffer{})
+	err := sliceCmd.Execute()
+	if err == nil {
+		t.Fatal("expected --reason without --after to fail")
+	}
+	for _, want := range []string{"--reason requires --after", "ds task slice add", "--after <slice>", "--reason improve"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("slice reason error missing %q: %v", want, err)
+		}
 	}
 }
 

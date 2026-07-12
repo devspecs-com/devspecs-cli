@@ -35,8 +35,8 @@ issues, and future workflows.
 
 Default workflow: use ds task to create bounded task workspaces with packed
 source/test/docs context, one-slice prompts, checkpoints, result receipts, and
-decision gates for AI-assisted coding work. Use ds apply next or ds apply
-<target> to emit the next bounded one-slice agent prompt.
+decision gates for AI-assisted coding work. Use ds apply or ds apply <target>
+to emit the next bounded one-slice agent prompt.
 
 Human orientation: start with ds recent to recover the local thread, active
 branches, and likely follow-up commands. Use ds find for a focused question and

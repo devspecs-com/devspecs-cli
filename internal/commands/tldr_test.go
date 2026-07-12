@@ -22,17 +22,19 @@ func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 		"## Epic / Multi-Slice Feature (`epic`)",
 		"## Incident / Triage (`incident`)",
 		"## Brownfield Intent Recovery (`brownfield`)",
-		"ds task quick",
+		`ds task "fix <bug>" --quick`,
 		"ds task checkpoint <task-id> --target <target>",
 		"Fastest path for known work",
 		"Run ds init once per repo",
 		`/ds-task "goal"`,
-		"/ds-apply <task-id|target>",
+		"/ds-apply [task-id|target]",
 		"Human front door: run ds recent",
 		"Workflow commands refresh the local index by default",
 		"Use ds recent, ds find, ds map, and ds context as diagnostic/evidence tools around a task",
 		"Command roles: ds find discovers and packs evidence",
-		"Record the completion contract with checkpoint/finish",
+		"ds task slice add <task-id>",
+		"--after A01 --reason improve",
+		"Record the completion contract with checkpoint",
 		"ds map",
 		"ds recent",
 		`ds task "implement <bounded target>"`,
@@ -76,7 +78,7 @@ func TestTLDR_FilterAndJSON(t *testing.T) {
 	if !strings.Contains(commands, "ds find") {
 		t.Fatalf("incident workflow missing packed find command: %#v", out.Workflows[0])
 	}
-	if strings.Index(commands, "ds recent") > strings.Index(commands, "ds task quick") {
+	if strings.Index(commands, "ds recent") > strings.Index(commands, `ds task "triage <incident>" --quick`) {
 		t.Fatalf("incident workflow should orient with recent before task execution: %#v", out.Workflows[0])
 	}
 	if strings.Contains(commands, "ds scan") {

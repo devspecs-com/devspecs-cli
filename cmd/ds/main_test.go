@@ -69,7 +69,7 @@ func TestRootCmd_HelpCentersTaskWorkflow(t *testing.T) {
 	for _, want := range []string{
 		"Default workflow:",
 		"use ds task to create bounded task workspaces",
-		"Use ds apply next or ds apply",
+		"Use ds apply or ds apply",
 		"Human orientation:",
 		"start with ds recent to recover the local thread",
 		"Use ds find for a focused question",
@@ -171,7 +171,7 @@ func TestRootCmd_ApplyRegistered(t *testing.T) {
 	got := buf.String()
 	for _, want := range []string{
 		"Emit an agent prompt for exactly one DevSpecs task target.",
-		"apply <next|task-id|target>",
+		"apply [task-id|target]",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected apply help to contain %q, got:\n%s", want, got)
@@ -196,7 +196,7 @@ func TestRootCmd_CommandRoleHelpDistinguishesFindStatusAndTrace(t *testing.T) {
 			args: []string{"task", "status", "--help"},
 			want: []string{
 				"Show lifecycle state for an existing DevSpecs task.",
-				"inspect task, slice, iteration, checkpoint, and decision",
+				"inspect task, slice, follow-up, checkpoint, and decision",
 				"It does not discover new source or docs",
 			},
 		},
