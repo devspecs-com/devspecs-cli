@@ -1,17 +1,24 @@
 # DevSpecs CLI
 
-> Give agents the next slice, not the whole roadmap.
+> Stop losing the thread.
 
-DevSpecs is a local-first CLI for AI coding workflows. It turns repo intent,
-source, tests, docs, and recent work into bounded task slices with packed
-context, checkpoints, and explicit decision gates.
+DevSpecs keeps the durable parts of AI coding work attached to your repo, so
+humans and agents can continue without reconstructing the thread from chat.
 
-No cloud required. No account. No LLM calls. No code upload. Your source files
-stay authoritative.
+Git shows what changed. DevSpecs shows what matters next: recent work, packed
+repo evidence, task state, decision gates, checkpoints, and the next bounded
+handoff.
+
+Use it as a lightweight task/spec workflow, or as a local codebase navigation
+layer for the plans, ADRs, PRDs, RFCs, docs, source, tests, and git history you
+already have.
+
+Local-first. No cloud sync. No account. No LLM calls. No code upload. Your
+source files stay authoritative.
 
 <p>
   <a href="https://devspecs.com">
-    <img src="https://devspecs.com/demo/fastapi-task-flow-v1-1.gif" alt="DevSpecs FastAPI task flow demo" width="900">
+    <img src="https://devspecs.com/demo/fastapi-recent-gate-v1-1.gif" alt="DevSpecs FastAPI recent work demo" width="900">
   </a>
 </p>
 
@@ -28,7 +35,7 @@ stay authoritative.
 | Reddit | [u/bnunamak](https://www.reddit.com/user/bnunamak/) |
 | LinkedIn | [Brennan Nunamaker](https://www.linkedin.com/in/brennan-nunamaker-30657a70) |
 
-## Try It In Five Minutes
+## Install, Then Try It
 
 Install:
 
@@ -36,25 +43,35 @@ Install:
 brew install devspecs-com/tap/devspecs
 ```
 
-Recover the local thread in the repo:
+Recover the local thread:
 
 ```bash
 ds recent
 ```
 
-Then open the LLM-oriented guide:
+When you want a compact agent cheat sheet:
 
 ```bash
 ds tldr
 ```
 
-Create one bounded task:
+Create one bounded task in your repo:
 
 ```bash
 ds task "fix OAuth redirect"
 ds apply
 ds task checkpoint A01 --decision improve
 ds apply
+```
+
+Or try it in a disposable FastAPI checkout:
+
+```bash
+git clone https://github.com/fastapi/fastapi
+cd fastapi
+ds init
+ds recent
+ds task "trace Swagger OAuth redirect behavior"
 ```
 
 Or let DevSpecs write thin adapter files for Codex, Cursor, Claude, and
@@ -70,20 +87,23 @@ ds init
 
 | Job | Command | Use When |
 | --- | --- | --- |
-| Recover the thread | `ds recent` | You are returning to a repo, checking active local work, or deciding what to ask next. |
-| Bound an agent task | `ds task "goal"` | You know the work and want packed repo context plus a stop line. |
+| Recover the thread | `ds recent` | You came back cold and need the current local work thread. |
+| Ground the change | `ds map` / `ds find "topic"` | Git and rg found code, but you still need intent, boundaries, and exclusions. |
+| Create a bounded handoff | `ds task "goal"` | You know the work and want packed repo context plus a stop line. |
 | Coordinate multi-repo work | `ds workspace init .` | You have an umbrella workspace with several child repos. Experimental. |
-| Continue the next slice | `ds apply` | A task already exists and the repo has one unambiguous current target. |
-| Record the receipt | `ds task checkpoint A01 --decision promote` | You need to capture what changed, what ran, and what comes next. |
-| Map a repo | `ds map` | You are entering unfamiliar code and need system boundaries. |
-| Inspect evidence | `ds find "topic"` | You want source, tests, docs, receipts, and exclusions in one context pack. |
+| Continue one slice | `ds apply next` | A task already exists and the agent needs the current target only. |
+| Record the receipt | `ds task checkpoint A01 --decision promote` | You need to capture what changed, what ran, what missed, and what comes next. |
+| Inspect exact context | `ds context <artifact-id>` | You want one indexed artifact as paste-ready agent context. |
 
 ## Why DevSpecs Exists
 
-Issue trackers describe intended work. AI coding adds a new local work layer:
-prompts, partial attempts, missed files, test evidence, course corrections,
-and follow-up slices. Without structure, that layer disappears into chat logs
-and editor state.
+Issue trackers describe intended work. Git records what changed. AI coding adds
+a new local work layer between them: prompts, partial attempts, missed files,
+test evidence, course corrections, and follow-up slices.
+
+Without structure, that layer disappears into chat logs and editor state. The
+next human or agent has to infer why the branch exists, what passed, what was
+superseded, and where to continue.
 
 DevSpecs gives that layer local shape:
 
@@ -333,6 +353,14 @@ does not call a model itself.
 No. The index is local SQLite. Source files remain authoritative. Optional
 telemetry is anonymous and excludes repo names, file paths, document text,
 source code, and raw queries.
+
+### Is this a spec framework like OpenSpec?
+
+Partly, but DevSpecs is broader. It can create lightweight task specs with
+packed source, tests, intent, decision gates, iteration slices, and checkpoints.
+It also works as a local codebase navigation layer by indexing existing plans,
+ADRs, PRDs, RFCs, docs, source, tests, git history, and task state without
+requiring a new spec process first.
 
 ### Do I need MCP or slash commands?
 
