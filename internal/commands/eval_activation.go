@@ -329,7 +329,7 @@ func runActivationMatrix(manifestPath string, opts activationMatrixOptions) (*ac
 	if result.Summary.Total == 0 {
 		result.Notes = append(result.Notes, fmt.Sprintf("no repos matched activation profile %q", opts.Profile))
 	}
-	result.Summary.DurationMillis = int(time.Since(start).Milliseconds())
+	result.Summary.DurationMillis = activationElapsedMillis(start)
 	result.Timing = activationTimingSummary(result.Cases)
 	result.SlowestCases = activationSlowestCases(result.Cases, 5)
 	if resultDir != "" {
@@ -428,7 +428,7 @@ func runActivationMatrixCase(repo activationMatrixRepo, repoPath string, meta ac
 	stdout, stderr, normalizationPaths, err := runActivationCommandIsolated(commandName, args, repoPath, opts.IndexState)
 	out.StdoutBytes = len(stdout)
 	out.StderrBytes = len(stderr)
-	out.DurationMillis = int(time.Since(start).Milliseconds())
+	out.DurationMillis = activationElapsedMillis(start)
 	normalized := normalizeActivationOutput(stdout, repoPath, normalizationPaths...)
 	out.StdoutSHA256 = activationSHA256(normalized)
 	if err != nil {
@@ -495,7 +495,7 @@ func runActivationMatrixBinaryCompareCase(out activationMatrixCaseResult, repoPa
 	out.Candidate = &candidate
 	out.StdoutBytes = candidate.StdoutBytes
 	out.StderrBytes = candidate.StderrBytes
-	out.DurationMillis = int(time.Since(start).Milliseconds())
+	out.DurationMillis = activationElapsedMillis(start)
 	normalizedBaseline := normalizeActivationOutput(baselineStdout, repoPath, baseline.normalizationPaths...)
 	normalizedCandidate := normalizeActivationOutput(candidateStdout, repoPath, candidate.normalizationPaths...)
 	out.StdoutSHA256 = activationSHA256(normalizedCandidate)
@@ -1003,12 +1003,12 @@ func runExternalActivationCommandIsolated(binary, commandName string, args []str
 	if out.IndexState == activationIndexStateWarm {
 		warmupStart := time.Now()
 		warmupStdout, warmupStderr, warmupErr := runExternalActivationWarmup(binary, repoPath, tempHome)
-		out.WarmupMillis = int(time.Since(warmupStart).Milliseconds())
+		out.WarmupMillis = activationElapsedMillis(warmupStart)
 		out.WarmupStdoutBytes = len(warmupStdout)
 		out.WarmupStderrBytes = len(warmupStderr)
 		if warmupErr != nil {
 			out.Error = "warm index setup failed: " + warmupErr.Error()
-			out.DurationMillis = int(time.Since(start).Milliseconds())
+			out.DurationMillis = activationElapsedMillis(start)
 			return out, nil
 		}
 	}
@@ -1021,7 +1021,7 @@ func runExternalActivationCommandIsolated(binary, commandName string, args []str
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err = cmd.Run()
-	out.DurationMillis = int(time.Since(start).Milliseconds())
+	out.DurationMillis = activationElapsedMillis(start)
 	out.StdoutBytes = stdout.Len()
 	out.StderrBytes = stderr.Len()
 	normalized := normalizeActivationOutput(stdout.Bytes(), repoPath, normalizationPaths...)
@@ -1278,6 +1278,20 @@ func activationTimingSummary(cases []activationMatrixCaseResult) activationMatri
 		Baseline:  activationTimingStats(baselineDurations),
 		Candidate: activationTimingStats(candidateDurations),
 	}
+}
+
+func activationElapsedMillis(start time.Time) int {
+	return activationDurationMillis(time.Since(start))
+}
+
+func activationDurationMillis(duration time.Duration) int {
+	if duration <= 0 {
+		return 0
+	}
+	if ms := int(duration.Milliseconds()); ms > 0 {
+		return ms
+	}
+	return 1
 }
 
 func activationTimingStats(values []int) activationMatrixTimingStats {
