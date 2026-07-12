@@ -4,7 +4,7 @@
 
 - No unreleased changes yet.
 
-## v1.2.0 - draft
+## v1.2.0 - 2026-07-12
 
 DevSpecs v1.2 expands the CLI from repo-local task execution into workspace-aware
 coordination, stronger regression discipline, better first-run map/recent
@@ -84,7 +84,7 @@ CLI surface polish:
 - Clarified `ds scan` help copy so it describes a repository intent/source/test
   rescan instead of only specs, plans, and ADRs.
 
-## v1.1.0 - draft
+## v1.1.0 - 2026-06-17
 
 DevSpecs v1.1 centers the launch story on bounded task execution for AI coding
 agents.

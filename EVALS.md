@@ -1,6 +1,6 @@
 # DevSpecs Public Eval Surface
 
-Status: public eval boundary, 2026-06-09.
+Status: public eval boundary, 2026-07-12.
 
 This repo includes the public, claim-aligned test and fixture surface for the
 DevSpecs CLI. It is meant to prove deterministic product behavior and guard
@@ -13,6 +13,8 @@ evaluation runs.
 - parser and metadata extraction behavior;
 - task lifecycle and bounded slice prompt behavior;
 - retrieval and packing contracts that are stable enough for product tests;
+- first-run activation quality checks for `recent`, `map`, and substrate
+  consumer command paths;
 - small synthetic fixtures that can run quickly in CI.
 
 The default public check is:
@@ -33,9 +35,10 @@ go test -count=1 ./internal/evalharness
 ## Activation Matrix Goldens
 
 `ds eval --activation-matrix` is a hidden developer harness for fast-activation
-work on `ds recent` and `ds map`. It runs a YAML or JSON manifest of repos and
-commands, forces `--json --quiet --path <repo>`, normalizes local repo paths out
-of stdout, and compares result output against per-profile goldens.
+work on `ds recent`, `ds map`, and substrate consumers such as `ds find` and
+`ds task quick`. It runs a YAML or JSON manifest of repos and commands, forces
+result-safe flags where appropriate, normalizes local repo paths out of stdout,
+and compares result output against per-profile goldens or baseline binaries.
 
 ## Canonical Regression Set Registry
 
@@ -47,8 +50,14 @@ Search anchors for future agents:
 
 - `smoke-5-recent-quality`: current 5-repo `ds recent` quality gate.
 - `skinny-25-recent-legacy`: old local 25-repo recent stability gate.
+- `fat-25-local-full-history-c07`: local full-history fat-25 activation and
+  raw scan comparison set.
+- `fat-100-local-full-history-c07`: local full-history fat-100 activation,
+  raw scan, and scan-phase comparison set.
 - `fat-full-fastapi-quality-and-scan`: current FastAPI full-history sentinel;
   one repo only, not broad fat evidence.
+- `fat-full-fastapi-cross-command`: current FastAPI cold `find` and
+  `task quick` substrate-consumer sentinel.
 - `fat-100-vps-daily-target`: target shape for a durable broad daily gate.
 - `fat-156-recent-legacy`: H03 historical recent fat gate, not current quality
   proof.
@@ -66,6 +75,13 @@ Current-snapshot goldens are forward regression guards only. Promotion-quality
 optimization evidence must compare the candidate against a pre-optimization
 baseline on the same locked repo set. Faster-but-weaker default activation
 output is a regression, not a successful fast path.
+
+The C07/C08 v1.2 hardening work also materialized a local reviewed fat-100
+quality layer. That layer combines strict v1.1.0 comparisons, automatic
+classification, manual review, and fixed-case evidence so future runs can
+distinguish true regressions from already-reviewed same-or-better output
+changes. It is useful local release evidence, not a substitute for small public
+CI fixtures or a durable public VPS daily set.
 
 Example manifest:
 
