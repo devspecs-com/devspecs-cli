@@ -183,7 +183,7 @@ func runScanQuiet(cmd *cobra.Command, db *store.DB, repoRoot string) *scan.Resul
 		return nil
 	}
 	if cmd != nil {
-		scanOpts.Progress = scanProgressStderr(cmd.ErrOrStderr(), "Auto-index")
+		scanOpts.Progress = scanProgressStderr(cmd.ErrOrStderr(), "Auto-index", commandVerboseProgress(cmd))
 	}
 	result, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, scanOpts)
 	if err != nil {
@@ -216,7 +216,7 @@ func runTaskScanQuiet(cmd *cobra.Command, db *store.DB, repoRoot string) *scan.R
 	}
 	scanOpts.SourceManifest = true
 	if cmd != nil {
-		scanOpts.Progress = scanProgressStderr(cmd.ErrOrStderr(), "Task auto-index")
+		scanOpts.Progress = scanProgressStderr(cmd.ErrOrStderr(), "Task auto-index", commandVerboseProgress(cmd))
 	}
 	result, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, scanOpts)
 	if err != nil {

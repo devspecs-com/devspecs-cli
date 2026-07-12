@@ -552,6 +552,64 @@ func TestRecentMaintenanceOnlyOutputStaysVisibleAndFramed(t *testing.T) {
 	}
 }
 
+func TestRecentPreservesSpecificReadmeSpecUpdates(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	t.Setenv("DEVSPECS_HOME", t.TempDir())
+	mustWriteFile(t, filepath.Join(repoRoot, "LICENSE"), "MIT\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "README.md"), "# Spec\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Initial commit")
+
+	mustWriteFile(t, filepath.Join(repoRoot, "README.md"), "# Spec\n\nMany relation id optionality.\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "fix: README.md many relation id optionality")
+	mustWriteFile(t, filepath.Join(repoRoot, "README.md"), "# Spec\n\nOne cardinality relation field optionality.\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "fix: update README.md one cardinality relation field optionality")
+	mustWriteFile(t, filepath.Join(repoRoot, "README.md"), "# Spec\n\nSpecification identifiers use the new format.\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "feat: updated specification identifiers to new format")
+
+	out := mapTestRunRecentJSON(t, repoRoot)
+	if len(mapTestTopicsContaining(out, "docs updates")) > 0 {
+		t.Fatalf("specific README spec changes should not collapse into generic docs updates: %#v", out.Topics)
+	}
+	if len(mapTestTopicsContaining(out, "one cardinality relation")) != 1 {
+		t.Fatalf("missing one-cardinality spec topic: %#v", out.Topics)
+	}
+	if len(mapTestTopicsContaining(out, "specification identifiers")) != 1 {
+		t.Fatalf("missing specification-identifiers topic: %#v", out.Topics)
+	}
+	if len(out.Topics) > 0 && strings.Contains(strings.ToLower(out.Topics[0].Query), "commit license") {
+		t.Fatalf("repo setup/license topic should not outrank spec changes: %#v", out.Topics)
+	}
+}
+
+func TestRecentKeepsVersionManifestTopicSpecific(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	t.Setenv("DEVSPECS_HOME", t.TempDir())
+	mustWriteFile(t, filepath.Join(repoRoot, "kalo.json"), `{"version":"v0.0.1-dev-300126"}`+"\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Scoop update for kalo version v0.0.1-dev-300126")
+	mustWriteFile(t, filepath.Join(repoRoot, "kalo.json"), `{"version":"v0.1.0"}`+"\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "Scoop update for kalo version v0.1.0")
+
+	out := mapTestRunRecentJSON(t, repoRoot)
+	if len(out.Topics) != 1 {
+		t.Fatalf("expected merged version manifest topic, got %#v", out.Topics)
+	}
+	if strings.Contains(strings.ToLower(out.Topics[0].Query), "config updates") {
+		t.Fatalf("version manifest updates should keep package/version specificity: %#v", out.Topics[0])
+	}
+	if !strings.Contains(strings.ToLower(out.Topics[0].Query), "scoop") || !strings.Contains(strings.ToLower(out.Topics[0].Query), "kalo") {
+		t.Fatalf("version manifest topic lost subject specificity: %#v", out.Topics[0])
+	}
+	if out.Topics[0].CommitCount != 2 {
+		t.Fatalf("merged version manifest topic should keep both commits: %#v", out.Topics[0])
+	}
+}
+
 func mapTestRunRecentJSON(t *testing.T, repoRoot string) mapRecentOutput {
 	t.Helper()
 	cmd := NewRecentCmd()
@@ -1534,6 +1592,31 @@ func TestMapTryCommandKeepsSupportedBoundaryHandoff(t *testing.T) {
 	}
 }
 
+func TestMapTryCommandKeepsSpecificCoverForIndexedHandoffUnsafeArea(t *testing.T) {
+	idx := newMapTestPackabilityIndex(
+		"public/images/avatars/phase-1.mp4",
+		"src/app/assets/styles/components/DrumDesigner.module.css",
+	)
+	got, diag := mapTryCommandForRoleWithPackability(
+		"Files, Assets & Storage",
+		[]string{"Upload"},
+		nil,
+		mapMediumConfidence,
+		[]string{
+			"public/images/avatars/phase-1.mp4",
+			"src/app/assets/styles/components/DrumDesigner.module.css",
+		},
+		mapBoundaryRoleHandoffUnsafe,
+		idx,
+	)
+	if got != `ds find "upload"` {
+		t.Fatalf("indexed handoff-unsafe cover try = %q", got)
+	}
+	if diag == nil || diag.TrySuppressed {
+		t.Fatalf("specific cover should not be suppressed with indexed key paths: %#v", diag)
+	}
+}
+
 func TestMapAreaPackCommandsRespectsSuppressedTry(t *testing.T) {
 	area := mapArea{
 		Label:        "Plugins",
@@ -1715,9 +1798,14 @@ func TestRecentCommandShowsRecentTopics(t *testing.T) {
 	cmd := NewRecentCmd()
 	cmd.SetArgs([]string{"--path", repoRoot, "--no-refresh"})
 	buf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
 	cmd.SetOut(buf)
+	cmd.SetErr(errBuf)
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(errBuf.String(), "Recent progress: analyzing recent repository activity") || !strings.Contains(errBuf.String(), "Recent progress: complete") {
+		t.Fatalf("recent should report non-quiet progress on stderr, got: %s", errBuf.String())
 	}
 	text := buf.String()
 	for _, want := range []string{
@@ -1746,6 +1834,38 @@ func TestRecentCommandShowsRecentTopics(t *testing.T) {
 	}
 	if !strings.Contains(out.Topics[0].Query, "credentials") {
 		t.Fatalf("recent topic query = %q", out.Topics[0].Query)
+	}
+}
+
+func TestRecentVerboseShowsDetailedProgress(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	t.Setenv("DEVSPECS_HOME", t.TempDir())
+	mustMkdirAll(t, filepath.Join(repoRoot, "internal", "security"))
+	mustWriteFile(t, filepath.Join(repoRoot, "internal", "security", "credentials.go"), "package security\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "internal", "security", "credentials_test.go"), "package security\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "feat: credentials rotation context")
+
+	cmd := NewRecentCmd()
+	cmd.SetArgs([]string{"--path", repoRoot, "--no-refresh", "--verbose"})
+	buf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	cmd.SetErr(errBuf)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	out := errBuf.String()
+	for _, want := range []string{
+		"Recent progress: analyzing recent repository activity",
+		"Recent progress: checking local git history",
+		"Recent progress: reading recent commits and path boundaries",
+		"Recent progress: analyzed 2 commit(s), matched 1 topic(s)",
+		"Recent progress: complete",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("recent --verbose progress missing %q:\n%s", want, out)
+		}
 	}
 }
 

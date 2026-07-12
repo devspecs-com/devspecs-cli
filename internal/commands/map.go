@@ -1469,7 +1469,20 @@ func runRecent(cmd *cobra.Command, opts mapOptions) error {
 	if err != nil {
 		return err
 	}
+	if !opts.Quiet {
+		fmt.Fprintln(cmd.ErrOrStderr(), "Recent progress: analyzing recent repository activity")
+		if opts.Verbose {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Recent progress: checking local git history")
+			fmt.Fprintln(cmd.ErrOrStderr(), "Recent progress: reading recent commits and path boundaries")
+		}
+	}
 	out := buildMapRecentOutput(cmd.Context(), repoRoot, opts)
+	if !opts.Quiet && opts.Verbose {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Recent progress: analyzed %d commit(s), matched %d topic(s)\n", out.Diagnostics.CommitsRead, len(out.Topics))
+	}
+	if !opts.Quiet {
+		fmt.Fprintln(cmd.ErrOrStderr(), "Recent progress: complete")
+	}
 	success = true
 	props["recent_topic_count_bucket"] = telemetry.CountBucket(len(out.Topics))
 	if opts.JSON {
@@ -3489,6 +3502,7 @@ func mapBoundaryAreaScore(area *mapAreaInternal, repoName, repoShape string) flo
 	score += float64(mapMinInt(len(area.Subareas), 5)) * 3
 	score += float64(mapMinInt(len(area.ArtifactPathSet), 40)) * 0.25
 	score += float64(mapMinInt(area.EvidenceCounts["trace"], 4)) * 4
+	score += mapBoundaryBalancedSourceTestBonus(area)
 	score += float64(mapMinInt(area.EvidenceCounts["import"], mapBoundaryImportScoreCap)) * 0.35
 	score += float64(mapMinInt(area.EvidenceCounts["test_import"], mapBoundaryTestImportScoreCap)) * 0.9
 	if area.EvidenceSources["conceptual_parent"] {
@@ -3513,6 +3527,18 @@ func mapBoundaryAreaScore(area *mapAreaInternal, repoName, repoShape string) flo
 	}
 	score += roleAdjustment
 	return score
+}
+
+func mapBoundaryBalancedSourceTestBonus(area *mapAreaInternal) float64 {
+	if area == nil {
+		return 0
+	}
+	source := area.EvidenceCounts["source"]
+	test := area.EvidenceCounts["test"]
+	if source == 0 || test == 0 {
+		return 0
+	}
+	return float64(mapMinInt(source, test)) * 0.1
 }
 
 func mapBoundaryRoleScoreAdjustment(role string) float64 {
@@ -4405,7 +4431,7 @@ func applyMapRecentBoundaryQuality(ctx context.Context, repoRoot string, commits
 			continue
 		}
 		topics[i].QualitySignals = appendUniqueString(topics[i].QualitySignals, "maintenance")
-		if hasUsefulTopic {
+		if hasUsefulTopic || mapRecentTopicMaintenanceKindSignal(topics[i]) == "repo-setup" {
 			topics[i].QualitySignals = appendUniqueString(topics[i].QualitySignals, "maintenance_demoted")
 			topics[i].Score -= mapRecentMaintenancePenalty(topics[i])
 		}
@@ -4468,10 +4494,20 @@ func mapRecentTopicsShouldMerge(a, b mapRecentTopic) bool {
 		}
 		return false
 	}
+	if mapRecentTopicDocOnly(a) || mapRecentTopicDocOnly(b) {
+		return false
+	}
 	if mapRecentTopicPathOverlap(a, b) > 0 && mapRecentTopicQueryOverlap(a, b) > 0 {
 		return true
 	}
 	return false
+}
+
+func mapRecentTopicDocOnly(topic mapRecentTopic) bool {
+	return topic.EvidenceCounts["doc"] > 0 &&
+		topic.EvidenceCounts["source"] == 0 &&
+		topic.EvidenceCounts["test"] == 0 &&
+		topic.EvidenceCounts["config"] == 0
 }
 
 func mergeMapRecentTopics(a, b mapRecentTopic) mapRecentTopic {
@@ -4590,9 +4626,26 @@ func mapRecentMergedTopicQuery(a, b mapRecentTopic) string {
 		case "doc-archive":
 			return "docs archive"
 		case "docs":
+			if common := mapRecentCommonComparableWords(a.Query, b.Query); len(common) >= 2 {
+				return strings.Join(firstStrings(common, 4), " ")
+			}
+			if query := mapRecentMergedPathQuery(a, b); query != "" {
+				return query
+			}
 			return "docs updates"
 		case "config":
+			if common := mapRecentCommonComparableWords(a.Query, b.Query); len(common) >= 2 {
+				return strings.Join(firstStrings(common, 4), " ")
+			}
+			if query := mapRecentMergedPathQuery(a, b); query != "" {
+				return query
+			}
 			return "config updates"
+		case "repo-setup":
+			if query := mapRecentMergedPathQuery(a, b); query != "" {
+				return query
+			}
+			return "repo setup"
 		}
 	}
 	common := mapRecentCommonComparableWords(a.Query, b.Query)
@@ -4978,6 +5031,8 @@ func mapRecentMaintenanceKind(commit parsedFindGitCommit, evidence map[string]in
 	}
 	subject := strings.ToLower(commit.subject)
 	switch {
+	case mapRecentCommitRepoSetupOnly(commit):
+		return "repo-setup"
 	case strings.Contains(subject, "sponsor"):
 		return "sponsors"
 	case strings.Contains(subject, "translation") || strings.Contains(subject, "translate") || mapRecentCommitTouchesLocaleDocs(commit):
@@ -4995,13 +5050,94 @@ func mapRecentMaintenanceKind(commit parsedFindGitCommit, evidence map[string]in
 		return "workflow"
 	case mapRecentCommitBulkDocsOnly(commit):
 		return "doc-archive"
-	case mapRecentCommitDocsOnly(commit) && strings.Contains(subject, "update"):
+	case mapRecentCommitGenericDocsUpdate(commit):
 		return "docs"
-	case mapRecentCommitConfigOnly(commit) && (strings.Contains(subject, "update") || strings.Contains(subject, "fix")):
+	case mapRecentCommitGenericConfigUpdate(commit):
 		return "config"
 	default:
 		return ""
 	}
+}
+
+func mapRecentCommitRepoSetupOnly(commit parsedFindGitCommit) bool {
+	subject := strings.ToLower(strings.TrimSpace(stripMapCommitPrefix(commit.subject)))
+	if subject != "initial commit" && subject != "first commit" {
+		return false
+	}
+	if len(commit.paths) == 0 {
+		return false
+	}
+	hasLicenseLikePath := false
+	for _, path := range commit.paths {
+		base := strings.ToLower(filepath.Base(normalizeMapPath(path)))
+		switch base {
+		case "license", "copying", "notice", "readme.md", ".gitignore":
+			if base == "license" || base == "copying" || base == "notice" {
+				hasLicenseLikePath = true
+			}
+			continue
+		default:
+			return false
+		}
+	}
+	return hasLicenseLikePath
+}
+
+func mapRecentCommitGenericDocsUpdate(commit parsedFindGitCommit) bool {
+	if !mapRecentCommitDocsOnly(commit) {
+		return false
+	}
+	subject := strings.ToLower(commit.subject)
+	hasGenericVerb := strings.Contains(subject, "update") || strings.Contains(subject, "updated") || strings.Contains(subject, "updates") || strings.Contains(subject, "fix")
+	hasDocTarget := strings.Contains(subject, "readme") || strings.Contains(subject, "docs") || strings.Contains(subject, "documentation")
+	if !hasGenericVerb || !hasDocTarget {
+		return false
+	}
+	return mapRecentMaintenanceSpecificTermCount(subject, mapRecentDocsMaintenanceGenericWords) <= 1
+}
+
+func mapRecentCommitGenericConfigUpdate(commit parsedFindGitCommit) bool {
+	if !mapRecentCommitConfigOnly(commit) {
+		return false
+	}
+	subject := strings.ToLower(commit.subject)
+	if !strings.Contains(subject, "update") && !strings.Contains(subject, "fix") {
+		return false
+	}
+	return mapRecentMaintenanceSpecificTermCount(subject, mapRecentConfigMaintenanceGenericWords) <= 1
+}
+
+func mapRecentMaintenanceSpecificTermCount(subject string, generic map[string]bool) int {
+	count := 0
+	for _, word := range mapRecentSubjectTerms(subject) {
+		if generic[word] || mapTryGeneratedLeafWord(word) {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+var mapRecentDocsMaintenanceGenericWords = map[string]bool{
+	"doc":           true,
+	"docs":          true,
+	"documentation": true,
+	"readme":        true,
+	"reference":     true,
+	"references":    true,
+	"update":        true,
+	"updated":       true,
+	"updates":       true,
+}
+
+var mapRecentConfigMaintenanceGenericWords = map[string]bool{
+	"config":        true,
+	"configuration": true,
+	"fix":           true,
+	"fixed":         true,
+	"update":        true,
+	"updated":       true,
+	"updates":       true,
 }
 
 func mapRecentCommitTouchesLocaleDocs(commit parsedFindGitCommit) bool {
@@ -5379,6 +5515,8 @@ func mapRecentPathFamily(path string) string {
 	case strings.Contains(lower, "/docs/") ||
 		strings.HasPrefix(lower, "docs/") ||
 		ext == ".md" || ext == ".mdx" || ext == ".rst" || ext == ".adoc":
+		return "doc"
+	case base == "license" || base == "copying" || base == "notice":
 		return "doc"
 	case ext == ".sql" ||
 		strings.Contains(lower, "/migrations/") ||
@@ -6758,6 +6896,9 @@ func mapTryCandidatePackable(candidate mapTryCandidate, diag *mapPackabilityDiag
 	}
 	if diag.KeyPathCount == 0 {
 		return diag.IndexedQueryAnchorCount >= 1
+	}
+	if boundaryRole == mapBoundaryRoleHandoffUnsafe && candidate.Source == "cover" && diag.IndexedKeyPathCount > 0 {
+		return true
 	}
 	if mapTryRoleNeedsSpecificContext(boundaryRole) && diag.IndexedQueryAnchorCount == 0 {
 		return false

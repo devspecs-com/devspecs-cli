@@ -197,7 +197,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	scanOpts.IgnoreRules = noGitignore
 	scanOpts.PhaseTiming = phaseTiming
 	if !quiet {
-		scanOpts.Progress = scanProgressStderr(cmd.ErrOrStderr(), "Scan")
+		scanOpts.Progress = scanProgressStderr(cmd.ErrOrStderr(), "Scan", verbose)
 	}
 	if verbose && !quiet && scanOpts.FreshIndex {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Using fresh-index scan path for empty/rebuilt index\n")
@@ -282,7 +282,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 
 const scanProgressInventoryThreshold = 200
 
-func scanProgressStderr(out io.Writer, label string) func(scan.ProgressEvent) {
+func scanProgressStderr(out io.Writer, label string, verbose ...bool) func(scan.ProgressEvent) {
 	if out == nil {
 		return nil
 	}
@@ -290,9 +290,26 @@ func scanProgressStderr(out io.Writer, label string) func(scan.ProgressEvent) {
 	if label == "" {
 		label = "Scan"
 	}
+	detailed := len(verbose) > 0 && verbose[0]
 	emitted := false
+	printed := map[string]bool{}
+	printLine := func(format string, args ...any) {
+		fmt.Fprintf(out, "%s progress: ", label)
+		fmt.Fprintf(out, format, args...)
+		fmt.Fprintln(out)
+		emitted = true
+	}
+	printOnce := func(key, format string, args ...any) {
+		if printed[key] {
+			return
+		}
+		printed[key] = true
+		printLine(format, args...)
+	}
 	return func(event scan.ProgressEvent) {
 		switch {
+		case event.Phase == "scan" && event.Event == "start":
+			printLine(scanProgressStartMessage(label))
 		case event.Phase == "shared_discovery" && event.Event == "inventory_done" && shouldPrintScanProgress(event):
 			fmt.Fprintf(out, "%s progress: discovered %d candidate file(s)", label, event.InventoryFiles)
 			if event.SkippedDirs > 0 {
@@ -303,13 +320,79 @@ func scanProgressStderr(out io.Writer, label string) func(scan.ProgressEvent) {
 			}
 			fmt.Fprintln(out)
 			emitted = true
-		case event.Phase == "shared_discovery" && event.Event == "" && (emitted || shouldPrintScanProgress(event)):
-			fmt.Fprintf(out, "%s progress: scanned %d/%d candidate file(s)\n", label, event.FilesScanned, event.FilesTotal)
-			emitted = true
+		case event.Phase == "shared_discovery" && event.Event == "" && detailed && (emitted || shouldPrintScanProgress(event)):
+			printLine("scanned %d/%d candidate file(s)%s", event.FilesScanned, event.FilesTotal, scanProgressCountsSuffix(event.CandidatesDiscovered))
+		case event.Phase == "shared_discovery" && event.Event == "done" && emitted:
+			if detailed {
+				printLine("discovery complete (%d candidate file(s)%s)", event.FilesTotal, scanProgressCountsSuffix(event.CandidatesDiscovered))
+			} else {
+				printLine("discovery complete")
+			}
+		case event.Phase == "parse_upsert" && event.Event == "adapter_start" && event.CandidatesTotal > 0:
+			if detailed {
+				printLine("extracting %s (%d candidate file(s))", scanProgressAdapterLabel(event.CurrentAdapter), event.CandidatesTotal)
+			} else {
+				printOnce("extracting", "extracting and indexing artifacts")
+			}
+		case event.Phase == "extract" && event.Event == "" && detailed && event.CandidatesTotal > 0:
+			printLine("extracting %s (%d/%d candidate file(s))", scanProgressAdapterLabel(event.CurrentAdapter), event.CandidatesProcessed, event.CandidatesTotal)
+		case event.Phase == "extract" && event.Event == "adapter_done" && detailed && event.CandidatesTotal > 0:
+			printLine("extracted %s (%d/%d candidate file(s))", scanProgressAdapterLabel(event.CurrentAdapter), event.CandidatesProcessed, event.CandidatesTotal)
+		case event.Phase == "persist" && event.Event == "" && detailed && event.CandidatesTotal > 0:
+			printLine("persisting %s (%d/%d candidate file(s))", scanProgressAdapterLabel(event.CurrentAdapter), event.CandidatesProcessed, event.CandidatesTotal)
+		case event.Phase == "persist" && event.Event == "adapter_done" && detailed && event.CandidatesTotal > 0:
+			printLine("persisted %s (%d/%d candidate file(s))", scanProgressAdapterLabel(event.CurrentAdapter), event.CandidatesProcessed, event.CandidatesTotal)
+		case (event.Phase == "fresh_index_writer" || event.Phase == "batch_new_writer") && event.Event == "rows_flushed":
+			if detailed {
+				printLine("wrote index rows%s", scanProgressRowsSuffix(event.RowsWritten))
+			} else {
+				printLine("index rows written")
+			}
+		case event.Phase == "evidence_graph" && event.Event == "start":
+			printLine("building evidence graph")
+		case event.Phase == "evidence_graph" && event.Event == "done":
+			if detailed {
+				printLine("evidence graph complete%s", scanProgressRowsSuffix(event.RowsWritten))
+			} else {
+				printLine("evidence graph complete")
+			}
+		case event.Phase == "source_manifest" && event.Event == "start":
+			printLine("building source manifest")
+		case event.Phase == "source_manifest" && event.Event == "done":
+			if detailed {
+				printLine("source manifest complete (%d/%d indexed file(s)%s)", event.FilesScanned, event.FilesTotal, scanProgressDetailsSuffix(event.RowsWritten))
+			} else {
+				printLine("source manifest complete")
+			}
+		case (event.Phase == "fresh_index_fts" || event.Phase == "batch_new_fts") && event.Event == "start":
+			if detailed {
+				printLine("updating search index (%d deferred row(s))", event.DeferredFTSRows)
+			} else {
+				printLine("updating search index")
+			}
+		case (event.Phase == "fresh_index_fts" || event.Phase == "batch_new_fts") && event.Event == "done":
+			if detailed {
+				printLine("search index complete%s", scanProgressRowsSuffix(event.RowsWritten))
+			} else {
+				printLine("search index complete")
+			}
 		case event.Phase == "scan" && event.Event == "done" && emitted:
-			fmt.Fprintf(out, "%s progress: complete\n", label)
+			printLine("complete")
 		}
 	}
+}
+
+func commandVerboseProgress(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+	if verbose, err := cmd.Flags().GetBool("verbose"); err == nil {
+		return verbose
+	}
+	if verbose, err := cmd.InheritedFlags().GetBool("verbose"); err == nil {
+		return verbose
+	}
+	return false
 }
 
 func shouldPrintScanProgress(event scan.ProgressEvent) bool {
@@ -317,6 +400,69 @@ func shouldPrintScanProgress(event scan.ProgressEvent) bool {
 		return true
 	}
 	return event.ElapsedMS >= int64((5 * time.Second).Milliseconds())
+}
+
+func scanProgressStartMessage(label string) string {
+	if strings.Contains(strings.ToLower(label), "index") {
+		return "preparing index substrate"
+	}
+	return "starting scan"
+}
+
+func scanProgressAdapterLabel(adapter string) string {
+	adapter = strings.TrimSpace(adapter)
+	if adapter == "" {
+		return "artifacts"
+	}
+	return strings.ReplaceAll(adapter, "_", " ")
+}
+
+func scanProgressCountsSuffix(counts map[string]int) string {
+	formatted := scanProgressFormatCounts(counts, 4)
+	if formatted == "" {
+		return ""
+	}
+	return "; candidates: " + formatted
+}
+
+func scanProgressRowsSuffix(rows map[string]int) string {
+	formatted := scanProgressFormatCounts(rows, 5)
+	if formatted == "" {
+		return ""
+	}
+	return " (" + formatted + ")"
+}
+
+func scanProgressDetailsSuffix(rows map[string]int) string {
+	formatted := scanProgressFormatCounts(rows, 5)
+	if formatted == "" {
+		return ""
+	}
+	return "; rows: " + formatted
+}
+
+func scanProgressFormatCounts(counts map[string]int, limit int) string {
+	if len(counts) == 0 || limit <= 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(counts))
+	for key, count := range counts {
+		if count > 0 {
+			keys = append(keys, key)
+		}
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	sort.Strings(keys)
+	if len(keys) > limit {
+		keys = keys[:limit]
+	}
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s %d", strings.ReplaceAll(key, "_", " "), counts[key]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func scanTraversalError(repoRoot string, err error) error {

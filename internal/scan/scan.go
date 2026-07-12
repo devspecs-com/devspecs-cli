@@ -368,6 +368,10 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 		return nil, fmt.Errorf("sync openspec links: %w", err)
 	}
 	phase.finish(nil, nil)
+	progress.emit(ProgressEvent{
+		Phase: "evidence_graph",
+		Event: "start",
+	})
 	phase = timing.start("evidence_graph", "")
 	if diagnostics, err := s.rebuildEvidenceGraph(repoID, now, evidenceGraphBuildOptions{RichTypedIndex: opts.RichTypedIndex, PhaseTiming: opts.PhaseTiming}); err != nil {
 		phase.finish(nil, statusTimingDetails(err))
@@ -379,6 +383,15 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 			"mentions": diagnostics.MentionsIndexed,
 			"edges":    diagnostics.EdgesIndexed,
 		}, nil)
+		progress.emit(ProgressEvent{
+			Phase: "evidence_graph",
+			Event: "done",
+			RowsWritten: map[string]int{
+				"concepts": diagnostics.ConceptsIndexed,
+				"mentions": diagnostics.MentionsIndexed,
+				"edges":    diagnostics.EdgesIndexed,
+			},
+		})
 	}
 	if opts.IncludeGitEvidence || opts.IncludeWorkstreamEvidence {
 		phase := timing.start("git_evidence", "")
@@ -408,6 +421,10 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 		phase.finish(nil, nil)
 	}
 	if opts.SourceManifest {
+		progress.emit(ProgressEvent{
+			Phase: "source_manifest",
+			Event: "start",
+		})
 		phase := timing.start("source_manifest", "")
 		if diagnostics, err := s.rebuildSourceManifest(ctx, repoRoot, repoID, now, opts.PhaseTiming, opts.FileWorkerCount); err != nil {
 			phase.finish(nil, statusTimingDetails(err))
@@ -422,6 +439,19 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 				"imports":         diagnostics.ImportRows,
 				"fts_rows":        diagnostics.FTSRows,
 			}, nil)
+			progress.emit(ProgressEvent{
+				Phase:        "source_manifest",
+				Event:        "done",
+				FilesTotal:   diagnostics.InventoryFiles,
+				FilesScanned: diagnostics.IndexedFiles,
+				RowsWritten: map[string]int{
+					"files":   diagnostics.IndexedFiles,
+					"symbols": diagnostics.SymbolRows,
+					"tests":   diagnostics.TestRows,
+					"imports": diagnostics.ImportRows,
+					"fts":     diagnostics.FTSRows,
+				},
+			})
 		}
 	}
 	phase = timing.start("openspec_metrics", "")

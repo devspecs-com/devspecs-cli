@@ -2,20 +2,28 @@
 
 ## Unreleased
 
+- No unreleased changes yet.
+
+## v1.2.0 - draft
+
+DevSpecs v1.2 expands the CLI from repo-local task execution into workspace-aware
+coordination, stronger regression discipline, better first-run map/recent
+quality, and faster cold indexing.
+
+Workspace and task coordination:
+
 - Added experimental workspace coordination commands for umbrella repos:
   `ds workspace change create`, `ds workspace slice create`, and
   `ds workspace trace`. Top-level `ds change`, `ds slice`, and `ds trace`
   remain hidden compatibility aliases, with regression coverage for alias help
   and dispatch.
+- Added `ds ws` as a built-in shortcut for `ds workspace` and introduced
+  `specs/cli-surface.yaml` as the first canonical CLI surface audit artifact.
 - Added explicit `--repo` routing for repo-local task and apply flows so agents
   can work from an umbrella root without writing task artifacts into the wrong
   repo.
 - Added workspace trace output for known change/task IDs, including per-slice
   lifecycle status and aggregate workspace change completeness.
-- Added `ds ws` as a built-in shortcut for `ds workspace` and introduced
-  `specs/cli-surface.yaml` as the first canonical CLI surface audit artifact.
-- Clarified `ds scan` help copy so it describes a repository intent/source/test
-  rescan instead of only specs, plans, and ADRs.
 - Added `ds task checkpoint --draft` to preview checkpoint markdown, structured
   JSON evidence, and result append text without mutating task lifecycle state.
 - Added `ds task checkpoint --from-git` to populate edited-file evidence from
@@ -24,6 +32,57 @@
   run logs as actual run evidence plus bounded structured output.
 - Changed checkpoint result appends to convert the initial instruction section
   into `## Checkpoint History` after the first real checkpoint.
+
+Quality and activation regression infrastructure:
+
+- Added activation regression support for baseline-vs-candidate binary
+  comparisons, canonical skinny/fat/full-history repo manifests, structured
+  `ds map` comparison, and self-vs-self determinism checks.
+- Added a cross-command cold activation gate for substrate consumers so
+  `recent`, `map`, `find`, and `task quick` can be checked together before
+  promoting indexing or output changes.
+- Added a reviewed fat-100 activation quality baseline that layers strict
+  v1.1.0 comparisons with accepted manual/automatic delta classifications,
+  allowing future runs to distinguish true regressions from already-reviewed
+  same-or-better output changes.
+- Archived and documented canonical regression sets so future performance and
+  quality work can start from the same small, fat-25, and fat-100 repo sets
+  instead of rediscovering old manifests.
+
+Map and recent quality:
+
+- Improved `ds map` first-run behavior so default `map` builds the required
+  local substrate before producing handoff commands instead of returning weaker
+  index-missing output.
+- Improved `ds map` boundary ranking and handoff suggestions with indexed
+  packability checks, source/test balance signals, cached map output, and
+  stricter structured comparison gates.
+- Improved `ds recent` topic quality for noisy public repos such as FastAPI by
+  merging overlapping recent work, demoting generic maintenance/setup topics,
+  preserving specific README/spec/version-manifest topics, and surfacing
+  system-boundary hints when available.
+
+Cold indexing performance and UX:
+
+- Added a fresh-index writer path for empty/cold repositories with batched row
+  writes, deferred FTS updates, transaction-aware scans, and avoided per-file
+  authored-at lookups where first-run semantics are unchanged.
+- Reduced cold scan cost in source manifest, test-case, source companion, and
+  evidence graph paths, including parallel source/test discovery and lower
+  evidence mention construction overhead.
+- Added phase timing and benchmark output for cold first-index runs, including
+  source manifest, evidence graph, DB/write, and cross-command activation
+  telemetry.
+- Improved non-quiet cold-start progress output for `recent`, `map`, `find`,
+  `task`, and scan-backed auto-indexing. Default progress now reports
+  high-level checkpoints on stderr, while `--verbose` exposes detailed
+  discovery, extraction, persistence, evidence graph, source manifest, and
+  search-index phases without polluting result stdout or JSON output.
+
+CLI surface polish:
+
+- Clarified `ds scan` help copy so it describes a repository intent/source/test
+  rescan instead of only specs, plans, and ADRs.
 
 ## v1.1.0 - draft
 
