@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 func TestRootCmd_Version(t *testing.T) {
@@ -367,6 +371,26 @@ func TestRootCmd_ListNotRegistered(t *testing.T) {
 	}
 }
 
+func TestRootCmd_LiveSurfaceMatchesCLISurfaceSpec(t *testing.T) {
+	spec := readCLISurfaceSpec(t)
+	root := newRootCmd()
+
+	assertCommandSurface(t, "ds", root, spec.Tree["ds"].Children, spec.HiddenTree["ds"].Children, spec.RemovedTree["ds"].Children)
+
+	task := mustFindCommand(t, root, "task")
+	assertCommandSurface(t, "ds task", task, spec.Tree["ds task"].Children, nil, nil)
+	assertCommandSurface(t, "ds task slice", mustFindCommand(t, task, "slice"), spec.Tree["ds task slice"].Children, nil, nil)
+	assertCommandSurface(t, "ds task iteration", mustFindCommand(t, task, "iteration"), spec.Tree["ds task iteration"].Children, nil, nil)
+
+	workspace := mustFindCommand(t, root, "workspace")
+	assertCommandSurface(t, "ds workspace", workspace, spec.Tree["ds workspace"].Children, nil, nil)
+	assertCommandSurface(t, "ds workspace change", mustFindCommand(t, workspace, "change"), spec.Tree["ds workspace change"].Children, nil, nil)
+	assertCommandSurface(t, "ds workspace slice", mustFindCommand(t, workspace, "slice"), spec.Tree["ds workspace slice"].Children, nil, nil)
+
+	config := mustFindCommand(t, root, "config")
+	assertCommandSurface(t, "ds config", config, spec.Tree["ds config"].Children, nil, nil)
+}
+
 func executeRootJSON(t *testing.T, args ...string) map[string]any {
 	t.Helper()
 	out := executeRoot(t, args...)
@@ -388,6 +412,153 @@ func executeRoot(t *testing.T, args ...string) string {
 		t.Fatalf("execute ds %v: %v\n%s", args, err, buf.String())
 	}
 	return buf.String()
+}
+
+type cliSurfaceSpec struct {
+	Tree        map[string]cliSurfaceNode `yaml:"tree"`
+	HiddenTree  map[string]cliSurfaceNode `yaml:"hidden_tree"`
+	RemovedTree map[string]cliSurfaceNode `yaml:"removed_tree"`
+}
+
+type cliSurfaceNode struct {
+	Status   string                    `yaml:"status"`
+	Aliases  []string                  `yaml:"aliases"`
+	Children map[string]cliSurfaceNode `yaml:"children"`
+}
+
+func readCLISurfaceSpec(t *testing.T) cliSurfaceSpec {
+	t.Helper()
+	var data []byte
+	var err error
+	for _, path := range []string{
+		filepath.Join("specs", "cli-surface.yaml"),
+		filepath.Join("..", "..", "specs", "cli-surface.yaml"),
+	} {
+		data, err = os.ReadFile(path)
+		if err == nil {
+			var spec cliSurfaceSpec
+			if err := yaml.Unmarshal(data, &spec); err != nil {
+				t.Fatalf("parse %s: %v", path, err)
+			}
+			return spec
+		}
+	}
+	t.Fatalf("read specs/cli-surface.yaml: %v", err)
+	return cliSurfaceSpec{}
+}
+
+func assertCommandSurface(t *testing.T, prefix string, parent *cobra.Command, public, hidden, removed map[string]cliSurfaceNode) {
+	t.Helper()
+	if public == nil {
+		public = map[string]cliSurfaceNode{}
+	}
+	if hidden == nil {
+		hidden = map[string]cliSurfaceNode{}
+	}
+	if removed == nil {
+		removed = map[string]cliSurfaceNode{}
+	}
+
+	visibleExpected := map[string]bool{}
+	for name, node := range public {
+		cmd := findCommand(parent, name)
+		if cmd == nil && node.Status == "cobra_builtin" {
+			continue
+		}
+		if cmd == nil {
+			t.Fatalf("%s missing command %q from cli-surface.yaml", parent.CommandPath(), name)
+		}
+		if isSurfaceHidden(node.Status) {
+			if !cmd.Hidden {
+				t.Fatalf("%s %s should be hidden per cli-surface.yaml status %q", prefix, name, node.Status)
+			}
+		} else {
+			visibleExpected[name] = true
+			if cmd.Hidden {
+				t.Fatalf("%s %s should be visible per cli-surface.yaml status %q", prefix, name, node.Status)
+			}
+		}
+		assertAliases(t, prefix+" "+name, cmd, node.Aliases)
+	}
+	for name, node := range hidden {
+		cmd := mustFindCommand(t, parent, name)
+		if !cmd.Hidden {
+			t.Fatalf("%s %s should be hidden per cli-surface.yaml hidden_tree", prefix, name)
+		}
+		assertAliases(t, prefix+" "+name, cmd, node.Aliases)
+	}
+	for name := range removed {
+		if cmd := findCommand(parent, name); cmd != nil {
+			t.Fatalf("%s %s is marked removed in cli-surface.yaml but is still registered", prefix, name)
+		}
+	}
+
+	var unexpected []string
+	for _, cmd := range parent.Commands() {
+		if cmd.Hidden || cmd.Name() == "help" {
+			continue
+		}
+		if !visibleExpected[cmd.Name()] {
+			unexpected = append(unexpected, cmd.Name())
+		}
+	}
+	sort.Strings(unexpected)
+	if len(unexpected) > 0 {
+		t.Fatalf("%s has visible commands not listed as public in cli-surface.yaml: %s", prefix, strings.Join(unexpected, ", "))
+	}
+}
+
+func isSurfaceHidden(status string) bool {
+	switch status {
+	case "hidden", "hidden_compat", "removed":
+		return true
+	default:
+		return false
+	}
+}
+
+func assertAliases(t *testing.T, commandPath string, cmd *cobra.Command, aliases []string) {
+	t.Helper()
+	for _, alias := range aliases {
+		alias = strings.TrimSpace(strings.TrimPrefix(alias, "ds "))
+		if strings.Contains(alias, " ") {
+			parts := strings.Fields(alias)
+			alias = parts[len(parts)-1]
+		}
+		if alias == "" {
+			continue
+		}
+		if !containsString(cmd.Aliases, alias) {
+			t.Fatalf("%s missing alias %q from cli-surface.yaml; aliases=%v", commandPath, alias, cmd.Aliases)
+		}
+	}
+}
+
+func mustFindCommand(t *testing.T, parent *cobra.Command, name string) *cobra.Command {
+	t.Helper()
+	cmd := findCommand(parent, name)
+	if cmd == nil {
+		t.Fatalf("%s missing command %q from cli-surface.yaml", parent.CommandPath(), name)
+	}
+	return cmd
+}
+
+func findCommand(parent *cobra.Command, name string) *cobra.Command {
+	for _, cmd := range parent.Commands() {
+		if cmd.Name() == name {
+			return cmd
+		}
+	}
+	return nil
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func setupRootWorkspaceFixture(t *testing.T) string {
