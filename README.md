@@ -95,28 +95,6 @@ ds init
 | Record the receipt | `ds task checkpoint A01 --decision promote` | You need to capture what changed, what ran, what missed, and what comes next. |
 | Inspect exact context | `ds context <artifact-id>` | You want one indexed artifact as paste-ready agent context. |
 
-## What Changed In v1.2.0
-
-DevSpecs v1.2 focuses on first-run activation quality and release discipline:
-
-- `ds recent` produces more useful first-run topics by merging overlapping
-  recent work and demoting generic maintenance noise.
-- `ds map` builds the local substrate before default output so first-run system
-  boundaries are not weaker than warm-index output.
-- Cold indexing is faster on the broad local regression set, with visible
-  progress on stderr for non-quiet runs and detailed phase checkpoints under
-  `--verbose`.
-- Experimental workspace coordination is available through
-  `ds workspace ...` and the `ds ws` shortcut for umbrella repos.
-- Regression infrastructure now includes canonical small/fat/full-history
-  manifests, baseline-vs-candidate comparisons, reviewed fat-100 quality
-  evidence, and cross-command cold activation gates for `recent`, `map`,
-  `find`, and `task --quick`.
-
-Large cold repos can still take seconds on the first index build. The product
-bar is same-or-better first result quality, not a faster weak path; use
-`--quiet` or `--json` for result-only automation.
-
 ## Why DevSpecs Exists
 
 Issue trackers describe intended work. Git records what changed. AI coding adds
@@ -228,7 +206,7 @@ remain the default path.
 `ds ws` is a built-in shortcut for `ds workspace`; docs use the full command
 when first introducing the workflow.
 
-Current dogfood flow:
+Example:
 
 ```powershell
 ds workspace init . --json
@@ -248,12 +226,6 @@ task/apply/checkpoint work.
 `ds workspace trace` is for known workspace change or repo task IDs. Use
 `ds find` when you need to discover relevant source, tests, docs, or prior task
 receipts.
-
-Migration guarantee: new docs, help text, and examples use the
-`ds workspace ...` namespace. Top-level `ds change`, `ds slice`, and `ds trace`
-remain hidden compatibility aliases for older local scripts. Regression tests
-cover three gates: root help hides the aliases, alias help points to the
-workspace form, and the aliases still dispatch the same workspace operations.
 
 ## Command Roles
 
@@ -288,7 +260,7 @@ the older flat ranked result list.
 
 ## What DevSpecs Indexes
 
-DevSpecs indexes the substrate your repo already has:
+DevSpecs indexes the context your repo already has:
 
 - plans, specs, PRDs, RFCs, ADRs, runbooks, and decision memos;
 - OpenSpec changes;
@@ -323,8 +295,7 @@ Index state lives in local SQLite and can be rebuilt.
 | `ds config show` | Inspect effective repo discovery config. |
 
 Most read commands support `--json`. Run `ds <command> --help` for the current
-flag surface. Prefer the `ds workspace ...` form for workspace coordination;
-top-level workspace aliases are hidden compatibility shims.
+flags. Use the `ds workspace ...` form for workspace coordination.
 
 ## Storage And Privacy
 
@@ -412,14 +383,6 @@ ADRs, or plans.
 No. `ds find` is a routing and evidence layer. If it surfaces a current owner
 decision memo, north-star doc, or `Status: next` plan, read that artifact before
 asking the agent to change code.
-
-## Public Eval Boundary
-
-The public repo contains deterministic product tests and small synthetic
-fixtures. It is the product claim surface, not a dump of exploratory research
-material or unreduced evaluation runs.
-
-See [EVALS.md](EVALS.md) for the current boundary.
 
 ## Development
 

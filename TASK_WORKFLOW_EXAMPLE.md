@@ -1,6 +1,6 @@
 # DevSpecs Task Workflow Example
 
-Status: public-safe transcript, generated from the current CLI on 2026-06-09.
+Generated from the CLI on 2026-06-09.
 
 This example was captured from a tiny synthetic repo with:
 
@@ -170,7 +170,7 @@ Goal: Trace existing digest behavior and tests
 
 Do not implement sibling slices, future slices, or the full task track. Stop after this target's acceptance checks are satisfied.
 Record the outcome in `devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md` or with `ds task checkpoint weekly-digest --target A01`.
-Checklist edits are useful notes, but lifecycle state should be recorded with `ds task checkpoint`; legacy `finish` and `decide` shortcuts are compatibility-only.
+Checklist edits are useful notes, but lifecycle state should be recorded with `ds task checkpoint`.
 Command roles: use `ds find` to discover and pack evidence, `ds task status`
 to inspect lifecycle, `ds apply` to emit the current bounded prompt, and
 `ds workspace trace` only for known workspace change/task links. In trace
@@ -247,7 +247,7 @@ and receipts.
 
 ## Experimental Workspace Coordination
 
-For multi-repo dogfood, initialize the umbrella and create repo-local task
+For multi-repo coordination, initialize the umbrella and create repo-local task
 slices explicitly:
 
 ```powershell
