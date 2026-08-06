@@ -359,7 +359,6 @@ func detectInstallSource(executable string) (source, confidence, command string,
 		strings.Contains(normalized, "/homebrew/bin/ds") ||
 		strings.Contains(normalized, "/linuxbrew/bin/ds") ||
 		strings.Contains(normalized, "/linuxbrew/.linuxbrew/bin/ds") ||
-		strings.Contains(normalized, "/usr/local/bin/ds") ||
 		strings.Contains(normalized, "/opt/homebrew/bin/ds"):
 		return "homebrew", "medium", "brew update && brew upgrade devspecs-com/tap/devspecs", nil
 	case looksLikeGoInstall(normalized):

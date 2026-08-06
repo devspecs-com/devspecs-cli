@@ -32,6 +32,16 @@ func TestDetectInstallSourceHomebrew(t *testing.T) {
 	}
 }
 
+func TestDetectInstallSourceUsrLocalBinaryIsManual(t *testing.T) {
+	source, confidence, command, _ := detectInstallSource("/usr/local/bin/ds")
+	if source != "manual or unknown" || confidence != "low" {
+		t.Fatalf("source=%q confidence=%q", source, confidence)
+	}
+	if strings.Contains(command, "brew") || !strings.Contains(command, "install.sh") {
+		t.Fatalf("unexpected manual update guidance: %q", command)
+	}
+}
+
 func TestDetectInstallSourceScoop(t *testing.T) {
 	for _, path := range []string{
 		`C:\Users\alice\scoop\apps\devspecs\current\ds.exe`,
