@@ -14,6 +14,18 @@
   redirecting users toward `ds apply`, `ds task checkpoint`, and
   `ds task refresh`.
 
+## v1.3.1 - 2026-08-06
+
+- Added `ds prune`, with `--dry-run`, JSON output, and explicit `--vacuum`
+  compaction, to remove index data for repository roots that no longer exist.
+- Changed Git repository identity from physical path alone to canonical remote
+  plus root commit, with root aliases so ephemeral worktrees reuse one logical
+  repository index instead of duplicating all artifacts.
+- Scoped relative artifact source identities to their logical repository so
+  common paths such as `AGENTS.md` cannot collide across unrelated repos.
+- Changed `ds update` detection so a manually installed `/usr/local/bin/ds`
+  binary is not reported as Homebrew without stronger Homebrew path evidence.
+
 ## v1.2.0 - 2026-07-12
 
 DevSpecs v1.2 expands the CLI from repo-local task execution into workspace-aware

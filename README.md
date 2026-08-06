@@ -271,7 +271,9 @@ DevSpecs indexes the context your repo already has:
 - common agent/planning layouts such as Cursor, Codex, Claude, Spec Kit, and
   BMAD samples used by tests.
 
-Index state lives in local SQLite and can be rebuilt.
+Index state lives in local SQLite and can be rebuilt. Git worktrees that share
+the same canonical remote and root commit reuse one logical repository index
+instead of indexing every worktree as a new repository.
 
 ## Command Map
 
@@ -292,6 +294,7 @@ Index state lives in local SQLite and can be rebuilt.
 | `ds find <query>` | Build agent-readable packed context. |
 | `ds context <id>` | Export one artifact as paste-ready agent context. |
 | `ds scan` | Manually refresh or rebuild configured intent-artifact paths. |
+| `ds prune [--dry-run] [--vacuum]` | Remove index data for repository roots that no longer exist; compact the database explicitly with `--vacuum`. |
 | `ds config show` | Inspect effective repo discovery config. |
 
 Most read commands support `--json`. Run `ds <command> --help` for the current
@@ -307,6 +310,21 @@ flags. Use the `ds workspace ...` form for workspace coordination.
 | `.devspecs/tasks/<task-id>/` | Legacy or explicitly local task workspace. | No, unless you chose it deliberately. |
 | `devspecs/workspace.yaml` | Experimental workspace manifest for umbrella repos. | Yes, when used by the team. |
 | `devspecs/changes/<change-id>-*.md` | Experimental workspace-level change records. | Yes, when used by the team. |
+
+The global index records every physical root observed for a logical Git
+repository. This lets temporary agent worktrees reuse the repository's index.
+When worktrees are deleted, clean their stale aliases and data with:
+
+```bash
+ds prune --dry-run
+ds prune
+ds prune --vacuum
+```
+
+`ds prune` only removes a logical repository when none of its recorded roots
+still exist. Normal pruning makes freed SQLite pages reusable. `--vacuum` also
+rewrites the database to return unused space to the filesystem, which can take
+time and require temporary free disk space on a large index.
 
 Commit task artifacts when they explain durable work, should be reviewed with a
 change, or are useful to the next person or agent. If a task is scratch-only,
