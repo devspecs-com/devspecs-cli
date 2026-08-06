@@ -1,4 +1,4 @@
--- DevSpecs v0.1 schema (version 14)
+-- DevSpecs v0.1 schema (version 15)
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version    INTEGER PRIMARY KEY,
@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS repos (
   id                 TEXT PRIMARY KEY,
   root_path          TEXT NOT NULL,
   git_remote_url     TEXT,
+  git_root_commit    TEXT,
+  git_identity       TEXT,
   git_current_branch TEXT,
   last_scan_commit   TEXT,
   last_scan_at       TEXT,
@@ -16,6 +18,21 @@ CREATE TABLE IF NOT EXISTS repos (
   created_at         TEXT NOT NULL,
   updated_at         TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS repo_roots (
+  root_path     TEXT PRIMARY KEY,
+  repo_id       TEXT NOT NULL,
+  first_seen_at TEXT NOT NULL,
+  last_seen_at  TEXT NOT NULL,
+  FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
+);
+
+CREATE TRIGGER IF NOT EXISTS repos_record_initial_root
+AFTER INSERT ON repos
+BEGIN
+  INSERT OR IGNORE INTO repo_roots (root_path, repo_id, first_seen_at, last_seen_at)
+  VALUES (NEW.root_path, NEW.id, NEW.created_at, NEW.updated_at);
+END;
 
 CREATE TABLE IF NOT EXISTS artifacts (
   id                  TEXT PRIMARY KEY,
@@ -263,6 +280,7 @@ CREATE INDEX IF NOT EXISTS idx_criteria_artifact ON artifact_criteria(artifact_i
 CREATE INDEX IF NOT EXISTS idx_criteria_revision ON artifact_criteria(revision_id);
 CREATE INDEX IF NOT EXISTS idx_criteria_section ON artifact_criteria(section_id);
 CREATE INDEX IF NOT EXISTS idx_sources_identity ON sources(source_identity);
+CREATE INDEX IF NOT EXISTS idx_repo_roots_repo ON repo_roots(repo_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_repo ON artifacts(repo_id);
 CREATE INDEX IF NOT EXISTS idx_revisions_artifact ON artifact_revisions(artifact_id);
 CREATE INDEX IF NOT EXISTS idx_tags_tag ON artifact_tags(tag);

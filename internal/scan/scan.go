@@ -62,6 +62,7 @@ type RunOptions struct {
 	PhaseTiming               bool
 	Progress                  func(ProgressEvent)
 	ProgressInterval          time.Duration
+	RepositoryInfo            *repo.Info
 }
 
 // New creates a Scanner with the given store and adapters.
@@ -95,8 +96,22 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 		ctx = ignore.WithContext(ctx, matcher)
 	}
 
+	repoInfo := opts.RepositoryInfo
+	if repoInfo == nil {
+		detected := repo.DetectIdentity(repoRoot)
+		if !sameRepositoryRoot(detected.RootPath, repoRoot) {
+			// A caller may intentionally scan a fixture/subtree inside a larger Git
+			// repository. Keep that target path-scoped instead of rebinding it to
+			// the parent repository's logical index.
+			detected = repo.Info{RootPath: repoRoot}
+		}
+		repoInfo = &detected
+	}
+	if strings.TrimSpace(repoInfo.RootPath) == "" {
+		repoInfo.RootPath = repoRoot
+	}
 	phase := timing.start("ensure_repo", "")
-	repoID, err := s.ensureRepo(repoRoot, now)
+	repoID, err := s.ensureRepo(*repoInfo, now)
 	phase.finish(nil, statusTimingDetails(err))
 	if err != nil {
 		return nil, fmt.Errorf("ensure repo: %w", err)
@@ -257,7 +272,7 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 		}
 		parsedByAdapter[adapter.Name()] += parsedCount
 		sourceIdentityCounts := parsedSourceIdentityCounts(parsed)
-		existingArtifacts, err := s.existingArtifactsBySourceIdentity(sourceIdentityKeys(sourceIdentityCounts))
+		existingArtifacts, err := s.existingArtifactsBySourceIdentity(repoID, sourceIdentityKeys(sourceIdentityCounts))
 		if err != nil {
 			adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()]}, statusTimingDetails(err))
 			return nil, fmt.Errorf("lookup existing artifacts for %s: %w", adapter.Name(), err)
@@ -534,6 +549,20 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 	})
 	result.PhaseTiming = timing.finish()
 	return result, nil
+}
+
+func sameRepositoryRoot(a, b string) bool {
+	aAbs, aErr := filepath.Abs(a)
+	bAbs, bErr := filepath.Abs(b)
+	if aErr == nil && bErr == nil {
+		a, b = aAbs, bAbs
+	}
+	a = filepath.Clean(a)
+	b = filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 func (s *Scanner) recordScanMeta(repoID, repoRoot, now string) {
@@ -1200,19 +1229,14 @@ func (r fileInventoryResult) diagnostics() *TraversalDiagnostics {
 	return &diag
 }
 
-func (s *Scanner) ensureRepo(rootPath, now string) (string, error) {
-	var id string
-	err := s.db.QueryRow("SELECT id FROM repos WHERE root_path = ?", rootPath).Scan(&id)
-	if err == nil {
-		s.db.Exec("UPDATE repos SET updated_at = ? WHERE id = ?", now, id)
-		return id, nil
-	}
-	id = s.ids.NewWithPrefix("repo_")
-	_, err = s.db.Exec(
-		"INSERT INTO repos (id, root_path, created_at, updated_at) VALUES (?, ?, ?, ?)",
-		id, rootPath, now, now,
-	)
-	return id, err
+func (s *Scanner) ensureRepo(info repo.Info, now string) (string, error) {
+	return s.db.ResolveRepo(store.RepositoryIdentity{
+		RootPath:      info.RootPath,
+		RemoteURL:     info.RemoteURL,
+		RootCommit:    info.RootCommit,
+		GitIdentity:   info.GitIdentity,
+		CurrentBranch: info.CurrentBranch,
+	}, s.ids.NewWithPrefix("repo_"), now)
 }
 
 type scanRunState struct {
@@ -1319,7 +1343,7 @@ func sourceIdentityKeys(counts map[string]int) []string {
 
 const existingArtifactLookupChunkSize = 500
 
-func (s *Scanner) existingArtifactsBySourceIdentity(identities []string) (map[string]existingArtifactRow, error) {
+func (s *Scanner) existingArtifactsBySourceIdentity(repoID string, identities []string) (map[string]existingArtifactRow, error) {
 	out := map[string]existingArtifactRow{}
 	if len(identities) == 0 {
 		return out, nil
@@ -1331,8 +1355,9 @@ func (s *Scanner) existingArtifactsBySourceIdentity(identities []string) (map[st
 		}
 		chunk := identities[start:end]
 		var b strings.Builder
-		b.WriteString("SELECT s.source_identity, a.id, COALESCE(a.current_revision_id, '') FROM sources s JOIN artifacts a ON a.id = s.artifact_id WHERE s.source_identity IN (")
-		args := make([]any, 0, len(chunk))
+		b.WriteString("SELECT s.source_identity, a.id, COALESCE(a.current_revision_id, '') FROM sources s JOIN artifacts a ON a.id = s.artifact_id WHERE a.repo_id = ? AND s.source_identity IN (")
+		args := make([]any, 0, len(chunk)+1)
+		args = append(args, repoID)
 		for i, identity := range chunk {
 			if i > 0 {
 				b.WriteString(", ")
@@ -1371,8 +1396,8 @@ func (s *Scanner) upsertArtifact(repoRoot, repoID, adapterName string, art adapt
 	// Check if artifact exists by source_identity
 	var artifactID, currentRevID string
 	err := s.db.QueryRow(
-		"SELECT a.id, COALESCE(a.current_revision_id, '') FROM artifacts a JOIN sources s ON s.artifact_id = a.id WHERE s.source_identity = ?",
-		art.SourceIdentity,
+		"SELECT a.id, COALESCE(a.current_revision_id, '') FROM artifacts a JOIN sources s ON s.artifact_id = a.id WHERE a.repo_id = ? AND s.source_identity = ?",
+		repoID, art.SourceIdentity,
 	).Scan(&artifactID, &currentRevID)
 
 	contentHash := hashContent(art.Body)

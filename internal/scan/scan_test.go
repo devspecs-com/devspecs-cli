@@ -82,6 +82,38 @@ func TestScan_StableIDs(t *testing.T) {
 	}
 }
 
+func TestScan_SourceIdentityIsScopedToLogicalRepository(t *testing.T) {
+	tmp := t.TempDir()
+	db, err := store.Open(filepath.Join(tmp, "devspecs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&markdown.Adapter{}})
+	for _, name := range []string{"repo-a", "repo-b"} {
+		root := filepath.Join(tmp, name)
+		if err := os.MkdirAll(filepath.Join(root, "plans"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "plans", "shared.md"), []byte("# Shared Plan\n\nRepository-specific content.\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := scanner.Run(context.Background(), root, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var artifacts, repos int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM artifacts`).Scan(&artifacts); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM repos`).Scan(&repos); err != nil {
+		t.Fatal(err)
+	}
+	if artifacts != 2 || repos != 2 {
+		t.Fatalf("same relative path collided across repositories: artifacts=%d repos=%d", artifacts, repos)
+	}
+}
+
 func TestScan_NoDuplicateOnUnchanged(t *testing.T) {
 	repoRoot, db := setupTestRepo(t)
 	ids := idgen.NewFactory()

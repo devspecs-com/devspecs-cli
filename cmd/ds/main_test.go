@@ -117,6 +117,7 @@ func TestRootCmd_HelpGroupsCommandsByActor(t *testing.T) {
 		"  apply       Emit a one-slice DevSpecs apply prompt",
 		"Advanced and maintenance",
 		"  scan        Rescan repository intent docs, source, tests, and git evidence",
+		"  prune       Remove index data for repository roots that no longer exist",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected grouped help to contain %q, got:\n%s", want, got)

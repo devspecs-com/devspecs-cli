@@ -82,6 +82,7 @@ document text, or raw queries. Disable with DEVSPECS_TELEMETRY=0.`,
 	addHiddenWorkspaceCompatibilityCommand(rootCmd, commands.NewTraceCmd(), "ds workspace trace")
 	rootCmd.AddCommand(commands.NewTLDRCmd())
 	rootCmd.AddCommand(commands.NewUpdateCmd())
+	rootCmd.AddCommand(commands.NewPruneCmd())
 	rootCmd.AddCommand(commands.NewResolveCmd())
 	rootCmd.AddCommand(commands.NewContextCmd())
 	rootCmd.AddCommand(commands.NewTodosCmd())
@@ -125,6 +126,7 @@ func assignRootCommandGroups(rootCmd *cobra.Command) {
 		"scan":      rootGroupAdvanced,
 		"config":    rootGroupAdvanced,
 		"update":    rootGroupAdvanced,
+		"prune":     rootGroupAdvanced,
 		"version":   rootGroupAdvanced,
 	}
 	for _, cmd := range rootCmd.Commands() {

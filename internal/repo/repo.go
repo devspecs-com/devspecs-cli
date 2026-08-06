@@ -3,9 +3,13 @@ package repo
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -13,8 +17,87 @@ import (
 type Info struct {
 	RootPath      string
 	RemoteURL     string
+	RootCommit    string
+	GitIdentity   string
 	CurrentBranch string
 	IsGit         bool
+}
+
+// DetectIdentity adds the stable remote-plus-root-commit identity used to
+// recognize one logical repository across Git worktrees.
+func DetectIdentity(dir string) Info {
+	return WithIdentity(Detect(dir))
+}
+
+// WithIdentity enriches already-detected Git metadata without repeating path,
+// remote, and branch discovery.
+func WithIdentity(info Info) Info {
+	if !info.IsGit || strings.TrimSpace(info.RemoteURL) == "" {
+		return info
+	}
+	info.RootCommit = RootCommit(info.RootPath)
+	info.GitIdentity = StableGitIdentity(info.RemoteURL, info.RootCommit)
+	return info
+}
+
+// RootCommit returns all root commits reachable from HEAD in stable order.
+// Multiple roots are possible after merging unrelated histories.
+func RootCommit(repoRoot string) string {
+	cmd := exec.Command("git", "rev-list", "--max-parents=0", "HEAD")
+	cmd.Dir = repoRoot
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	var roots []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if root := strings.TrimSpace(line); root != "" {
+			roots = append(roots, root)
+		}
+	}
+	sort.Strings(roots)
+	return strings.Join(roots, ",")
+}
+
+// StableGitIdentity combines a canonical remote with root history. Empty
+// inputs stay path-scoped rather than risking an unrelated-repository match.
+func StableGitIdentity(remoteURL, rootCommit string) string {
+	remote := CanonicalRemoteURL(remoteURL)
+	rootCommit = strings.TrimSpace(rootCommit)
+	if remote == "" || rootCommit == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(remote + "\n" + rootCommit))
+	return "git_" + hex.EncodeToString(sum[:])
+}
+
+// CanonicalRemoteURL normalizes common SSH and URL Git remote spellings.
+func CanonicalRemoteURL(remote string) string {
+	remote = strings.TrimSpace(remote)
+	if remote == "" {
+		return ""
+	}
+	if !strings.Contains(remote, "://") {
+		at := strings.LastIndex(remote, "@")
+		colon := strings.Index(remote, ":")
+		if at >= 0 && colon > at {
+			remote = "ssh://" + remote[:colon] + "/" + remote[colon+1:]
+		}
+	}
+	parsed, err := url.Parse(remote)
+	if err != nil || parsed.Hostname() == "" {
+		return ""
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if port := parsed.Port(); port != "" && port != "22" && port != "443" {
+		host += ":" + port
+	}
+	repoPath := strings.Trim(strings.ReplaceAll(parsed.Path, "\\", "/"), "/")
+	repoPath = strings.TrimSuffix(repoPath, ".git")
+	if repoPath == "" {
+		return ""
+	}
+	return host + "/" + strings.ToLower(repoPath)
 }
 
 // Detect attempts to discover git repository info from the given directory.

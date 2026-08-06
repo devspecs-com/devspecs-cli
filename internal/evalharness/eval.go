@@ -1216,7 +1216,7 @@ func listIndexedArtifactsWithRevisions(db *store.DB, root string) ([]store.Artif
 FROM artifacts a
 JOIN repos r ON a.repo_id = r.id
 LEFT JOIN artifact_revisions ar ON ar.id = a.current_revision_id
-WHERE r.root_path = ?
+WHERE `+store.RepoRootCondition("r")+`
 ORDER BY a.last_observed_at DESC`, root)
 	if err != nil {
 		return nil, nil, nil, err
@@ -1246,7 +1246,7 @@ func listIndexedSourcesByArtifact(db *store.DB, root string) (map[string][]store
 	rows, err := db.Query(`SELECT s.id, s.artifact_id, s.source_type, COALESCE(s.path,''), s.source_identity, COALESCE(s.format_profile,''), COALESCE(s.layout_group,'')
 FROM sources s
 JOIN repos r ON s.repo_id = r.id
-WHERE r.root_path = ?
+WHERE `+store.RepoRootCondition("r")+`
 ORDER BY s.artifact_id, s.path, s.id`, root)
 	if err != nil {
 		return nil, err
@@ -1268,7 +1268,7 @@ func listIndexedTodosByArtifact(db *store.DB, root string) (map[string][]store.T
 FROM artifact_todos t
 JOIN artifacts a ON t.artifact_id = a.id
 JOIN repos r ON a.repo_id = r.id
-WHERE r.root_path = ?
+WHERE `+store.RepoRootCondition("r")+`
 ORDER BY t.artifact_id, t.ordinal`, root)
 	if err != nil {
 		return nil, err
@@ -1290,7 +1290,7 @@ func listIndexedLinksByArtifact(db *store.DB, root string) (map[string][]store.L
 FROM links l
 JOIN artifacts a ON l.artifact_id = a.id
 JOIN repos r ON a.repo_id = r.id
-WHERE r.root_path = ?
+WHERE `+store.RepoRootCondition("r")+`
 ORDER BY l.artifact_id, l.link_type, l.target`, root)
 	if err != nil {
 		return nil, err
@@ -1312,7 +1312,7 @@ func listIndexedSectionsByArtifact(db *store.DB, root string) (map[string][]stor
 FROM artifact_sections s
 JOIN artifacts a ON s.artifact_id = a.id
 JOIN repos r ON a.repo_id = r.id
-WHERE r.root_path = ?
+WHERE `+store.RepoRootCondition("r")+`
 ORDER BY s.artifact_id, s.start_line, s.heading_path`, root)
 	if err != nil {
 		return nil, err

@@ -135,7 +135,7 @@ func (db *DB) ListArtifacts(fp FilterParams) ([]ArtifactRow, error) {
 		joins = append(joins, "JOIN repos r ON a.repo_id = r.id")
 	}
 	if fp.RepoRoot != "" {
-		conditions = append(conditions, "r.root_path = ?")
+		conditions = append(conditions, RepoRootCondition("r"))
 		args = append(args, fp.RepoRoot)
 	}
 	if fp.Branch != "" {
@@ -340,7 +340,7 @@ func (db *DB) ListAllTodos(fp FilterParams, openOnly, doneOnly bool) ([]TodoRow,
 		joins = append(joins, "JOIN repos r ON a.repo_id = r.id")
 	}
 	if fp.RepoRoot != "" {
-		conditions = append(conditions, "r.root_path = ?")
+		conditions = append(conditions, RepoRootCondition("r"))
 		args = append(args, fp.RepoRoot)
 	}
 	if fp.Branch != "" {
@@ -427,7 +427,7 @@ func (db *DB) ListAllCriteria(fp FilterParams, openOnly, doneOnly bool, criteria
 		joins = append(joins, "JOIN repos r ON a.repo_id = r.id")
 	}
 	if fp.RepoRoot != "" {
-		conditions = append(conditions, "r.root_path = ?")
+		conditions = append(conditions, RepoRootCondition("r"))
 		args = append(args, fp.RepoRoot)
 	}
 	if fp.Branch != "" {
@@ -514,7 +514,7 @@ func (db *DB) findArtifactsFTS(query string, fp FilterParams) ([]ArtifactRow, er
 	if fp.RepoRoot != "" || fp.Branch != "" || fp.User != "" {
 		sqlQuery += " JOIN repos r ON a.repo_id = r.id"
 		if fp.RepoRoot != "" {
-			conditions = append(conditions, "r.root_path = ?")
+			conditions = append(conditions, RepoRootCondition("r"))
 			args = append(args, fp.RepoRoot)
 		}
 		if fp.Branch != "" {
@@ -575,7 +575,7 @@ func (db *DB) findArtifactsLIKE(query string, fp FilterParams) ([]ArtifactRow, e
 	if fp.RepoRoot != "" || fp.Branch != "" || fp.User != "" {
 		sqlQuery += " JOIN repos r ON a.repo_id = r.id"
 		if fp.RepoRoot != "" {
-			conditions = append(conditions, "r.root_path = ?")
+			conditions = append(conditions, RepoRootCondition("r"))
 			args = append(args, fp.RepoRoot)
 		}
 		if fp.Branch != "" {
@@ -715,7 +715,7 @@ func (db *DB) FindArtifactSections(query string, fp FilterParams, limit int) ([]
 	if fp.RepoRoot != "" || fp.Branch != "" || fp.User != "" {
 		sqlQuery += " JOIN repos r ON a.repo_id = r.id"
 		if fp.RepoRoot != "" {
-			conditions = append(conditions, "r.root_path = ?")
+			conditions = append(conditions, RepoRootCondition("r"))
 			args = append(args, fp.RepoRoot)
 		}
 		if fp.Branch != "" {
@@ -865,10 +865,24 @@ func (db *DB) FindSourceByIdentity(identity string) (string, error) {
 	return artifactID, err
 }
 
+// FindSourceByIdentityInRepo scopes a relative source identity to one logical repository.
+func (db *DB) FindSourceByIdentityInRepo(repoID, identity string) (string, error) {
+	var artifactID string
+	err := db.QueryRow(`
+		SELECT s.artifact_id
+		FROM sources s
+		JOIN artifacts a ON a.id = s.artifact_id
+		WHERE a.repo_id = ? AND s.source_identity = ?
+		LIMIT 1`, repoID, identity).Scan(&artifactID)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return artifactID, err
+}
+
 // EnsureRepo creates or returns the repo ID for the given root path.
 func (db *DB) EnsureRepo(rootPath, now string) (string, error) {
-	var id string
-	err := db.QueryRow("SELECT id FROM repos WHERE root_path = ?", rootPath).Scan(&id)
+	id, err := db.FindRepoID(rootPath, "")
 	if err == nil {
 		return id, nil
 	}
@@ -880,6 +894,8 @@ func (db *DB) EnsureRepo(rootPath, now string) (string, error) {
 type RepoMeta struct {
 	ID             string
 	RootPath       string
+	GitRemoteURL   string
+	GitIdentity    string
 	LastScanCommit string
 	LastScanAt     string
 	ScannedBy      string
@@ -889,9 +905,10 @@ type RepoMeta struct {
 func (db *DB) GetRepoByRoot(rootPath string) *RepoMeta {
 	var m RepoMeta
 	err := db.QueryRow(
-		"SELECT id, root_path, COALESCE(last_scan_commit,''), COALESCE(last_scan_at,''), COALESCE(scanned_by,'') FROM repos WHERE root_path = ?",
+		"SELECT id, ?, COALESCE(git_remote_url,''), COALESCE(git_identity,''), COALESCE(last_scan_commit,''), COALESCE(last_scan_at,''), COALESCE(scanned_by,'') FROM repos r WHERE "+RepoRootCondition("r")+" LIMIT 1",
 		rootPath,
-	).Scan(&m.ID, &m.RootPath, &m.LastScanCommit, &m.LastScanAt, &m.ScannedBy)
+		rootPath,
+	).Scan(&m.ID, &m.RootPath, &m.GitRemoteURL, &m.GitIdentity, &m.LastScanCommit, &m.LastScanAt, &m.ScannedBy)
 	if err != nil {
 		return nil
 	}
@@ -959,7 +976,7 @@ func (db *DB) ResumeArtifacts(repoRoot string, fp FilterParams) ([]ResumeRow, er
 	var conditions []string
 	var args []any
 
-	conditions = append(conditions, "r.root_path = ?")
+	conditions = append(conditions, RepoRootCondition("r"))
 	args = append(args, repoRoot)
 
 	if fp.Tag != "" {

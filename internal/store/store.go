@@ -17,7 +17,7 @@ import (
 var schemaDDL string
 
 // SchemaVersion is the current schema version. Bump when schema.sql changes.
-const SchemaVersion = 14
+const SchemaVersion = 15
 
 // SQLiteBusyTimeoutMS is the local index write-wait window for concurrent CLI
 // commands before SQLite returns a busy/locked error.
@@ -85,8 +85,10 @@ func (db *DB) migrate() error {
 
 	if maxVersion == 0 {
 		// Fresh DB — record current version
-		_, err = db.Exec("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)", SchemaVersion, now)
-		return err
+		if _, err = db.Exec("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)", SchemaVersion, now); err != nil {
+			return err
+		}
+		maxVersion = SchemaVersion
 	}
 
 	for maxVersion < SchemaVersion {
@@ -146,6 +148,11 @@ func (db *DB) migrate() error {
 				return err
 			}
 			maxVersion = 14
+		case 14:
+			if err := db.migrate14To15(now); err != nil {
+				return err
+			}
+			maxVersion = 15
 		default:
 			return fmt.Errorf(
 				"index was created with schema v%d but this CLI requires v%d. Run 'ds scan --rebuild' or delete ~/.devspecs/devspecs.db and run 'ds scan' to rebuild",
@@ -156,6 +163,11 @@ func (db *DB) migrate() error {
 
 	if maxVersion > SchemaVersion {
 		return fmt.Errorf("database schema v%d is newer than this CLI (v%d)", maxVersion, SchemaVersion)
+	}
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_repos_git_identity
+		ON repos(git_identity)
+		WHERE git_identity IS NOT NULL AND git_identity <> ''`); err != nil {
+		return fmt.Errorf("ensure repository identity index: %w", err)
 	}
 
 	return nil
@@ -427,5 +439,33 @@ func (db *DB) migrate13To14(now string) error {
 		}
 	}
 	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 14, now)
+	return err
+}
+
+func (db *DB) migrate14To15(now string) error {
+	if err := tryAlterTable(db.DB, `ALTER TABLE repos ADD COLUMN git_root_commit TEXT`); err != nil {
+		return fmt.Errorf("migrate v14->v15 git root commit: %w", err)
+	}
+	if err := tryAlterTable(db.DB, `ALTER TABLE repos ADD COLUMN git_identity TEXT`); err != nil {
+		return fmt.Errorf("migrate v14->v15 git identity: %w", err)
+	}
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS repo_roots (
+			root_path     TEXT PRIMARY KEY,
+			repo_id       TEXT NOT NULL,
+			first_seen_at TEXT NOT NULL,
+			last_seen_at  TEXT NOT NULL,
+			FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_repo_roots_repo ON repo_roots(repo_id)`,
+		`INSERT OR IGNORE INTO repo_roots (root_path, repo_id, first_seen_at, last_seen_at)
+		 SELECT root_path, id, created_at, updated_at FROM repos`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("migrate v14->v15 repository roots: %w", err)
+		}
+	}
+	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 15, now)
 	return err
 }

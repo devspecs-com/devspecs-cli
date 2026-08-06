@@ -105,9 +105,23 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 	sourceIdentity := relPath + "|capture"
 	now := time.Now().UTC().Format(time.RFC3339)
 	ids := idgen.NewFactory()
+	info := repo.DetectIdentity(wd)
+	if strings.TrimSpace(info.RootPath) == "" {
+		info.RootPath = wd
+	}
+	repoID, err := db.ResolveRepo(store.RepositoryIdentity{
+		RootPath:      info.RootPath,
+		RemoteURL:     info.RemoteURL,
+		RootCommit:    info.RootCommit,
+		GitIdentity:   info.GitIdentity,
+		CurrentBranch: info.CurrentBranch,
+	}, ids.NewWithPrefix("repo_"), now)
+	if err != nil {
+		return fmt.Errorf("ensure repository: %w", err)
+	}
 
 	// Check if already captured
-	existingArtID, err := db.FindSourceByIdentity(sourceIdentity)
+	existingArtID, err := db.FindSourceByIdentityInRepo(repoID, sourceIdentity)
 	if err != nil {
 		return err
 	}
@@ -152,14 +166,6 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 	}
 
 	// Create new
-	// Ensure repo exists
-	var repoID string
-	db.QueryRow("SELECT id FROM repos WHERE root_path = ?", wd).Scan(&repoID)
-	if repoID == "" {
-		repoID = ids.NewWithPrefix("repo_")
-		db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES (?, ?, ?, ?)", repoID, wd, now, now)
-	}
-
 	artifactID := ids.New()
 	revID := ids.NewWithPrefix("rev_")
 	contentHash := hashBody(art.Body)

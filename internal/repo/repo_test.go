@@ -113,6 +113,9 @@ func TestDetect_GitWorktree(t *testing.T) {
 	if err := gitCmd("-C", mainRepo, "worktree", "add", "-b", "worktree-branch", worktree).Run(); err != nil {
 		t.Fatal(err)
 	}
+	if err := gitCmd("-C", mainRepo, "remote", "add", "origin", "git@github.com:Acme/Example.git").Run(); err != nil {
+		t.Fatal(err)
+	}
 	subdir := filepath.Join(worktree, "nested")
 	if err := os.MkdirAll(subdir, 0o755); err != nil {
 		t.Fatal(err)
@@ -127,6 +130,41 @@ func TestDetect_GitWorktree(t *testing.T) {
 	}
 	if info.CurrentBranch != "worktree-branch" {
 		t.Fatalf("expected worktree branch, got %q", info.CurrentBranch)
+	}
+	mainIdentity := DetectIdentity(mainRepo)
+	worktreeIdentity := DetectIdentity(worktree)
+	if mainIdentity.GitIdentity == "" || mainIdentity.GitIdentity != worktreeIdentity.GitIdentity {
+		t.Fatalf("worktree identities differ: main=%q linked=%q", mainIdentity.GitIdentity, worktreeIdentity.GitIdentity)
+	}
+}
+
+func TestCanonicalRemoteURL_EquivalentGitHubSpellings(t *testing.T) {
+	want := "github.com/acme/example"
+	for _, remote := range []string{
+		"git@github.com:Acme/Example.git",
+		"ssh://git@github.com/Acme/Example.git",
+		"https://github.com/acme/example.git",
+	} {
+		if got := CanonicalRemoteURL(remote); got != want {
+			t.Fatalf("CanonicalRemoteURL(%q) = %q, want %q", remote, got, want)
+		}
+	}
+	if got := CanonicalRemoteURL(`C:\repos\example`); got != "" {
+		t.Fatalf("local path should not become a shared identity: %q", got)
+	}
+}
+
+func TestStableGitIdentity_RequiresRemoteAndRoot(t *testing.T) {
+	if got := StableGitIdentity("", "abc"); got != "" {
+		t.Fatalf("identity without remote = %q", got)
+	}
+	if got := StableGitIdentity("https://github.com/acme/example.git", ""); got != "" {
+		t.Fatalf("identity without root = %q", got)
+	}
+	a := StableGitIdentity("git@github.com:Acme/Example.git", "abc")
+	b := StableGitIdentity("https://github.com/acme/example", "abc")
+	if a == "" || a != b {
+		t.Fatalf("equivalent remotes produced different identities: %q != %q", a, b)
 	}
 }
 
