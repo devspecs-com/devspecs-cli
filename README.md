@@ -294,7 +294,7 @@ instead of indexing every worktree as a new repository.
 | `ds find <query>` | Build agent-readable packed context. |
 | `ds context <id>` | Export one artifact as paste-ready agent context. |
 | `ds scan` | Manually refresh or rebuild configured intent-artifact paths. |
-| `ds prune [--dry-run] [--vacuum]` | Remove index data for repository roots that no longer exist; compact the database explicitly with `--vacuum`. |
+| `ds prune [--dry-run] [--vacuum]` | Remove stale repository data and redundant capture revisions; compact the database explicitly with `--vacuum`. |
 | `ds config show` | Inspect effective repo discovery config. |
 
 Most read commands support `--json`. Run `ds <command> --help` for the current
@@ -322,9 +322,12 @@ ds prune --vacuum
 ```
 
 `ds prune` only removes a logical repository when none of its recorded roots
-still exist. Normal pruning makes freed SQLite pages reusable. `--vacuum` also
-rewrites the database to return unused space to the filesystem, which can take
-time and require temporary free disk space on a large index.
+still exist. It also collapses consecutive capture revisions with identical
+content while preserving the current revision and distinct content transitions.
+Normal pruning makes freed SQLite pages reusable. `--vacuum` also rewrites the
+database to return unused space to the filesystem, which can take time and
+require temporary free disk space on a large index. Long human-mode maintenance
+operations report bounded progress on stderr; JSON output remains clean.
 
 Commit task artifacts when they explain durable work, should be reviewed with a
 change, or are useful to the next person or agent. If a task is scratch-only,

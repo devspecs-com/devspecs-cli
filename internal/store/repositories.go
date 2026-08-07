@@ -91,12 +91,36 @@ func (db *DB) ResolveRepo(identity RepositoryIdentity, newID, now string) (strin
 		identity.CurrentBranch, now, id); err != nil {
 		return "", err
 	}
+	if err := db.normalizeReboundRootSources(rootPath, id); err != nil {
+		return "", err
+	}
 	_, err = db.Exec(`
 		INSERT INTO repo_roots (root_path, repo_id, first_seen_at, last_seen_at)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(root_path) DO UPDATE SET repo_id = excluded.repo_id, last_seen_at = excluded.last_seen_at`,
 		rootPath, id, now, now)
 	return id, err
+}
+
+func (db *DB) normalizeReboundRootSources(rootPath, canonicalRepoID string) error {
+	var previousRepoID string
+	err := db.QueryRow("SELECT repo_id FROM repo_roots WHERE root_path = ?", rootPath).Scan(&previousRepoID)
+	if err == sql.ErrNoRows || previousRepoID == canonicalRepoID {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`
+		UPDATE sources
+		SET repo_id = ?
+		WHERE repo_id = ?
+		  AND artifact_id IN (SELECT id FROM artifacts WHERE repo_id = ?)`,
+		canonicalRepoID, previousRepoID, canonicalRepoID)
+	if err != nil {
+		return fmt.Errorf("normalize rebound repository sources: %w", err)
+	}
+	return nil
 }
 
 func (db *DB) findRepoIDByGitIdentity(gitIdentity string) (string, error) {

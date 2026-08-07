@@ -114,6 +114,85 @@ func TestScan_SourceIdentityIsScopedToLogicalRepository(t *testing.T) {
 	}
 }
 
+func TestScan_RepairsUnanimousLegacySourceOwnership(t *testing.T) {
+	tmp := t.TempDir()
+	db, err := store.Open(filepath.Join(tmp, "devspecs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&markdown.Adapter{}})
+	rootA := filepath.Join(tmp, "repo-a")
+	rootB := filepath.Join(tmp, "repo-b")
+	for root, body := range map[string]string{
+		rootA: "# Shared Plan\n\nRepository A evidence.\n",
+		rootB: "# Shared Plan\n\nRepository B evidence.\n",
+	} {
+		if err := os.MkdirAll(filepath.Join(root, "plans"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "plans", "shared.md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := scanner.RunWithOptions(context.Background(), rootA, nil, RunOptions{UseTransaction: true}); err != nil {
+		t.Fatal(err)
+	}
+	metaA := db.GetRepoByRoot(rootA)
+	if metaA == nil {
+		t.Fatal("repo A missing")
+	}
+	var artifactID string
+	if err := db.QueryRow(`SELECT id FROM artifacts WHERE repo_id = ?`, metaA.ID).Scan(&artifactID); err != nil {
+		t.Fatal(err)
+	}
+	now := "2026-08-07T00:00:00Z"
+	repoB, err := db.ResolveRepo(store.RepositoryIdentity{RootPath: rootB}, "repo_b", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE sources SET repo_id = ? WHERE artifact_id = ?`, repoB, artifactID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := scanner.RunWithOptions(context.Background(), rootB, nil, RunOptions{UseTransaction: true, PhaseTiming: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.New != 0 || result.Updated != 1 {
+		t.Fatalf("legacy artifact was not reused: %#v", result)
+	}
+	var artifactRepo, sourceRepo, body string
+	if err := db.QueryRow(`SELECT a.repo_id, s.repo_id, rv.body
+		FROM artifacts a JOIN sources s ON s.artifact_id = a.id
+		JOIN artifact_revisions rv ON rv.id = a.current_revision_id
+		WHERE a.id = ?`, artifactID).Scan(&artifactRepo, &sourceRepo, &body); err != nil {
+		t.Fatal(err)
+	}
+	if artifactRepo != repoB || sourceRepo != repoB || !strings.Contains(body, "Repository B evidence") {
+		t.Fatalf("legacy ownership/content not repaired: artifact=%q source=%q body=%q", artifactRepo, sourceRepo, body)
+	}
+	var oldMentions int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM concept_mentions cm
+		JOIN concepts c ON c.id = cm.concept_id
+		WHERE cm.artifact_id = ? AND c.repo_id <> ?`, artifactID, repoB).Scan(&oldMentions); err != nil {
+		t.Fatal(err)
+	}
+	if oldMentions != 0 {
+		t.Fatalf("legacy graph mentions remain: %d", oldMentions)
+	}
+	if _, err := scanner.RunWithOptions(context.Background(), rootA, nil, RunOptions{UseTransaction: true}); err != nil {
+		t.Fatal(err)
+	}
+	var artifacts int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM artifacts`).Scan(&artifacts); err != nil {
+		t.Fatal(err)
+	}
+	if artifacts != 2 {
+		t.Fatalf("repo A did not regain its own artifact: %d", artifacts)
+	}
+}
+
 func TestScan_NoDuplicateOnUnchanged(t *testing.T) {
 	repoRoot, db := setupTestRepo(t)
 	ids := idgen.NewFactory()

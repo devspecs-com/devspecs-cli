@@ -272,9 +272,17 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 		}
 		parsedByAdapter[adapter.Name()] += parsedCount
 		sourceIdentityCounts := parsedSourceIdentityCounts(parsed)
+		ownershipRepair := store.LegacyOwnershipRepairReport{}
+		if opts.UseTransaction {
+			ownershipRepair, err = s.db.RepairLegacyArtifactOwnership(repoID, sourceIdentityKeys(sourceIdentityCounts), now)
+			if err != nil {
+				adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()]}, statusTimingDetails(err))
+				return nil, fmt.Errorf("repair legacy ownership for %s: %w", adapter.Name(), err)
+			}
+		}
 		existingArtifacts, err := s.existingArtifactsBySourceIdentity(repoID, sourceIdentityKeys(sourceIdentityCounts))
 		if err != nil {
-			adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()]}, statusTimingDetails(err))
+			adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()], "ownership_repaired": ownershipRepair.RepairedArtifacts, "ownership_ambiguous": ownershipRepair.AmbiguousIdentities}, statusTimingDetails(err))
 			return nil, fmt.Errorf("lookup existing artifacts for %s: %w", adapter.Name(), err)
 		}
 		existingCount := 0
@@ -289,13 +297,13 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 			_, alreadyIndexed := existingArtifacts[art.SourceIdentity]
 			if !alreadyIndexed && sourceIdentityCounts[art.SourceIdentity] == 1 {
 				if err := s.insertBatchedNewArtifact(repoRoot, repoID, adapter.Name(), art, parsedArtifact.sources, parsedArtifact.parseResult, now, result, opts, state); err != nil {
-					adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()], "existing": existingCount, "batch_new": batchNewCount}, statusTimingDetails(err))
+					adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()], "existing": existingCount, "batch_new": batchNewCount, "ownership_repaired": ownershipRepair.RepairedArtifacts, "ownership_ambiguous": ownershipRepair.AmbiguousIdentities}, statusTimingDetails(err))
 					return nil, fmt.Errorf("batch insert artifact %q: %w", art.SourceIdentity, err)
 				}
 				batchNewCount++
 			} else {
 				if err := s.upsertArtifact(repoRoot, repoID, adapter.Name(), art, parsedArtifact.sources, parsedArtifact.parseResult, now, result, opts, state); err != nil {
-					adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()], "existing": existingCount, "batch_new": batchNewCount}, statusTimingDetails(err))
+					adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()], "existing": existingCount, "batch_new": batchNewCount, "ownership_repaired": ownershipRepair.RepairedArtifacts, "ownership_ambiguous": ownershipRepair.AmbiguousIdentities}, statusTimingDetails(err))
 					return nil, fmt.Errorf("upsert artifact %q: %w", art.SourceIdentity, err)
 				}
 				existingCount++
@@ -322,7 +330,7 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 		}
 		if state != nil && state.batchNew != nil {
 			if err := state.batchNew.flushRows(); err != nil {
-				adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()], "existing": existingCount, "batch_new": batchNewCount}, statusTimingDetails(err))
+				adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()], "existing": existingCount, "batch_new": batchNewCount, "ownership_repaired": ownershipRepair.RepairedArtifacts, "ownership_ambiguous": ownershipRepair.AmbiguousIdentities}, statusTimingDetails(err))
 				return nil, fmt.Errorf("flush batch-new rows for %s: %w", adapter.Name(), err)
 			}
 		}
@@ -336,7 +344,7 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 			ArtifactsUpserted:   cloneIntMap(upsertedByAdapter),
 			WriterDurationMS:    writerDurationMS,
 		})
-		adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()], "existing": existingCount, "batch_new": batchNewCount}, nil)
+		adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()], "existing": existingCount, "batch_new": batchNewCount, "ownership_repaired": ownershipRepair.RepairedArtifacts, "ownership_ambiguous": ownershipRepair.AmbiguousIdentities}, nil)
 	}
 
 	if state != nil && state.batchNew != nil {

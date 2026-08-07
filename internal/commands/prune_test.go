@@ -87,3 +87,77 @@ func TestPruneCommand_NoIndexDoesNotCreateOne(t *testing.T) {
 		t.Fatalf("prune created an index unexpectedly: %v", err)
 	}
 }
+
+func TestPruneCommand_VacuumProgressUsesStderr(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	t.Setenv("DEVSPECS_TELEMETRY", "0")
+	db, err := store.Open(filepath.Join(home, "devspecs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewPruneCmd()
+	cmd.SetArgs([]string{"--vacuum"})
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("Prune progress: compacting index")) ||
+		!bytes.Contains(stderr.Bytes(), []byte("Prune progress: complete")) {
+		t.Fatalf("vacuum progress missing from stderr: %q", stderr.String())
+	}
+	if bytes.Contains(stdout.Bytes(), []byte("Prune progress:")) {
+		t.Fatalf("progress leaked into stdout: %q", stdout.String())
+	}
+}
+
+func TestPruneCommand_JSONSuppressesProgress(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	t.Setenv("DEVSPECS_TELEMETRY", "0")
+	db, err := store.Open(filepath.Join(home, "devspecs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewPruneCmd()
+	cmd.SetArgs([]string{"--vacuum", "--json"})
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var report store.PruneReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("invalid JSON stdout: %v\n%s", err, stdout.String())
+	}
+	if !report.Vacuumed {
+		t.Fatalf("expected vacuumed report: %#v", report)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("JSON progress should be suppressed, got stderr: %q", stderr.String())
+	}
+}
+
+func TestPruneProgressReporter_DelaysShortOperations(t *testing.T) {
+	var out bytes.Buffer
+	progress := newPruneProgressReporter(&out, true, time.Hour)
+	progress.setPhase("inspect")
+	progress.setPhase("complete")
+	progress.stop()
+	if out.Len() != 0 {
+		t.Fatalf("short operation emitted progress: %q", out.String())
+	}
+}

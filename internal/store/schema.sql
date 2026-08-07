@@ -280,6 +280,8 @@ CREATE INDEX IF NOT EXISTS idx_criteria_artifact ON artifact_criteria(artifact_i
 CREATE INDEX IF NOT EXISTS idx_criteria_revision ON artifact_criteria(revision_id);
 CREATE INDEX IF NOT EXISTS idx_criteria_section ON artifact_criteria(section_id);
 CREATE INDEX IF NOT EXISTS idx_sources_identity ON sources(source_identity);
+CREATE INDEX IF NOT EXISTS idx_sources_artifact_repo ON sources(artifact_id, repo_id);
+CREATE INDEX IF NOT EXISTS idx_sources_repo ON sources(repo_id);
 CREATE INDEX IF NOT EXISTS idx_repo_roots_repo ON repo_roots(repo_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_repo ON artifacts(repo_id);
 CREATE INDEX IF NOT EXISTS idx_revisions_artifact ON artifact_revisions(artifact_id);

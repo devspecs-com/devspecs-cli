@@ -3,7 +3,9 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/devspecs-com/devspecs-cli/internal/config"
@@ -12,17 +14,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const pruneProgressDelay = 750 * time.Millisecond
+
 // NewPruneCmd creates the ds prune maintenance command.
 func NewPruneCmd() *cobra.Command {
 	var dryRun, vacuum, asJSON bool
 	cmd := &cobra.Command{
 		Use:   "prune",
-		Short: "Remove index data for repository roots that no longer exist",
-		Long: `Remove stale repository roots from the global DevSpecs index.
+		Short: "Remove stale and redundant data from the local index",
+		Long: `Remove stale repository roots and redundant capture history from the
+global DevSpecs index.
 
 A logical repository is removed only when none of its recorded roots still
-exist. Deleted SQLite pages are reusable immediately; pass --vacuum to compact
-the database file and return unused space to the filesystem.`,
+exist. Consecutive capture revisions with identical content are collapsed while
+preserving the current revision and distinct content transitions. Deleted
+SQLite pages are reusable immediately; pass --vacuum to compact the database
+file and return unused space to the filesystem.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runPrune(cmd, dryRun, vacuum, asJSON)
@@ -44,6 +51,9 @@ func runPrune(cmd *cobra.Command, dryRun, vacuum, asJSON bool) error {
 	if dryRun && vacuum {
 		return fmt.Errorf("--dry-run and --vacuum cannot be used together")
 	}
+	progress := newPruneProgressReporter(cmd.ErrOrStderr(), !asJSON, pruneProgressDelay)
+	defer progress.stop()
+	progress.setPhase("inspect")
 
 	dbPath, err := config.DBPath()
 	if err != nil {
@@ -64,14 +74,116 @@ func runPrune(cmd *cobra.Command, dryRun, vacuum, asJSON bool) error {
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 
-	report, err := db.Prune(store.PruneOptions{DryRun: dryRun, Vacuum: vacuum})
+	report, err := db.Prune(store.PruneOptions{
+		DryRun: dryRun,
+		Vacuum: vacuum,
+		Progress: func(event store.PruneProgress) {
+			progress.setPhase(event.Phase)
+		},
+	})
 	if err != nil {
 		return store.FriendlySQLiteBusyError(err)
 	}
 	props["repositories_pruned_bucket"] = telemetry.CountBucket(report.RepositoriesPruned)
 	props["artifacts_pruned_bucket"] = telemetry.CountBucket(report.ArtifactsPruned)
+	props["revisions_compacted_bucket"] = telemetry.CountBucket(report.RevisionsCompacted)
 	success = true
 	return outputPruneReport(cmd, report, asJSON)
+}
+
+type pruneProgressReporter struct {
+	mu      sync.Mutex
+	out     io.Writer
+	enabled bool
+	delay   time.Duration
+	started time.Time
+	phase   string
+	emitted bool
+	stopped bool
+	timer   *time.Timer
+}
+
+func newPruneProgressReporter(out io.Writer, enabled bool, delay time.Duration) *pruneProgressReporter {
+	return &pruneProgressReporter{out: out, enabled: enabled, delay: delay, started: time.Now()}
+}
+
+func (p *pruneProgressReporter) setPhase(phase string) {
+	if p == nil || !p.enabled {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopped || phase == "" || phase == p.phase {
+		return
+	}
+	p.phase = phase
+	if phase == "complete" {
+		if p.emitted {
+			fmt.Fprintf(p.out, "Prune progress: complete (%s)\n", formatProgressDuration(time.Since(p.started)))
+		}
+		p.stopTimerLocked()
+		return
+	}
+	if phase == "compact" {
+		p.stopTimerLocked()
+		p.emitPhaseLocked()
+		return
+	}
+	if p.emitted {
+		p.emitPhaseLocked()
+		return
+	}
+	if p.timer == nil {
+		p.timer = time.AfterFunc(p.delay, p.emitCurrentPhase)
+	}
+}
+
+func (p *pruneProgressReporter) emitCurrentPhase() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.timer = nil
+	if p.stopped || p.phase == "" || p.phase == "complete" {
+		return
+	}
+	p.emitPhaseLocked()
+}
+
+func (p *pruneProgressReporter) emitPhaseLocked() {
+	labels := map[string]string{
+		"inspect": "inspecting index",
+		"delete":  "removing stale index data",
+		"compact": "compacting index",
+	}
+	label := labels[p.phase]
+	if label == "" {
+		return
+	}
+	fmt.Fprintf(p.out, "Prune progress: %s\n", label)
+	p.emitted = true
+}
+
+func (p *pruneProgressReporter) stop() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stopped = true
+	p.stopTimerLocked()
+}
+
+func (p *pruneProgressReporter) stopTimerLocked() {
+	if p.timer != nil {
+		p.timer.Stop()
+		p.timer = nil
+	}
+}
+
+func formatProgressDuration(duration time.Duration) string {
+	if duration < time.Second {
+		return duration.Round(100 * time.Millisecond).String()
+	}
+	return duration.Round(time.Second).String()
 }
 
 func outputPruneReport(cmd *cobra.Command, report store.PruneReport, asJSON bool) error {
@@ -93,6 +205,11 @@ func outputPruneReport(cmd *cobra.Command, report store.PruneReport, asJSON bool
 	fmt.Fprintf(out, "Stale roots: %d\n", len(report.StaleRoots))
 	fmt.Fprintf(out, "%s repositories: %d\n", verb, report.RepositoriesPruned)
 	fmt.Fprintf(out, "%s artifacts: %d\n", verb, report.ArtifactsPruned)
+	compactVerb := "Compacted"
+	if report.DryRun {
+		compactVerb = "Would compact"
+	}
+	fmt.Fprintf(out, "%s duplicate capture revisions: %d\n", compactVerb, report.RevisionsCompacted)
 	fmt.Fprintf(out, "Index size: %s", formatByteSize(report.BytesBefore))
 	if report.Vacuumed {
 		fmt.Fprintf(out, " -> %s after vacuum", formatByteSize(report.BytesAfter))

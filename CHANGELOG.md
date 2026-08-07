@@ -14,15 +14,23 @@
   redirecting users toward `ds apply`, `ds task checkpoint`, and
   `ds task refresh`.
 
-## v1.3.1 - 2026-08-06
+## v1.3.1 - 2026-08-07
 
 - Added `ds prune`, with `--dry-run`, JSON output, and explicit `--vacuum`
-  compaction, to remove index data for repository roots that no longer exist.
+  compaction, to remove index data for repository roots that no longer exist
+  and collapse redundant consecutive capture revisions without losing content
+  transitions.
+- Added bounded prune/vacuum progress on stderr for long human-mode maintenance
+  waits while preserving clean JSON stdout.
 - Changed Git repository identity from physical path alone to canonical remote
   plus root commit, with root aliases so ephemeral worktrees reuse one logical
   repository index instead of duplicating all artifacts.
 - Scoped relative artifact source identities to their logical repository so
   common paths such as `AGENTS.md` cannot collide across unrelated repos.
+- Added conservative repair for legacy cross-repository source ownership,
+  including source-ownership indexes that keep fat-index prune checks bounded.
+- Changed repeated `ds capture` calls so unchanged content refreshes metadata
+  without appending another revision.
 - Changed `ds update` detection so a manually installed `/usr/local/bin/ds`
   binary is not reported as Homebrew without stronger Homebrew path evidence.
 

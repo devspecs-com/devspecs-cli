@@ -29,6 +29,11 @@ func TestOpen_CreatesDB(t *testing.T) {
 	if !indexExists(t, db, "idx_repos_git_identity") {
 		t.Fatal("unique repository Git identity index not found")
 	}
+	for _, name := range []string{"idx_sources_artifact_repo", "idx_sources_repo"} {
+		if !indexExists(t, db, name) {
+			t.Fatalf("source ownership index %s not found", name)
+		}
+	}
 }
 
 func TestMigrate_V14ToV15BackfillsRepositoryRoots(t *testing.T) {
@@ -97,6 +102,33 @@ func TestMigrate_Idempotent(t *testing.T) {
 	}
 
 	db.Close()
+}
+
+func TestMigrate_RecreatesSourceOwnershipIndexesForExistingV15(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "devspecs.db")
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"idx_sources_artifact_repo", "idx_sources_repo"} {
+		if _, err := db.Exec("DROP INDEX " + name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, name := range []string{"idx_sources_artifact_repo", "idx_sources_repo"} {
+		if !indexExists(t, db, name) {
+			t.Fatalf("existing v15 index did not recreate %s", name)
+		}
+	}
 }
 
 func TestMigrate_V12ToV13DropsSourceManifestCompactionIndexes(t *testing.T) {

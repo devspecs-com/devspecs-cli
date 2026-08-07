@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 )
 
 // PruneOptions controls stale repository cleanup.
@@ -12,6 +13,13 @@ type PruneOptions struct {
 	DryRun     bool
 	Vacuum     bool
 	PathExists func(string) bool
+	Progress   func(PruneProgress)
+}
+
+// PruneProgress identifies a blocking maintenance phase without implying a
+// percentage SQLite cannot report accurately.
+type PruneProgress struct {
+	Phase string
 }
 
 // PruneReport summarizes index lifecycle maintenance.
@@ -21,6 +29,7 @@ type PruneReport struct {
 	StaleRoots         []string `json:"stale_roots"`
 	RepositoriesPruned int      `json:"repositories_pruned"`
 	ArtifactsPruned    int      `json:"artifacts_pruned"`
+	RevisionsCompacted int      `json:"revisions_compacted"`
 	BytesBefore        int64    `json:"bytes_before"`
 	BytesAfter         int64    `json:"bytes_after"`
 }
@@ -31,6 +40,7 @@ func (db *DB) Prune(opts PruneOptions) (PruneReport, error) {
 	if opts.DryRun && opts.Vacuum {
 		return report, fmt.Errorf("--dry-run and --vacuum cannot be used together")
 	}
+	emitPruneProgress(opts.Progress, "inspect")
 	exists := opts.PathExists
 	if exists == nil {
 		exists = func(path string) bool {
@@ -100,11 +110,19 @@ func (db *DB) Prune(opts PruneOptions) (PruneReport, error) {
 			return report, err
 		}
 	}
+	duplicateArgs := stringsToAny(pruneRepoIDs)
+	if err := db.QueryRow("SELECT COUNT(*) FROM ("+duplicateCaptureRevisionPairsSQL(len(pruneRepoIDs))+")", duplicateArgs...).Scan(&report.RevisionsCompacted); err != nil {
+		return report, fmt.Errorf("inspect duplicate capture revisions: %w", err)
+	}
 	if opts.DryRun {
 		report.BytesAfter = report.BytesBefore
+		emitPruneProgress(opts.Progress, "complete")
 		return report, nil
 	}
 
+	if len(report.StaleRoots) > 0 || len(pruneRepoIDs) > 0 {
+		emitPruneProgress(opts.Progress, "delete")
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		return report, err
@@ -125,6 +143,11 @@ func (db *DB) Prune(opts PruneOptions) (PruneReport, error) {
 			return report, err
 		}
 	}
+	compacted, err := compactDuplicateCaptureRevisions(tx)
+	if err != nil {
+		return report, err
+	}
+	report.RevisionsCompacted = compacted
 	if _, err := tx.Exec(`
 		UPDATE repos
 		SET root_path = (SELECT MIN(rr.root_path) FROM repo_roots rr WHERE rr.repo_id = repos.id)
@@ -138,6 +161,7 @@ func (db *DB) Prune(opts PruneOptions) (PruneReport, error) {
 	rollback = false
 
 	if opts.Vacuum {
+		emitPruneProgress(opts.Progress, "compact")
 		if _, err := db.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
 			return report, fmt.Errorf("checkpoint index before vacuum: %w", err)
 		}
@@ -147,7 +171,83 @@ func (db *DB) Prune(opts PruneOptions) (PruneReport, error) {
 		report.Vacuumed = true
 	}
 	report.BytesAfter = fileSize(dbPath)
+	emitPruneProgress(opts.Progress, "complete")
 	return report, nil
+}
+
+const duplicateCaptureRevisionPairsSQLTemplate = `
+	WITH revision_order AS (
+		SELECT r.id, r.artifact_id, r.content_hash, r.observed_at, a.current_revision_id,
+			CASE WHEN r.content_hash = LAG(r.content_hash) OVER (
+				PARTITION BY r.artifact_id ORDER BY r.observed_at, r.id
+			) THEN 0 ELSE 1 END AS starts_run
+		FROM artifact_revisions r
+		JOIN artifacts a ON a.id = r.artifact_id
+		WHERE {{REPO_FILTER}}EXISTS (
+			SELECT 1 FROM sources s
+			WHERE s.artifact_id = r.artifact_id AND s.source_type = 'capture'
+		)
+	), revision_runs AS (
+		SELECT *, SUM(starts_run) OVER (
+			PARTITION BY artifact_id ORDER BY observed_at, id ROWS UNBOUNDED PRECEDING
+		) AS run_id
+		FROM revision_order
+	), revision_keeps AS (
+		SELECT id,
+			FIRST_VALUE(id) OVER (
+				PARTITION BY artifact_id, run_id
+				ORDER BY CASE WHEN id = current_revision_id THEN 1 ELSE 0 END DESC, observed_at DESC, id DESC
+			) AS keep_id
+		FROM revision_runs
+	)
+	SELECT id, keep_id FROM revision_keeps WHERE id <> keep_id`
+
+func duplicateCaptureRevisionPairsSQL(excludedRepoCount int) string {
+	filter := ""
+	if excludedRepoCount > 0 {
+		filter = "a.repo_id NOT IN (" + questionMarks(excludedRepoCount) + ") AND "
+	}
+	return strings.Replace(duplicateCaptureRevisionPairsSQLTemplate, "{{REPO_FILTER}}", filter, 1)
+}
+
+func compactDuplicateCaptureRevisions(tx *sql.Tx) (int, error) {
+	if _, err := tx.Exec(`CREATE TEMP TABLE IF NOT EXISTS prune_duplicate_revisions (
+		delete_id TEXT PRIMARY KEY,
+		keep_id TEXT NOT NULL
+	)`); err != nil {
+		return 0, fmt.Errorf("create duplicate revision work table: %w", err)
+	}
+	if _, err := tx.Exec("DELETE FROM prune_duplicate_revisions"); err != nil {
+		return 0, fmt.Errorf("reset duplicate revision work table: %w", err)
+	}
+	if _, err := tx.Exec("INSERT INTO prune_duplicate_revisions (delete_id, keep_id) " + duplicateCaptureRevisionPairsSQL(0)); err != nil {
+		return 0, fmt.Errorf("select duplicate capture revisions: %w", err)
+	}
+	var count int
+	if err := tx.QueryRow("SELECT COUNT(*) FROM prune_duplicate_revisions").Scan(&count); err != nil {
+		return 0, fmt.Errorf("count duplicate capture revisions: %w", err)
+	}
+	if count == 0 {
+		return 0, nil
+	}
+	for _, table := range []string{"artifact_todos", "artifact_criteria", "artifact_sections"} {
+		if _, err := tx.Exec(`UPDATE ` + table + `
+			SET revision_id = (SELECT keep_id FROM prune_duplicate_revisions WHERE delete_id = revision_id)
+			WHERE revision_id IN (SELECT delete_id FROM prune_duplicate_revisions)`); err != nil {
+			return 0, fmt.Errorf("remap %s duplicate revisions: %w", table, err)
+		}
+	}
+	if _, err := tx.Exec(`DELETE FROM artifact_revisions
+		WHERE id IN (SELECT delete_id FROM prune_duplicate_revisions)`); err != nil {
+		return 0, fmt.Errorf("delete duplicate capture revisions: %w", err)
+	}
+	return count, nil
+}
+
+func emitPruneProgress(progress func(PruneProgress), phase string) {
+	if progress != nil {
+		progress(PruneProgress{Phase: phase})
+	}
 }
 
 func deleteRepositories(tx *sql.Tx, repoIDs []string) error {
@@ -187,6 +287,20 @@ func deleteRepositories(tx *sql.Tx, repoIDs []string) error {
 			  AND s.repo_id NOT IN (SELECT id FROM prune_repo_ids)
 		  )`); err != nil {
 		return fmt.Errorf("repair legacy artifact ownership: %w", err)
+	}
+	// A surviving artifact can also carry a source row written under a stale
+	// repository ID. Preserve that evidence and normalize it to the artifact's
+	// surviving owner before deleting repository-scoped rows.
+	if _, err := tx.Exec(`
+		UPDATE sources AS s
+		SET repo_id = (SELECT a.repo_id FROM artifacts a WHERE a.id = s.artifact_id)
+		WHERE s.repo_id IN (SELECT id FROM prune_repo_ids)
+		  AND EXISTS (
+			SELECT 1 FROM artifacts a
+			WHERE a.id = s.artifact_id
+			  AND a.repo_id NOT IN (SELECT id FROM prune_repo_ids)
+		  )`); err != nil {
+		return fmt.Errorf("repair legacy source ownership: %w", err)
 	}
 	if _, err := tx.Exec(`CREATE TEMP TABLE IF NOT EXISTS prune_artifact_ids (id TEXT PRIMARY KEY)`); err != nil {
 		return err

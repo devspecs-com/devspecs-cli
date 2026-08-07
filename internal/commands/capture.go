@@ -13,6 +13,7 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/todoparse"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
 	"github.com/devspecs-com/devspecs-cli/internal/repo"
@@ -127,41 +128,38 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 	}
 
 	if existingArtID != "" {
-		// Update existing artifact
 		contentHash := hashBody(art.Body)
-		revID := ids.NewWithPrefix("rev_")
-		exStr, err := extractedJSONString(art.Extracted)
-		if err != nil {
+		var currentRevisionID, currentContentHash string
+		if err := db.QueryRow(`
+			SELECT COALESCE(a.current_revision_id, ''), COALESCE(r.content_hash, '')
+			FROM artifacts a
+			LEFT JOIN artifact_revisions r ON r.id = a.current_revision_id
+			WHERE a.id = ?`, existingArtID).Scan(&currentRevisionID, &currentContentHash); err != nil {
+			return fmt.Errorf("read current capture revision: %w", err)
+		}
+
+		revID := currentRevisionID
+		if revID == "" || currentContentHash != contentHash {
+			revID = ids.NewWithPrefix("rev_")
+			exStr, err := extractedJSONString(art.Extracted)
+			if err != nil {
+				return err
+			}
+			if err := db.InsertRevisionDirect(revID, existingArtID, contentHash, art.Body, exStr, now); err != nil {
+				return fmt.Errorf("insert capture revision: %w", err)
+			}
+		}
+		if _, err := db.Exec(`UPDATE artifacts
+			SET title = ?, kind = ?, subtype = ?, status = ?, current_revision_id = ?, updated_at = ?, last_observed_at = ?
+			WHERE id = ?`, art.Title, art.Kind, art.Subtype, art.Status, revID, now, now, existingArtID); err != nil {
+			return fmt.Errorf("update captured artifact: %w", err)
+		}
+		if err := replaceCaptureChecklists(db, ids, existingArtID, revID, pr, now); err != nil {
 			return err
 		}
-		db.InsertRevisionDirect(revID, existingArtID, contentHash, art.Body, exStr, now)
-		db.UpdateArtifactStatus(existingArtID, art.Status, now)
-		db.Exec("UPDATE artifacts SET title = ?, kind = ?, subtype = ?, current_revision_id = ?, updated_at = ?, last_observed_at = ? WHERE id = ?",
-			art.Title, art.Kind, art.Subtype, revID, now, now, existingArtID)
-
-		// Replace todos and criteria
-		db.Exec("DELETE FROM artifact_todos WHERE artifact_id = ?", existingArtID)
-		for _, td := range pr.Todos {
-			todoID := ids.NewWithPrefix("todo_")
-			done := 0
-			if td.Done {
-				done = 1
-			}
-			db.Exec("INSERT INTO artifact_todos (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-				todoID, existingArtID, revID, td.Ordinal, td.Text, done, td.SourceFile, td.SourceLine, now)
+		if err := db.IndexArtifactFTS(existingArtID, art.Title, art.Body, relPath); err != nil {
+			return fmt.Errorf("update capture search index: %w", err)
 		}
-		db.Exec("DELETE FROM artifact_criteria WHERE artifact_id = ?", existingArtID)
-		for _, cr := range pr.Criteria {
-			critID := ids.NewWithPrefix("crit_")
-			done := 0
-			if cr.Done {
-				done = 1
-			}
-			db.Exec("INSERT INTO artifact_criteria (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, criteria_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-				critID, existingArtID, revID, cr.Ordinal, cr.Text, done, cr.SourceFile, cr.SourceLine, cr.CriteriaKind, now)
-		}
-
-		db.IndexArtifactFTS(existingArtID, art.Title, art.Body, relPath)
 		return outputCapture(cmd, existingArtID, relPath, asJSON)
 	}
 
@@ -203,6 +201,36 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 
 	db.IndexArtifactFTS(artifactID, art.Title, art.Body, relPath)
 	return outputCapture(cmd, artifactID, relPath, asJSON)
+}
+
+func replaceCaptureChecklists(db *store.DB, ids *idgen.Factory, artifactID, revisionID string, pr todoparse.ParseResult, now string) error {
+	if _, err := db.Exec("DELETE FROM artifact_todos WHERE artifact_id = ?", artifactID); err != nil {
+		return fmt.Errorf("replace capture todos: %w", err)
+	}
+	for _, td := range pr.Todos {
+		done := 0
+		if td.Done {
+			done = 1
+		}
+		if _, err := db.Exec("INSERT INTO artifact_todos (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			ids.NewWithPrefix("todo_"), artifactID, revisionID, td.Ordinal, td.Text, done, td.SourceFile, td.SourceLine, now); err != nil {
+			return fmt.Errorf("insert capture todo: %w", err)
+		}
+	}
+	if _, err := db.Exec("DELETE FROM artifact_criteria WHERE artifact_id = ?", artifactID); err != nil {
+		return fmt.Errorf("replace capture criteria: %w", err)
+	}
+	for _, cr := range pr.Criteria {
+		done := 0
+		if cr.Done {
+			done = 1
+		}
+		if _, err := db.Exec("INSERT INTO artifact_criteria (id, artifact_id, revision_id, ordinal, text, done, source_file, source_line, criteria_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			ids.NewWithPrefix("crit_"), artifactID, revisionID, cr.Ordinal, cr.Text, done, cr.SourceFile, cr.SourceLine, cr.CriteriaKind, now); err != nil {
+			return fmt.Errorf("insert capture criterion: %w", err)
+		}
+	}
+	return nil
 }
 
 func extractedJSONString(m map[string]any) (string, error) {
