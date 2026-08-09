@@ -40,6 +40,18 @@ work on `ds recent`, `ds map`, and substrate consumers such as `ds find` and
 result-safe flags where appropriate, normalizes local repo paths out of stdout,
 and compares result output against per-profile goldens or baseline binaries.
 
+### Pull Request Smoke Gate
+
+Every pull request to `main` runs the tracked public smoke-5 gate in
+`.github/workflows/activation-smoke.yml`. Its manifest and reviewed goldens are
+under `testdata/activation/smoke-5/`. The gate clones five public repositories
+at pinned commits with full history, runs cold `ds recent --max-areas 5`, and
+requires exact normalized output parity. Failed-run metadata is uploaded as the
+`activation-smoke-5` workflow artifact.
+
+This is a fast first-run quality guard, not broad performance evidence. Review
+intentional result changes before refreshing its goldens.
+
 ## Canonical Regression Set Registry
 
 Local/private activation work keeps a discoverability registry at

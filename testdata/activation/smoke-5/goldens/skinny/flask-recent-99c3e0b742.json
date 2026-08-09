@@ -1,0 +1,188 @@
+{
+  "schema": "devspecs.map.recent.v1",
+  "repo": {
+    "name": "flask",
+    "path": "<REPO_ROOT>",
+    "confidence": "medium"
+  },
+  "topics": [
+    {
+      "label": "Examples Pyproject Celery",
+      "query": "examples pyproject celery",
+      "commit_count": 1,
+      "file_count": 12,
+      "evidence_counts": {
+        "config": 6,
+        "source": 6
+      },
+      "key_paths": [
+        "examples/celery/pyproject.toml",
+        "examples/celery/src/task_app/__init__.py",
+        "examples/javascript/js_example/__init__.py",
+        "examples/javascript/pyproject.toml"
+      ],
+      "boundary_label": "Celery",
+      "boundary_role": "product_capability",
+      "boundary_paths": [
+        "examples/celery/**",
+        "examples/celery/src/task_app/**",
+        "examples/celery/src/task_app/templates/**"
+      ],
+      "quality_signals": [
+        "source_test_support",
+        "boundary_support",
+        "useful_boundary"
+      ],
+      "recent_signals": [
+        {
+          "sha": "ff6fa22",
+          "subject": "update dependencies"
+        }
+      ],
+      "try": "ds find \"examples pyproject celery\"",
+      "score": 130
+    },
+    {
+      "label": "Case Insensitive Comparison",
+      "query": "case insensitive comparison",
+      "commit_count": 1,
+      "file_count": 2,
+      "evidence_counts": {
+        "doc": 1,
+        "source": 1
+      },
+      "key_paths": [
+        "src/flask/sansio/app.py",
+        "CHANGES.rst"
+      ],
+      "boundary_label": "Flask/Sansio",
+      "boundary_role": "product_capability",
+      "boundary_paths": [
+        "Flask/Sansio/**",
+        "src/flask/sansio/**"
+      ],
+      "quality_signals": [
+        "source_test_support",
+        "boundary_support",
+        "useful_boundary"
+      ],
+      "recent_signals": [
+        {
+          "sha": "9368fb3",
+          "subject": "case-insensitive comparison"
+        }
+      ],
+      "try": "ds find \"case insensitive comparison\"",
+      "score": 74
+    },
+    {
+      "label": "All Teardown Callbacks Are",
+      "query": "all teardown callbacks are",
+      "commit_count": 1,
+      "file_count": 10,
+      "evidence_counts": {
+        "doc": 2,
+        "source": 3,
+        "test": 5
+      },
+      "key_paths": [
+        "src/flask/app.py",
+        "src/flask/ctx.py",
+        "src/flask/helpers.py",
+        "tests/test_appctx.py"
+      ],
+      "boundary_label": "Package Installation \u0026 Virtual Environments",
+      "boundary_role": "handoff_unsafe",
+      "boundary_paths": [
+        "docs/tutorial/**",
+        "tests/**",
+        "docs/**"
+      ],
+      "quality_signals": [
+        "source_test_support",
+        "boundary_support"
+      ],
+      "recent_signals": [
+        {
+          "sha": "fbb6f0b",
+          "subject": "all teardown callbacks are called despite errors"
+        }
+      ],
+      "try": "ds find \"all teardown callbacks are\"",
+      "score": 68
+    },
+    {
+      "label": "Document Headers Must Be",
+      "query": "document headers must be",
+      "commit_count": 1,
+      "file_count": 4,
+      "evidence_counts": {
+        "doc": 2,
+        "source": 2
+      },
+      "key_paths": [
+        "src/flask/ctx.py",
+        "src/flask/helpers.py",
+        "docs/patterns/streaming.rst",
+        "docs/templating.rst"
+      ],
+      "boundary_label": "Registry, Cache \u0026 Artifact Fetching",
+      "boundary_role": "handoff_unsafe",
+      "boundary_paths": [
+        "docs/deploying/**",
+        "docs/patterns/**",
+        "docs/tutorial/**"
+      ],
+      "quality_signals": [
+        "source_test_support",
+        "boundary_support"
+      ],
+      "recent_signals": [
+        {
+          "sha": "a29f88c",
+          "subject": "document that headers must be set before streaming"
+        }
+      ],
+      "try": "ds find \"document headers must be\"",
+      "score": 68
+    },
+    {
+      "label": "Replace Private Monkeypatch API",
+      "query": "replace private monkeypatch api",
+      "commit_count": 1,
+      "file_count": 2,
+      "evidence_counts": {
+        "test": 2
+      },
+      "key_paths": [
+        "tests/conftest.py",
+        "tests/test_cli.py"
+      ],
+      "boundary_label": "Package Installation \u0026 Virtual Environments",
+      "boundary_role": "handoff_unsafe",
+      "boundary_paths": [
+        "docs/tutorial/**",
+        "tests/**",
+        "docs/**"
+      ],
+      "quality_signals": [
+        "source_test_support",
+        "boundary_support"
+      ],
+      "recent_signals": [
+        {
+          "sha": "5ce121d",
+          "subject": "Replace the use of private `monkeypatch` fixture API"
+        }
+      ],
+      "try": "ds find \"replace private monkeypatch api\"",
+      "score": 63
+    }
+  ],
+  "diagnostics": {
+    "commits_read": 40,
+    "commits_skipped": 18,
+    "raw_topic_count": 20,
+    "matched_topic_count": 5
+  }
+}

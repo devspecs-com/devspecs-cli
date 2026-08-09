@@ -1,0 +1,64 @@
+name: Activation Smoke
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: activation-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  recent-quality:
+    name: Cold recent quality (smoke-5)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SMOKE_MANIFEST: testdata/activation/smoke-5/manifest.json
+      SMOKE_GOLDENS: testdata/activation/smoke-5/goldens
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Prepare pinned full-history repositories
+        env:
+          DEVSPECS_SMOKE_ROOT: ${{ runner.temp }}/devspecs-smoke-5
+        run: go run ./scripts/ci/prepare_activation_smoke.go "$SMOKE_MANIFEST"
+
+      - name: Build candidate
+        run: go build -o "${{ runner.temp }}/ds" ./cmd/ds
+
+      - name: Run cold recent quality gate
+        shell: bash
+        env:
+          DEVSPECS_SMOKE_ROOT: ${{ runner.temp }}/devspecs-smoke-5
+          SMOKE_RESULTS: ${{ runner.temp }}/devspecs-smoke-5-results
+        run: |
+          set -o pipefail
+          "${{ runner.temp }}/ds" eval "$SMOKE_MANIFEST" \
+            --activation-matrix \
+            --activation-profile skinny \
+            --activation-clone-mode full \
+            --activation-index-state cold \
+            --activation-golden-dir "$SMOKE_GOLDENS" \
+            --activation-result-dir "$SMOKE_RESULTS" \
+            --json | tee "$SMOKE_RESULTS.stdout.json"
+
+      - name: Upload activation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: activation-smoke-5
+          path: |
+            ${{ runner.temp }}/devspecs-smoke-5-results
+            ${{ runner.temp }}/devspecs-smoke-5-results.stdout.json
+          if-no-files-found: warn

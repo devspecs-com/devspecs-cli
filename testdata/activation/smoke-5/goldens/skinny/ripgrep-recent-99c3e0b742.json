@@ -1,0 +1,205 @@
+{
+  "schema": "devspecs.map.recent.v1",
+  "repo": {
+    "name": "ripgrep",
+    "path": "<REPO_ROOT>",
+    "confidence": "medium"
+  },
+  "topics": [
+    {
+      "label": "Cargo Crates",
+      "query": "cargo crates",
+      "commit_count": 6,
+      "file_count": 2,
+      "evidence_counts": {
+        "config": 1,
+        "source": 1
+      },
+      "key_paths": [
+        "Cargo.lock",
+        "crates/ignore/Cargo.toml"
+      ],
+      "boundary_label": "Crates",
+      "boundary_role": "product_capability",
+      "boundary_paths": [
+        "crates/cli/**",
+        "crates/cli/src/**",
+        "crates/core/flags/complete/**"
+      ],
+      "quality_signals": [
+        "source_test_support",
+        "boundary_support",
+        "useful_boundary"
+      ],
+      "recent_signals": [
+        {
+          "sha": "3fce3b5",
+          "subject": "ignore-0.4.33"
+        },
+        {
+          "sha": "5ed408e",
+          "subject": "ignore-0.4.32"
+        },
+        {
+          "sha": "59e318f",
+          "subject": "ignore-0.4.31"
+        }
+      ],
+      "try": "ds find \"cargo crates\"",
+      "score": 170
+    },
+    {
+      "label": "Time Unstable",
+      "query": "time unstable",
+      "commit_count": 1,
+      "file_count": 11,
+      "evidence_counts": {
+        "config": 2,
+        "source": 9
+      },
+      "key_paths": [
+        "crates/core/flags/defs.rs",
+        "crates/core/flags/doc/help.rs",
+        "crates/core/flags/doc/man.rs",
+        "crates/core/flags/doc/template.long.help"
+      ],
+      "boundary_label": "Crates",
+      "boundary_role": "product_capability",
+      "boundary_paths": [
+        "crates/cli/**",
+        "crates/cli/src/**",
+        "crates/core/flags/complete/**"
+      ],
+      "quality_signals": [
+        "source_test_support",
+        "boundary_support",
+        "useful_boundary"
+      ],
+      "recent_signals": [
+        {
+          "sha": "d958105",
+          "subject": "cargo: add new build-time `unstable-index` feature"
+        }
+      ],
+      "try": "ds find \"time unstable\"",
+      "score": 158
+    },
+    {
+      "label": "Disable Many Flags Indexing",
+      "query": "disable many flags indexing",
+      "commit_count": 1,
+      "file_count": 5,
+      "evidence_counts": {
+        "source": 2,
+        "test": 3
+      },
+      "key_paths": [
+        "crates/core/flags/defs.rs",
+        "crates/core/flags/hiargs.rs",
+        "tests/index/disallowed.rs",
+        "tests/index/mod.rs"
+      ],
+      "boundary_label": "Crates",
+      "boundary_role": "product_capability",
+      "boundary_paths": [
+        "crates/cli/**",
+        "crates/cli/src/**",
+        "crates/core/flags/complete/**"
+      ],
+      "quality_signals": [
+        "source_test_support",
+        "boundary_support",
+        "useful_boundary"
+      ],
+      "recent_signals": [
+        {
+          "sha": "2ed0c00",
+          "subject": "flags: disable many flags when indexing is enabled"
+        }
+      ],
+      "try": "ds find \"disable many flags indexing\"",
+      "score": 102
+    },
+    {
+      "label": "Globset Cargo Crates",
+      "query": "globset cargo crates",
+      "commit_count": 2,
+      "file_count": 2,
+      "evidence_counts": {
+        "config": 1,
+        "source": 1
+      },
+      "key_paths": [
+        "Cargo.lock",
+        "crates/globset/Cargo.toml"
+      ],
+      "boundary_label": "Crates",
+      "boundary_role": "product_capability",
+      "boundary_paths": [
+        "crates/cli/**",
+        "crates/cli/src/**",
+        "crates/core/flags/complete/**"
+      ],
+      "quality_signals": [
+        "source_test_support",
+        "boundary_support",
+        "useful_boundary"
+      ],
+      "recent_signals": [
+        {
+          "sha": "5055264",
+          "subject": "globset-0.4.20"
+        },
+        {
+          "sha": "28c687d",
+          "subject": "globset-0.4.19"
+        }
+      ],
+      "try": "ds find \"globset cargo crates\"",
+      "score": 86
+    },
+    {
+      "label": "Grep Crate",
+      "query": "grep crate",
+      "commit_count": 1,
+      "file_count": 8,
+      "evidence_counts": {
+        "config": 2,
+        "doc": 1,
+        "source": 5
+      },
+      "key_paths": [
+        "Cargo.lock",
+        "crates/index/LICENSE-MIT",
+        "crates/index/UNLICENSE",
+        "crates/index/src/lib.rs"
+      ],
+      "boundary_label": "Crates",
+      "boundary_role": "product_capability",
+      "boundary_paths": [
+        "crates/cli/**",
+        "crates/cli/src/**",
+        "crates/core/flags/complete/**"
+      ],
+      "quality_signals": [
+        "source_test_support",
+        "boundary_support",
+        "useful_boundary"
+      ],
+      "recent_signals": [
+        {
+          "sha": "be739c7",
+          "subject": "index: add grep-index crate"
+        }
+      ],
+      "try": "ds find \"grep crate\"",
+      "score": 82
+    }
+  ],
+  "diagnostics": {
+    "commits_read": 40,
+    "commits_skipped": 3,
+    "raw_topic_count": 30,
+    "matched_topic_count": 5
+  }
+}

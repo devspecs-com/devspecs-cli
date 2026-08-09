@@ -1,0 +1,169 @@
+{
+  "schema": "devspecs.map.recent.v1",
+  "repo": {
+    "name": "fastapi",
+    "path": "<REPO_ROOT>",
+    "confidence": "medium"
+  },
+  "topics": [
+    {
+      "label": "App Frontend Automatic Cookie",
+      "query": "app frontend automatic cookie",
+      "commit_count": 1,
+      "file_count": 3,
+      "evidence_counts": {
+        "doc": 1,
+        "source": 1,
+        "test": 1
+      },
+      "key_paths": [
+        "fastapi/routing.py",
+        "tests/test_frontend.py",
+        "docs/en/docs/tutorial/frontend.md"
+      ],
+      "boundary_label": "Package Installation \u0026 Virtual Environments",
+      "boundary_role": "handoff_unsafe",
+      "boundary_paths": [
+        "docs/de/docs/advanced/**",
+        "docs/de/docs/**",
+        "docs/en/docs/advanced/**"
+      ],
+      "quality_signals": [
+        "source_test_support",
+        "boundary_support"
+      ],
+      "recent_signals": [
+        {
+          "sha": "319be50",
+          "subject": "✨ Support dependencies in `app.frontend()`, e.g. for automatic cookie authentication for the frontend (#15908)"
+        }
+      ],
+      "try": "ds find \"app frontend automatic cookie\"",
+      "score": 60
+    },
+    {
+      "label": "Sponsors Updates",
+      "query": "sponsors updates",
+      "commit_count": 2,
+      "file_count": 4,
+      "evidence_counts": {
+        "doc": 6
+      },
+      "key_paths": [
+        "README.md",
+        "docs/en/data/sponsors.yml",
+        "docs/en/data/sponsors_badge.yml",
+        "docs/en/docs/img/sponsors/tutorcruncher.png"
+      ],
+      "topic_type": "maintenance",
+      "quality_signals": [
+        "maintenance:sponsors",
+        "boundary_support",
+        "maintenance",
+        "maintenance_demoted",
+        "boundary_omitted_maintenance"
+      ],
+      "recent_signals": [
+        {
+          "sha": "4cafad5",
+          "subject": "🔧 Update sponsors: add TutorCruncher (#15947)"
+        },
+        {
+          "sha": "28c6fa1",
+          "subject": "🔧 Update sponsors: remove RapidProxy (#15929)"
+        }
+      ],
+      "try": "ds find \"sponsors updates\"",
+      "score": -36
+    },
+    {
+      "label": "Latest Changes Workflow",
+      "query": "latest changes workflow",
+      "commit_count": 2,
+      "file_count": 1,
+      "evidence_counts": {
+        "config": 2
+      },
+      "key_paths": [
+        ".github/workflows/latest-changes.yml"
+      ],
+      "topic_type": "maintenance",
+      "quality_signals": [
+        "maintenance:release-docs",
+        "maintenance",
+        "maintenance_demoted",
+        "boundary_omitted_maintenance"
+      ],
+      "recent_signals": [
+        {
+          "sha": "a52b4b9",
+          "subject": "⬆️ Update latest-changes to 0.6.1 (#15926)"
+        },
+        {
+          "sha": "f500ef1",
+          "subject": "👷 Fix latest-changes checkout target (#15932)"
+        }
+      ],
+      "try": "ds find \"latest changes workflow\"",
+      "score": -60
+    },
+    {
+      "label": "Llm Prompt Hindi",
+      "query": "llm prompt hindi",
+      "commit_count": 1,
+      "file_count": 1,
+      "evidence_counts": {
+        "doc": 1
+      },
+      "key_paths": [
+        "docs/hi/llm-prompt.md"
+      ],
+      "topic_type": "maintenance",
+      "quality_signals": [
+        "maintenance:translation",
+        "maintenance",
+        "maintenance_demoted"
+      ],
+      "recent_signals": [
+        {
+          "sha": "91df2c2",
+          "subject": "🌐 Update `llm-prompt.md` for Hindi (#15810)"
+        }
+      ],
+      "try": "ds find \"llm prompt hindi\"",
+      "score": -64
+    },
+    {
+      "label": "Manager",
+      "query": "manager",
+      "commit_count": 1,
+      "file_count": 1,
+      "evidence_counts": {
+        "config": 1
+      },
+      "key_paths": [
+        ".github/workflows/issue-manager.yml"
+      ],
+      "topic_type": "maintenance",
+      "quality_signals": [
+        "maintenance:workflow",
+        "maintenance",
+        "maintenance_demoted"
+      ],
+      "recent_signals": [
+        {
+          "sha": "9c913b7",
+          "subject": "⬆️ Update issue-manager to 0.8.1 (#15928)"
+        }
+      ],
+      "try": "ds find \"manager\"",
+      "score": -64
+    }
+  ],
+  "diagnostics": {
+    "commits_read": 40,
+    "commits_skipped": 33,
+    "raw_topic_count": 5,
+    "matched_topic_count": 5
+  }
+}
