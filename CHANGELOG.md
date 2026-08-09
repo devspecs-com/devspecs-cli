@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.4.0 - 2026-08-09
+
 - Added `ds task --quick` for compact one-off task workspaces and hid the older
   `ds task quick` form from normal help as compatibility surface.
 - Changed `ds apply` with no target to resolve the unambiguous next slice and
@@ -13,8 +15,6 @@
   and `sync`) from normal help while keeping compatibility paths callable and
   redirecting users toward `ds apply`, `ds task checkpoint`, and
   `ds task refresh`.
-
-## v1.3.1 - 2026-08-07
 
 - Added `ds prune`, with `--dry-run`, JSON output, and explicit `--vacuum`
   compaction, to remove index data for repository roots that no longer exist
