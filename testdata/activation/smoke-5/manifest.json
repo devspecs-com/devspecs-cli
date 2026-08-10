@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "suite_id": "ci-smoke-5-recent-quality",
+  "suite_version": "2026-08-09",
+  "golden_set_version": "v1.4.0-rc1",
+  "repos": [
+    {
+      "id": "fastapi",
+      "path": "${DEVSPECS_SMOKE_ROOT}/fastapi",
+      "url": "https://github.com/fastapi/fastapi.git",
+      "commit_sha": "7cb06f360dd44efac059848df1a9beee7643b018",
+      "clone_mode": "full",
+      "profiles": ["skinny"],
+      "commands": [
+        {"name": "recent", "args": ["--max-areas", "5"]}
+      ]
+    },
+    {
+      "id": "cobra",
+      "path": "${DEVSPECS_SMOKE_ROOT}/cobra",
+      "url": "https://github.com/spf13/cobra.git",
+      "commit_sha": "adbc8813901bba65827259daa8e22ff94ec1f30e",
+      "clone_mode": "full",
+      "profiles": ["skinny"],
+      "commands": [
+        {"name": "recent", "args": ["--max-areas", "5"]}
+      ]
+    },
+    {
+      "id": "ripgrep",
+      "path": "${DEVSPECS_SMOKE_ROOT}/ripgrep",
+      "url": "https://github.com/BurntSushi/ripgrep.git",
+      "commit_sha": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+      "clone_mode": "full",
+      "profiles": ["skinny"],
+      "commands": [
+        {"name": "recent", "args": ["--max-areas", "5"]}
+      ]
+    },
+    {
+      "id": "htmx",
+      "path": "${DEVSPECS_SMOKE_ROOT}/htmx",
+      "url": "https://github.com/bigskysoftware/htmx.git",
+      "commit_sha": "ad56dff71e55d9c717447437b4c942a64575d4b2",
+      "clone_mode": "full",
+      "profiles": ["skinny"],
+      "commands": [
+        {"name": "recent", "args": ["--max-areas", "5"]}
+      ]
+    },
+    {
+      "id": "flask",
+      "path": "${DEVSPECS_SMOKE_ROOT}/flask",
+      "url": "https://github.com/pallets/flask.git",
+      "commit_sha": "6a2f545bfd8ed31e19066a299296917e034aca58",
+      "clone_mode": "full",
+      "profiles": ["skinny"],
+      "commands": [
+        {"name": "recent", "args": ["--max-areas", "5"]}
+      ]
+    }
+  ]
+}

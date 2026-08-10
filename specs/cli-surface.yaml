@@ -61,6 +61,9 @@ tree:
       scan:
         status: maintenance
         purpose: Rescan repository intent docs, source, tests, and git evidence with progress and timing diagnostics.
+      prune:
+        status: maintenance
+        purpose: Remove missing-repository data and redundant capture history, and optionally compact the SQLite database.
       config:
         status: maintenance
         purpose: Inspect or edit DevSpecs discovery config.

@@ -18,13 +18,58 @@ func TestOpen_CreatesDB(t *testing.T) {
 	}
 	defer db.Close()
 
-	tables := []string{"schema_migrations", "repos", "artifacts", "artifact_revisions", "sources", "links", "artifact_todos", "artifact_criteria", "artifact_tags", "artifact_sections", "artifact_sections_fts", "concepts", "concept_mentions", "artifact_edges", "git_commits", "git_commit_files", "source_manifest", "source_manifest_symbols", "source_manifest_tests", "source_manifest_imports", "source_manifest_fts", "task_checkpoint_facts"}
+	tables := []string{"schema_migrations", "repos", "repo_roots", "artifacts", "artifact_revisions", "sources", "links", "artifact_todos", "artifact_criteria", "artifact_tags", "artifact_sections", "artifact_sections_fts", "concepts", "concept_mentions", "artifact_edges", "git_commits", "git_commit_files", "source_manifest", "source_manifest_symbols", "source_manifest_tests", "source_manifest_imports", "source_manifest_fts", "task_checkpoint_facts"}
 	for _, table := range tables {
 		var name string
 		err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name)
 		if err != nil {
 			t.Errorf("table %q not found: %v", table, err)
 		}
+	}
+	if !indexExists(t, db, "idx_repos_git_identity") {
+		t.Fatal("unique repository Git identity index not found")
+	}
+	for _, name := range []string{"idx_sources_artifact_repo", "idx_sources_repo"} {
+		if !indexExists(t, db, name) {
+			t.Fatalf("source ownership index %s not found", name)
+		}
+	}
+}
+
+func TestMigrate_V14ToV15BackfillsRepositoryRoots(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "devspecs.db")
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := "2026-08-06T00:00:00Z"
+	if _, err := db.Exec(`INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('legacy', '/tmp/legacy', ?, ?)`, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TRIGGER repos_record_initial_root`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TABLE repo_roots`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE schema_migrations SET version = 14`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var repoID string
+	if err := db.QueryRow(`SELECT repo_id FROM repo_roots WHERE root_path = '/tmp/legacy'`).Scan(&repoID); err != nil {
+		t.Fatal(err)
+	}
+	if repoID != "legacy" {
+		t.Fatalf("backfilled repo id = %q", repoID)
 	}
 }
 
@@ -57,6 +102,33 @@ func TestMigrate_Idempotent(t *testing.T) {
 	}
 
 	db.Close()
+}
+
+func TestMigrate_RecreatesSourceOwnershipIndexesForExistingV15(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "devspecs.db")
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"idx_sources_artifact_repo", "idx_sources_repo"} {
+		if _, err := db.Exec("DROP INDEX " + name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, name := range []string{"idx_sources_artifact_repo", "idx_sources_repo"} {
+		if !indexExists(t, db, name) {
+			t.Fatalf("existing v15 index did not recreate %s", name)
+		}
+	}
 }
 
 func TestMigrate_V12ToV13DropsSourceManifestCompactionIndexes(t *testing.T) {

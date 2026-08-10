@@ -31,7 +31,7 @@ func appendArtifactFilterClauses(joins *[]string, conditions *[]string, args *[]
 		*joins = append(*joins, "JOIN artifact_tags at ON at.artifact_id = a.id")
 	}
 	if fp.RepoRoot != "" {
-		*conditions = append(*conditions, "r.root_path = ?")
+		*conditions = append(*conditions, RepoRootCondition("r"))
 		*args = append(*args, fp.RepoRoot)
 	}
 	if fp.Branch != "" {

@@ -282,7 +282,7 @@ func (db *DB) SearchSourceManifestFTS(match string, fp FilterParams, limit int) 
 	}
 	conditions = append(conditions, "source_manifest_fts MATCH ?")
 	if fp.RepoRoot != "" {
-		conditions = append(conditions, "r.root_path = ?")
+		conditions = append(conditions, RepoRootCondition("r"))
 		args = append(args, fp.RepoRoot)
 	}
 	if fp.Branch != "" {

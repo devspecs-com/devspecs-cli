@@ -3,7 +3,6 @@ package commands
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +20,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
 	"github.com/devspecs-com/devspecs-cli/internal/indexquery"
+	"github.com/devspecs-com/devspecs-cli/internal/repo"
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/spf13/cobra"
@@ -3032,15 +3032,11 @@ func recentTaskCheckpointFacts(db *store.DB, repoRoot string, limit int) []store
 	if db == nil || strings.TrimSpace(repoRoot) == "" {
 		return nil
 	}
-	var repoID string
-	err := db.QueryRow("SELECT id FROM repos WHERE root_path = ?", repoRoot).Scan(&repoID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
+	meta := db.GetRepoByRoot(repoRoot)
+	if meta == nil {
 		return nil
 	}
-	facts, err := db.ListRecentTaskCheckpointFacts(repoID, limit)
+	facts, err := db.ListRecentTaskCheckpointFacts(meta.ID, limit)
 	if err != nil {
 		return nil
 	}
@@ -3058,12 +3054,11 @@ func taskCheckpointFactsForTask(repoRoot, taskID string) []store.TaskCheckpointF
 		return nil
 	}
 	defer db.Close()
-	var repoID string
-	err = db.QueryRow("SELECT id FROM repos WHERE root_path = ?", repoRoot).Scan(&repoID)
-	if err != nil {
+	meta := db.GetRepoByRoot(repoRoot)
+	if meta == nil {
 		return nil
 	}
-	facts, err := db.ListTaskCheckpointFacts(repoID, taskID)
+	facts, err := db.ListTaskCheckpointFacts(meta.ID, taskID)
 	if err != nil {
 		return nil
 	}
@@ -5234,17 +5229,18 @@ func indexTaskCheckpointFact(repoRoot string, manifest taskManifest, record task
 }
 
 func ensureTaskFactRepo(db *store.DB, repoRoot, now string) (string, error) {
-	var repoID string
-	err := db.QueryRow("SELECT id FROM repos WHERE root_path = ?", repoRoot).Scan(&repoID)
-	if err == nil {
-		return repoID, nil
-	}
 	ids := idgen.NewFactory()
-	repoID = ids.NewWithPrefix("repo_")
-	if _, err := db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES (?, ?, ?, ?)", repoID, repoRoot, now, now); err != nil {
-		return "", err
+	info := repo.DetectIdentity(repoRoot)
+	if strings.TrimSpace(info.RootPath) == "" {
+		info.RootPath = repoRoot
 	}
-	return repoID, nil
+	return db.ResolveRepo(store.RepositoryIdentity{
+		RootPath:      info.RootPath,
+		RemoteURL:     info.RemoteURL,
+		RootCommit:    info.RootCommit,
+		GitIdentity:   info.GitIdentity,
+		CurrentBranch: info.CurrentBranch,
+	}, ids.NewWithPrefix("repo_"), now)
 }
 
 func marshalTaskFactJSON(value any, fallback string) (string, error) {

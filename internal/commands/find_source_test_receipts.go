@@ -248,7 +248,7 @@ func loadFindSourceTestManifestRows(db *store.DB, fp store.FilterParams) ([]find
 	}
 	conditions = append(conditions, "sm.ignored_reason = ''")
 	if fp.RepoRoot != "" {
-		conditions = append(conditions, "r.root_path = ?")
+		conditions = append(conditions, store.RepoRootCondition("r"))
 		args = append(args, fp.RepoRoot)
 	}
 	if fp.Branch != "" {

@@ -492,10 +492,31 @@ func scanTraversalError(repoRoot string, err error) error {
 }
 
 func liveScanRunOptions(db *store.DB, repoRoot string) (scan.RunOptions, error) {
-	opts := scan.RunOptions{UseTransaction: true}
-	hasArtifacts, err := scanTargetHasArtifacts(db, repoRoot)
-	if err != nil {
-		return opts, err
+	info := repo.Detect(repoRoot)
+	if strings.TrimSpace(info.RootPath) == "" {
+		info.RootPath = repoRoot
+	}
+	opts := scan.RunOptions{UseTransaction: true, RepositoryInfo: &info}
+	meta := db.GetRepoByRoot(repoRoot)
+	var hasArtifacts bool
+	var err error
+	if meta != nil {
+		if info.IsGit && strings.TrimSpace(info.RemoteURL) != "" &&
+			(strings.TrimSpace(meta.GitIdentity) == "" || repo.CanonicalRemoteURL(meta.GitRemoteURL) != repo.CanonicalRemoteURL(info.RemoteURL)) {
+			info = repo.WithIdentity(info)
+			opts.RepositoryInfo = &info
+		}
+		hasArtifacts, err = db.RepoHasArtifacts(meta.ID)
+		if err != nil {
+			return opts, err
+		}
+	} else {
+		info = repo.WithIdentity(info)
+		opts.RepositoryInfo = &info
+		hasArtifacts, _, err = scanTargetHasArtifacts(db, repoRoot, info.GitIdentity)
+		if err != nil {
+			return opts, err
+		}
 	}
 	if !hasArtifacts {
 		opts.FreshIndex = true
@@ -504,15 +525,20 @@ func liveScanRunOptions(db *store.DB, repoRoot string) (scan.RunOptions, error) 
 	return opts, nil
 }
 
-func scanTargetHasArtifacts(db *store.DB, repoRoot string) (bool, error) {
+func scanTargetHasArtifacts(db *store.DB, repoRoot, gitIdentity string) (hasArtifacts, found bool, err error) {
 	if strings.TrimSpace(repoRoot) != "" {
-		count, err := db.CountArtifacts(store.FilterParams{RepoRoot: repoRoot})
-		if err != nil {
-			return false, err
+		repoID, err := db.FindRepoID(repoRoot, gitIdentity)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, false, nil
 		}
-		return count > 0, nil
+		if err != nil {
+			return false, false, err
+		}
+		hasArtifacts, err := db.RepoHasArtifacts(repoID)
+		return hasArtifacts, true, err
 	}
-	return scanIndexHasArtifacts(db)
+	hasArtifacts, err = scanIndexHasArtifacts(db)
+	return hasArtifacts, hasArtifacts, err
 }
 
 func scanIndexHasArtifacts(db *store.DB) (bool, error) {

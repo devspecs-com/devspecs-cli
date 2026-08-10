@@ -1,0 +1,190 @@
+{
+  "schema": "devspecs.map.recent.v1",
+  "repo": {
+    "name": "htmx",
+    "path": "<REPO_ROOT>",
+    "confidence": "medium"
+  },
+  "topics": [
+    {
+      "label": "Www Static Attributes",
+      "query": "www static attributes",
+      "commit_count": 1,
+      "file_count": 6,
+      "evidence_counts": {
+        "source": 2,
+        "test": 4
+      },
+      "key_paths": [
+        "www/static/src/htmx.js",
+        "www/themes/htmx-theme/static/js/htmx.js",
+        "www/static/test/attributes/hx-disabled-elt.js",
+        "www/static/test/attributes/hx-push-url.js"
+      ],
+      "boundary_label": "Www/Static",
+      "boundary_role": "product_capability",
+      "boundary_paths": [
+        "Www/Static/**",
+        "www/static/img/you-cant/**",
+        "www/static/js/**"
+      ],
+      "quality_signals": [
+        "source_test_support",
+        "boundary_support",
+        "useful_boundary"
+      ],
+      "recent_signals": [
+        {
+          "sha": "ebeca09",
+          "subject": "update www"
+        }
+      ],
+      "try": "ds find \"www static attributes\"",
+      "score": 107
+    },
+    {
+      "label": "Prep Www Content Extensions",
+      "query": "prep www content extensions",
+      "commit_count": 1,
+      "file_count": 16,
+      "evidence_counts": {
+        "config": 2,
+        "doc": 11,
+        "source": 3
+      },
+      "key_paths": [
+        "src/htmx.js",
+        "www/static/src/htmx.js",
+        "www/themes/htmx-theme/static/js/htmx.js",
+        "editors/jetbrains/htmx.web-types.json"
+      ],
+      "boundary_label": "Themes",
+      "boundary_role": "horizontal_layer",
+      "boundary_paths": [
+        "www/themes/**",
+        "www/themes/htmx-theme/highlighting/**",
+        "www/themes/htmx-theme/static/css/**"
+      ],
+      "quality_signals": [
+        "source_test_support",
+        "boundary_support"
+      ],
+      "recent_signals": [
+        {
+          "sha": "bdc7d7d",
+          "subject": "2.10 release prep"
+        }
+      ],
+      "try": "ds find \"prep www content extensions\"",
+      "score": 96
+    },
+    {
+      "label": "Remediate Cve",
+      "query": "remediate cve",
+      "commit_count": 1,
+      "file_count": 2,
+      "evidence_counts": {
+        "doc": 1,
+        "source": 1
+      },
+      "key_paths": [
+        "www/content/talk/podcasts.csv",
+        "www/content/CVE-2026-3682-1.md"
+      ],
+      "boundary_label": "Content/Data Model",
+      "boundary_role": "product_capability",
+      "boundary_paths": [
+        "Content/Data Model/**",
+        "test/manual/hxboost_partial_template_parsing/**",
+        "www/content/**"
+      ],
+      "quality_signals": [
+        "source_test_support",
+        "boundary_support",
+        "useful_boundary"
+      ],
+      "recent_signals": [
+        {
+          "sha": "e869b82",
+          "subject": "remediate CVE-2026-3682-1"
+        }
+      ],
+      "try": "ds find \"remediate cve\"",
+      "score": 91
+    },
+    {
+      "label": "History Normalize Path Relative",
+      "query": "history normalize path relative",
+      "commit_count": 1,
+      "file_count": 3,
+      "evidence_counts": {
+        "source": 1,
+        "test": 2
+      },
+      "key_paths": [
+        "src/htmx.js",
+        "test/attributes/hx-push-url.js",
+        "test/attributes/hx-replace-url.js"
+      ],
+      "boundary_label": "Attributes",
+      "boundary_role": "docs_reference",
+      "boundary_paths": [
+        "test/attributes/**",
+        "www/content/attributes/**",
+        "www/static/test/attributes/**"
+      ],
+      "quality_signals": [
+        "source_test_support",
+        "boundary_support"
+      ],
+      "recent_signals": [
+        {
+          "sha": "7c07323",
+          "subject": "fix history normalizePath relative path normalization (#3477)"
+        }
+      ],
+      "try": "ds find \"history normalize path relative\"",
+      "score": 71
+    },
+    {
+      "label": "Empty Class Attribute Left",
+      "query": "empty class attribute left",
+      "commit_count": 1,
+      "file_count": 2,
+      "evidence_counts": {
+        "source": 1,
+        "test": 1
+      },
+      "key_paths": [
+        "src/htmx.js",
+        "test/core/class-cleanup.js"
+      ],
+      "boundary_label": "Extension Surfaces",
+      "boundary_role": "extension_ecosystem",
+      "boundary_paths": [
+        "test/core/**",
+        "www/content/extensions/**",
+        "www/static/test/core/**"
+      ],
+      "quality_signals": [
+        "source_test_support",
+        "boundary_support",
+        "useful_boundary"
+      ],
+      "recent_signals": [
+        {
+          "sha": "bd442b5",
+          "subject": "fix: remove empty class attribute left behind after settle/swap/request (#3715)"
+        }
+      ],
+      "try": "ds find \"empty class attribute left\"",
+      "score": 69
+    }
+  ],
+  "diagnostics": {
+    "commits_read": 40,
+    "commits_skipped": 13,
+    "raw_topic_count": 26,
+    "matched_topic_count": 5
+  }
+}

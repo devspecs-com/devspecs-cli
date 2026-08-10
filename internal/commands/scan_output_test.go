@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -611,6 +612,158 @@ func TestLiveScanRunOptions_FreshIndexForEmptyOrUnindexedRepo(t *testing.T) {
 	}
 	if !opts.SkipAuthoredAtLookup {
 		t.Fatal("fresh repo append should skip per-artifact authored_at lookup")
+	}
+}
+
+func TestScan_GitWorktreeReusesLogicalRepositoryIndex(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available:", err)
+	}
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	t.Setenv("DEVSPECS_TELEMETRY", "0")
+	mainRepo := filepath.Join(tmp, "main")
+	worktree := filepath.Join(tmp, "worktree")
+	runGitCommand(t, "init", "-b", "main", mainRepo)
+	runGitCommand(t, "-C", mainRepo, "remote", "add", "origin", "git@github.com:acme/worktree-fixture.git")
+	if err := os.MkdirAll(filepath.Join(mainRepo, "plans"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mainRepo, "plans", "activation.md"), []byte("# Activation Plan\n\nKeep first-run output useful.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitCommand(t, "-C", mainRepo, "add", ".")
+	runGitCommand(t, "-C", mainRepo, "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-m", "initial")
+
+	first := NewScanCmd()
+	first.SetArgs([]string{"--path", mainRepo, "--quiet"})
+	if err := first.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(home, "devspecs.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var firstArtifacts int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM artifacts`).Scan(&firstArtifacts); err != nil {
+		t.Fatal(err)
+	}
+	if firstArtifacts == 0 {
+		t.Fatal("fixture scan produced no artifacts")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	runGitCommand(t, "-C", mainRepo, "worktree", "add", "-b", "agent-lane", worktree)
+	db, err = store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts, err := liveScanRunOptions(db, worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.FreshIndex {
+		t.Fatal("known logical repository worktree selected fresh-index insertion")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	second := NewScanCmd()
+	second.SetArgs([]string{"--path", worktree, "--quiet"})
+	if err := second.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var repoCount, rootCount, secondArtifacts int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM repos`).Scan(&repoCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM repo_roots`).Scan(&rootCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM artifacts`).Scan(&secondArtifacts); err != nil {
+		t.Fatal(err)
+	}
+	if repoCount != 1 || rootCount != 2 || secondArtifacts != firstArtifacts {
+		t.Fatalf("worktree duplicated index: repos=%d roots=%d artifacts=%d first_artifacts=%d", repoCount, rootCount, secondArtifacts, firstArtifacts)
+	}
+}
+
+func TestScan_BackfillsLegacyRepositoryIdentityOnce(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available:", err)
+	}
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	repoRoot := filepath.Join(tmp, "repo")
+	t.Setenv("DEVSPECS_HOME", home)
+	t.Setenv("DEVSPECS_TELEMETRY", "0")
+	runGitCommand(t, "init", "-b", "main", repoRoot)
+	runGitCommand(t, "-C", repoRoot, "remote", "add", "origin", "https://github.com/acme/legacy-fixture.git")
+	if err := os.WriteFile(filepath.Join(repoRoot, "plan.md"), []byte("# Legacy Plan\n\nBackfill identity.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitCommand(t, "-C", repoRoot, "add", ".")
+	runGitCommand(t, "-C", repoRoot, "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-m", "initial")
+
+	dbPath := filepath.Join(home, "devspecs.db")
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := "2026-08-06T00:00:00Z"
+	if _, err := db.Exec(`INSERT INTO repos (id, root_path, git_remote_url, created_at, updated_at) VALUES ('legacy', ?, ?, ?, ?)`, repoRoot, "https://github.com/acme/legacy-fixture.git", now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO artifacts
+		(id, repo_id, kind, subtype, title, status, created_at, updated_at, last_observed_at, authored_at)
+		VALUES ('legacy-artifact', 'legacy', 'plan', '', 'Legacy', 'draft', ?, ?, ?, ?)`, now, now, now, now); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := liveScanRunOptions(db, repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.FreshIndex || opts.RepositoryInfo == nil || opts.RepositoryInfo.GitIdentity == "" {
+		t.Fatalf("legacy repo was not prepared for identity backfill: %#v", opts.RepositoryInfo)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewScanCmd()
+	cmd.SetArgs([]string{"--path", repoRoot, "--quiet"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var identity string
+	if err := db.QueryRow(`SELECT COALESCE(git_identity, '') FROM repos WHERE id = 'legacy'`).Scan(&identity); err != nil {
+		t.Fatal(err)
+	}
+	if identity == "" {
+		t.Fatal("legacy repository identity was not persisted by scan")
+	}
+}
+
+func runGitCommand(t *testing.T, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
 	}
 }
 
