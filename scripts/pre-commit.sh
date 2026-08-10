@@ -33,6 +33,9 @@ if [ -n "$UNFORMATTED" ]; then
 	exit 1
 fi
 
+echo "pre-commit: direct testing assertion baseline"
+go run ./scripts/ci/check-test-assertions
+
 case "${DEVSPECS_PRECOMMIT_TESTS:-quick}" in
 0 | false | skip | none)
 	echo "pre-commit: skipping go test (DEVSPECS_PRECOMMIT_TESTS=$DEVSPECS_PRECOMMIT_TESTS)"

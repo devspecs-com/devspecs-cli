@@ -1,4 +1,4 @@
-.PHONY: build test lint cover cover-check snapshot clean hooks
+.PHONY: build test test-policy lint cover cover-check snapshot clean hooks
 
 BINARY := ds
 MODULE := github.com/devspecs-com/devspecs-cli
@@ -17,6 +17,9 @@ RACE := $(shell go env CGO_ENABLED 2>/dev/null | grep -q 1 && echo "-race")
 
 test:
 	go test $(RACE) -count=1 ./...
+
+test-policy:
+	go run ./scripts/ci/check-test-assertions
 
 lint:
 	go vet ./...

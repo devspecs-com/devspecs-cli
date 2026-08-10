@@ -1,15 +1,13 @@
 package version
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestDefaults(t *testing.T) {
-	if Version != "dev" {
-		t.Errorf("expected Version=dev, got %q", Version)
-	}
-	if Commit != "none" {
-		t.Errorf("expected Commit=none, got %q", Commit)
-	}
-	if Date != "unknown" {
-		t.Errorf("expected Date=unknown, got %q", Date)
-	}
+	assert.Equal(t, "dev", Version)
+	assert.Equal(t, "none", Commit)
+	assert.Equal(t, "unknown", Date)
 }

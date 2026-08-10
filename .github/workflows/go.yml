@@ -36,6 +36,9 @@ jobs:
             exit 1
           fi
 
+      - name: Test assertion policy
+        run: go run ./scripts/ci/check-test-assertions
+
       - name: Unit tests
         run: go test -v -race -coverprofile coverage.out ./...
 
