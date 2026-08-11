@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAddFindPackScoutBodyEvidenceAnnotatesRescuedRows(t *testing.T) {
@@ -35,15 +37,13 @@ class Animator:
 	got := addFindPackScoutBodyEvidence(repoRoot, "Fix on complete animation callback", pack)
 	item := got.Groups[0].Items[0]
 	joined := strings.Join(item.Reasons, "\n")
-	if !strings.Contains(joined, findPackScoutBodyEvidencePrefix) {
-		t.Fatalf("missing body evidence reason: %#v", item.Reasons)
-	}
-	if got.Metadata["pack_scout_body_evidence_count"] != "1" {
-		t.Fatalf("missing evidence count metadata: %#v", got.Metadata)
-	}
-	if got.Metadata["pack_scout_body_evidence_bytes"] == "" || got.Metadata["pack_scout_body_evidence_bytes"] == "0" {
-		t.Fatalf("missing evidence bytes metadata: %#v", got.Metadata)
-	}
+	assert.Contains(t, joined, findPackScoutBodyEvidencePrefix,
+		"missing body evidence reason: %#v", item.Reasons)
+	assert.Equal(t, "1", got.Metadata["pack_scout_body_evidence_count"],
+		"missing evidence count metadata: %#v", got.Metadata)
+	assert.NotEqual(t, "", got.Metadata["pack_scout_body_evidence_bytes"], "missing evidence bytes metadata: %#v", got.Metadata)
+	assert.NotEqual(t, "0", got.Metadata["pack_scout_body_evidence_bytes"], "missing evidence bytes metadata: %#v", got.Metadata)
+
 }
 
 func TestAddFindPackScoutBodyEvidenceSkipsNonRescuedRows(t *testing.T) {
@@ -63,9 +63,9 @@ func TestAddFindPackScoutBodyEvidenceSkipsNonRescuedRows(t *testing.T) {
 	}
 
 	got := addFindPackScoutBodyEvidence(repoRoot, "Fix on complete animation callback", pack)
-	if got.Metadata != nil {
-		t.Fatalf("non-rescued row should not trigger body evidence: %#v", got.Metadata)
-	}
+	require.Nil(t, got.Metadata,
+		"non-rescued row should not trigger body evidence: %#v", got.Metadata)
+
 }
 
 func TestConcisePackReasonsShowsBoundedBodyEvidence(t *testing.T) {
@@ -74,17 +74,21 @@ func TestConcisePackReasonsShowsBoundedBodyEvidence(t *testing.T) {
 		"bounded body evidence: animation=3, callback=1; bytes=120",
 	})
 	joined := strings.Join(got, "; ")
-	if !strings.Contains(joined, "body evidence: animation=3, callback=1; bytes=120") {
-		t.Fatalf("missing concise body evidence: %#v", got)
-	}
+	assert.Contains(t, joined, "body evidence: animation=3, callback=1; bytes=120",
+		"missing concise body evidence: %#v", got)
+
 }
 
 func mustWriteScoutEvidenceFile(t *testing.T, path, body string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
+	{
+		err := os.MkdirAll(filepath.Dir(path), 0o755)
+		require.NoError(t, err)
 	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
+	{
+
+		err := os.WriteFile(path, []byte(body), 0o644)
+		require.NoError(t, err)
 	}
+
 }

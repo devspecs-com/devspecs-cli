@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDisplayPackReasons_HidesDebugScoreAndGenericTerms(t *testing.T) {
@@ -14,17 +16,16 @@ func TestDisplayPackReasons_HidesDebugScoreAndGenericTerms(t *testing.T) {
 		"query term match in path: activity",
 	}, false)
 	joined := strings.Join(got, "; ")
-	if strings.Contains(joined, "score") {
-		t.Fatalf("display reasons leaked scorer internals: %#v", got)
-	}
-	if strings.Contains(joined, "how") {
-		t.Fatalf("display reasons kept generic task word: %#v", got)
-	}
-	for _, want := range []string{"matched anchors: activity, event, query", "path matched: activity"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("display reasons missing %q: %#v", want, got)
-		}
-	}
+	assert.NotContains(t, joined, "score",
+		"display reasons leaked scorer internals: %#v", got)
+	assert.NotContains(t, joined, "how",
+		"display reasons kept generic task word: %#v", got)
+
+	assert.Contains(t, joined, "matched anchors: activity, event, query",
+		"display reasons missing %q: %#v", "matched anchors: activity, event, query", got)
+	assert.Contains(t, joined, "path matched: activity",
+		"display reasons missing %q: %#v", "path matched: activity", got)
+
 }
 
 func TestDisplayPackReasons_CompactsSectionReceipts(t *testing.T) {
@@ -33,14 +34,14 @@ func TestDisplayPackReasons_CompactsSectionReceipts(t *testing.T) {
 		"indexed section match: Architecture Design > Human Attention Optimization lines 395-418; Architecture Design > The 8 Plugin Slots lines 100-120",
 	}, false)
 	joined := strings.Join(got, "; ")
-	for _, want := range []string{"section focus:", "section evidence:"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("display reasons missing compact section label %q: %#v", want, got)
-		}
-	}
-	if strings.Contains(joined, "section-packed context") || strings.Contains(joined, "indexed section match") {
-		t.Fatalf("display reasons leaked internal section labels: %#v", got)
-	}
+	assert.Contains(t, joined, "section focus:",
+		"display reasons missing compact section label %q: %#v", "section focus:", got)
+	assert.Contains(t, joined, "section evidence:",
+		"display reasons missing compact section label %q: %#v", "section evidence:", got)
+
+	assert.NotContains(t, joined, "section-packed context", "display reasons leaked internal section labels: %#v", got)
+	assert.NotContains(t, joined, "indexed section match", "display reasons leaked internal section labels: %#v", got)
+
 }
 
 func TestConcisePackReasons_AvoidsCollapsedMoreMarkers(t *testing.T) {
@@ -50,16 +51,20 @@ func TestConcisePackReasons_AvoidsCollapsedMoreMarkers(t *testing.T) {
 		"anchor-first ranking: score 24.000; matches server, design, guidelines; fields title, heading, body, path",
 	})
 	joined := strings.Join(got, "; ")
-	for _, notWant := range []string{"+1 more", "section focus", "section evidence", "Table of Contents"} {
-		if strings.Contains(joined, notWant) {
-			t.Fatalf("concise reasons leaked %q: %#v", notWant, got)
-		}
-	}
-	for _, want := range []string{"matched: server, design, guidelines", "sections: Project Structure; Package Naming and Versioning"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("concise reasons missing %q: %#v", want, got)
-		}
-	}
+	assert.NotContains(t, joined, "+1 more",
+		"concise reasons leaked %q: %#v", "+1 more", got)
+	assert.NotContains(t, joined, "section focus",
+		"concise reasons leaked %q: %#v", "section focus", got)
+	assert.NotContains(t, joined, "section evidence",
+		"concise reasons leaked %q: %#v", "section evidence", got)
+	assert.NotContains(t, joined, "Table of Contents",
+		"concise reasons leaked %q: %#v", "Table of Contents", got)
+
+	assert.Contains(t, joined, "matched: server, design, guidelines",
+		"concise reasons missing %q: %#v", "matched: server, design, guidelines", got)
+	assert.Contains(t, joined, "sections: Project Structure; Package Naming and Versioning",
+		"concise reasons missing %q: %#v", "sections: Project Structure; Package Naming and Versioning", got)
+
 }
 
 func TestPackCoverageText_UsesRoleNames(t *testing.T) {
@@ -68,9 +73,9 @@ func TestPackCoverageText_UsesRoleNames(t *testing.T) {
 		HasImplementation:      true,
 		HasBehaviorTests:       true,
 	})
-	if got != "background + implementation + tests" {
-		t.Fatalf("coverage text = %q", got)
-	}
+	assert.Equal(t, "background + implementation + tests", got,
+		"coverage text = %q", got)
+
 }
 
 func TestWriteFindPackTextBoundaryPrimarySummarizesRelatedByDefault(t *testing.T) {
@@ -95,19 +100,19 @@ func TestWriteFindPackTextBoundaryPrimarySummarizesRelatedByDefault(t *testing.T
 		},
 	})
 	var b strings.Builder
-	if err := writeFindPackText(&b, "auth design", "test", pack, nil, nil, false); err != nil {
-		t.Fatal(err)
+	{
+		err := writeFindPackText(&b, "auth design", "test", pack, nil, nil, false)
+		require.NoError(t, err)
 	}
+
 	out := b.String()
-	if !strings.Contains(out, "Primary Auth Design") {
-		t.Fatalf("default boundary output missing primary item:\n%s", out)
-	}
-	if !strings.Contains(out, "Related context kept for verbose/JSON:") {
-		t.Fatalf("default boundary output missing related summary:\n%s", out)
-	}
-	if strings.Contains(out, "   4. d  Related Auth Followup") {
-		t.Fatalf("default boundary output should not print related items as full rows:\n%s", out)
-	}
+	assert.Contains(t, out, "Primary Auth Design",
+		"default boundary output missing primary item:\n%s", out)
+	assert.Contains(t, out, "Related context kept for verbose/JSON:",
+		"default boundary output missing related summary:\n%s", out)
+	assert.NotContains(t, out, "   4. d  Related Auth Followup",
+		"default boundary output should not print related items as full rows:\n%s", out)
+
 }
 
 func TestWriteFindPackTextBoundaryPrimaryVerboseShowsRelatedItems(t *testing.T) {
@@ -131,16 +136,17 @@ func TestWriteFindPackTextBoundaryPrimaryVerboseShowsRelatedItems(t *testing.T) 
 		},
 	})
 	var b strings.Builder
-	if err := writeFindPackText(&b, "auth design", "test", pack, nil, nil, true); err != nil {
-		t.Fatal(err)
+	{
+		err := writeFindPackText(&b, "auth design", "test", pack, nil, nil, true)
+		require.NoError(t, err)
 	}
+
 	out := b.String()
-	if !strings.Contains(out, "Related Auth Notes") {
-		t.Fatalf("verbose boundary output should show related items:\n%s", out)
-	}
-	if strings.Contains(out, "Related context kept for verbose/JSON:") {
-		t.Fatalf("verbose boundary output should keep detailed role groups instead of compact summary:\n%s", out)
-	}
+	assert.Contains(t, out, "Related Auth Notes",
+		"verbose boundary output should show related items:\n%s", out)
+	assert.NotContains(t, out, "Related context kept for verbose/JSON:",
+		"verbose boundary output should keep detailed role groups instead of compact summary:\n%s", out)
+
 }
 
 func TestWriteFindPackTextFamilyPrimarySummarizesRelatedFamilies(t *testing.T) {
@@ -185,22 +191,21 @@ func TestWriteFindPackTextFamilyPrimarySummarizesRelatedFamilies(t *testing.T) {
 	}, "Handle RDS clusters without instances in AWS discovery")
 
 	var b strings.Builder
-	if err := writeFindPackText(&b, "Handle RDS clusters without instances in AWS discovery", "test", pack, nil, nil, false); err != nil {
-		t.Fatal(err)
+	{
+		err := writeFindPackText(&b, "Handle RDS clusters without instances in AWS discovery", "test", pack, nil, nil, false)
+		require.NoError(t, err)
 	}
+
 	out := b.String()
-	if !strings.Contains(out, "Related families kept for verbose/JSON:") {
-		t.Fatalf("family-primary output missing related summary:\n%s", out)
-	}
-	if strings.Contains(out, "exact anchor on appears") {
-		t.Fatalf("family-primary output leaked generic local-language receipt:\n%s", out)
-	}
-	if !strings.Contains(out, "exact anchor rds appears") {
-		t.Fatalf("family-primary output should keep specific local-language receipt:\n%s", out)
-	}
-	if strings.Contains(out, "  10. msk-test") {
-		t.Fatalf("family-primary default output should collapse related rows:\n%s", out)
-	}
+	assert.Contains(t, out, "Related families kept for verbose/JSON:",
+		"family-primary output missing related summary:\n%s", out)
+	assert.NotContains(t, out, "exact anchor on appears",
+		"family-primary output leaked generic local-language receipt:\n%s", out)
+	assert.Contains(t, out, "exact anchor rds appears",
+		"family-primary output should keep specific local-language receipt:\n%s", out)
+	assert.NotContains(t, out, "  10. msk-test",
+		"family-primary default output should collapse related rows:\n%s", out)
+
 }
 
 func TestWriteFindPackTextFamilyPrimaryVerboseShowsRelatedRows(t *testing.T) {
@@ -218,14 +223,15 @@ func TestWriteFindPackTextFamilyPrimaryVerboseShowsRelatedRows(t *testing.T) {
 	}, "Handle RDS clusters without instances in AWS discovery")
 
 	var b strings.Builder
-	if err := writeFindPackText(&b, "Handle RDS clusters without instances in AWS discovery", "test", pack, nil, nil, true); err != nil {
-		t.Fatal(err)
+	{
+		err := writeFindPackText(&b, "Handle RDS clusters without instances in AWS discovery", "test", pack, nil, nil, true)
+		require.NoError(t, err)
 	}
+
 	out := b.String()
-	if !strings.Contains(out, "discovery/aws/ecs.go") {
-		t.Fatalf("verbose family-primary output should show related rows:\n%s", out)
-	}
-	if strings.Contains(out, "Related families kept for verbose/JSON:") {
-		t.Fatalf("verbose family-primary output should show rows instead of summary:\n%s", out)
-	}
+	assert.Contains(t, out, "discovery/aws/ecs.go",
+		"verbose family-primary output should show related rows:\n%s", out)
+	assert.NotContains(t, out, "Related families kept for verbose/JSON:",
+		"verbose family-primary output should show rows instead of summary:\n%s", out)
+
 }

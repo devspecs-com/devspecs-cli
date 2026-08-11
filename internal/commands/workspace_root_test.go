@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWorkspaceRootWarningDetectsMultipleChildProjects(t *testing.T) {
@@ -16,21 +19,20 @@ func TestWorkspaceRootWarningDetectsMultipleChildProjects(t *testing.T) {
 	writeWorkspaceRootTestFile(t, root, "examples/demo/package.json", `{"name":"ignored-example"}`)
 
 	warning := detectWorkspaceRootWarning(root, "scan")
-	if warning == nil {
-		t.Fatal("expected workspace root warning")
-	}
-	if warning.Kind != "workspace_root" {
-		t.Fatalf("kind = %q, want workspace_root", warning.Kind)
-	}
+	require.NotNil(t, warning,
+		"expected workspace root warning")
+	assert.Equal(t, "workspace_root", warning.Kind,
+		"kind = %q, want workspace_root", warning.Kind)
+
 	joined := strings.Join(warning.CandidateRoots, "\n")
-	for _, want := range []string{"apps/api", "apps/web"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("missing candidate %q in %#v", want, warning.CandidateRoots)
-		}
-	}
-	if strings.Contains(joined, "examples/demo") {
-		t.Fatalf("examples should not trigger workspace warning candidates: %#v", warning.CandidateRoots)
-	}
+	assert.Contains(t, joined, "apps/api",
+		"missing candidate %q in %#v", "apps/api", warning.CandidateRoots)
+	assert.Contains(t, joined, "apps/web",
+		"missing candidate %q in %#v", "apps/web", warning.CandidateRoots)
+
+	assert.NotContains(t, joined, "examples/demo",
+		"examples should not trigger workspace warning candidates: %#v", warning.CandidateRoots)
+
 }
 
 func TestWorkspaceRootWarningSuppressesNormalGitRepoRoot(t *testing.T) {
@@ -41,9 +43,9 @@ func TestWorkspaceRootWarningSuppressesNormalGitRepoRoot(t *testing.T) {
 	writeWorkspaceRootTestFile(t, root, "web/package.json", `{"name":"web"}`)
 
 	warning := detectWorkspaceRootWarning(root, "map")
-	if warning != nil {
-		t.Fatalf("normal selected git repo root should not warn: %#v", warning)
-	}
+	require.Nil(t, warning,
+		"normal selected git repo root should not warn: %#v", warning)
+
 }
 
 func TestWorkspaceRootWarningKeepsNestedGitRepoWarning(t *testing.T) {
@@ -53,15 +55,15 @@ func TestWorkspaceRootWarningKeepsNestedGitRepoWarning(t *testing.T) {
 	writeWorkspaceRootTestFile(t, root, "repos/web/.git/HEAD", "ref: refs/heads/main\n")
 
 	warning := detectWorkspaceRootWarning(root, "map")
-	if warning == nil {
-		t.Fatal("expected warning for root containing multiple nested git repos")
-	}
+	require.NotNil(t, warning,
+		"expected warning for root containing multiple nested git repos")
+
 	joined := strings.Join(warning.CandidateRoots, "\n")
-	for _, want := range []string{"repos/api", "repos/web"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("missing nested git candidate %q in %#v", want, warning.CandidateRoots)
-		}
-	}
+	assert.Contains(t, joined, "repos/api",
+		"missing nested git candidate %q in %#v", "repos/api", warning.CandidateRoots)
+	assert.Contains(t, joined, "repos/web",
+		"missing nested git candidate %q in %#v", "repos/web", warning.CandidateRoots)
+
 }
 
 func TestWorkspaceRootGroupingPlanDefersDefaultParallelGrouping(t *testing.T) {
@@ -73,26 +75,24 @@ func TestWorkspaceRootGroupingPlanDefersDefaultParallelGrouping(t *testing.T) {
 	writeWorkspaceRootTestFile(t, root, "examples/demo/package.json", `{"name":"ignored-example"}`)
 
 	plan := evaluateWorkspaceRootGrouping(root, "task")
-	if plan.DefaultAction != workspaceRootActionChooseOneRoot {
-		t.Fatalf("default action = %q, want %q: %#v", plan.DefaultAction, workspaceRootActionChooseOneRoot, plan)
-	}
-	if plan.ParallelGrouping != workspaceRootParallelGroupingDeferDefault {
-		t.Fatalf("parallel grouping = %q, want %q", plan.ParallelGrouping, workspaceRootParallelGroupingDeferDefault)
-	}
+	assert.Equal(t, workspaceRootActionChooseOneRoot, plan.DefaultAction,
+		"default action = %q, want %q: %#v", plan.DefaultAction, workspaceRootActionChooseOneRoot, plan)
+	assert.Equal(t, workspaceRootParallelGroupingDeferDefault, plan.ParallelGrouping,
+		"parallel grouping = %q, want %q", plan.ParallelGrouping, workspaceRootParallelGroupingDeferDefault)
+
 	var got []string
 	for _, group := range plan.CandidateRoots {
 		got = append(got, group.RelPath)
-		if group.AbsPath == "" || !filepath.IsAbs(group.AbsPath) {
-			t.Fatalf("expected absolute group path for %#v", group)
-		}
-		if !strings.Contains(group.SuggestedCommand, "ds task ...") {
-			t.Fatalf("expected task suggested command, got %#v", group)
-		}
+		assert.NotEqual(t, "", group.AbsPath, "expected absolute group path for %#v", group)
+		assert.True(t, filepath.IsAbs(group.AbsPath), "expected absolute group path for %#v", group)
+		assert.Contains(t, group.SuggestedCommand, "ds task ...",
+			"expected task suggested command, got %#v", group)
+
 	}
 	want := []string{"packages/api", "packages/zeta", "services/worker"}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("candidate roots = %#v, want %#v", got, want)
-	}
+	assert.Equal(t, strings.Join(want, "\n"), strings.Join(got, "\n"),
+		"candidate roots = %#v, want %#v", got, want)
+
 }
 
 func TestWorkspaceRootGroupingPlanShowsMergedGroupsAreBroaderThanNarrowedRoot(t *testing.T) {
@@ -106,40 +106,78 @@ func TestWorkspaceRootGroupingPlanShowsMergedGroupsAreBroaderThanNarrowedRoot(t 
 	writeWorkspaceRootTestFile(t, root, "node_modules/pkg/noise.md", "# Noise\n")
 
 	plan := evaluateWorkspaceRootGrouping(root, "scan")
-	if plan.DefaultAction != workspaceRootActionChooseOneRoot {
-		t.Fatalf("default action = %q, want %q", plan.DefaultAction, workspaceRootActionChooseOneRoot)
-	}
+	assert.Equal(t, workspaceRootActionChooseOneRoot, plan.DefaultAction,
+		"default action = %q, want %q", plan.DefaultAction, workspaceRootActionChooseOneRoot)
+
 	apiCost := countWorkspaceRootTestFiles(t, filepath.Join(root, "packages", "api"))
 	mergedCost := 0
 	for _, group := range plan.CandidateRoots {
 		mergedCost += countWorkspaceRootTestFiles(t, group.AbsPath)
 	}
-	if mergedCost <= apiCost {
-		t.Fatalf("merged grouped traversal cost = %d, want greater than narrowed root cost %d", mergedCost, apiCost)
-	}
-	if plan.ParallelGrouping != workspaceRootParallelGroupingDeferDefault {
-		t.Fatalf("parallel grouping = %q, want %q", plan.ParallelGrouping, workspaceRootParallelGroupingDeferDefault)
-	}
+	assert.Greater(t, mergedCost, apiCost,
+		"merged grouped traversal cost = %d, want greater than narrowed root cost %d", mergedCost, apiCost)
+	assert.Equal(t, workspaceRootParallelGroupingDeferDefault, plan.ParallelGrouping,
+		"parallel grouping = %q, want %q", plan.ParallelGrouping, workspaceRootParallelGroupingDeferDefault)
+
 }
 
 func TestWorkspaceRootGroupingPlanCapsDeterministically(t *testing.T) {
 	root := t.TempDir()
-	for _, name := range []string{"zulu", "alpha", "bravo", "echo", "delta", "charlie", "foxtrot"} {
+	{
+		name := "zulu"
+
 		writeWorkspaceRootTestFile(t, root, filepath.ToSlash(filepath.Join("packages", name, "package.json")), `{"name":"test"}`)
+
+	}
+	{
+		name := "alpha"
+
+		writeWorkspaceRootTestFile(t, root, filepath.ToSlash(filepath.Join("packages", name, "package.json")), `{"name":"test"}`)
+
+	}
+	{
+		name := "bravo"
+
+		writeWorkspaceRootTestFile(t, root, filepath.ToSlash(filepath.Join("packages", name, "package.json")), `{"name":"test"}`)
+
+	}
+	{
+		name := "echo"
+
+		writeWorkspaceRootTestFile(t, root, filepath.ToSlash(filepath.Join("packages", name, "package.json")), `{"name":"test"}`)
+
+	}
+	{
+		name := "delta"
+
+		writeWorkspaceRootTestFile(t, root, filepath.ToSlash(filepath.Join("packages", name, "package.json")), `{"name":"test"}`)
+
+	}
+	{
+		name := "charlie"
+
+		writeWorkspaceRootTestFile(t, root, filepath.ToSlash(filepath.Join("packages", name, "package.json")), `{"name":"test"}`)
+
+	}
+	{
+		name := "foxtrot"
+
+		writeWorkspaceRootTestFile(t, root, filepath.ToSlash(filepath.Join("packages", name, "package.json")), `{"name":"test"}`)
+
 	}
 
 	plan := evaluateWorkspaceRootGrouping(root, "scan")
-	if len(plan.CandidateRoots) != workspaceRootCandidateLimit {
-		t.Fatalf("candidate count = %d, want %d: %#v", len(plan.CandidateRoots), workspaceRootCandidateLimit, plan.CandidateRoots)
-	}
+	require.Len(t, plan.CandidateRoots, workspaceRootCandidateLimit,
+		"candidate count = %d, want %d: %#v", len(plan.CandidateRoots), workspaceRootCandidateLimit, plan.CandidateRoots)
+
 	var got []string
 	for _, group := range plan.CandidateRoots {
 		got = append(got, group.RelPath)
 	}
 	want := []string{"packages/alpha", "packages/bravo", "packages/charlie", "packages/delta", "packages/echo", "packages/foxtrot"}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("candidate roots = %#v, want %#v", got, want)
-	}
+	assert.Equal(t, strings.Join(want, "\n"), strings.Join(got, "\n"),
+		"candidate roots = %#v, want %#v", got, want)
+
 }
 
 func TestWorkspaceRootGroupingPlanKeepsNormalGitRepoCurrentRoot(t *testing.T) {
@@ -149,15 +187,13 @@ func TestWorkspaceRootGroupingPlanKeepsNormalGitRepoCurrentRoot(t *testing.T) {
 	writeWorkspaceRootTestFile(t, root, "web/package.json", `{"name":"web"}`)
 
 	plan := evaluateWorkspaceRootGrouping(root, "map")
-	if plan.DefaultAction != workspaceRootActionCurrentRoot {
-		t.Fatalf("default action = %q, want %q: %#v", plan.DefaultAction, workspaceRootActionCurrentRoot, plan)
-	}
-	if plan.ParallelGrouping != workspaceRootParallelGroupingNotNeeded {
-		t.Fatalf("parallel grouping = %q, want %q", plan.ParallelGrouping, workspaceRootParallelGroupingNotNeeded)
-	}
-	if len(plan.CandidateRoots) != 0 {
-		t.Fatalf("normal git repo should not produce grouping roots: %#v", plan.CandidateRoots)
-	}
+	assert.Equal(t, workspaceRootActionCurrentRoot, plan.DefaultAction,
+		"default action = %q, want %q: %#v", plan.DefaultAction, workspaceRootActionCurrentRoot, plan)
+	assert.Equal(t, workspaceRootParallelGroupingNotNeeded, plan.ParallelGrouping,
+		"parallel grouping = %q, want %q", plan.ParallelGrouping, workspaceRootParallelGroupingNotNeeded)
+	require.Empty(t, plan.CandidateRoots,
+		"normal git repo should not produce grouping roots: %#v", plan.CandidateRoots)
+
 }
 
 func TestScanJSONIncludesWorkspaceRootWarning(t *testing.T) {
@@ -173,30 +209,31 @@ func TestScanJSONIncludesWorkspaceRootWarning(t *testing.T) {
 	stderr := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var out struct {
 		RootWarning *struct {
 			Kind           string   `json:"kind"`
 			CandidateRoots []string `json:"candidate_roots"`
 		} `json:"root_warning"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
-		t.Fatalf("scan --json stdout should be valid JSON: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	{
+		err := json.Unmarshal(stdout.Bytes(), &out)
+		require.NoError(t, err,
+			"scan --json stdout should be valid JSON: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
 	}
-	if out.RootWarning == nil {
-		t.Fatalf("expected root_warning in JSON output:\n%s", stdout.String())
-	}
-	if out.RootWarning.Kind != "workspace_root" {
-		t.Fatalf("root_warning.kind = %q", out.RootWarning.Kind)
-	}
-	if !strings.Contains(stderr.String(), "Workspace root warning") {
-		t.Fatalf("expected warning on stderr before scan, got: %s", stderr.String())
-	}
-	if strings.Contains(stdout.String(), "Workspace root warning") {
-		t.Fatalf("warning text leaked into JSON stdout:\n%s", stdout.String())
-	}
+	require.NotNil(t, out.RootWarning,
+		"expected root_warning in JSON output:\n%s", stdout.String())
+	assert.Equal(t, "workspace_root", out.RootWarning.Kind,
+		"root_warning.kind = %q", out.RootWarning.Kind)
+	assert.Contains(t, stderr.String(), "Workspace root warning",
+		"expected warning on stderr before scan, got: %s", stderr.String())
+	assert.NotContains(t, stdout.String(), "Workspace root warning",
+		"warning text leaked into JSON stdout:\n%s", stdout.String())
+
 }
 
 func TestMapJSONAutoScanSuppressesWorkspaceRootWarningStderr(t *testing.T) {
@@ -212,30 +249,37 @@ func TestMapJSONAutoScanSuppressesWorkspaceRootWarningStderr(t *testing.T) {
 	stderr := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("map --json should suppress workspace-root warning stderr, got: %s", stderr.String())
-	}
+	assert.Equal(t, 0, stderr.Len(),
+		"map --json should suppress workspace-root warning stderr, got: %s", stderr.String())
+
 	var payload map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
-		t.Fatalf("map --json stdout should remain valid JSON: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	{
+		err := json.Unmarshal(stdout.Bytes(), &payload)
+		require.NoError(t, err,
+			"map --json stdout should remain valid JSON: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
 	}
-	if strings.Contains(stdout.String(), "Workspace root warning") {
-		t.Fatalf("warning text leaked into JSON stdout:\n%s", stdout.String())
-	}
+	assert.NotContains(t, stdout.String(), "Workspace root warning",
+		"warning text leaked into JSON stdout:\n%s", stdout.String())
+
 }
 
 func writeWorkspaceRootTestFile(t *testing.T, root, rel, body string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
+	{
+		err := os.MkdirAll(filepath.Dir(path), 0o755)
+		require.NoError(t, err)
 	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
+	{
+
+		err := os.WriteFile(path, []byte(body), 0o644)
+		require.NoError(t, err)
 	}
+
 }
 
 func countWorkspaceRootTestFiles(t *testing.T, root string) int {
@@ -254,8 +298,7 @@ func countWorkspaceRootTestFiles(t *testing.T, root string) int {
 		count++
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	return count
 }

@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTraceWorkspaceChangeListsRepoSlicesAndIndexState(t *testing.T) {
@@ -43,41 +44,42 @@ func TestTraceWorkspaceChangeListsRepoSlicesAndIndexState(t *testing.T) {
 		"--index=false",
 		"--json",
 	)
-	if err := os.Remove(prefect.ResultPath); err != nil {
-		t.Fatal(err)
+	{
+		err := os.Remove(prefect.ResultPath)
+		require.NoError(t, err)
 	}
 
 	trace := runTraceJSON(t, change.ChangeID, "--workspace", root, "--json")
-	if trace.Kind != "workspace_change" || trace.ChangeID != change.ChangeID || trace.WorkspaceRoot != root {
-		t.Fatalf("workspace trace basics = %#v", trace)
+	assert.Equal(t, "workspace_change", trace.Kind, "workspace trace basics = %#v", trace)
+	assert.Equal(t, change.ChangeID, trace.ChangeID, "workspace trace basics = %#v", trace)
+	assert.Equal(t, root, trace.WorkspaceRoot, "workspace trace basics = %#v", trace)
+	assert.Equal(t, traceStatusIncomplete, trace.Status,
+		"workspace trace status = %q, want %q", trace.Status, traceStatusIncomplete)
+	require.Len(t, trace.Slices, 4,
+		"workspace trace slices = %d, want 4: %#v", len(trace.Slices), trace.Slices)
+
+	backendSlice := traceSliceByAlias(trace.Slices, "backend")
+	require.NotNil(t, backendSlice)
+	assert.Equal(t, "completed", backendSlice.Status)
+	assert.Equal(t, traceIndexMissing, backendSlice.IndexStatus)
+	frontendSlice := traceSliceByAlias(trace.Slices, "frontend")
+	require.NotNil(t, frontendSlice)
+	assert.Equal(t, "started", frontendSlice.Status)
+	assert.Equal(t, traceIndexMissing, frontendSlice.IndexStatus)
+	databaseSlice := traceSliceByAlias(trace.Slices, "database")
+	require.NotNil(t, databaseSlice)
+	assert.Equal(t, "blocked", databaseSlice.Status)
+	assert.Equal(t, traceIndexMissing, databaseSlice.IndexStatus)
+	prefectSlice := traceSliceByAlias(trace.Slices, "prefect")
+	require.NotNil(t, prefectSlice)
+	assert.Equal(t, "missing_result", prefectSlice.Status)
+	assert.Equal(t, traceIndexMissing, prefectSlice.IndexStatus)
+	{
+		got := len(trace.Edges)
+		assert.Equal(t, 4, got,
+			"trace edges = %d, want 4: %#v", got, trace.Edges)
 	}
-	if trace.Status != traceStatusIncomplete {
-		t.Fatalf("workspace trace status = %q, want %q", trace.Status, traceStatusIncomplete)
-	}
-	if len(trace.Slices) != 4 {
-		t.Fatalf("workspace trace slices = %d, want 4: %#v", len(trace.Slices), trace.Slices)
-	}
-	wantStatus := map[string]string{
-		"backend":  "completed",
-		"frontend": "started",
-		"database": "blocked",
-		"prefect":  "missing_result",
-	}
-	for alias, want := range wantStatus {
-		slice := traceSliceByAlias(trace.Slices, alias)
-		if slice == nil {
-			t.Fatalf("trace missing repo alias %q: %#v", alias, trace.Slices)
-		}
-		if slice.Status != want {
-			t.Fatalf("trace status for %s = %q, want %q: %#v", alias, slice.Status, want, slice)
-		}
-		if slice.IndexStatus != traceIndexMissing {
-			t.Fatalf("trace index status for %s = %q, want %q: %#v", alias, slice.IndexStatus, traceIndexMissing, slice)
-		}
-	}
-	if got := len(trace.Edges); got != 4 {
-		t.Fatalf("trace edges = %d, want 4: %#v", got, trace.Edges)
-	}
+
 }
 
 func TestTraceRepoTaskShowsParentChangeAndSiblingAliases(t *testing.T) {
@@ -89,22 +91,20 @@ func TestTraceRepoTaskShowsParentChangeAndSiblingAliases(t *testing.T) {
 	frontend := runSliceCreateJSON(t, root, change.ChangeID, "frontend", "Frontend UI")
 
 	trace := runTraceJSON(t, backend.TaskID, "--repo", backend.RepoRoot, "--json")
-	if trace.Kind != "repo_task" || trace.TaskID != backend.TaskID {
-		t.Fatalf("repo task trace basics = %#v", trace)
-	}
-	if trace.Status != traceStatusIncomplete {
-		t.Fatalf("repo task parent trace status = %q, want %q", trace.Status, traceStatusIncomplete)
-	}
-	if trace.ParentChange != change.ChangeID || trace.ChangeID != change.ChangeID || trace.RepoAlias != "backend" {
-		t.Fatalf("repo task trace parent link = %#v", trace)
-	}
-	if traceSliceByAlias(trace.Slices, "backend") == nil || traceSliceByAlias(trace.Slices, "frontend") == nil {
-		t.Fatalf("repo task trace should include parent change siblings, got %#v", trace.Slices)
-	}
+	assert.Equal(t, "repo_task", trace.Kind, "repo task trace basics = %#v", trace)
+	assert.Equal(t, backend.TaskID, trace.TaskID, "repo task trace basics = %#v", trace)
+	assert.Equal(t, traceStatusIncomplete, trace.Status,
+		"repo task parent trace status = %q, want %q", trace.Status, traceStatusIncomplete)
+	assert.Equal(t, change.ChangeID, trace.ParentChange, "repo task trace parent link = %#v", trace)
+	assert.Equal(t, change.ChangeID, trace.ChangeID, "repo task trace parent link = %#v", trace)
+	assert.Equal(t, "backend", trace.RepoAlias, "repo task trace parent link = %#v", trace)
+	require.NotNil(t, traceSliceByAlias(trace.Slices, "backend"), "repo task trace should include parent change siblings, got %#v", trace.Slices)
+	require.NotNil(t, traceSliceByAlias(trace.Slices, "frontend"), "repo task trace should include parent change siblings, got %#v", trace.Slices)
+
 	frontendSlice := traceSliceByAlias(trace.Slices, "frontend")
-	if frontendSlice.TaskID != frontend.TaskID {
-		t.Fatalf("frontend sibling task id = %q, want %q", frontendSlice.TaskID, frontend.TaskID)
-	}
+	assert.Equal(t, frontend.TaskID, frontendSlice.TaskID,
+		"frontend sibling task id = %q, want %q", frontendSlice.TaskID, frontend.TaskID)
+
 }
 
 func TestSliceCreateUpsertsWorkspaceTraceEdge(t *testing.T) {
@@ -114,34 +114,33 @@ func TestSliceCreateUpsertsWorkspaceTraceEdge(t *testing.T) {
 	slice := runSliceCreateJSON(t, root, change.ChangeID, "backend", "Backend API")
 
 	db, err := openDB()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 	meta := db.GetRepoByRoot(canonicalRepoRoot(root))
-	if meta == nil {
-		t.Fatal("workspace root was not registered in the index")
-	}
+	require.NotNil(t, meta,
+		"workspace root was not registered in the index")
+
 	edges, err := db.GetArtifactEdges(store.ArtifactEdgeFilter{
 		RepoID:        meta.ID,
 		SrcArtifactID: traceChangeArtifactID(change.ChangeID),
 		EdgeType:      traceEdgeWorkspaceChangeHasSlice,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(edges) != 1 {
-		t.Fatalf("workspace trace edges = %d, want 1: %#v", len(edges), edges)
-	}
+	require.NoError(t, err)
+	require.Len(t, edges, 1,
+		"workspace trace edges = %d, want 1: %#v", len(edges), edges)
+
 	edge := edges[0]
-	if edge.DstArtifactID != traceTaskArtifactID(slice.TaskID) {
-		t.Fatalf("edge dst = %q, want %q", edge.DstArtifactID, traceTaskArtifactID(slice.TaskID))
-	}
-	for _, want := range []string{`"change_id":"EAG-C001"`, `"repo_alias":"backend"`, `"task_id":"eag-c001-backend"`} {
-		if !strings.Contains(edge.MetadataJSON, want) {
-			t.Fatalf("edge metadata missing %q: %s", want, edge.MetadataJSON)
-		}
-	}
+	assert.Equal(t, traceTaskArtifactID(slice.TaskID), edge.DstArtifactID,
+		"edge dst = %q, want %q", edge.DstArtifactID, traceTaskArtifactID(slice.TaskID))
+
+	assert.Contains(t, edge.MetadataJSON, `"change_id":"EAG-C001"`,
+		"edge metadata missing %q: %s", `"change_id":"EAG-C001"`, edge.MetadataJSON)
+	assert.Contains(t, edge.MetadataJSON, `"repo_alias":"backend"`,
+		"edge metadata missing %q: %s", `"repo_alias":"backend"`, edge.MetadataJSON)
+	assert.Contains(t, edge.MetadataJSON, `"task_id":"eag-c001-backend"`,
+		"edge metadata missing %q: %s", `"task_id":"eag-c001-backend"`, edge.MetadataJSON)
+
 }
 
 func TestTraceWorkspaceChangePlannedStatusBeforeWorkStarts(t *testing.T) {
@@ -152,18 +151,19 @@ func TestTraceWorkspaceChangePlannedStatusBeforeWorkStarts(t *testing.T) {
 
 	trace := runTraceJSON(t, change.ChangeID, "--workspace", root, "--json")
 	slice := traceSliceByAlias(trace.Slices, "prefect")
-	if slice == nil {
-		t.Fatalf("trace missing prefect slice: %#v", trace.Slices)
+	require.NotNil(t, slice,
+		"trace missing prefect slice: %#v", trace.Slices)
+	assert.Equal(t, prefect.TaskID, slice.TaskID, "planned trace slice = %#v", slice)
+	assert.Equal(t, "planned", slice.Status, "planned trace slice = %#v", slice)
+	assert.Equal(t, traceStatusIncomplete, trace.Status,
+		"planned trace status = %q, want %q", trace.Status, traceStatusIncomplete)
+	{
+
+		_, err := os.Stat(filepath.Join(root, "prefect", "devspecs", "tasks", prefect.TaskID))
+		require.NoError(t, err,
+			"planned trace should still keep repo-local task workspace: %v", err)
 	}
-	if slice.TaskID != prefect.TaskID || slice.Status != "planned" {
-		t.Fatalf("planned trace slice = %#v", slice)
-	}
-	if trace.Status != traceStatusIncomplete {
-		t.Fatalf("planned trace status = %q, want %q", trace.Status, traceStatusIncomplete)
-	}
-	if _, err := os.Stat(filepath.Join(root, "prefect", "devspecs", "tasks", prefect.TaskID)); err != nil {
-		t.Fatalf("planned trace should still keep repo-local task workspace: %v", err)
-	}
+
 }
 
 func runSliceCreateJSON(t *testing.T, root, changeID, repoAlias, name string) sliceCreateOutput {
@@ -180,13 +180,18 @@ func runSliceCreateJSON(t *testing.T, root, changeID, repoAlias, name string) sl
 	})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var out sliceCreateOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("slice create json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoError(t, err,
+			"slice create json: %v\n%s", err, buf.String())
 	}
+
 	return out
 }
 
@@ -196,13 +201,18 @@ func runTraceJSON(t *testing.T, args ...string) traceOutput {
 	cmd.SetArgs(append([]string{"trace"}, args...))
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var out traceOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("trace json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoError(t, err,
+			"trace json: %v\n%s", err, buf.String())
 	}
+
 	return out
 }
 
@@ -211,9 +221,11 @@ func runTaskCommand(t *testing.T, args ...string) {
 	cmd := NewTaskCmd()
 	cmd.SetArgs(args)
 	cmd.SetOut(&bytes.Buffer{})
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 }
 
 func traceSliceByAlias(slices []traceSliceOutput, alias string) *traceSliceOutput {

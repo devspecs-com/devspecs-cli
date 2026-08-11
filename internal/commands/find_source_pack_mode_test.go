@@ -1,24 +1,73 @@
 package commands
 
-import "testing"
+import (
+	"testing"
 
-func TestNormalizeFindSourcePackMode(t *testing.T) {
-	tests := map[string]string{
-		"":                    findSourcePackModeOff,
-		"off":                 findSourcePackModeOff,
-		"false":               findSourcePackModeOff,
-		"compact":             findSourcePackModeCompactManifestV0,
-		"source_manifest":     findSourcePackModeCompactManifestV0,
-		"compact_manifest_v0": findSourcePackModeCompactManifestV0,
-		"compact_manifest_v1": findSourcePackModeCompactManifestV1,
-		"manifest-v1":         findSourcePackModeCompactManifestV1,
-		"compact_manifest_v2": findSourcePackModeCompactManifestV2,
-		"manifest-v2":         findSourcePackModeCompactManifestV2,
-		"wat":                 "",
-	}
-	for in, want := range tests {
-		if got := normalizeFindSourcePackMode(in); got != want {
-			t.Fatalf("normalizeFindSourcePackMode(%q) = %q, want %q", in, got, want)
-		}
-	}
+	"github.com/stretchr/testify/assert"
+)
+
+func TestNormalizeFindSourcePackMode_WithEmptyInput_ReturnsOff(t *testing.T) {
+	got := normalizeFindSourcePackMode("")
+
+	assert.Equal(t, findSourcePackModeOff, got)
+}
+
+func TestNormalizeFindSourcePackMode_WithOff_ReturnsOff(t *testing.T) {
+	got := normalizeFindSourcePackMode("off")
+
+	assert.Equal(t, findSourcePackModeOff, got)
+}
+
+func TestNormalizeFindSourcePackMode_WithFalse_ReturnsOff(t *testing.T) {
+	got := normalizeFindSourcePackMode("false")
+
+	assert.Equal(t, findSourcePackModeOff, got)
+}
+
+func TestNormalizeFindSourcePackMode_WithCompact_ReturnsCompactManifestV0(t *testing.T) {
+	got := normalizeFindSourcePackMode("compact")
+
+	assert.Equal(t, findSourcePackModeCompactManifestV0, got)
+}
+
+func TestNormalizeFindSourcePackMode_WithSourceManifest_ReturnsCompactManifestV0(t *testing.T) {
+	got := normalizeFindSourcePackMode("source_manifest")
+
+	assert.Equal(t, findSourcePackModeCompactManifestV0, got)
+}
+
+func TestNormalizeFindSourcePackMode_WithCompactManifestV0_ReturnsCompactManifestV0(t *testing.T) {
+	got := normalizeFindSourcePackMode("compact_manifest_v0")
+
+	assert.Equal(t, findSourcePackModeCompactManifestV0, got)
+}
+
+func TestNormalizeFindSourcePackMode_WithCompactManifestV1_ReturnsCompactManifestV1(t *testing.T) {
+	got := normalizeFindSourcePackMode("compact_manifest_v1")
+
+	assert.Equal(t, findSourcePackModeCompactManifestV1, got)
+}
+
+func TestNormalizeFindSourcePackMode_WithManifestV1_ReturnsCompactManifestV1(t *testing.T) {
+	got := normalizeFindSourcePackMode("manifest-v1")
+
+	assert.Equal(t, findSourcePackModeCompactManifestV1, got)
+}
+
+func TestNormalizeFindSourcePackMode_WithCompactManifestV2_ReturnsCompactManifestV2(t *testing.T) {
+	got := normalizeFindSourcePackMode("compact_manifest_v2")
+
+	assert.Equal(t, findSourcePackModeCompactManifestV2, got)
+}
+
+func TestNormalizeFindSourcePackMode_WithManifestV2_ReturnsCompactManifestV2(t *testing.T) {
+	got := normalizeFindSourcePackMode("manifest-v2")
+
+	assert.Equal(t, findSourcePackModeCompactManifestV2, got)
+}
+
+func TestNormalizeFindSourcePackMode_WithUnknownInput_ReturnsEmpty(t *testing.T) {
+	got := normalizeFindSourcePackMode("wat")
+
+	assert.Empty(t, got)
 }

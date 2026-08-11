@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestApplyFindSourceManifestConsumptionScoutReplacesDocsSource(t *testing.T) {
@@ -25,12 +26,11 @@ func TestApplyFindSourceManifestConsumptionScoutReplacesDocsSource(t *testing.T)
 	})
 
 	got := applyFindSourceManifestConsumptionScout("serve Swagger UI OAuth2 redirect from a custom docs redirect URL", matches, all)
-	if !findPackHasPath(got, "fastapi/applications.py") {
-		t.Fatalf("expected manifest implementation replacement, got %#v", retrieval.CandidatePaths(got))
-	}
-	if findPackHasPath(got, "docs_src/custom_docs_ui/tutorial001.py") {
-		t.Fatalf("expected docs tutorial source to be replaced, got %#v", retrieval.CandidatePaths(got))
-	}
+	assert.True(t, findPackHasPath(got, "fastapi/applications.py"),
+		"expected manifest implementation replacement, got %#v", retrieval.CandidatePaths(got))
+	assert.False(t, findPackHasPath(got, "docs_src/custom_docs_ui/tutorial001.py"),
+		"expected docs tutorial source to be replaced, got %#v", retrieval.CandidatePaths(got))
+
 }
 
 func TestApplyFindSourceManifestConsumptionScoutReservesManifestTest(t *testing.T) {
@@ -52,9 +52,9 @@ func TestApplyFindSourceManifestConsumptionScoutReservesManifestTest(t *testing.
 	})
 
 	got := applyFindSourceManifestConsumptionScout("Depends use_cache false rerun dependency", matches, all)
-	if !findPackHasPath(got, "tests/test_dependency_cache.py") {
-		t.Fatalf("expected manifest test reservation, got %#v", retrieval.CandidatePaths(got))
-	}
+	assert.True(t, findPackHasPath(got, "tests/test_dependency_cache.py"),
+		"expected manifest test reservation, got %#v", retrieval.CandidatePaths(got))
+
 }
 
 func findPackHasPath(candidates []retrieval.Candidate, path string) bool {
