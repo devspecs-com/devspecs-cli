@@ -2359,7 +2359,7 @@ func TestMapOutputCacheRoundTripsFreshMap(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	got, ok, err := loadMapOutputCache(repoRoot, mapDefaultMaxAreas)
+	got, ok, err := loadMapOutputCache(t.Context(), repoRoot, mapDefaultMaxAreas)
 	require.NoError(t, err)
 	require.True(t, ok,
 		"expected map output cache hit")

@@ -1,6 +1,7 @@
 package freshness
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,6 +51,17 @@ func TestCheck_NilIfNoRepo(t *testing.T) {
 	assert.Nil(t, result,
 		"expected nil for uninitialized repo, got %+v", result)
 
+}
+
+func TestCheckContext_WhenCommandIsCanceled_ReturnsCancellation(t *testing.T) {
+	db := setupDB(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	status, err := CheckContext(ctx, db, t.TempDir())
+
+	assert.Nil(t, status)
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 func TestCheck_GitFresh(t *testing.T) {
