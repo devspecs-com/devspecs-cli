@@ -991,14 +991,31 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 		return err
 	}
 	if opts.AsJSON {
-		enc := json.NewEncoder(cmd.OutOrStdout())
+		var body bytes.Buffer
+		enc := json.NewEncoder(&body)
 		enc.SetIndent("", "  ")
-		return enc.Encode(out)
+		if err := enc.Encode(out); err != nil {
+			return taskStartOutputError(out, err)
+		}
+		n, err := cmd.OutOrStdout().Write(body.Bytes())
+		if err == nil && n != body.Len() {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
+			return taskStartOutputError(out, err)
+		}
+		return nil
 	}
 	if opts.Quick {
-		return writeTaskQuickStartHuman(cmd.OutOrStdout(), out, confidence)
+		if err := writeTaskQuickStartHuman(cmd.OutOrStdout(), out, confidence); err != nil {
+			return taskStartOutputError(out, err)
+		}
+		return nil
 	}
-	return writeTaskStartHuman(cmd.OutOrStdout(), out, confidence)
+	if err := writeTaskStartHuman(cmd.OutOrStdout(), out, confidence); err != nil {
+		return taskStartOutputError(out, err)
+	}
+	return nil
 }
 
 func createTaskWorkspace(cmd *cobra.Command, query string, opts taskStartOptions) (taskStartOutput, taskConfidence, error) {
@@ -1006,7 +1023,7 @@ func createTaskWorkspace(cmd *cobra.Command, query string, opts taskStartOptions
 	if query == "" {
 		return taskStartOutput{}, taskConfidence{}, fmt.Errorf("task query is empty")
 	}
-	repoRoot, err := resolveTargetRepoRoot(firstNonEmptyTaskString(opts.Repo, commandRepoTarget(cmd)))
+	repoRoot, err := resolveTargetRepoRootContext(cmd.Context(), firstNonEmptyTaskString(opts.Repo, commandRepoTarget(cmd)))
 	if err != nil {
 		return taskStartOutput{}, taskConfidence{}, err
 	}
@@ -1028,7 +1045,7 @@ func createTaskWorkspace(cmd *cobra.Command, query string, opts taskStartOptions
 	if err != nil {
 		return taskStartOutput{}, taskConfidence{}, err
 	}
-	if err := prepareTaskWorkspace(workspace, opts.Force); err != nil {
+	if err := validateTaskWorkspaceTarget(workspace, opts.Force); err != nil {
 		return taskStartOutput{}, taskConfidence{}, err
 	}
 
@@ -1067,21 +1084,21 @@ func createTaskWorkspace(cmd *cobra.Command, query string, opts taskStartOptions
 	}
 
 	paths := taskAbsoluteArtifactPaths(workspace, relArtifacts)
-	files := map[string]string{
-		paths.Index: renderTaskIndex(manifest),
+	files := map[string][]byte{
+		relArtifacts.Index: []byte(renderTaskIndex(manifest)),
 	}
 	for _, slice := range slices {
-		files[filepath.Join(workspace, slice.Plan)] = renderTaskSlicePlan(manifest, slice)
-		files[filepath.Join(workspace, slice.Result)] = renderTaskSliceResultTemplate(manifest, slice)
+		files[slice.Plan] = []byte(renderTaskSlicePlan(manifest, slice))
+		files[slice.Result] = []byte(renderTaskSliceResultTemplate(manifest, slice))
 	}
-	for path, body := range files {
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			return taskStartOutput{}, taskConfidence{}, fmt.Errorf("write %s: %w", path, err)
-		}
-	}
-	manifestPath := filepath.Join(workspace, taskManifestFilename)
-	if err := writeTaskManifest(manifestPath, manifest); err != nil {
+	manifestBody, err := marshalTaskManifest(manifest)
+	if err != nil {
 		return taskStartOutput{}, taskConfidence{}, err
+	}
+	files[taskManifestFilename] = manifestBody
+	manifestPath := filepath.Join(workspace, taskManifestFilename)
+	if err := publishTaskWorkspace(cmd.Context(), workspace, opts.Force, files); err != nil {
+		return taskStartOutput{}, taskConfidence{}, fmt.Errorf("publish task %s workspace %s: %w", taskID, workspace, err)
 	}
 
 	var indexed []string
@@ -1098,7 +1115,7 @@ func createTaskWorkspace(cmd *cobra.Command, query string, opts taskStartOptions
 		}
 		indexed, err = captureTaskArtifacts(cmd, repoRoot, requests)
 		if err != nil {
-			return taskStartOutput{}, taskConfidence{}, err
+			return taskStartOutput{}, taskConfidence{}, fmt.Errorf("task %s workspace was created at %s, but index capture failed: %w", taskID, workspace, err)
 		}
 	}
 
@@ -5857,6 +5874,8 @@ func writeTaskCheckpointDraftHuman(out io.Writer, draft taskCheckpointDraftOutpu
 }
 
 func writeTaskStartHuman(out io.Writer, result taskStartOutput, confidence taskConfidence) error {
+	tracked := &taskOutputWriter{out: out}
+	out = tracked
 	fmt.Fprintf(out, "Created task workspace: %s\n", result.Workspace)
 	fmt.Fprintf(out, "Task ID: %s\n", result.TaskID)
 	fmt.Fprintf(out, "Series: %s\n", result.Series)
@@ -5902,10 +5921,12 @@ func writeTaskStartHuman(out io.Writer, result taskStartOutput, confidence taskC
 	if len(result.IndexedPaths) > 0 {
 		fmt.Fprintf(out, "Indexed: %s\n", strings.Join(result.IndexedPaths, ", "))
 	}
-	return nil
+	return tracked.err
 }
 
 func writeTaskQuickStartHuman(out io.Writer, result taskStartOutput, confidence taskConfidence) error {
+	tracked := &taskOutputWriter{out: out}
+	out = tracked
 	target := defaultTaskSeries(result.Series) + "01"
 	planPath := result.FirstSlicePath
 	resultPath := result.ResultPath
@@ -5938,7 +5959,28 @@ func writeTaskQuickStartHuman(out io.Writer, result taskStartOutput, confidence 
 	fmt.Fprintf(out, "\nNext:\n")
 	fmt.Fprintf(out, "  ds apply %s --target %s\n", result.TaskID, target)
 	fmt.Fprintf(out, "  ds task checkpoint %s --target %s --stage validated --decision promote\n", result.TaskID, target)
-	return nil
+	return tracked.err
+}
+
+type taskOutputWriter struct {
+	out io.Writer
+	err error
+}
+
+func (w *taskOutputWriter) Write(p []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	n, err := w.out.Write(p)
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
+	w.err = err
+	return n, err
+}
+
+func taskStartOutputError(result taskStartOutput, err error) error {
+	return fmt.Errorf("task %s was created at %s, but success output failed: %w", result.TaskID, result.Workspace, err)
 }
 
 func firstTaskRiskCards(cards []taskRiskCard, limit int) []taskRiskCard {
@@ -5962,12 +6004,19 @@ func firstTaskFreshnessWarnings(warnings []taskFreshnessWarning, limit int) []ta
 	return warnings[:limit]
 }
 
-func writeTaskManifest(path string, manifest taskManifest) error {
+func marshalTaskManifest(manifest taskManifest) ([]byte, error) {
 	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
+}
+
+func writeTaskManifest(path string, manifest taskManifest) error {
+	data, err := marshalTaskManifest(manifest)
 	if err != nil {
 		return err
 	}
-	data = append(data, '\n')
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("write manifest: %w", err)
 	}
@@ -6001,16 +6050,137 @@ func normalizeTaskManifest(manifest *taskManifest) {
 	manifest.Profile = defaultTaskProfile(manifest.Profile)
 }
 
-func prepareTaskWorkspace(workspace string, force bool) error {
-	if _, err := os.Stat(workspace); err == nil {
+func validateTaskWorkspaceTarget(workspace string, force bool) error {
+	info, err := os.Stat(workspace)
+	if err == nil {
 		if !force {
 			return fmt.Errorf("task workspace already exists: %s", workspace)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("task workspace path is not a directory: %s", workspace)
 		}
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	if err := os.MkdirAll(workspace, 0o755); err != nil {
-		return fmt.Errorf("create task workspace: %w", err)
+	return nil
+}
+
+func publishTaskWorkspace(ctx context.Context, workspace string, force bool, files map[string][]byte) error {
+	parent := filepath.Dir(workspace)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return fmt.Errorf("create task workspace parent: %w", err)
+	}
+	staging, err := os.MkdirTemp(parent, "."+filepath.Base(workspace)+".staging-*")
+	if err != nil {
+		return fmt.Errorf("create task workspace staging directory: %w", err)
+	}
+	defer func() {
+		if staging != "" {
+			_ = os.RemoveAll(staging)
+		}
+	}()
+	if err := writeTaskWorkspaceFiles(staging, files); err != nil {
+		return err
+	}
+	if err := validateTaskWorkspaceFiles(staging, files); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	backup, err := moveExistingTaskWorkspaceAside(workspace, force)
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(staging, workspace); err != nil {
+		restoreErr := restoreTaskWorkspaceBackup(workspace, backup)
+		return errors.Join(fmt.Errorf("publish staged task workspace: %w", err), restoreErr)
+	}
+	staging = ""
+	if err := validateTaskWorkspaceFiles(workspace, files); err != nil {
+		removeErr := os.RemoveAll(workspace)
+		restoreErr := restoreTaskWorkspaceBackup(workspace, backup)
+		return errors.Join(err, removeErr, restoreErr)
+	}
+	if backup != "" {
+		if err := os.RemoveAll(backup); err != nil {
+			return fmt.Errorf("task workspace published, but remove replaced workspace backup: %w", err)
+		}
+	}
+	return nil
+}
+
+func writeTaskWorkspaceFiles(workspace string, files map[string][]byte) error {
+	for relativePath, body := range files {
+		path, err := taskWorkspaceFilePath(workspace, relativePath)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return fmt.Errorf("create task artifact parent %s: %w", relativePath, err)
+		}
+		if err := os.WriteFile(path, body, 0o644); err != nil {
+			return fmt.Errorf("write task artifact %s: %w", relativePath, err)
+		}
+	}
+	return nil
+}
+
+func validateTaskWorkspaceFiles(workspace string, files map[string][]byte) error {
+	for relativePath := range files {
+		path, err := taskWorkspaceFilePath(workspace, relativePath)
+		if err != nil {
+			return err
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return fmt.Errorf("validate task artifact %s: %w", relativePath, err)
+		}
+		if !info.Mode().IsRegular() || info.Size() == 0 {
+			return fmt.Errorf("validate task artifact %s: expected a non-empty regular file", relativePath)
+		}
+	}
+	return nil
+}
+
+func taskWorkspaceFilePath(workspace, relativePath string) (string, error) {
+	relativePath = filepath.Clean(filepath.FromSlash(strings.TrimSpace(relativePath)))
+	if relativePath == "." || filepath.IsAbs(relativePath) || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid task artifact path: %s", relativePath)
+	}
+	return filepath.Join(workspace, relativePath), nil
+}
+
+func moveExistingTaskWorkspaceAside(workspace string, force bool) (string, error) {
+	if _, err := os.Stat(workspace); err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	if !force {
+		return "", fmt.Errorf("task workspace already exists: %s", workspace)
+	}
+	backup, err := os.MkdirTemp(filepath.Dir(workspace), "."+filepath.Base(workspace)+".backup-*")
+	if err != nil {
+		return "", fmt.Errorf("reserve task workspace backup: %w", err)
+	}
+	if err := os.Remove(backup); err != nil {
+		return "", fmt.Errorf("prepare task workspace backup: %w", err)
+	}
+	if err := os.Rename(workspace, backup); err != nil {
+		return "", fmt.Errorf("back up existing task workspace: %w", err)
+	}
+	return backup, nil
+}
+
+func restoreTaskWorkspaceBackup(workspace, backup string) error {
+	if backup == "" {
+		return nil
+	}
+	if err := os.Rename(backup, workspace); err != nil {
+		return fmt.Errorf("restore existing task workspace: %w", err)
 	}
 	return nil
 }
