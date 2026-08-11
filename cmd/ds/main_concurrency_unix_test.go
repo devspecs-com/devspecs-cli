@@ -68,6 +68,14 @@ type concurrentIndexState struct {
 	ForeignKeysOK  bool
 }
 
+type durableTaskProcessOutput struct {
+	TaskID    string `json:"task_id"`
+	Workspace string `json:"workspace"`
+	Slices    []struct {
+		ID string `json:"id"`
+	} `json:"slices"`
+}
+
 func TestMain_WhenConcurrentCommandsShareIndex_SerializesWritesAndPreservesReads(t *testing.T) {
 	repoRoot, home := setupConcurrentCLIFixture(t)
 	initialScan := runConcurrentCLIProcess(t, repoRoot, home, nil, "scan", "--path", repoRoot)
@@ -158,6 +166,111 @@ func TestMain_WhenCPUActiveMapRefreshIsTerminated_ReapsGitAndPreservesIndex(t *t
 	assert.Equal(t, before.LastScanAt, after.LastScanAt)
 	assert.Equal(t, "ok", after.Integrity)
 	assert.True(t, after.ForeignKeysOK)
+}
+
+func TestMain_WhenCPUActiveTaskPreflightIsTerminated_ReapsGitAndLeavesNoWorkspace(t *testing.T) {
+	repoRoot, home := setupConcurrentCLIFixture(t)
+	initialScan := runConcurrentCLIProcess(t, repoRoot, home, nil, "scan", "--path", repoRoot, "--quiet")
+	waitForConcurrentCLIProcess(t, initialScan, concurrentCLIProcessTimeout)
+	commitConcurrentFixtureChange(t, repoRoot)
+	actualGit, err := exec.LookPath("git")
+	require.NoError(t, err)
+	shimDir := t.TempDir()
+	gitPIDPath := filepath.Join(t.TempDir(), "git.pid")
+	writeCPUActiveGitShim(t, filepath.Join(shimDir, "git"))
+	extraEnv := []string{
+		"PATH=" + shimDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"DEVSPECS_TEST_REAL_GIT=" + actualGit,
+		"DEVSPECS_TEST_GIT_PID_FILE=" + gitPIDPath,
+	}
+	workspace := filepath.Join(repoRoot, "devspecs", "tasks", "interrupted-task")
+	taskProcess := runConcurrentCLIProcess(t, repoRoot, home, extraEnv,
+		"task", "publish a durable task",
+		"--id", "interrupted-task",
+		"--slice", "first boundary",
+		"--slice", "second boundary",
+	)
+	gitPID := waitForGitPID(t, gitPIDPath)
+
+	signalErr := taskProcess.command.Process.Signal(syscall.SIGTERM)
+	waitErr := waitForTerminatedCLIProcess(t, taskProcess, 5*time.Second)
+	gitExited := waitForProcessExit(gitPID, 5*time.Second)
+	_, statErr := os.Stat(workspace)
+
+	assert.NoError(t, signalErr)
+	assert.Error(t, waitErr)
+	assert.True(t, gitExited, "Git subprocess %d remained alive after task termination", gitPID)
+	assert.True(t, os.IsNotExist(statErr), "workspace should not exist after task preflight termination: %v", statErr)
+	assert.NotContains(t, taskProcess.stdout.String(), "Created task workspace:")
+}
+
+func TestMain_WhenSixSliceTaskCompletes_ReportsIdentityAndPublishesEveryArtifact(t *testing.T) {
+	repoRoot, home := setupConcurrentCLIFixture(t)
+	initialScan := runConcurrentCLIProcess(t, repoRoot, home, nil, "scan", "--path", repoRoot, "--quiet")
+	waitForConcurrentCLIProcess(t, initialScan, concurrentCLIProcessTimeout)
+	workspace := filepath.Join(repoRoot, "devspecs", "tasks", "six-slice-process-task")
+	taskProcess := runConcurrentCLIProcess(t, repoRoot, home, nil,
+		"task", "publish a durable six-slice task",
+		"--id", "six-slice-process-task",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"--slice", "first boundary",
+		"--slice", "second boundary",
+		"--slice", "third boundary",
+		"--slice", "fourth boundary",
+		"--slice", "fifth boundary",
+		"--slice", "sixth boundary",
+	)
+
+	waitErr := waitForTerminatedCLIProcess(t, taskProcess, concurrentCLIProcessTimeout)
+	var out durableTaskProcessOutput
+	unmarshalErr := json.NewDecoder(strings.NewReader(taskProcess.stdout.String())).Decode(&out)
+	entries, readErr := os.ReadDir(workspace)
+
+	require.NoError(t, waitErr, "stdout:\n%s\nstderr:\n%s", taskProcess.stdout.String(), taskProcess.stderr.String())
+	require.NoError(t, unmarshalErr)
+	require.NoError(t, readErr)
+	assert.Equal(t, "six-slice-process-task", out.TaskID)
+	assert.Equal(t, workspace, out.Workspace)
+	require.Len(t, out.Slices, 6)
+	assert.Equal(t, "A01", out.Slices[0].ID)
+	assert.Equal(t, "A02", out.Slices[1].ID)
+	assert.Equal(t, "A03", out.Slices[2].ID)
+	assert.Equal(t, "A04", out.Slices[3].ID)
+	assert.Equal(t, "A05", out.Slices[4].ID)
+	assert.Equal(t, "A06", out.Slices[5].ID)
+	require.Len(t, entries, 14)
+}
+
+func TestMain_WhenForcedTaskReplacesEmptyWorkspace_ReportsIdentityAndPublishesCompleteArtifacts(t *testing.T) {
+	repoRoot, home := setupConcurrentCLIFixture(t)
+	initialScan := runConcurrentCLIProcess(t, repoRoot, home, nil, "scan", "--path", repoRoot, "--quiet")
+	waitForConcurrentCLIProcess(t, initialScan, concurrentCLIProcessTimeout)
+	workspace := filepath.Join(repoRoot, "devspecs", "tasks", "forced-process-task")
+	require.NoError(t, os.MkdirAll(workspace, 0o755))
+	taskProcess := runConcurrentCLIProcess(t, repoRoot, home, nil,
+		"task", "replace an empty task workspace",
+		"--id", "forced-process-task",
+		"--force",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+	)
+
+	waitErr := waitForTerminatedCLIProcess(t, taskProcess, concurrentCLIProcessTimeout)
+	var out durableTaskProcessOutput
+	unmarshalErr := json.NewDecoder(strings.NewReader(taskProcess.stdout.String())).Decode(&out)
+	entries, readErr := os.ReadDir(workspace)
+
+	require.NoError(t, waitErr, "stdout:\n%s\nstderr:\n%s", taskProcess.stdout.String(), taskProcess.stderr.String())
+	require.NoError(t, unmarshalErr)
+	require.NoError(t, readErr)
+	assert.Equal(t, "forced-process-task", out.TaskID)
+	assert.Equal(t, workspace, out.Workspace)
+	require.Len(t, out.Slices, 1)
+	assert.Equal(t, "A01", out.Slices[0].ID)
+	require.Len(t, entries, 4)
 }
 
 func TestMainConcurrentCLIHelperProcess(t *testing.T) {

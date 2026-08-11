@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,13 +29,17 @@ func commandRepoTarget(cmd *cobra.Command) string {
 }
 
 func resolveTargetRepoRoot(repoPath string) (string, error) {
+	return resolveTargetRepoRootContext(context.Background(), repoPath)
+}
+
+func resolveTargetRepoRootContext(ctx context.Context, repoPath string) (string, error) {
 	repoPath = strings.TrimSpace(repoPath)
 	if repoPath == "" {
 		wd, err := os.Getwd()
 		if err != nil {
 			return "", err
 		}
-		return resolveRepoRootForPath(wd), nil
+		return resolveRepoRootForPathContext(ctx, wd)
 	}
 	abs, err := filepath.Abs(repoPath)
 	if err != nil {
@@ -47,15 +52,18 @@ func resolveTargetRepoRoot(repoPath string) (string, error) {
 	if !info.IsDir() {
 		return "", fmt.Errorf("target repo is not a directory: %s", abs)
 	}
-	return resolveRepoRootForPath(abs), nil
+	return resolveRepoRootForPathContext(ctx, abs)
 }
 
-func resolveRepoRootForPath(path string) string {
-	repoRoot := canonicalRepoRoot(resolveRepoRootFromWd(path))
+func resolveRepoRootForPathContext(ctx context.Context, path string) (string, error) {
+	repoRoot := canonicalRepoRoot(resolveRepoRootFromWdContext(ctx, path))
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if repoRoot == "" {
 		repoRoot = canonicalRepoRoot(path)
 	}
-	return repoRoot
+	return repoRoot, nil
 }
 
 func commandArg(value string) string {

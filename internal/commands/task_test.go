@@ -3,6 +3,8 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1582,6 +1584,197 @@ func TestTask_StartBootstrapsRepeatedSlices(t *testing.T) {
 	assert.Truef(t, strings.HasPrefix(out.Workspace, filepath.Join(repoDir, "devspecs", "tasks", "multi-slice-test")),
 		"workspace = %q", out.Workspace)
 
+}
+
+func TestTask_StartWhenPreflightFails_DoesNotCreateWorkspace(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	workspace := filepath.Join(repoDir, "devspecs", "tasks", "preflight-failure")
+	t.Setenv("DEVSPECS_TASK_PACK_SCOUT_MODE", "invalid")
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "preflight-failure",
+		"--no-refresh",
+		"--index=false",
+		"fail before publishing artifacts",
+	})
+	cmd.SetOut(&bytes.Buffer{})
+
+	err := cmd.Execute()
+	_, statErr := os.Stat(workspace)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unknown task pack scout mode")
+	assert.True(t, os.IsNotExist(statErr), "workspace should not exist after preflight failure: %v", statErr)
+}
+
+func TestTask_StartWithSixSlices_PublishesEveryArtifactAndReportsIdentity(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	workspace := filepath.Join(repoDir, "devspecs", "tasks", "six-slice-task")
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "six-slice-task",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"--slice", "first boundary",
+		"--slice", "second boundary",
+		"--slice", "third boundary",
+		"--slice", "fourth boundary",
+		"--slice", "fifth boundary",
+		"--slice", "sixth boundary",
+		"publish a durable six-slice task",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+	var out taskStartOutput
+	unmarshalErr := json.Unmarshal(buf.Bytes(), &out)
+	entries, readErr := os.ReadDir(workspace)
+
+	require.NoError(t, err)
+	require.NoError(t, unmarshalErr)
+	require.NoError(t, readErr)
+	assert.Equal(t, "six-slice-task", out.TaskID)
+	assert.Equal(t, workspace, out.Workspace)
+	require.Len(t, out.Slices, 6)
+	assert.Equal(t, "A01", out.Slices[0].ID)
+	assert.Equal(t, "A02", out.Slices[1].ID)
+	assert.Equal(t, "A03", out.Slices[2].ID)
+	assert.Equal(t, "A04", out.Slices[3].ID)
+	assert.Equal(t, "A05", out.Slices[4].ID)
+	assert.Equal(t, "A06", out.Slices[5].ID)
+	require.Len(t, entries, 14)
+	assertTaskArtifactExists(t, out.IndexPath)
+	assertTaskArtifactExists(t, out.ManifestPath)
+	assertTaskArtifactExists(t, out.Slices[0].PlanPath)
+	assertTaskArtifactExists(t, out.Slices[0].ResultPath)
+	assertTaskArtifactExists(t, out.Slices[1].PlanPath)
+	assertTaskArtifactExists(t, out.Slices[1].ResultPath)
+	assertTaskArtifactExists(t, out.Slices[2].PlanPath)
+	assertTaskArtifactExists(t, out.Slices[2].ResultPath)
+	assertTaskArtifactExists(t, out.Slices[3].PlanPath)
+	assertTaskArtifactExists(t, out.Slices[3].ResultPath)
+	assertTaskArtifactExists(t, out.Slices[4].PlanPath)
+	assertTaskArtifactExists(t, out.Slices[4].ResultPath)
+	assertTaskArtifactExists(t, out.Slices[5].PlanPath)
+	assertTaskArtifactExists(t, out.Slices[5].ResultPath)
+}
+
+func TestTask_StartWithForce_ReplacesEmptyWorkspaceWithCompleteArtifacts(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	workspace := filepath.Join(repoDir, "devspecs", "tasks", "empty-workspace")
+	mustMkdirAll(t, workspace)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "empty-workspace",
+		"--force",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"replace an empty workspace",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+	var out taskStartOutput
+	unmarshalErr := json.Unmarshal(buf.Bytes(), &out)
+	entries, readErr := os.ReadDir(workspace)
+
+	require.NoError(t, err)
+	require.NoError(t, unmarshalErr)
+	require.NoError(t, readErr)
+	assert.Equal(t, "empty-workspace", out.TaskID)
+	assert.Equal(t, workspace, out.Workspace)
+	require.Len(t, entries, 4)
+	assertTaskArtifactExists(t, out.IndexPath)
+	assertTaskArtifactExists(t, out.FirstSlicePath)
+	assertTaskArtifactExists(t, out.ResultPath)
+	assertTaskArtifactExists(t, out.ManifestPath)
+}
+
+func TestTask_StartWhenHumanOutputFails_ReturnsErrorWithDurableWorkspaceIdentity(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	workspace := filepath.Join(repoDir, "devspecs", "tasks", "output-failure")
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "output-failure",
+		"--no-refresh",
+		"--index=false",
+		"create before reporting success",
+	})
+	cmd.SetOut(taskFailingWriter{})
+
+	err := cmd.Execute()
+	entries, readErr := os.ReadDir(workspace)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "task output-failure was created")
+	assert.ErrorContains(t, err, workspace)
+	assert.ErrorIs(t, err, errTaskOutputClosed)
+	require.NoError(t, readErr)
+	require.Len(t, entries, 4)
+}
+
+func TestTask_StartWhenJSONOutputIsShort_ReturnsErrorWithDurableWorkspaceIdentity(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	workspace := filepath.Join(repoDir, "devspecs", "tasks", "short-json-output")
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "short-json-output",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"create before reporting JSON success",
+	})
+	cmd.SetOut(taskShortWriter{})
+
+	err := cmd.Execute()
+	entries, readErr := os.ReadDir(workspace)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "task short-json-output was created")
+	assert.ErrorContains(t, err, workspace)
+	assert.ErrorIs(t, err, io.ErrShortWrite)
+	require.NoError(t, readErr)
+	require.Len(t, entries, 4)
+}
+
+func TestPublishTaskWorkspace_WhenArtifactPathEscapesStaging_ReturnsErrorWithoutFinalWorkspace(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "tasks", "invalid-artifact")
+	files := map[string][]byte{
+		"../outside.md": []byte("must not escape"),
+	}
+
+	err := publishTaskWorkspace(t.Context(), workspace, false, files)
+	_, statErr := os.Stat(workspace)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "invalid task artifact path")
+	assert.True(t, os.IsNotExist(statErr), "workspace should not exist after staged write failure: %v", statErr)
+}
+
+var errTaskOutputClosed = errors.New("task output is closed")
+
+type taskFailingWriter struct{}
+
+func (taskFailingWriter) Write([]byte) (int, error) {
+	return 0, errTaskOutputClosed
+}
+
+type taskShortWriter struct{}
+
+func (taskShortWriter) Write(p []byte) (int, error) {
+	return len(p) - 1, nil
+}
+
+func assertTaskArtifactExists(t *testing.T, path string) {
+	t.Helper()
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.True(t, info.Mode().IsRegular())
+	assert.Positive(t, info.Size())
 }
 
 func TestTaskNextResolvesFirstPendingBoundary(t *testing.T) {

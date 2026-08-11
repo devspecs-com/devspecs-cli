@@ -180,7 +180,11 @@ func runTaskScanQuietAndNotify(cmd *cobra.Command, db *store.DB, repoRoot string
 // resolveRepoRootFromWd finds the project root by checking for .git or .devspecs/
 // walking upward from the given directory.
 func resolveRepoRootFromWd(wd string) string {
-	info := repo.Detect(wd)
+	return resolveRepoRootFromWdContext(context.Background(), wd)
+}
+
+func resolveRepoRootFromWdContext(ctx context.Context, wd string) string {
+	info := repo.DetectContext(ctx, wd)
 	if info.IsGit {
 		return info.RootPath
 	}

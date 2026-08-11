@@ -4,6 +4,16 @@
 
 ## v1.4.0 - 2026-08-09
 
+- Changed concurrent index mutations to queue behind one bounded writer lease so
+  overlapping `scan`, `map`, `find`, `recent`, and `task` operations do not fail
+  with transient SQLite lock errors.
+- Added visible 10-minute auto-index and 30-minute explicit-scan deadlines, with
+  signal cancellation that reaps active Git subprocesses instead of leaving
+  long-running workers behind.
+- Changed `ds task` creation to stage and validate complete workspaces before
+  atomic publication. Interrupted preflight no longer leaves an empty final
+  task directory, forced retries safely replace remnants, and failed success
+  output now returns nonzero with the durable task ID and path in the error.
 - Added `ds prune`, with `--dry-run`, JSON output, and explicit `--vacuum`
   compaction, to remove index data for repository roots that no longer exist
   and collapse redundant consecutive capture revisions without losing content
