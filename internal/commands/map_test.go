@@ -12,6 +12,8 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/scan"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMapTextHidesReviewerDiagnosticsByDefault(t *testing.T) {
@@ -40,16 +42,68 @@ func TestMapTextHidesReviewerDiagnosticsByDefault(t *testing.T) {
 	var buf bytes.Buffer
 	writeMapText(&buf, out, false)
 	text := buf.String()
-	for _, notWant := range []string{"Try changed", "Receipt changed", "Aha", "raw signal", "class=", "confidence="} {
-		if strings.Contains(text, notWant) {
-			t.Fatalf("default map output leaked reviewer diagnostic %q:\n%s", notWant, text)
-		}
-	}
-	for _, want := range []string{"Repo map: payments-api", "Candidate subsystems", "Subsystem:", "Purpose:", "Boundary:", "Try: ds find", "Try: ds task"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("default map output missing %q:\n%s", want, text)
-		}
-	}
+	assert.NotContainsf(t,
+		text,
+		("Try changed"), "default map output leaked reviewer diagnostic %q:\n%s",
+
+		("Try changed"), text)
+	assert.NotContainsf(t,
+		text,
+		("Receipt changed"), "default map output leaked reviewer diagnostic %q:\n%s",
+
+		("Receipt changed"), text)
+	assert.NotContainsf(t,
+		text,
+		("Aha"), "default map output leaked reviewer diagnostic %q:\n%s",
+
+		("Aha"), text)
+	assert.NotContainsf(t,
+		text,
+		("raw signal"), "default map output leaked reviewer diagnostic %q:\n%s",
+
+		("raw signal"), text)
+	assert.NotContainsf(t,
+		text,
+		("class="),
+		"default map output leaked reviewer diagnostic %q:\n%s",
+
+		("class="), text)
+	assert.NotContainsf(t,
+		text,
+		("confidence="), "default map output leaked reviewer diagnostic %q:\n%s",
+
+		("confidence="), text)
+	assert.Containsf(t, text,
+		("Repo map: payments-api"), "default map output missing %q:\n%s",
+
+		("Repo map: payments-api"), text)
+	assert.Containsf(t, text,
+		("Candidate subsystems"), "default map output missing %q:\n%s",
+
+		("Candidate subsystems"), text)
+	assert.Containsf(t, text,
+		("Subsystem:"), "default map output missing %q:\n%s",
+
+		("Subsystem:"), text)
+	assert.Containsf(t, text,
+		("Purpose:"),
+		"default map output missing %q:\n%s",
+
+		("Purpose:"), text)
+	assert.Containsf(t, text,
+		("Boundary:"),
+		"default map output missing %q:\n%s",
+
+		("Boundary:"), text)
+	assert.Containsf(t, text,
+		("Try: ds find"), "default map output missing %q:\n%s",
+
+		("Try: ds find"), text)
+	assert.Containsf(t, text,
+		("Try: ds task"), "default map output missing %q:\n%s",
+
+		("Try: ds task"), text)
+
 }
 
 func TestMapJSONSchemaIsAgentReadable(t *testing.T) {
@@ -71,28 +125,25 @@ func TestMapJSONSchemaIsAgentReadable(t *testing.T) {
 	}, mapOptions{MaxAreas: 2})
 
 	data, err := json.Marshal(out)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	var decoded mapOutput
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("map JSON did not round trip: %v\n%s", err, string(data))
+	{
+		err := json.Unmarshal(data, &decoded)
+		require.NoErrorf(t, err,
+			"map JSON did not round trip: %v\n%s", err, string(data))
 	}
-	if decoded.Schema != mapSchemaVersion {
-		t.Fatalf("schema = %q, want %q", decoded.Schema, mapSchemaVersion)
-	}
-	if decoded.Repo.Name != "orders" {
-		t.Fatalf("repo name = %q", decoded.Repo.Name)
-	}
-	if len(decoded.Areas) == 0 {
-		t.Fatalf("expected at least one area in JSON:\n%s", string(data))
-	}
-	if decoded.Areas[0].AreaType == "" {
-		t.Fatalf("expected area_type in JSON:\n%s", string(data))
-	}
-	if decoded.Areas[0].Purpose == "" || len(decoded.Areas[0].BoundaryPaths) == 0 {
-		t.Fatalf("expected subsystem purpose and boundary paths in JSON:\n%s", string(data))
-	}
+	assert.Equalf(t, mapSchemaVersion, decoded.Schema,
+		"schema = %q, want %q", decoded.Schema, mapSchemaVersion)
+	assert.Equalf(t, "orders", decoded.Repo.Name,
+		"repo name = %q", decoded.Repo.Name)
+	require.NotEmptyf(t, decoded.Areas,
+		"expected at least one area in JSON:\n%s", string(data))
+	assert.NotEqualf(t, "", decoded.Areas[0].AreaType,
+		"expected area_type in JSON:\n%s", string(data))
+	assert.NotEmpty(t, decoded.Areas[0].Purpose)
+	require.NotEmpty(t, decoded.Areas[0].BoundaryPaths)
+
 }
 
 func TestMapEvidenceCountsUsesPathFamilies(t *testing.T) {
@@ -101,9 +152,10 @@ func TestMapEvidenceCountsUsesPathFamilies(t *testing.T) {
 		{Kind: "source_context", Path: "tests/test_core.py"},
 		{Kind: "source_context", Path: "docs_src/tutorial001.py"},
 	})
-	if counts["source"] != 1 || counts["test"] != 1 || counts["doc"] != 1 {
-		t.Fatalf("unexpected path-aware families: %#v", counts)
-	}
+	assert.Equal(t, 1, counts["source"])
+	assert.Equal(t, 1, counts["test"])
+	assert.Equal(t, 1, counts["doc"])
+
 }
 
 func TestMapRootOnlyAreaStaysLowConfidence(t *testing.T) {
@@ -124,15 +176,14 @@ func TestMapRootOnlyAreaStaysLowConfidence(t *testing.T) {
 			},
 		},
 	}, mapOptions{MaxAreas: 3})
-	if out.Repo.Confidence != mapLowConfidence {
-		t.Fatalf("root-only map confidence = %q, want low; areas=%#v", out.Repo.Confidence, out.Areas)
-	}
-	if len(out.Areas) == 0 || !out.Areas[0].IsRepoRootUmbrella {
-		t.Fatalf("expected root umbrella area, got %#v", out.Areas)
-	}
-	if out.Areas[0].AreaType != mapTypeRoot {
-		t.Fatalf("root area type = %q, want %q", out.Areas[0].AreaType, mapTypeRoot)
-	}
+	assert.Equalf(t, mapLowConfidence, out.Repo.Confidence,
+		"root-only map confidence = %q, want low; areas=%#v", out.Repo.Confidence, out.Areas)
+	require.NotEmpty(t, out.Areas)
+	assert.True(t, out.Areas[0].IsRepoRootUmbrella)
+
+	assert.Equalf(t, mapTypeRoot, out.Areas[0].AreaType,
+		"root area type = %q, want %q", out.Areas[0].AreaType, mapTypeRoot)
+
 }
 
 func TestMapAreaTypeClassifiesProductBoundaries(t *testing.T) {
@@ -142,15 +193,13 @@ func TestMapAreaTypeClassifiesProductBoundaries(t *testing.T) {
 	for _, area := range out.Areas {
 		types[area.Label] = area.AreaType
 	}
-	if types["Flowable"] != mapTypeExternal {
-		t.Fatalf("Flowable type = %q, want external integration; all=%#v", types["Flowable"], types)
-	}
-	if types["Status Pill"] != mapTypeUI {
-		t.Fatalf("Status Pill type = %q, want UI surface; all=%#v", types["Status Pill"], types)
-	}
-	if types["Submission"] != mapTypeBusinessFlow {
-		t.Fatalf("Submission type = %q, want business workflow; all=%#v", types["Submission"], types)
-	}
+	assert.Equalf(t, mapTypeExternal, types["Flowable"],
+		"Flowable type = %q, want external integration; all=%#v", types["Flowable"], types)
+	assert.Equalf(t, mapTypeUI, types["Status Pill"],
+		"Status Pill type = %q, want UI surface; all=%#v", types["Status Pill"], types)
+	assert.Equalf(t, mapTypeBusinessFlow, types["Submission"],
+		"Submission type = %q, want business workflow; all=%#v", types["Submission"], types)
+
 }
 
 func TestMapAreaDrilldownIsActionable(t *testing.T) {
@@ -158,18 +207,32 @@ func TestMapAreaDrilldownIsActionable(t *testing.T) {
 	var buf bytes.Buffer
 	writeMapAreaText(&buf, out, "submission", false)
 	text := buf.String()
-	for _, want := range []string{
-		"Map area: Submission",
-		"Type: business workflow",
-		"Key files:",
-		"apps/api/internal/submission/redaction.go",
-		"Pack this context:",
-		`ds find "submission redaction"`,
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("area drilldown missing %q:\n%s", want, text)
-		}
-	}
+	assert.Containsf(t, text,
+		("Map area: Submission"), "area drilldown missing %q:\n%s",
+
+		("Map area: Submission"), text)
+	assert.Containsf(t, text,
+		("Type: business workflow"), "area drilldown missing %q:\n%s",
+
+		("Type: business workflow"), text)
+	assert.Containsf(t, text,
+		("Key files:"), "area drilldown missing %q:\n%s",
+
+		("Key files:"), text)
+	assert.Containsf(t, text,
+		("apps/api/internal/submission/redaction.go"), "area drilldown missing %q:\n%s",
+
+		("apps/api/internal/submission/redaction.go"), text)
+	assert.Containsf(t, text,
+		("Pack this context:"), "area drilldown missing %q:\n%s",
+
+		("Pack this context:"), text)
+	assert.Containsf(t, text,
+		(`ds find "submission redaction"`), "area drilldown missing %q:\n%s",
+
+		(`ds find "submission redaction"`), text,
+	)
+
 }
 
 func TestMapAreaDrilldownNoMatchListsAvailableAreas(t *testing.T) {
@@ -177,11 +240,25 @@ func TestMapAreaDrilldownNoMatchListsAvailableAreas(t *testing.T) {
 	var buf bytes.Buffer
 	writeMapAreaText(&buf, out, "not-a-real-area", false)
 	text := buf.String()
-	for _, want := range []string{"No matching map area found.", "Available areas:", "Submission", "Flowable"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("no-match drilldown missing %q:\n%s", want, text)
-		}
-	}
+	assert.Containsf(t, text,
+		("No matching map area found."), "no-match drilldown missing %q:\n%s",
+
+		("No matching map area found."), text,
+	)
+	assert.Containsf(t, text,
+		("Available areas:"), "no-match drilldown missing %q:\n%s",
+
+		("Available areas:"), text)
+	assert.Containsf(t, text,
+		("Submission"), "no-match drilldown missing %q:\n%s",
+
+		("Submission"), text)
+	assert.Containsf(t, text,
+		("Flowable"),
+		"no-match drilldown missing %q:\n%s",
+
+		("Flowable"), text)
+
 }
 
 func TestMapAreaDrilldownUsesMatchedDocTopicOverLocaleBucket(t *testing.T) {
@@ -205,26 +282,47 @@ func TestMapAreaDrilldownUsesMatchedDocTopicOverLocaleBucket(t *testing.T) {
 	var buf bytes.Buffer
 	writeMapAreaText(&buf, out, "background tasks", false)
 	text := buf.String()
-	for _, want := range []string{
-		"Map area: Background Tasks",
-		"docs/en/docs/tutorial/background-tasks.md",
-		`ds find "background tasks"`,
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("doc drilldown missing %q:\n%s", want, text)
-		}
-	}
-	for _, notWant := range []string{
-		"Map area: Docs/Fr",
-		"docs/de/docs/tutorial/background-tasks.md",
-		"docs/es/docs/tutorial/background-tasks.md",
-		"docs/fr/docs/tutorial/background-tasks.md",
-		`ds find "docs fr background"`,
-	} {
-		if strings.Contains(text, notWant) {
-			t.Fatalf("doc drilldown leaked %q:\n%s", notWant, text)
-		}
-	}
+	assert.Containsf(t, text,
+		("Map area: Background Tasks"),
+		"doc drilldown missing %q:\n%s",
+
+		("Map area: Background Tasks"), text)
+	assert.Containsf(t, text,
+		("docs/en/docs/tutorial/background-tasks.md"), "doc drilldown missing %q:\n%s",
+
+		("docs/en/docs/tutorial/background-tasks.md"), text)
+	assert.Containsf(t, text,
+		(`ds find "background tasks"`),
+		"doc drilldown missing %q:\n%s",
+
+		(`ds find "background tasks"`), text)
+	assert.NotContainsf(t,
+		text,
+		("Map area: Docs/Fr"), "doc drilldown leaked %q:\n%s",
+
+		("Map area: Docs/Fr"), text)
+	assert.NotContainsf(t,
+		text,
+		("docs/de/docs/tutorial/background-tasks.md"), "doc drilldown leaked %q:\n%s",
+
+		("docs/de/docs/tutorial/background-tasks.md"), text)
+	assert.NotContainsf(t,
+		text,
+		("docs/es/docs/tutorial/background-tasks.md"), "doc drilldown leaked %q:\n%s",
+
+		("docs/es/docs/tutorial/background-tasks.md"), text)
+	assert.NotContainsf(t,
+		text,
+		("docs/fr/docs/tutorial/background-tasks.md"), "doc drilldown leaked %q:\n%s",
+
+		("docs/fr/docs/tutorial/background-tasks.md"), text)
+	assert.NotContainsf(t,
+		text,
+		(`ds find "docs fr background"`), "doc drilldown leaked %q:\n%s",
+
+		(`ds find "docs fr background"`), text,
+	)
+
 }
 
 func TestMapRecentTopicsSkipNoiseAndBuildPackHandoff(t *testing.T) {
@@ -246,22 +344,19 @@ func TestMapRecentTopicsSkipNoiseAndBuildPackHandoff(t *testing.T) {
 			},
 		},
 	}, "", 5)
-	if skipped != 1 {
-		t.Fatalf("skipped = %d, want 1", skipped)
-	}
-	if len(topics) != 1 {
-		t.Fatalf("topics = %#v, want one", topics)
-	}
+	assert.Equalf(t, 1, skipped,
+		"skipped = %d, want 1", skipped)
+	require.Lenf(t, topics, 1,
+		"topics = %#v, want one", topics)
+
 	topic := topics[0]
-	if topic.Label != "Public Form Endpoints" {
-		t.Fatalf("label = %q, want Public Form Endpoints", topic.Label)
-	}
-	if topic.Try != `ds find "public form endpoints"` {
-		t.Fatalf("try = %q", topic.Try)
-	}
-	if topic.EvidenceCounts["source"] == 0 || topic.EvidenceCounts["config"] == 0 {
-		t.Fatalf("expected source/config evidence, got %#v", topic.EvidenceCounts)
-	}
+	assert.Equalf(t, "Public Form Endpoints", topic.Label,
+		"label = %q, want Public Form Endpoints", topic.Label)
+	assert.Equalf(t, `ds find "public form endpoints"`, topic.Try,
+		"try = %q", topic.Try)
+	assert.NotEqual(t, 0, topic.EvidenceCounts["source"])
+	assert.NotEqual(t, 0, topic.EvidenceCounts["config"])
+
 }
 
 func TestRecentBoundaryQualityDemotesMaintenanceAheadOfSourceWork(t *testing.T) {
@@ -289,22 +384,25 @@ func TestRecentBoundaryQualityDemotesMaintenanceAheadOfSourceWork(t *testing.T) 
 	cmd.SetArgs([]string{"--path", repoRoot, "--no-refresh", "--json"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var out mapRecentOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("recent json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"recent json: %v\n%s", err, buf.String())
 	}
-	if len(out.Topics) < 2 {
-		t.Fatalf("expected source and maintenance topics, got %#v", out.Topics)
-	}
-	if out.Topics[0].TopicType == "maintenance" || !strings.Contains(out.Topics[0].Query, "swagger") {
-		t.Fatalf("source-backed swagger topic should rank first, got %#v", out.Topics)
-	}
-	if !mapTestHasSignal(out.Topics[0].QualitySignals, "source_test_support") {
-		t.Fatalf("top topic missing source/test quality signal: %#v", out.Topics[0])
-	}
+	assert.GreaterOrEqualf(t, len(out.Topics), 2,
+		"expected source and maintenance topics, got %#v", out.Topics)
+	assert.NotEqual(t, "maintenance", out.Topics[0].TopicType)
+	assert.Contains(t, out.Topics[0].Query, "swagger")
+
+	assert.Truef(t, mapTestHasSignal(out.Topics[0].QualitySignals, "source_test_support"),
+		"top topic missing source/test quality signal: %#v", out.Topics[0])
+
 	foundDemotedMaintenance := false
 	for _, topic := range out.Topics[1:] {
 		if topic.TopicType == "maintenance" && mapTestHasSignal(topic.QualitySignals, "maintenance_demoted") {
@@ -312,9 +410,9 @@ func TestRecentBoundaryQualityDemotesMaintenanceAheadOfSourceWork(t *testing.T) 
 			break
 		}
 	}
-	if !foundDemotedMaintenance {
-		t.Fatalf("expected demoted maintenance topic, got %#v", out.Topics)
-	}
+	assert.Truef(t, foundDemotedMaintenance,
+		"expected demoted maintenance topic, got %#v", out.Topics)
+
 }
 
 func TestRecentKeepsSourceBackedDependencyLanguage(t *testing.T) {
@@ -341,22 +439,25 @@ func TestRecentKeepsSourceBackedDependencyLanguage(t *testing.T) {
 	cmd.SetArgs([]string{"--path", repoRoot, "--no-refresh", "--json"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var out mapRecentOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("recent json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"recent json: %v\n%s", err, buf.String())
 	}
-	if len(out.Topics) < 2 {
-		t.Fatalf("expected source and maintenance topics, got %#v", out.Topics)
-	}
-	if out.Topics[0].TopicType == "maintenance" || !strings.Contains(out.Topics[0].Query, "frontend") {
-		t.Fatalf("source-backed frontend topic should rank first, got %#v", out.Topics)
-	}
-	if !mapTestHasSignal(out.Topics[0].QualitySignals, "source_test_support") {
-		t.Fatalf("top topic missing source/test quality signal: %#v", out.Topics[0])
-	}
+	assert.GreaterOrEqualf(t, len(out.Topics), 2,
+		"expected source and maintenance topics, got %#v", out.Topics)
+	assert.NotEqual(t, "maintenance", out.Topics[0].TopicType)
+	assert.Contains(t, out.Topics[0].Query, "frontend")
+
+	assert.Truef(t, mapTestHasSignal(out.Topics[0].QualitySignals, "source_test_support"),
+		"top topic missing source/test quality signal: %#v", out.Topics[0])
+
 }
 
 func TestRecentDemotesBulkDocsArchiveWhenSourceWorkExists(t *testing.T) {
@@ -379,19 +480,22 @@ func TestRecentDemotesBulkDocsArchiveWhenSourceWorkExists(t *testing.T) {
 	cmd.SetArgs([]string{"--path", repoRoot, "--no-refresh", "--json"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var out mapRecentOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("recent json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"recent json: %v\n%s", err, buf.String())
 	}
-	if len(out.Topics) < 2 {
-		t.Fatalf("expected source and bulk-doc topics, got %#v", out.Topics)
-	}
-	if out.Topics[0].TopicType == "maintenance" || !strings.Contains(out.Topics[0].Query, "fast api") {
-		t.Fatalf("source-backed demo topic should rank first, got %#v", out.Topics)
-	}
+	assert.GreaterOrEqualf(t, len(out.Topics), 2,
+		"expected source and bulk-doc topics, got %#v", out.Topics)
+	assert.NotEqual(t, "maintenance", out.Topics[0].TopicType)
+	assert.Contains(t, out.Topics[0].Query, "fast api")
+
 	foundDemotedBulkDocs := false
 	for _, topic := range out.Topics[1:] {
 		if topic.TopicType == "maintenance" && mapTestHasSignal(topic.QualitySignals, "maintenance:doc-archive") && mapTestHasSignal(topic.QualitySignals, "maintenance_demoted") {
@@ -399,9 +503,9 @@ func TestRecentDemotesBulkDocsArchiveWhenSourceWorkExists(t *testing.T) {
 			break
 		}
 	}
-	if !foundDemotedBulkDocs {
-		t.Fatalf("expected demoted bulk docs archive, got %#v", out.Topics)
-	}
+	assert.Truef(t, foundDemotedBulkDocs,
+		"expected demoted bulk docs archive, got %#v", out.Topics)
+
 }
 
 func TestRecentMergesOverlappingMaintenanceTopics(t *testing.T) {
@@ -435,43 +539,35 @@ func TestRecentMergesOverlappingMaintenanceTopics(t *testing.T) {
 	mapTestGit(t, repoRoot, "commit", "-m", "Fix latest-changes checkout target")
 
 	out := mapTestRunRecentJSON(t, repoRoot)
-	if len(out.Topics) < 3 {
-		t.Fatalf("expected source, sponsors, and latest topics, got %#v", out.Topics)
-	}
-	if out.Topics[0].TopicType == "maintenance" || !strings.Contains(out.Topics[0].Query, "frontend") {
-		t.Fatalf("source-backed frontend topic should stay first, got %#v", out.Topics)
-	}
+	assert.GreaterOrEqualf(t, len(out.Topics), 3,
+		"expected source, sponsors, and latest topics, got %#v", out.Topics)
+	assert.NotEqual(t, "maintenance", out.Topics[0].TopicType)
+	assert.Contains(t, out.Topics[0].Query, "frontend")
 
 	sponsors := mapTestTopicsContaining(out, "sponsor")
-	if len(sponsors) != 1 {
-		t.Fatalf("expected one merged sponsor topic, got %#v", sponsors)
-	}
-	if sponsors[0].CommitCount != 2 || len(sponsors[0].RecentSignals) < 2 {
-		t.Fatalf("sponsor topic should carry both commits/signals, got %#v", sponsors[0])
-	}
-	if sponsors[0].TopicType != "maintenance" || !mapTestHasSignal(sponsors[0].QualitySignals, "maintenance:sponsors") {
-		t.Fatalf("sponsor topic should preserve maintenance framing, got %#v", sponsors[0])
-	}
-	if sponsors[0].BoundaryLabel != "" {
-		t.Fatalf("merged maintenance topic should omit misleading boundaries, got %#v", sponsors[0])
-	}
+	require.Lenf(t, sponsors, 1,
+		"expected one merged sponsor topic, got %#v", sponsors)
+	assert.Equal(t, 2, sponsors[0].CommitCount)
+	assert.GreaterOrEqual(t, len(sponsors[0].RecentSignals), 2)
+	assert.Equal(t, "maintenance", sponsors[0].TopicType)
+	assert.True(t, mapTestHasSignal(sponsors[0].QualitySignals, "maintenance:sponsors"))
+
+	assert.Equalf(t, "", sponsors[0].BoundaryLabel,
+		"merged maintenance topic should omit misleading boundaries, got %#v", sponsors[0])
 
 	latest := mapTestTopicsContaining(out, "latest")
-	if len(latest) != 1 {
-		t.Fatalf("expected one merged latest-changes workflow topic, got %#v", latest)
-	}
-	if latest[0].CommitCount != 2 || len(latest[0].RecentSignals) < 2 {
-		t.Fatalf("latest topic should carry both commits/signals, got %#v", latest[0])
-	}
-	if latest[0].TopicType != "maintenance" || !mapTestHasSignal(latest[0].QualitySignals, "maintenance:release-docs") {
-		t.Fatalf("latest topic should preserve release-docs maintenance framing, got %#v", latest[0])
-	}
+	require.Lenf(t, latest, 1,
+		"expected one merged latest-changes workflow topic, got %#v", latest)
+	assert.Equal(t, 2, latest[0].CommitCount)
+	assert.GreaterOrEqual(t, len(latest[0].RecentSignals), 2)
+	assert.Equal(t, "maintenance", latest[0].TopicType)
+	assert.True(t, mapTestHasSignal(latest[0].QualitySignals, "maintenance:release-docs"))
 
 	var text bytes.Buffer
 	writeMapRecentText(&text, out, false)
-	if !strings.Contains(text.String(), "Recent signals:") {
-		t.Fatalf("merged text output should show plural recent signals:\n%s", text.String())
-	}
+	assert.Containsf(t, text.String(), "Recent signals:",
+		"merged text output should show plural recent signals:\n%s", text.String())
+
 }
 
 func TestRecentMergesOverlappingSourceTestTopics(t *testing.T) {
@@ -490,15 +586,13 @@ func TestRecentMergesOverlappingSourceTestTopics(t *testing.T) {
 
 	out := mapTestRunRecentJSON(t, repoRoot)
 	swagger := mapTestTopicsContaining(out, "swagger")
-	if len(swagger) != 1 {
-		t.Fatalf("expected one merged swagger topic, got %#v", swagger)
-	}
-	if swagger[0].TopicType == "maintenance" || !mapTestHasSignal(swagger[0].QualitySignals, "source_test_support") {
-		t.Fatalf("merged swagger topic should stay source/test-backed, got %#v", swagger[0])
-	}
-	if swagger[0].CommitCount != 2 || len(swagger[0].RecentSignals) < 2 {
-		t.Fatalf("merged swagger topic should carry both source/test commits, got %#v", swagger[0])
-	}
+	require.Lenf(t, swagger, 1,
+		"expected one merged swagger topic, got %#v", swagger)
+	assert.NotEqual(t, "maintenance", swagger[0].TopicType)
+	assert.True(t, mapTestHasSignal(swagger[0].QualitySignals, "source_test_support"))
+	assert.Equal(t, 2, swagger[0].CommitCount)
+	assert.GreaterOrEqual(t, len(swagger[0].RecentSignals), 2)
+
 }
 
 func TestRecentDoesNotMergeUnrelatedSourceTopicsByGenericWords(t *testing.T) {
@@ -519,12 +613,11 @@ func TestRecentDoesNotMergeUnrelatedSourceTopicsByGenericWords(t *testing.T) {
 	out := mapTestRunRecentJSON(t, repoRoot)
 	swagger := mapTestTopicsContaining(out, "swagger")
 	frontend := mapTestTopicsContaining(out, "frontend")
-	if len(swagger) != 1 || len(frontend) != 1 {
-		t.Fatalf("expected separate swagger and frontend topics, got %#v", out.Topics)
-	}
-	if swagger[0].CommitCount != 1 || frontend[0].CommitCount != 1 {
-		t.Fatalf("unrelated source topics should not merge by generic words, got swagger=%#v frontend=%#v", swagger[0], frontend[0])
-	}
+	require.Len(t, swagger, 1)
+	require.Len(t, frontend, 1)
+	assert.Equal(t, 1, swagger[0].CommitCount)
+	assert.Equal(t, 1, frontend[0].CommitCount)
+
 }
 
 func TestRecentMaintenanceOnlyOutputStaysVisibleAndFramed(t *testing.T) {
@@ -540,16 +633,17 @@ func TestRecentMaintenanceOnlyOutputStaysVisibleAndFramed(t *testing.T) {
 	cmd.SetArgs([]string{"--path", repoRoot, "--no-refresh"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	text := buf.String()
-	if !strings.Contains(text, "Sponsors Rapid Proxy") {
-		t.Fatalf("maintenance topic should remain visible:\n%s", text)
-	}
-	if !strings.Contains(text, "Topic type: maintenance") {
-		t.Fatalf("maintenance topic should be framed:\n%s", text)
-	}
+	assert.Containsf(t, text, "Sponsors Rapid Proxy",
+		"maintenance topic should remain visible:\n%s", text)
+	assert.Containsf(t, text, "Topic type: maintenance",
+		"maintenance topic should be framed:\n%s", text)
+
 }
 
 func TestRecentPreservesSpecificReadmeSpecUpdates(t *testing.T) {
@@ -571,18 +665,14 @@ func TestRecentPreservesSpecificReadmeSpecUpdates(t *testing.T) {
 	mapTestGit(t, repoRoot, "commit", "-m", "feat: updated specification identifiers to new format")
 
 	out := mapTestRunRecentJSON(t, repoRoot)
-	if len(mapTestTopicsContaining(out, "docs updates")) > 0 {
-		t.Fatalf("specific README spec changes should not collapse into generic docs updates: %#v", out.Topics)
-	}
-	if len(mapTestTopicsContaining(out, "one cardinality relation")) != 1 {
-		t.Fatalf("missing one-cardinality spec topic: %#v", out.Topics)
-	}
-	if len(mapTestTopicsContaining(out, "specification identifiers")) != 1 {
-		t.Fatalf("missing specification-identifiers topic: %#v", out.Topics)
-	}
-	if len(out.Topics) > 0 && strings.Contains(strings.ToLower(out.Topics[0].Query), "commit license") {
-		t.Fatalf("repo setup/license topic should not outrank spec changes: %#v", out.Topics)
-	}
+	assert.LessOrEqualf(t, len(mapTestTopicsContaining(out, "docs updates")), 0,
+		"specific README spec changes should not collapse into generic docs updates: %#v", out.Topics)
+	require.Lenf(t, mapTestTopicsContaining(out, "one cardinality relation"), 1,
+		"missing one-cardinality spec topic: %#v", out.Topics)
+	require.Lenf(t, mapTestTopicsContaining(out, "specification identifiers"), 1,
+		"missing specification-identifiers topic: %#v", out.Topics)
+	assert.False(t, len(out.Topics) > 0 && strings.Contains(strings.ToLower(out.Topics[0].Query), "commit license"))
+
 }
 
 func TestRecentKeepsVersionManifestTopicSpecific(t *testing.T) {
@@ -596,18 +686,16 @@ func TestRecentKeepsVersionManifestTopicSpecific(t *testing.T) {
 	mapTestGit(t, repoRoot, "commit", "-m", "Scoop update for kalo version v0.1.0")
 
 	out := mapTestRunRecentJSON(t, repoRoot)
-	if len(out.Topics) != 1 {
-		t.Fatalf("expected merged version manifest topic, got %#v", out.Topics)
-	}
-	if strings.Contains(strings.ToLower(out.Topics[0].Query), "config updates") {
-		t.Fatalf("version manifest updates should keep package/version specificity: %#v", out.Topics[0])
-	}
-	if !strings.Contains(strings.ToLower(out.Topics[0].Query), "scoop") || !strings.Contains(strings.ToLower(out.Topics[0].Query), "kalo") {
-		t.Fatalf("version manifest topic lost subject specificity: %#v", out.Topics[0])
-	}
-	if out.Topics[0].CommitCount != 2 {
-		t.Fatalf("merged version manifest topic should keep both commits: %#v", out.Topics[0])
-	}
+	require.Lenf(t, out.Topics, 1,
+		"expected merged version manifest topic, got %#v", out.Topics)
+	assert.NotContainsf(t, strings.ToLower(out.Topics[0].Query), "config updates",
+		"version manifest updates should keep package/version specificity: %#v", out.Topics[0])
+	assert.Contains(t, strings.ToLower(out.Topics[0].Query), "scoop")
+	assert.Contains(t, strings.ToLower(out.Topics[0].Query), "kalo")
+
+	assert.Equalf(t, 2, out.Topics[0].CommitCount,
+		"merged version manifest topic should keep both commits: %#v", out.Topics[0])
+
 }
 
 func mapTestRunRecentJSON(t *testing.T, repoRoot string) mapRecentOutput {
@@ -616,13 +704,18 @@ func mapTestRunRecentJSON(t *testing.T, repoRoot string) mapRecentOutput {
 	cmd.SetArgs([]string{"--path", repoRoot, "--no-refresh", "--json"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var out mapRecentOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("recent json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"recent json: %v\n%s", err, buf.String())
 	}
+
 	return out
 }
 
@@ -667,17 +760,16 @@ func TestFastMapFallbackAddsIndexRequiredCaveatForUnindexedRepo(t *testing.T) {
 	}
 
 	out := buildFastMapFallbackOutputFromRecent(repoRoot, recent, false)
-	if len(out.Areas) != 1 || out.Areas[0].Label != "Partner Commission" {
-		t.Fatalf("unexpected fallback areas: %#v", out.Areas)
-	}
-	if !strings.Contains(strings.Join(out.Caveats, "\n"), mapIndexRequiredCaveat) {
-		t.Fatalf("missing index-required caveat: %#v", out.Caveats)
-	}
+	require.Len(t, out.Areas, 1)
+	assert.Equal(t, "Partner Commission", out.Areas[0].Label)
+
+	assert.Containsf(t, strings.Join(out.Caveats, "\n"), mapIndexRequiredCaveat,
+		"missing index-required caveat: %#v", out.Caveats)
 
 	indexed := buildFastMapFallbackOutputFromRecent(repoRoot, recent, true)
-	if strings.Contains(strings.Join(indexed.Caveats, "\n"), mapIndexRequiredCaveat) {
-		t.Fatalf("indexed fallback should not show index-required caveat: %#v", indexed.Caveats)
-	}
+	assert.NotContainsf(t, strings.Join(indexed.Caveats, "\n"), mapIndexRequiredCaveat,
+		"indexed fallback should not show index-required caveat: %#v", indexed.Caveats)
+
 }
 
 func TestPathBoundaryMapUsesStablePathLabelOverRecentWorkstream(t *testing.T) {
@@ -699,18 +791,15 @@ func TestPathBoundaryMapUsesStablePathLabelOverRecentWorkstream(t *testing.T) {
 	}}
 
 	areas, _, _ := buildPathBoundaryAreas(repoRoot, "dub", files, commits, 5)
-	if len(areas) == 0 {
-		t.Fatalf("expected boundary areas")
-	}
-	if areas[0].Label != "Webhooks" {
-		t.Fatalf("top label = %q, want stable path boundary Webhooks; areas=%#v", areas[0].Label, areas)
-	}
-	if strings.Contains(strings.ToLower(areas[0].Label), "harden") {
-		t.Fatalf("recent workstream leaked into boundary label: %#v", areas[0])
-	}
-	if len(areas[0].TraceReceipts) == 0 || !strings.Contains(areas[0].TraceReceipts[0].Subject, "harden webhook") {
-		t.Fatalf("expected recent commit as receipt, got %#v", areas[0].TraceReceipts)
-	}
+	require.NotEmptyf(t, areas,
+		"expected boundary areas")
+	assert.Equalf(t, "Webhooks", areas[0].Label,
+		"top label = %q, want stable path boundary Webhooks; areas=%#v", areas[0].Label, areas)
+	assert.NotContainsf(t, strings.ToLower(areas[0].Label), "harden",
+		"recent workstream leaked into boundary label: %#v", areas[0])
+	require.NotEmpty(t, areas[0].TraceReceipts)
+	assert.Contains(t, areas[0].TraceReceipts[0].Subject, "harden webhook")
+
 }
 
 func TestPathBoundaryMapBuildsSubareasFromChildPaths(t *testing.T) {
@@ -731,18 +820,30 @@ func TestPathBoundaryMapBuildsSubareasFromChildPaths(t *testing.T) {
 			break
 		}
 	}
-	if workflow == nil {
-		t.Fatalf("expected Workflows & Automation boundary, got %#v", areas)
-	}
+	require.NotNilf(t, workflow,
+		"expected Workflows & Automation boundary, got %#v", areas)
+
 	covers := strings.Join(workflow.Covers, "\n")
-	for _, want := range []string{"Workflow Executor", "Workflow Builder", "Workflow Trigger"} {
-		if !strings.Contains(covers, want) {
-			t.Fatalf("workflow covers missing %q: %#v", want, workflow.Covers)
-		}
-	}
-	if workflow.EvidenceCounts["source"] == 0 || workflow.EvidenceCounts["test"] == 0 || workflow.EvidenceCounts["doc"] == 0 {
-		t.Fatalf("expected role-diverse evidence, got %#v", workflow.EvidenceCounts)
-	}
+	assert.Containsf(t, covers,
+
+		("Workflow Executor"), "workflow covers missing %q: %#v",
+
+		("Workflow Executor"), workflow.Covers)
+	assert.Containsf(t, covers,
+
+		("Workflow Builder"), "workflow covers missing %q: %#v",
+
+		("Workflow Builder"), workflow.Covers)
+	assert.Containsf(t, covers,
+
+		("Workflow Trigger"), "workflow covers missing %q: %#v",
+
+		("Workflow Trigger"), workflow.Covers)
+
+	assert.NotEqual(t, 0, workflow.EvidenceCounts["source"])
+	assert.NotEqual(t, 0, workflow.EvidenceCounts["test"])
+	assert.NotEqual(t, 0, workflow.EvidenceCounts["doc"])
+
 }
 
 func TestPathBoundaryMapAddsImportStructureReceipts(t *testing.T) {
@@ -760,18 +861,15 @@ func TestPathBoundaryMapAddsImportStructureReceipts(t *testing.T) {
 
 	areas, _, _ := buildPathBoundaryAreas(repoRoot, "dub", files, nil, 5)
 	webhooks := findMapTestArea(areas, "Webhooks")
-	if webhooks == nil {
-		t.Fatalf("expected Webhooks area, got %#v", areas)
-	}
-	if webhooks.EvidenceCounts["import"] == 0 {
-		t.Fatalf("expected import structure evidence, got %#v", webhooks.EvidenceCounts)
-	}
-	if webhooks.EvidenceCounts["test_import"] == 0 {
-		t.Fatalf("expected test->source evidence, got %#v", webhooks.EvidenceCounts)
-	}
-	if !strings.Contains(mapAreaEvidenceText(webhooks.EvidenceCounts), "import structure") {
-		t.Fatalf("evidence text missing import structure: %s", mapAreaEvidenceText(webhooks.EvidenceCounts))
-	}
+	require.NotNilf(t, webhooks,
+		"expected Webhooks area, got %#v", areas)
+	assert.NotEqualf(t, 0, webhooks.EvidenceCounts["import"],
+		"expected import structure evidence, got %#v", webhooks.EvidenceCounts)
+	assert.NotEqualf(t, 0, webhooks.EvidenceCounts["test_import"],
+		"expected test->source evidence, got %#v", webhooks.EvidenceCounts)
+	assert.Containsf(t, mapAreaEvidenceText(webhooks.EvidenceCounts), "import structure",
+		"evidence text missing import structure: %s", mapAreaEvidenceText(webhooks.EvidenceCounts))
+
 }
 
 func TestPathBoundaryMapSuppressesWrapperAndDomainShellLabels(t *testing.T) {
@@ -789,18 +887,14 @@ func TestPathBoundaryMapSuppressesWrapperAndDomainShellLabels(t *testing.T) {
 	}
 
 	areas, _, _ := buildPathBoundaryAreas(repoRoot, "dub", files, nil, 8)
-	for _, area := range areas {
-		switch area.Label {
-		case "Hooks", "Dashboard", "App Dub Co":
-			t.Fatalf("wrapper/domain shell label leaked into map: %#v", areas)
-		}
-	}
-	if findMapTestArea(areas, "Webhooks") == nil {
-		t.Fatalf("expected Webhooks to survive wrapper suppression, got %#v", areas)
-	}
-	if findMapTestArea(areas, "Affiliate / Partner Programs") == nil {
-		t.Fatalf("expected partner parent to survive domain-shell suppression, got %#v", areas)
-	}
+	assert.Nil(t, findMapTestArea(areas, "Hooks"))
+	assert.Nil(t, findMapTestArea(areas, "Dashboard"))
+	assert.Nil(t, findMapTestArea(areas, "App Dub Co"))
+	require.NotNilf(t, findMapTestArea(areas, "Webhooks"),
+		"expected Webhooks to survive wrapper suppression, got %#v", areas)
+	require.NotNilf(t, findMapTestArea(areas, "Affiliate / Partner Programs"),
+		"expected partner parent to survive domain-shell suppression, got %#v", areas)
+
 }
 
 func TestPathBoundaryMapAggregatesDubConceptualParents(t *testing.T) {
@@ -822,22 +916,19 @@ func TestPathBoundaryMapAggregatesDubConceptualParents(t *testing.T) {
 
 	areas, _, _ := buildPathBoundaryAreas(repoRoot, "dub", files, nil, 8)
 	partners := findMapTestArea(areas, "Affiliate / Partner Programs")
-	if partners == nil {
-		t.Fatalf("expected Affiliate / Partner Programs, got %#v", areas)
-	}
-	if !strings.Contains(strings.Join(partners.Covers, "\n"), "Commissions") {
-		t.Fatalf("partner parent missing concrete covers: %#v", partners.Covers)
-	}
+	require.NotNilf(t, partners,
+		"expected Affiliate / Partner Programs, got %#v", areas)
+	assert.Containsf(t, strings.Join(partners.Covers, "\n"), "Commissions",
+		"partner parent missing concrete covers: %#v", partners.Covers)
+
 	redirect := findMapTestArea(areas, "Short-Link Redirect & Click Capture")
-	if redirect == nil {
-		t.Fatalf("expected Short-Link Redirect & Click Capture, got %#v", areas)
-	}
-	if !strings.Contains(redirect.Try, "click events") {
-		t.Fatalf("conceptual try command should use concrete click substrate, got %q", redirect.Try)
-	}
-	if findMapTestArea(areas, "Program") != nil || findMapTestArea(areas, "Programs") != nil {
-		t.Fatalf("child program labels should be folded behind parent: %#v", areas)
-	}
+	require.NotNilf(t, redirect,
+		"expected Short-Link Redirect & Click Capture, got %#v", areas)
+	assert.Containsf(t, redirect.Try, "click events",
+		"conceptual try command should use concrete click substrate, got %q", redirect.Try)
+	assert.Nil(t, findMapTestArea(areas, "Program"))
+	assert.Nil(t, findMapTestArea(areas, "Programs"))
+
 }
 
 func TestPathBoundaryMapAggregatesPlaneConceptualParents(t *testing.T) {
@@ -864,21 +955,17 @@ func TestPathBoundaryMapAggregatesPlaneConceptualParents(t *testing.T) {
 
 	areas, _, _ := buildPathBoundaryAreas(repoRoot, "plane", files, nil, 8)
 	workItems := findMapTestArea(areas, "Work Items & Project Delivery")
-	if workItems == nil {
-		t.Fatalf("expected Work Items & Project Delivery, got %#v", areas)
-	}
-	if !strings.Contains(strings.Join(workItems.Covers, "\n"), "Issues") {
-		t.Fatalf("work item parent missing issue cover: %#v", workItems.Covers)
-	}
-	if findMapTestArea(areas, "Planning: Cycles, Modules & Views") == nil {
-		t.Fatalf("expected planning parent, got %#v", areas)
-	}
-	if findMapTestArea(areas, "Django API, Persistence & Async Workers") == nil {
-		t.Fatalf("expected Django API parent, got %#v", areas)
-	}
-	if findMapTestArea(areas, "States") != nil {
-		t.Fatalf("suppressed implementation-shaped States label leaked: %#v", areas)
-	}
+	require.NotNilf(t, workItems,
+		"expected Work Items & Project Delivery, got %#v", areas)
+	assert.Containsf(t, strings.Join(workItems.Covers, "\n"), "Issues",
+		"work item parent missing issue cover: %#v", workItems.Covers)
+	require.NotNilf(t, findMapTestArea(areas, "Planning: Cycles, Modules & Views"),
+		"expected planning parent, got %#v", areas)
+	require.NotNilf(t, findMapTestArea(areas, "Django API, Persistence & Async Workers"),
+		"expected Django API parent, got %#v", areas)
+	assert.Nilf(t, findMapTestArea(areas, "States"),
+		"suppressed implementation-shaped States label leaked: %#v", areas)
+
 }
 
 func TestPathBoundaryMapDoesNotUseDjangoParentForGenericTypeScriptAPI(t *testing.T) {
@@ -897,9 +984,9 @@ func TestPathBoundaryMapDoesNotUseDjangoParentForGenericTypeScriptAPI(t *testing
 	}
 
 	areas, _, _ := buildPathBoundaryAreas(repoRoot, "novu", files, nil, 8)
-	if findMapTestArea(areas, "Django API, Persistence & Async Workers") != nil {
-		t.Fatalf("Django parent should require Python/Django evidence, got %#v", areas)
-	}
+	assert.Nilf(t, findMapTestArea(areas, "Django API, Persistence & Async Workers"),
+		"Django parent should require Python/Django evidence, got %#v", areas)
+
 }
 
 func TestPathBoundaryMapAggregatesTwentyConceptualParents(t *testing.T) {
@@ -922,22 +1009,19 @@ func TestPathBoundaryMapAggregatesTwentyConceptualParents(t *testing.T) {
 	}
 
 	areas, _, _ := buildPathBoundaryAreas(repoRoot, "twenty", files, nil, 8)
-	if findMapTestArea(areas, "Metadata Engine & Data Model") == nil {
-		t.Fatalf("expected metadata parent, got %#v", areas)
-	}
-	if findMapTestArea(areas, "CRM Record Experience") == nil {
-		t.Fatalf("expected CRM record parent, got %#v", areas)
-	}
-	if findMapTestArea(areas, "Workflows & Automation") == nil {
-		t.Fatalf("expected workflow parent, got %#v", areas)
-	}
+	require.NotNilf(t, findMapTestArea(areas, "Metadata Engine & Data Model"),
+		"expected metadata parent, got %#v", areas)
+	require.NotNilf(t, findMapTestArea(areas, "CRM Record Experience"),
+		"expected CRM record parent, got %#v", areas)
+	require.NotNilf(t, findMapTestArea(areas, "Workflows & Automation"),
+		"expected workflow parent, got %#v", areas)
+
 	api := findMapTestArea(areas, "Public API Layer")
-	if api == nil {
-		t.Fatalf("expected public API parent, got %#v", areas)
-	}
-	if strings.Contains(api.Try, "public api layer") || !(strings.Contains(api.Try, "graphql") || strings.Contains(api.Try, "rest")) {
-		t.Fatalf("conceptual API try command should use constrained API child/path query, got %q", api.Try)
-	}
+	require.NotNilf(t, api,
+		"expected public API parent, got %#v", areas)
+	assert.NotContains(t, api.Try, "public api layer")
+	assert.True(t, (strings.Contains(api.Try, "graphql") || strings.Contains(api.Try, "rest")))
+
 }
 
 func TestPathBoundaryMapRanksConceptualParentKeyFiles(t *testing.T) {
@@ -956,15 +1040,13 @@ func TestPathBoundaryMapRanksConceptualParentKeyFiles(t *testing.T) {
 
 	areas, _, _ := buildPathBoundaryAreas(repoRoot, "twenty", files, nil, 8)
 	metadata := findMapTestArea(areas, "Metadata Engine & Data Model")
-	if metadata == nil {
-		t.Fatalf("expected metadata parent, got %#v", areas)
-	}
-	if len(metadata.KeyPaths) == 0 {
-		t.Fatalf("expected key paths")
-	}
-	if strings.Contains(metadata.KeyPaths[0], "twenty-docs") {
-		t.Fatalf("metadata parent should prefer implementation over docs, got %#v", metadata.KeyPaths)
-	}
+	require.NotNilf(t, metadata,
+		"expected metadata parent, got %#v", areas)
+	require.NotEmptyf(t, metadata.KeyPaths,
+		"expected key paths")
+	assert.NotContainsf(t, metadata.KeyPaths[0], "twenty-docs",
+		"metadata parent should prefer implementation over docs, got %#v", metadata.KeyPaths)
+
 }
 
 func TestPathBoundaryMapDedupesIdentityConceptualParents(t *testing.T) {
@@ -985,18 +1067,25 @@ func TestPathBoundaryMapDedupesIdentityConceptualParents(t *testing.T) {
 
 	areas, _, _ := buildPathBoundaryAreas(repoRoot, "crm", files, nil, 8)
 	identityParents := 0
-	for _, label := range []string{
-		"Workspace Identity, Access & Billing",
-		"Identity, Auth & Workspace Tenancy",
-		"Identity, Auth & Access Control",
-	} {
-		if findMapTestArea(areas, label) != nil {
-			identityParents++
-		}
+	if findMapTestArea(areas,
+		("Workspace Identity, Access & Billing")) !=
+		nil {
+
+		identityParents++
 	}
-	if identityParents != 1 {
-		t.Fatalf("expected exactly one identity parent, got %d in %#v", identityParents, areas)
+	if findMapTestArea(areas,
+		("Identity, Auth & Workspace Tenancy")) !=
+		nil {
+		identityParents++
 	}
+	if findMapTestArea(areas,
+		("Identity, Auth & Access Control")) != nil {
+		identityParents++
+	}
+
+	assert.Equalf(t, 1, identityParents,
+		"expected exactly one identity parent, got %d in %#v", identityParents, areas)
+
 }
 
 func TestPathBoundaryMapUsesToolRepoParents(t *testing.T) {
@@ -1029,30 +1118,55 @@ func TestPathBoundaryMapUsesToolRepoParents(t *testing.T) {
 	}
 
 	areas, _, _ := buildPathBoundaryAreas(repoRoot, "uv", files, nil, 8)
-	for _, label := range []string{
-		"Project & Workspace Lifecycle",
-		"Dependency Resolution & Lockfile",
-		"Package Installation & Virtual Environments",
-		"Registry, Cache & Artifact Fetching",
-		"Tools & Ephemeral Environments",
-	} {
-		if findMapTestArea(areas, label) == nil {
-			t.Fatalf("expected tool parent %q, got %#v", label, areas)
-		}
-	}
-	for _, label := range []string{
-		"Crates",
-		"Scripts",
-		"Identity, Auth & Workspace Tenancy",
-		"Work Items & Project Delivery",
-		"Built By Uv",
-		"Github",
-		"Instance Administration & Licensing",
-	} {
-		if findMapTestArea(areas, label) != nil {
-			t.Fatalf("tool repo shell/product label %q leaked into map: %#v", label, areas)
-		}
-	}
+	require.NotNilf(t, findMapTestArea(areas,
+		("Project & Workspace Lifecycle")),
+		"expected tool parent %q, got %#v",
+		("Project & Workspace Lifecycle"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Dependency Resolution & Lockfile"),
+	),
+		"expected tool parent %q, got %#v", ("Dependency Resolution & Lockfile"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Package Installation & Virtual Environments")), "expected tool parent %q, got %#v", ("Package Installation & Virtual Environments"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Registry, Cache & Artifact Fetching")), "expected tool parent %q, got %#v", ("Registry, Cache & Artifact Fetching"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Tools & Ephemeral Environments")),
+
+		"expected tool parent %q, got %#v", ("Tools & Ephemeral Environments"), areas)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("Crates")), "tool repo shell/product label %q leaked into map: %#v",
+
+		("Crates"), areas)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("Scripts")), "tool repo shell/product label %q leaked into map: %#v",
+
+		("Scripts"), areas)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("Identity, Auth & Workspace Tenancy")),
+
+		"tool repo shell/product label %q leaked into map: %#v",
+		("Identity, Auth & Workspace Tenancy"), areas)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("Work Items & Project Delivery")), "tool repo shell/product label %q leaked into map: %#v",
+
+		("Work Items & Project Delivery"), areas)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("Built By Uv")),
+		"tool repo shell/product label %q leaked into map: %#v",
+
+		("Built By Uv"), areas,
+	)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("Github")), "tool repo shell/product label %q leaked into map: %#v",
+
+		("Github"), areas)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("Instance Administration & Licensing")),
+
+		"tool repo shell/product label %q leaked into map: %#v",
+		("Instance Administration & Licensing"), areas)
+
 }
 
 func TestPathBoundaryMapFoldsRailsShellsIntoProductParents(t *testing.T) {
@@ -1088,23 +1202,38 @@ func TestPathBoundaryMapFoldsRailsShellsIntoProductParents(t *testing.T) {
 	}
 
 	areas, _, _ := buildPathBoundaryAreas(repoRoot, "maybe", files, nil, 8)
-	for _, label := range []string{
-		"Accounts & Net-Worth Dashboard",
-		"Transaction Ledger, Categorization & Cashflow",
-		"Budgeting",
-		"Investments, Holdings & Securities",
-		"Bank Connectivity & Plaid Sync",
-		"CSV & Manual Data Import",
-	} {
-		if findMapTestArea(areas, label) == nil {
-			t.Fatalf("expected finance/product parent %q, got %#v", label, areas)
-		}
-	}
-	for _, label := range []string{"Controllers", "DB/Migrate"} {
-		if findMapTestArea(areas, label) != nil {
-			t.Fatalf("rails shell label %q leaked into map: %#v", label, areas)
-		}
-	}
+	require.NotNilf(t, findMapTestArea(areas,
+		("Accounts & Net-Worth Dashboard")),
+
+		"expected finance/product parent %q, got %#v", ("Accounts & Net-Worth Dashboard"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Transaction Ledger, Categorization & Cashflow")), "expected finance/product parent %q, got %#v",
+		("Transaction Ledger, Categorization & Cashflow"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Budgeting")),
+		"expected finance/product parent %q, got %#v",
+
+		("Budgeting"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Investments, Holdings & Securities")), "expected finance/product parent %q, got %#v", ("Investments, Holdings & Securities"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Bank Connectivity & Plaid Sync")),
+
+		"expected finance/product parent %q, got %#v", ("Bank Connectivity & Plaid Sync"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("CSV & Manual Data Import")), "expected finance/product parent %q, got %#v",
+
+		("CSV & Manual Data Import"), areas)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("Controllers")),
+		"rails shell label %q leaked into map: %#v",
+
+		("Controllers"), areas)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("DB/Migrate")), "rails shell label %q leaked into map: %#v",
+
+		("DB/Migrate"), areas)
+
 }
 
 func TestPathBoundaryMapFoldsPlatformShellsIntoCommerceParents(t *testing.T) {
@@ -1137,23 +1266,35 @@ func TestPathBoundaryMapFoldsPlatformShellsIntoCommerceParents(t *testing.T) {
 	}
 
 	areas, _, _ := buildPathBoundaryAreas(repoRoot, "medusa", files, nil, 8)
-	for _, label := range []string{
-		"Framework Runtime & Module Platform",
-		"Product Catalog, Pricing & Inventory",
-		"Cart, Checkout & Promotions",
-		"Orders, Fulfillment & Post-Purchase",
-		"Payments, Tax & Monetary Configuration",
-		"Provider Adapters & Pluggable Infrastructure",
-	} {
-		if findMapTestArea(areas, label) == nil {
-			t.Fatalf("expected platform/commerce parent %q, got %#v", label, areas)
-		}
-	}
-	for _, label := range []string{"Www", "Design System"} {
-		if findMapTestArea(areas, label) != nil {
-			t.Fatalf("platform shell label %q leaked into map: %#v", label, areas)
-		}
-	}
+	require.NotNilf(t, findMapTestArea(areas,
+		("Framework Runtime & Module Platform")), "expected platform/commerce parent %q, got %#v",
+		("Framework Runtime & Module Platform"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Product Catalog, Pricing & Inventory")), "expected platform/commerce parent %q, got %#v",
+		("Product Catalog, Pricing & Inventory"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Cart, Checkout & Promotions")), "expected platform/commerce parent %q, got %#v",
+
+		("Cart, Checkout & Promotions"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Orders, Fulfillment & Post-Purchase")), "expected platform/commerce parent %q, got %#v",
+		("Orders, Fulfillment & Post-Purchase"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Payments, Tax & Monetary Configuration")), "expected platform/commerce parent %q, got %#v",
+		("Payments, Tax & Monetary Configuration"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Provider Adapters & Pluggable Infrastructure")), "expected platform/commerce parent %q, got %#v",
+		("Provider Adapters & Pluggable Infrastructure"), areas)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("Www")), "platform shell label %q leaked into map: %#v",
+
+		("Www"), areas)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("Design System")),
+		"platform shell label %q leaked into map: %#v",
+
+		("Design System"), areas)
+
 }
 
 func TestPathBoundaryMapDiscoversDocumentSigningParentOverFrameworkShells(t *testing.T) {
@@ -1178,20 +1319,50 @@ func TestPathBoundaryMapDiscoversDocumentSigningParentOverFrameworkShells(t *tes
 
 	areas, _, _ := buildPathBoundaryAreas(repoRoot, "documenso", files, nil, 8)
 	signing := findMapTestArea(areas, "Document Signing & Authoring")
-	if signing == nil {
-		t.Fatalf("expected document signing parent, got %#v", areas)
-	}
+	require.NotNilf(t, signing,
+		"expected document signing parent, got %#v", areas)
+
 	covers := strings.Join(signing.Covers, "\n")
-	for _, want := range []string{"Documents", "Recipients", "Field Signing"} {
-		if !strings.Contains(covers, want) {
-			t.Fatalf("document signing parent missing cover %q: %#v", want, signing.Covers)
-		}
-	}
-	for _, label := range []string{"Remix", "Trpc", "Server Only", "Primitives", "Universal"} {
-		if findMapTestArea(areas, label) != nil {
-			t.Fatalf("framework/package shell %q leaked into top-level map: %#v", label, areas)
-		}
-	}
+	assert.Containsf(t, covers,
+
+		("Documents"), "document signing parent missing cover %q: %#v",
+
+		("Documents"), signing.Covers)
+	assert.Containsf(t, covers,
+
+		("Recipients"), "document signing parent missing cover %q: %#v",
+
+		("Recipients"), signing.Covers)
+	assert.Containsf(t, covers,
+
+		("Field Signing"), "document signing parent missing cover %q: %#v",
+
+		("Field Signing"), signing.Covers)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("Remix")), "framework/package shell %q leaked into top-level map: %#v",
+
+		("Remix"), areas)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("Trpc")), "framework/package shell %q leaked into top-level map: %#v",
+
+		("Trpc"), areas)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("Server Only")),
+		"framework/package shell %q leaked into top-level map: %#v",
+
+		("Server Only"),
+		areas)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("Primitives")), "framework/package shell %q leaked into top-level map: %#v",
+
+		("Primitives"), areas,
+	)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("Universal")), "framework/package shell %q leaked into top-level map: %#v",
+
+		("Universal"), areas,
+	)
+
 }
 
 func TestPathBoundaryMapDiscoversPlatformConceptsOverComposablesAndBlackbox(t *testing.T) {
@@ -1222,30 +1393,52 @@ func TestPathBoundaryMapDiscoversPlatformConceptsOverComposablesAndBlackbox(t *t
 	}
 
 	areas, _, _ := buildPathBoundaryAreas(repoRoot, "directus", files, nil, 8)
-	for _, label := range []string{
-		"Content/Data Model",
-		"Extension Surfaces",
-		"Flows & Automation",
-		"Public API Layer",
-	} {
-		if findMapTestArea(areas, label) == nil {
-			t.Fatalf("expected platform concept parent %q, got %#v", label, areas)
-		}
-	}
-	for _, label := range []string{"Composables", "Blackbox"} {
-		if findMapTestArea(areas, label) != nil {
-			t.Fatalf("implementation/test shell %q leaked into top-level map: %#v", label, areas)
-		}
-	}
+	require.NotNilf(t, findMapTestArea(areas,
+		("Content/Data Model")),
+		"expected platform concept parent %q, got %#v",
+
+		("Content/Data Model"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Extension Surfaces")),
+		"expected platform concept parent %q, got %#v",
+
+		("Extension Surfaces"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Flows & Automation")),
+		"expected platform concept parent %q, got %#v",
+
+		("Flows & Automation"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Public API Layer")), "expected platform concept parent %q, got %#v",
+
+		("Public API Layer"),
+		areas)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("Composables")),
+		"implementation/test shell %q leaked into top-level map: %#v",
+
+		("Composables"), areas)
+	assert.Nilf(t,
+		findMapTestArea(areas, ("Blackbox")), "implementation/test shell %q leaked into top-level map: %#v",
+
+		("Blackbox"), areas,
+	)
+
 	apiParents := 0
-	for _, label := range []string{"Public API Layer", "Public HTTP API & Developer Platform"} {
-		if findMapTestArea(areas, label) != nil {
-			apiParents++
-		}
+	if findMapTestArea(areas,
+		("Public API Layer")) != nil {
+		apiParents++
 	}
-	if apiParents != 1 {
-		t.Fatalf("expected exactly one API parent, got %d in %#v", apiParents, areas)
+	if findMapTestArea(areas,
+		("Public HTTP API & Developer Platform")) !=
+		nil {
+
+		apiParents++
 	}
+
+	assert.Equalf(t, 1, apiParents,
+		"expected exactly one API parent, got %d in %#v", apiParents, areas)
+
 }
 
 func TestPathBoundaryMapDemotesFreshHoldoutShellBuckets(t *testing.T) {
@@ -1273,31 +1466,46 @@ func TestPathBoundaryMapDemotesFreshHoldoutShellBuckets(t *testing.T) {
 	}
 
 	areas, _, _ := buildPathBoundaryAreas(repoRoot, "support-platform", files, nil, 8)
-	if findMapTestArea(areas, "Javascript") != nil {
-		t.Fatalf("javascript shell leaked into first-screen map: %#v", areas)
-	}
-	for _, label := range []string{
-		"External HTTP API v1",
-		"Connected Accounts, Email, Calendar & Timeline",
-		"AI Agents, Chat & Skills",
-		"Identity, Auth & Access Control",
-	} {
-		if findMapTestArea(areas, label) == nil {
-			t.Fatalf("expected product/platform area %q, got %#v", label, areas)
-		}
-	}
+	assert.Nilf(t, findMapTestArea(areas, "Javascript"),
+		"javascript shell leaked into first-screen map: %#v", areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("External HTTP API v1")),
+		"expected product/platform area %q, got %#v",
+
+		("External HTTP API v1"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Connected Accounts, Email, Calendar & Timeline")), "expected product/platform area %q, got %#v",
+		("Connected Accounts, Email, Calendar & Timeline"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("AI Agents, Chat & Skills")), "expected product/platform area %q, got %#v",
+
+		("AI Agents, Chat & Skills"), areas)
+	require.NotNilf(t, findMapTestArea(areas,
+		("Identity, Auth & Access Control")),
+
+		"expected product/platform area %q, got %#v", ("Identity, Auth & Access Control"), areas)
+
 }
 
 func TestMapTryCommandDropsShellLabelsAndUsesSpecificCovers(t *testing.T) {
-	if got := mapTryCommand("Locales", []string{"Admin Console"}, nil, mapHighConfidence, nil); got != `ds find "admin console"` {
-		t.Fatalf("locales try = %q", got)
+	{
+		got := mapTryCommand("Locales", []string{"Admin Console"}, nil, mapHighConfidence, nil)
+		assert.Equalf(t, `ds find "admin console"`, got,
+			"locales try = %q", got)
 	}
-	if got := mapTryCommand("Javascript", []string{"Accordion"}, nil, mapHighConfidence, nil); got != `ds find "accordion"` {
-		t.Fatalf("javascript try = %q", got)
+	{
+
+		got := mapTryCommand("Javascript", []string{"Accordion"}, nil, mapHighConfidence, nil)
+		assert.Equalf(t, `ds find "accordion"`, got,
+			"javascript try = %q", got)
 	}
-	if got := mapTryCommand("Files, Assets & Storage", []string{"Upload"}, nil, mapHighConfidence, []string{"web/src/components/MemoEditor/hooks/useFileUpload.ts"}); got != `ds find "upload"` {
-		t.Fatalf("broad storage try should prefer the specific cover, got %q", got)
+	{
+
+		got := mapTryCommand("Files, Assets & Storage", []string{"Upload"}, nil, mapHighConfidence, []string{"web/src/components/MemoEditor/hooks/useFileUpload.ts"})
+		assert.Equalf(t, `ds find "upload"`, got,
+			"broad storage try should prefer the specific cover, got %q", got)
 	}
+
 }
 
 func TestMapTryCommandPrefersSpecificCoverForParentLabel(t *testing.T) {
@@ -1308,9 +1516,9 @@ func TestMapTryCommandPrefersSpecificCoverForParentLabel(t *testing.T) {
 		mapHighConfidence,
 		[]string{"apps/api/internal/submission/redaction.go"},
 	)
-	if got != `ds find "submission redaction"` {
-		t.Fatalf("parent label try = %q", got)
-	}
+	assert.Equalf(t, `ds find "submission redaction"`, got,
+		"parent label try = %q", got)
+
 }
 
 func TestMapTryCommandPrefersHighQualityTraceTaskOverPathTokens(t *testing.T) {
@@ -1329,9 +1537,9 @@ func TestMapTryCommandPrefersHighQualityTraceTaskOverPathTokens(t *testing.T) {
 		},
 		mapBoundaryRoleProductCapability,
 	)
-	if got != `ds find "map handoff query quality"` {
-		t.Fatalf("trace task handoff = %q", got)
-	}
+	assert.Equalf(t, `ds find "map handoff query quality"`, got,
+		"trace task handoff = %q", got)
+
 }
 
 func TestMapTryCommandConsidersThirdTraceReceiptForStablePathSupportedQuery(t *testing.T) {
@@ -1359,9 +1567,9 @@ func TestMapTryCommandConsidersThirdTraceReceiptForStablePathSupportedQuery(t *t
 		},
 		mapBoundaryRoleHandoffUnsafe,
 	)
-	if got != `ds find "website ia pivot homepage"` {
-		t.Fatalf("third path-supported trace task should stabilize handoff query, got %q", got)
-	}
+	assert.Equalf(t, `ds find "website ia pivot homepage"`, got,
+		"third path-supported trace task should stabilize handoff query, got %q", got)
+
 }
 
 func TestMapTryCommandPrefersPathForBroadRoleOverUnsupportedTraceDetails(t *testing.T) {
@@ -1382,9 +1590,9 @@ func TestMapTryCommandPrefersPathForBroadRoleOverUnsupportedTraceDetails(t *test
 		},
 		mapBoundaryRoleHandoffUnsafe,
 	)
-	if got != `ds find "abacus absences flow"` {
-		t.Fatalf("broad boundary should prefer stable path query over unsupported trace details, got %q", got)
-	}
+	assert.Equalf(t, `ds find "abacus absences flow"`, got,
+		"broad boundary should prefer stable path query over unsupported trace details, got %q", got)
+
 }
 
 func TestMapTryCommandPrefersDomainTraceOverTechnicalMigrationForBroadRole(t *testing.T) {
@@ -1404,9 +1612,9 @@ func TestMapTryCommandPrefersDomainTraceOverTechnicalMigrationForBroadRole(t *te
 		},
 		mapBoundaryRoleHandoffUnsafe,
 	)
-	if got != `ds find "flows enhance document invoices"` {
-		t.Fatalf("domain workflow trace should beat technical migration trace, got %q", got)
-	}
+	assert.Equalf(t, `ds find "flows enhance document invoices"`, got,
+		"domain workflow trace should beat technical migration trace, got %q", got)
+
 }
 
 func TestMapTryCommandKeepsSpecificCoverAboveUnrelatedTraceTask(t *testing.T) {
@@ -1421,9 +1629,9 @@ func TestMapTryCommandKeepsSpecificCoverAboveUnrelatedTraceTask(t *testing.T) {
 		[]string{"apps/api/internal/submission/redaction.go"},
 		mapBoundaryRoleProductCapability,
 	)
-	if got != `ds find "submission redaction"` {
-		t.Fatalf("specific cover should beat unrelated trace task, got %q", got)
-	}
+	assert.Equalf(t, `ds find "submission redaction"`, got,
+		"specific cover should beat unrelated trace task, got %q", got)
+
 }
 
 func TestMapTryCommandRejectsTestPrefixTraceTask(t *testing.T) {
@@ -1442,9 +1650,9 @@ func TestMapTryCommandRejectsTestPrefixTraceTask(t *testing.T) {
 		},
 		mapBoundaryRoleProductCapability,
 	)
-	if strings.Contains(got, "raise aggregate coverage") {
-		t.Fatalf("test prefix trace task leaked into handoff: %q", got)
-	}
+	assert.NotContainsf(t, got, "raise aggregate coverage",
+		"test prefix trace task leaked into handoff: %q", got)
+
 }
 
 func TestMapTryCommandAvoidsLowValuePathLeafQueries(t *testing.T) {
@@ -1460,15 +1668,13 @@ func TestMapTryCommandAvoidsLowValuePathLeafQueries(t *testing.T) {
 		},
 		mapBoundaryRoleProductCapability,
 	)
-	if got == "" {
-		t.Fatal("expected a handoff query")
-	}
-	if strings.Contains(got, "dockerfile") || strings.Contains(got, "dockerignore") || strings.Contains(got, "version") {
-		t.Fatalf("low-value path leaf leaked into handoff: %q", got)
-	}
-	if !strings.Contains(got, "operator") && !strings.Contains(got, "charts") && !strings.Contains(got, "crds") {
-		t.Fatalf("handoff lost useful area terms: %q", got)
-	}
+	assert.NotEqual(t, "", got,
+		"expected a handoff query")
+	assert.NotContains(t, got, "dockerfile")
+	assert.NotContains(t, got, "dockerignore")
+	assert.NotContains(t, got, "version")
+	assert.False(t, !strings.Contains(got, "operator") && !strings.Contains(got, "charts") && !strings.Contains(got, "crds"))
+
 }
 
 func TestMapTryCommandAvoidsGeneratedFixtureLeafQueries(t *testing.T) {
@@ -1484,15 +1690,12 @@ func TestMapTryCommandAvoidsGeneratedFixtureLeafQueries(t *testing.T) {
 		},
 		mapBoundaryRoleProductCapability,
 	)
-	if got == "" {
-		t.Fatal("expected a handoff query")
-	}
-	if strings.Contains(got, "bug000") || strings.Contains(got, "bug002") {
-		t.Fatalf("generated fixture leaf leaked into handoff: %q", got)
-	}
-	if !strings.Contains(got, "arm64") && !strings.Contains(got, "fixedbugs") {
-		t.Fatalf("handoff lost useful fixture-family terms: %q", got)
-	}
+	assert.NotEqual(t, "", got,
+		"expected a handoff query")
+	assert.NotContains(t, got, "bug000")
+	assert.NotContains(t, got, "bug002")
+	assert.False(t, !strings.Contains(got, "arm64") && !strings.Contains(got, "fixedbugs"))
+
 }
 
 func TestMapTryCommandConstrainsBroadBoundaryRoles(t *testing.T) {
@@ -1504,9 +1707,9 @@ func TestMapTryCommandConstrainsBroadBoundaryRoles(t *testing.T) {
 		[]string{"saleor/graphql/subscriptions/resolver.py"},
 		mapBoundaryRoleGenericParent,
 	)
-	if api == "" || strings.Contains(api, "public api layer") || !strings.Contains(api, "subscriptions") {
-		t.Fatalf("broad API parent should hand off to specific child/path evidence, got %q", api)
-	}
+	assert.NotEmpty(t, api)
+	assert.NotContains(t, api, "public api layer")
+	assert.Contains(t, api, "subscriptions")
 
 	platform := mapTryCommandForRole(
 		"Platform",
@@ -1516,9 +1719,10 @@ func TestMapTryCommandConstrainsBroadBoundaryRoles(t *testing.T) {
 		[]string{"src/Appwrite/Platform/Modules/Advisor/Reports/Report.php"},
 		mapBoundaryRoleGenericParent,
 	)
-	if platform == "" || strings.Contains(platform, `"platform"`) || !strings.Contains(platform, "advisor") {
-		t.Fatalf("generic platform parent should avoid standalone platform query, got %q", platform)
-	}
+	assert.NotEmpty(t, platform)
+	assert.NotContains(t, platform, `"platform"`)
+	assert.Contains(t, platform, "advisor")
+
 }
 
 func TestMapTryCommandPrefersSpecificExtensionCover(t *testing.T) {
@@ -1530,9 +1734,10 @@ func TestMapTryCommandPrefersSpecificExtensionCover(t *testing.T) {
 		[]string{"kong/plugins/ai-prompt-guard/handler.lua"},
 		mapBoundaryRoleExtensionEcosystem,
 	)
-	if got == "" || !strings.Contains(got, "ai prompt guard") || strings.Contains(got, "plugins ai") {
-		t.Fatalf("extension ecosystem try should prefer specific plugin cover, got %q", got)
-	}
+	assert.NotEmpty(t, got)
+	assert.Contains(t, got, "ai prompt guard")
+	assert.NotContains(t, got, "plugins ai")
+
 }
 
 func TestMapTryCommandSuppressesUnpackableBoundaryHandoff(t *testing.T) {
@@ -1550,18 +1755,16 @@ func TestMapTryCommandSuppressesUnpackableBoundaryHandoff(t *testing.T) {
 		mapBoundaryRoleExtensionEcosystem,
 		idx,
 	)
-	if got != "" {
-		t.Fatalf("unpackable try = %q, want suppressed", got)
-	}
-	if diag == nil || !diag.TrySuppressed {
-		t.Fatalf("expected suppression diagnostics, got %#v", diag)
-	}
-	if diag.Decision != "suppressed_no_indexed_support" {
-		t.Fatalf("decision = %q", diag.Decision)
-	}
-	if len(diag.MissingKeyExtensions) != 1 || diag.MissingKeyExtensions[0] != ".lua" {
-		t.Fatalf("missing extensions = %#v", diag.MissingKeyExtensions)
-	}
+	assert.Equalf(t, "", got,
+		"unpackable try = %q, want suppressed", got)
+	require.NotNil(t, diag)
+	assert.True(t, diag.TrySuppressed)
+
+	assert.Equalf(t, "suppressed_no_indexed_support", diag.Decision,
+		"decision = %q", diag.Decision)
+	require.Len(t, diag.MissingKeyExtensions, 1)
+	assert.Equal(t, ".lua", diag.MissingKeyExtensions[0])
+
 }
 
 func TestMapTryCommandKeepsSupportedBoundaryHandoff(t *testing.T) {
@@ -1581,15 +1784,14 @@ func TestMapTryCommandKeepsSupportedBoundaryHandoff(t *testing.T) {
 		mapBoundaryRoleExtensionEcosystem,
 		idx,
 	)
-	if got == "" {
-		t.Fatal("supported boundary handoff was suppressed")
-	}
-	if diag == nil || diag.Decision != "supported" {
-		t.Fatalf("expected supported diagnostics, got %#v", diag)
-	}
-	if diag.IndexedKeyPathCount != 2 {
-		t.Fatalf("indexed key paths = %d, want 2", diag.IndexedKeyPathCount)
-	}
+	assert.NotEqual(t, "", got,
+		"supported boundary handoff was suppressed")
+	require.NotNil(t, diag)
+	assert.Equal(t, "supported", diag.Decision)
+
+	assert.Equalf(t, 2, diag.IndexedKeyPathCount,
+		"indexed key paths = %d, want 2", diag.IndexedKeyPathCount)
+
 }
 
 func TestMapTryCommandKeepsSpecificCoverForIndexedHandoffUnsafeArea(t *testing.T) {
@@ -1609,12 +1811,11 @@ func TestMapTryCommandKeepsSpecificCoverForIndexedHandoffUnsafeArea(t *testing.T
 		mapBoundaryRoleHandoffUnsafe,
 		idx,
 	)
-	if got != `ds find "upload"` {
-		t.Fatalf("indexed handoff-unsafe cover try = %q", got)
-	}
-	if diag == nil || diag.TrySuppressed {
-		t.Fatalf("specific cover should not be suppressed with indexed key paths: %#v", diag)
-	}
+	assert.Equalf(t, `ds find "upload"`, got,
+		"indexed handoff-unsafe cover try = %q", got)
+	require.NotNil(t, diag)
+	assert.False(t, diag.TrySuppressed)
+
 }
 
 func TestMapAreaPackCommandsRespectsSuppressedTry(t *testing.T) {
@@ -1628,9 +1829,12 @@ func TestMapAreaPackCommandsRespectsSuppressedTry(t *testing.T) {
 			Packability: &mapPackabilityDiagnostics{TrySuppressed: true},
 		},
 	}
-	if got := mapAreaPackCommands(area); len(got) != 0 {
-		t.Fatalf("suppressed area pack commands = %#v", got)
+	{
+		got := mapAreaPackCommands(area)
+		require.Lenf(t, got, 0,
+			"suppressed area pack commands = %#v", got)
 	}
+
 }
 
 func newMapTestPackabilityIndex(paths ...string) *mapPackabilityIndex {
@@ -1647,18 +1851,24 @@ func newMapTestPackabilityIndex(paths ...string) *mapPackabilityIndex {
 
 func TestMapBoundaryRoleClassifiesUnsafeParents(t *testing.T) {
 	platform := &mapAreaInternal{Key: "platform", Label: "Platform", EvidenceCounts: map[string]int{"source": 4}}
-	if got := classifyMapBoundaryRole(platform, "Platform", mapTypePlatform, false, []string{"Advisor Reports"}, "appwrite", mapRepoShapePlatform); got != mapBoundaryRoleGenericParent {
-		t.Fatalf("platform role = %q", got)
+	{
+		got := classifyMapBoundaryRole(platform, "Platform", mapTypePlatform, false, []string{"Advisor Reports"}, "appwrite", mapRepoShapePlatform)
+		assert.Equalf(t, mapBoundaryRoleGenericParent, got,
+			"platform role = %q", got)
 	}
 
 	playground := &mapAreaInternal{Key: "playground", Label: "Playground", EvidenceCounts: map[string]int{"source": 4}}
-	if got := classifyMapBoundaryRole(playground, "Playground", mapTypeTooling, false, nil, "vite", mapRepoShapeTool); got != mapBoundaryRoleFixtureOrTestbed {
-		t.Fatalf("playground role = %q", got)
+	{
+		got := classifyMapBoundaryRole(playground, "Playground", mapTypeTooling, false, nil, "vite", mapRepoShapeTool)
+		assert.Equalf(t, mapBoundaryRoleFixtureOrTestbed, got,
+			"playground role = %q", got)
 	}
 
 	namespace := &mapAreaInternal{Key: "gitea-repositories-meta", Label: "Gitea Repositories Meta", EvidenceCounts: map[string]int{"source": 4}}
-	if got := classifyMapBoundaryRole(namespace, "Gitea Repositories Meta", mapTypeDomainFeature, false, nil, "gitea", mapRepoShapePlatform); got != mapBoundaryRoleRepoNamespace {
-		t.Fatalf("repo namespace role = %q", got)
+	{
+		got := classifyMapBoundaryRole(namespace, "Gitea Repositories Meta", mapTypeDomainFeature, false, nil, "gitea", mapRepoShapePlatform)
+		assert.Equalf(t, mapBoundaryRoleRepoNamespace, got,
+			"repo namespace role = %q", got)
 	}
 
 	plugins := &mapAreaInternal{
@@ -1669,16 +1879,18 @@ func TestMapBoundaryRoleClassifiesUnsafeParents(t *testing.T) {
 			Path: "tests/fixtures/plugins/ai-prompt-guard/index.ts",
 		}},
 	}
-	if got := classifyMapBoundaryRole(plugins, "Plugins", mapTypePlatform, false, []string{"Ai Prompt Guard"}, "kong", mapRepoShapePlatform); got != mapBoundaryRoleExtensionEcosystem {
-		t.Fatalf("plugin role should not become fixture from support path, got %q", got)
+	{
+		got := classifyMapBoundaryRole(plugins, "Plugins", mapTypePlatform, false, []string{"Ai Prompt Guard"}, "kong", mapRepoShapePlatform)
+		assert.Equalf(t, mapBoundaryRoleExtensionEcosystem, got,
+			"plugin role should not become fixture from support path, got %q", got)
 	}
+
 }
 
 func TestMapBoundaryPathEligibleSkipsEmbeddedGitFixtures(t *testing.T) {
 	path := "tests/gitea-repositories-meta/limited_org/private_repo_on_limited_org.git/objects/74/8bf557dfc9c6457998b5118a6c8b2129f56c30"
-	if mapBoundaryPathEligible(path) {
-		t.Fatalf("embedded git fixture path should be ineligible")
-	}
+	assert.False(t, mapBoundaryPathEligible(path))
+
 }
 
 func TestPathBoundaryMapPrefersImplementationKeyFilesOverTestsAndExamples(t *testing.T) {
@@ -1698,15 +1910,13 @@ func TestPathBoundaryMapPrefersImplementationKeyFilesOverTestsAndExamples(t *tes
 
 	areas, _, _ := buildPathBoundaryAreas(repoRoot, "cms", files, nil, 8)
 	dataModel := findMapTestArea(areas, "Content/Data Model")
-	if dataModel == nil {
-		t.Fatalf("expected Content/Data Model, got %#v", areas)
-	}
-	if len(dataModel.KeyPaths) == 0 {
-		t.Fatalf("expected key paths")
-	}
-	if strings.HasPrefix(dataModel.KeyPaths[0], "test/") || strings.HasPrefix(dataModel.KeyPaths[0], "examples/") {
-		t.Fatalf("content/data model should prefer implementation key files, got %#v", dataModel.KeyPaths)
-	}
+	require.NotNilf(t, dataModel,
+		"expected Content/Data Model, got %#v", areas)
+	require.NotEmptyf(t, dataModel.KeyPaths,
+		"expected key paths")
+	assert.False(t, strings.HasPrefix(dataModel.KeyPaths[0], "test/"))
+	assert.False(t, strings.HasPrefix(dataModel.KeyPaths[0], "examples/"))
+
 }
 
 func TestMapAreaMatchPrefersPluralLabelOverPathOnlyMatch(t *testing.T) {
@@ -1715,12 +1925,11 @@ func TestMapAreaMatchPrefersPluralLabelOverPathOnlyMatch(t *testing.T) {
 		{Label: "Partners", KeyPaths: []string{"apps/web/app/partners/fraud/page.tsx"}},
 	}
 	matches := matchMapAreas(areas, "partner")
-	if len(matches) == 0 {
-		t.Fatalf("expected matches")
-	}
-	if matches[0].Area.Label != "Partners" {
-		t.Fatalf("top match = %q, want Partners; matches=%#v", matches[0].Area.Label, matches)
-	}
+	require.NotEmptyf(t, matches,
+		"expected matches")
+	assert.Equalf(t, "Partners", matches[0].Area.Label,
+		"top match = %q, want Partners; matches=%#v", matches[0].Area.Label, matches)
+
 }
 
 func TestMapRecentTopicsFilterByAreaQuery(t *testing.T) {
@@ -1739,12 +1948,11 @@ func TestMapRecentTopicsFilterByAreaQuery(t *testing.T) {
 			paths:   []string{"scripts/release/steps/show-instructions-after-npm-publish.js"},
 		},
 	}, "bounce", 5)
-	if len(topics) != 1 {
-		t.Fatalf("filtered topics = %#v, want one", topics)
-	}
-	if !strings.Contains(topics[0].Query, "bounce") {
-		t.Fatalf("filtered topic = %#v, want bounce", topics[0])
-	}
+	require.Lenf(t, topics, 1,
+		"filtered topics = %#v, want one", topics)
+	assert.Containsf(t, topics[0].Query, "bounce",
+		"filtered topic = %#v, want bounce", topics[0])
+
 }
 
 func TestMapRecentTextAvoidsTaskStatusClaims(t *testing.T) {
@@ -1768,25 +1976,58 @@ func TestMapRecentTextAvoidsTaskStatusClaims(t *testing.T) {
 	var buf bytes.Buffer
 	writeMapRecentText(&buf, out, false)
 	text := buf.String()
-	for _, want := range []string{
-		"Recently active topics",
-		"Expedition Enemy Pressure",
-		"Evidence: 1 commit, 2 files, source",
-		"Recent signal: df68f82 Add expedition enemy pressure phases A-D for Killer Slice 001.",
-		`Try: ds find "expedition enemy pressure"`,
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("recent output missing %q:\n%s", want, text)
-		}
-	}
-	for _, notWant := range []string{"Open tasks", "In progress", "Done", "Stale", "Resume work"} {
-		if strings.Contains(text, notWant) {
-			t.Fatalf("recent output made task-status claim %q:\n%s", notWant, text)
-		}
-	}
+	assert.Containsf(t, text,
+		("Recently active topics"), "recent output missing %q:\n%s",
+
+		("Recently active topics"), text)
+	assert.Containsf(t, text,
+		("Expedition Enemy Pressure"),
+		"recent output missing %q:\n%s",
+
+		("Expedition Enemy Pressure"), text)
+	assert.Containsf(t, text,
+		("Evidence: 1 commit, 2 files, source"),
+		"recent output missing %q:\n%s",
+
+		("Evidence: 1 commit, 2 files, source"), text)
+	assert.Containsf(t, text,
+		("Recent signal: df68f82 Add expedition enemy pressure phases A-D for Killer Slice 001."), "recent output missing %q:\n%s",
+		("Recent signal: df68f82 Add expedition enemy pressure phases A-D for Killer Slice 001."), text)
+	assert.Containsf(t, text,
+		(`Try: ds find "expedition enemy pressure"`), "recent output missing %q:\n%s",
+
+		(`Try: ds find "expedition enemy pressure"`), text)
+	assert.NotContainsf(t,
+		text,
+		("Open tasks"), "recent output made task-status claim %q:\n%s",
+
+		("Open tasks"), text)
+	assert.NotContainsf(t,
+		text,
+		("In progress"), "recent output made task-status claim %q:\n%s",
+
+		("In progress"), text)
+	assert.NotContainsf(t,
+		text,
+		("Done"),
+		"recent output made task-status claim %q:\n%s",
+
+		("Done"), text)
+	assert.NotContainsf(t,
+		text,
+		("Stale"),
+		"recent output made task-status claim %q:\n%s",
+
+		("Stale"), text)
+	assert.NotContainsf(t,
+		text,
+		("Resume work"), "recent output made task-status claim %q:\n%s",
+
+		("Resume work"), text)
+
 }
 
-func TestRecentCommandShowsRecentTopics(t *testing.T) {
+func TestRecentCommandRendersHumanTopics(t *testing.T) {
 	repoRoot := setupGitRepo(t)
 	t.Setenv("DEVSPECS_HOME", t.TempDir())
 	mustMkdirAll(t, filepath.Join(repoRoot, "internal", "security"))
@@ -1801,22 +2042,36 @@ func TestRecentCommandShowsRecentTopics(t *testing.T) {
 	errBuf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	cmd.SetErr(errBuf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
-	if !strings.Contains(errBuf.String(), "Recent progress: analyzing recent repository activity") || !strings.Contains(errBuf.String(), "Recent progress: complete") {
-		t.Fatalf("recent should report non-quiet progress on stderr, got: %s", errBuf.String())
-	}
+	assert.Contains(t, errBuf.String(), "Recent progress: analyzing recent repository activity")
+	assert.Contains(t, errBuf.String(), "Recent progress: complete")
+
 	text := buf.String()
-	for _, want := range []string{
-		"Recently active topics",
-		"Credentials Rotation",
-		"Try: ds find",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("recent output missing %q:\n%s", want, text)
-		}
-	}
+	assert.Containsf(t, text,
+		("Recently active topics"), "recent output missing %q:\n%s",
+
+		("Recently active topics"), text)
+	assert.Containsf(t, text,
+		("Credentials Rotation"), "recent output missing %q:\n%s",
+
+		("Credentials Rotation"), text)
+	assert.Containsf(t, text,
+		("Try: ds find"), "recent output missing %q:\n%s",
+
+		("Try: ds find"), text)
+}
+
+func TestRecentCommandFiltersJSONTopicsByQuery(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	t.Setenv("DEVSPECS_HOME", t.TempDir())
+	mustMkdirAll(t, filepath.Join(repoRoot, "internal", "security"))
+	mustWriteFile(t, filepath.Join(repoRoot, "internal", "security", "credentials.go"), "package security\n")
+	mustWriteFile(t, filepath.Join(repoRoot, "internal", "security", "credentials_test.go"), "package security\n")
+	mapTestGit(t, repoRoot, "add", ".")
+	mapTestGit(t, repoRoot, "commit", "-m", "feat: credentials rotation context")
 
 	jsonCmd := NewRecentCmd()
 	jsonCmd.SetArgs([]string{"credentials", "--path", repoRoot, "--no-refresh", "--json"})
@@ -1824,22 +2079,24 @@ func TestRecentCommandShowsRecentTopics(t *testing.T) {
 	jsonErr := &bytes.Buffer{}
 	jsonCmd.SetOut(jsonBuf)
 	jsonCmd.SetErr(jsonErr)
-	if err := jsonCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := jsonCmd.Execute()
+		require.NoError(t, err)
 	}
-	if jsonErr.Len() != 0 {
-		t.Fatalf("recent --json should suppress progress stderr, got: %s", jsonErr.String())
-	}
+	assert.Equalf(t, 0, jsonErr.Len(),
+		"recent --json should suppress progress stderr, got: %s", jsonErr.String())
+
 	var out mapRecentOutput
-	if err := json.Unmarshal(jsonBuf.Bytes(), &out); err != nil {
-		t.Fatalf("recent json: %v\n%s", err, jsonBuf.String())
+	{
+		err := json.Unmarshal(jsonBuf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"recent json: %v\n%s", err, jsonBuf.String())
 	}
-	if out.Schema != mapRecentSchemaVersion || len(out.Topics) != 1 {
-		t.Fatalf("recent json output = %#v", out)
-	}
-	if !strings.Contains(out.Topics[0].Query, "credentials") {
-		t.Fatalf("recent topic query = %q", out.Topics[0].Query)
-	}
+	assert.Equal(t, mapRecentSchemaVersion, out.Schema)
+	require.Len(t, out.Topics, 1)
+
+	assert.Containsf(t, out.Topics[0].Query, "credentials",
+		"recent topic query = %q", out.Topics[0].Query)
 }
 
 func TestRecentVerboseShowsDetailedProgress(t *testing.T) {
@@ -1857,21 +2114,32 @@ func TestRecentVerboseShowsDetailedProgress(t *testing.T) {
 	errBuf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	cmd.SetErr(errBuf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	out := errBuf.String()
-	for _, want := range []string{
-		"Recent progress: analyzing recent repository activity",
-		"Recent progress: checking local git history",
-		"Recent progress: reading recent commits and path boundaries",
-		"Recent progress: analyzed 2 commit(s), matched 1 topic(s)",
-		"Recent progress: complete",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("recent --verbose progress missing %q:\n%s", want, out)
-		}
-	}
+	assert.Containsf(t, out,
+		("Recent progress: analyzing recent repository activity"), "recent --verbose progress missing %q:\n%s", ("Recent progress: analyzing recent repository activity"),
+		out)
+	assert.Containsf(t, out,
+		("Recent progress: checking local git history"), "recent --verbose progress missing %q:\n%s",
+
+		("Recent progress: checking local git history"), out)
+	assert.Containsf(t, out,
+		("Recent progress: reading recent commits and path boundaries"), "recent --verbose progress missing %q:\n%s",
+		("Recent progress: reading recent commits and path boundaries"), out)
+	assert.Containsf(t, out,
+		("Recent progress: analyzed 2 commit(s), matched 1 topic(s)"), "recent --verbose progress missing %q:\n%s",
+		("Recent progress: analyzed 2 commit(s), matched 1 topic(s)"), out)
+	assert.Containsf(t, out,
+		("Recent progress: complete"),
+		"recent --verbose progress missing %q:\n%s",
+
+		("Recent progress: complete"), out,
+	)
+
 }
 
 func TestRecentQuietFastFirstKeepsStdoutResultOnly(t *testing.T) {
@@ -1888,32 +2156,31 @@ func TestRecentQuietFastFirstKeepsStdoutResultOnly(t *testing.T) {
 	errBuf := &bytes.Buffer{}
 	cmd.SetOut(outBuf)
 	cmd.SetErr(errBuf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
-	if errBuf.Len() != 0 {
-		t.Fatalf("recent --quiet should suppress auto-scan stderr, got: %s", errBuf.String())
-	}
+	assert.Equalf(t, 0, errBuf.Len(),
+		"recent --quiet should suppress auto-scan stderr, got: %s", errBuf.String())
+
 	var out mapRecentOutput
-	if err := json.Unmarshal(outBuf.Bytes(), &out); err != nil {
-		t.Fatalf("recent --quiet stdout should remain valid JSON: %v\nstdout=%s\nstderr=%s", err, outBuf.String(), errBuf.String())
+	{
+		err := json.Unmarshal(outBuf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"recent --quiet stdout should remain valid JSON: %v\nstdout=%s\nstderr=%s", err, outBuf.String(), errBuf.String())
 	}
-	if out.Schema != mapRecentSchemaVersion || len(out.Topics) != 1 {
-		t.Fatalf("unexpected recent quiet JSON payload: %#v", out)
-	}
+	assert.Equal(t, mapRecentSchemaVersion, out.Schema)
+	require.Len(t, out.Topics, 1)
 
 	db, err := openDB()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 	count, err := db.CountArtifacts(store.FilterParams{RepoRoot: canonicalRepoRoot(repoRoot)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if count != 0 {
-		t.Fatalf("recent fast-first should not block on auto-scan, indexed artifact count = %d", count)
-	}
+	require.NoError(t, err)
+	assert.Equalf(t, 0, count,
+		"recent fast-first should not block on auto-scan, indexed artifact count = %d", count)
+
 }
 
 func TestMapRecentFlagRemainsCompatibilityPath(t *testing.T) {
@@ -1930,13 +2197,15 @@ func TestMapRecentFlagRemainsCompatibilityPath(t *testing.T) {
 	errBuf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	cmd.SetErr(errBuf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	text := buf.String()
-	if !strings.Contains(text, "Recently active topics") || !strings.Contains(text, "Refund Retry") {
-		t.Fatalf("map --recent compatibility output missing recent topics:\nstdout:\n%s\nstderr:\n%s", text, errBuf.String())
-	}
+	assert.Contains(t, text, "Recently active topics")
+	assert.Contains(t, text, "Refund Retry")
+
 }
 
 func mapTestGit(t *testing.T, repoRoot string, args ...string) {
@@ -1949,9 +2218,12 @@ func mapTestGit(t *testing.T, repoRoot string, args ...string) {
 		"GIT_COMMITTER_NAME=Test",
 		"GIT_COMMITTER_EMAIL=test@test.com",
 	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	{
+		out, err := cmd.CombinedOutput()
+		require.NoErrorf(t, err,
+			"git %v failed: %v\n%s", args, err, out)
 	}
+
 }
 
 func TestFastMapFallbackConvertsRecentTopicToMapArea(t *testing.T) {
@@ -1965,35 +2237,34 @@ func TestFastMapFallbackConvertsRecentTopicToMapArea(t *testing.T) {
 			"tests/format/yaml/spec/format.test.js",
 		},
 	}}, "", 5)
-	if skipped != 0 || len(topics) != 1 {
-		t.Fatalf("topics=%#v skipped=%d", topics, skipped)
-	}
+	assert.Equal(t, 0, skipped)
+	require.Len(t, topics, 1)
+
 	area := mapAreaFromRecentTopic(topics[0])
-	if area.Label != "YAML Format Language" {
-		t.Fatalf("label = %q", area.Label)
-	}
-	if area.Try != `ds find "yaml format language"` {
-		t.Fatalf("try = %q", area.Try)
-	}
-	if area.EvidenceCounts["source"] == 0 || area.EvidenceCounts["test"] == 0 {
-		t.Fatalf("expected source/test evidence counts: %#v", area.EvidenceCounts)
-	}
-	if area.AreaType == "" {
-		t.Fatalf("expected area type: %#v", area)
-	}
+	assert.Equalf(t, "YAML Format Language", area.Label,
+		"label = %q", area.Label)
+	assert.Equalf(t, `ds find "yaml format language"`, area.Try,
+		"try = %q", area.Try)
+	assert.NotEqual(t, 0, area.EvidenceCounts["source"])
+	assert.NotEqual(t, 0, area.EvidenceCounts["test"])
+
+	assert.NotEqualf(t, "", area.AreaType,
+		"expected area type: %#v", area)
+
 }
 
 func TestBuildCachedMapResultUsesStoredWorkstreamEdges(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "devspecs.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 	now := "2026-06-01T00:00:00Z"
 	repoRoot := filepath.Join(t.TempDir(), "repo")
-	if _, err := db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('repo_cached', ?, ?, ?)", repoRoot, now, now); err != nil {
-		t.Fatal(err)
+	{
+		_, err := db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('repo_cached', ?, ?, ?)", repoRoot, now, now)
+		require.NoError(t, err)
 	}
+
 	mustMapTestNoErr(t, db.InsertArtifactDirect("ds_game", "repo_cached", "source_context", "", "Game", "unknown", "rev_game", now, now))
 	mustMapTestNoErr(t, db.InsertArtifactDirect("ds_camera", "repo_cached", "source_context", "", "Camera RTS", "unknown", "rev_camera", now, now))
 	mustMapTestNoErr(t, db.InsertSourceDirect("src_game", "ds_game", "repo_cached", "source_context", "client/src/game/Game.ts", "client/src/game/Game.ts|source_context", "", "", now))
@@ -2013,25 +2284,24 @@ func TestBuildCachedMapResultUsesStoredWorkstreamEdges(t *testing.T) {
 	}, now))
 
 	result, ok, err := buildCachedMapResult(db, repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok {
-		t.Fatal("expected cached map result")
-	}
+	require.NoError(t, err)
+	require.True(t, ok,
+		"expected cached map result")
+
 	out := buildMapOutput(repoRoot, result, mapOptions{MaxAreas: 4})
-	if len(out.Areas) == 0 {
-		t.Fatalf("expected cached areas: %#v", out)
+	require.NotEmptyf(t, out.Areas,
+		"expected cached areas: %#v", out)
+	{
+
+		got := out.Areas[0].Label
+		assert.Equalf(t, "Game", got,
+			"cached map label = %q, want Game; areas=%#v", got, out.Areas)
 	}
-	if got := out.Areas[0].Label; got != "Game" {
-		t.Fatalf("cached map label = %q, want Game; areas=%#v", got, out.Areas)
-	}
-	if !strings.Contains(strings.Join(out.Areas[0].Covers, "\n"), "Rts Camera Mode") {
-		t.Fatalf("cached map covers missing Rts Camera Mode: %#v", out.Areas[0].Covers)
-	}
-	if !strings.Contains(strings.Join(out.Areas[0].KeyPaths, "\n"), "cameraRTS.ts") {
-		t.Fatalf("cached area missing source path: %#v", out.Areas[0].KeyPaths)
-	}
+	assert.Containsf(t, strings.Join(out.Areas[0].Covers, "\n"), "Rts Camera Mode",
+		"cached map covers missing Rts Camera Mode: %#v", out.Areas[0].Covers)
+	assert.Containsf(t, strings.Join(out.Areas[0].KeyPaths, "\n"), "cameraRTS.ts",
+		"cached area missing source path: %#v", out.Areas[0].KeyPaths)
+
 }
 
 func TestMapTryCommandAvoidsUnsupportedCommitVerb(t *testing.T) {
@@ -2039,9 +2309,9 @@ func TestMapTryCommandAvoidsUnsupportedCommitVerb(t *testing.T) {
 		SHA:     "abc1234",
 		Subject: "Replace `main` branch in changelog link with tags (#19054)",
 	}}, mapMediumConfidence, nil)
-	if query != `ds find "release publish npm"` {
-		t.Fatalf("query = %q, want release publish npm", query)
-	}
+	assert.Equalf(t, `ds find "release publish npm"`, query,
+		"query = %q, want release publish npm", query)
+
 	commands := mapAreaPackCommands(mapArea{
 		Label:         "Release",
 		Confidence:    mapMediumConfidence,
@@ -2050,9 +2320,9 @@ func TestMapTryCommandAvoidsUnsupportedCommitVerb(t *testing.T) {
 		Try:           query,
 	})
 	for _, cmd := range commands {
-		if strings.Contains(cmd, "release replace") {
-			t.Fatalf("unsupported commit verb leaked into commands: %#v", commands)
-		}
+		assert.NotContainsf(t, cmd, "release replace",
+			"unsupported commit verb leaked into commands: %#v", commands)
+
 	}
 }
 
@@ -2060,18 +2330,21 @@ func TestMapOutputCacheRoundTripsFreshMap(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	t.Setenv("DEVSPECS_HOME", home)
 	db, err := store.Open(filepath.Join(home, "devspecs.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 	now := "2026-06-01T00:00:00Z"
 	repoRoot := filepath.Join(t.TempDir(), "repo")
-	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
-		t.Fatal(err)
+	{
+		err := os.MkdirAll(repoRoot, 0o755)
+		require.NoError(t, err)
 	}
-	if _, err := db.Exec("INSERT INTO repos (id, root_path, last_scan_at, created_at, updated_at) VALUES ('repo_cache_out', ?, ?, ?, ?)", repoRoot, now, now, now); err != nil {
-		t.Fatal(err)
+	{
+
+		_, err := db.Exec("INSERT INTO repos (id, root_path, last_scan_at, created_at, updated_at) VALUES ('repo_cache_out', ?, ?, ?, ?)", repoRoot, now, now, now)
+		require.NoError(t, err)
 	}
+
 	out := mapOutput{
 		Schema: mapSchemaVersion,
 		Repo: mapRepo{
@@ -2081,19 +2354,18 @@ func TestMapOutputCacheRoundTripsFreshMap(t *testing.T) {
 		},
 		Areas: []mapArea{{Label: "Release", Try: `ds find "release publish npm"`}},
 	}
-	if err := saveMapOutputCache(repoRoot, mapDefaultMaxAreas, out); err != nil {
-		t.Fatal(err)
+	{
+		err := saveMapOutputCache(repoRoot, mapDefaultMaxAreas, out)
+		require.NoError(t, err)
 	}
+
 	got, ok, err := loadMapOutputCache(repoRoot, mapDefaultMaxAreas)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok {
-		t.Fatal("expected map output cache hit")
-	}
-	if got.Areas[0].Try != out.Areas[0].Try {
-		t.Fatalf("cached try = %q, want %q", got.Areas[0].Try, out.Areas[0].Try)
-	}
+	require.NoError(t, err)
+	require.True(t, ok,
+		"expected map output cache hit")
+	assert.Equalf(t, out.Areas[0].Try, got.Areas[0].Try,
+		"cached try = %q, want %q", got.Areas[0].Try, out.Areas[0].Try)
+
 }
 
 func TestMapUsesFreshOutputCacheBeforeAutoScan(t *testing.T) {
@@ -2116,8 +2388,9 @@ func TestMapUsesFreshOutputCacheBeforeAutoScan(t *testing.T) {
 			Try:   `ds find "cached credentials boundary"`,
 		}},
 	}
-	if err := saveMapOutputCache(canonicalRepoRoot(repoRoot), mapDefaultMaxAreas, cached); err != nil {
-		t.Fatal(err)
+	{
+		err := saveMapOutputCache(canonicalRepoRoot(repoRoot), mapDefaultMaxAreas, cached)
+		require.NoError(t, err)
 	}
 
 	cmd := NewMapCmd()
@@ -2126,19 +2399,22 @@ func TestMapUsesFreshOutputCacheBeforeAutoScan(t *testing.T) {
 	errBuf := &bytes.Buffer{}
 	cmd.SetOut(outBuf)
 	cmd.SetErr(errBuf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
-	if strings.Contains(errBuf.String(), "Index updated") {
-		t.Fatalf("fresh map output cache should skip auto-scan, stderr: %s", errBuf.String())
-	}
+	assert.NotContainsf(t, errBuf.String(), "Index updated",
+		"fresh map output cache should skip auto-scan, stderr: %s", errBuf.String())
+
 	var out mapOutput
-	if err := json.Unmarshal(outBuf.Bytes(), &out); err != nil {
-		t.Fatalf("map cache stdout should remain JSON: %v\n%s", err, outBuf.String())
+	{
+		err := json.Unmarshal(outBuf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"map cache stdout should remain JSON: %v\n%s", err, outBuf.String())
 	}
-	if !mapOutputHasAreaLabel(out, "Cached Credentials Boundary") {
-		t.Fatalf("expected cached map output, got %#v", out.Areas)
-	}
+	assert.Truef(t, mapOutputHasAreaLabel(out, "Cached Credentials Boundary"),
+		"expected cached map output, got %#v", out.Areas)
+
 }
 
 func TestMapOutputCacheMissScansWhenGitHeadMoved(t *testing.T) {
@@ -2161,8 +2437,9 @@ func TestMapOutputCacheMissScansWhenGitHeadMoved(t *testing.T) {
 			Try:   `ds find "stale cached boundary"`,
 		}},
 	}
-	if err := saveMapOutputCache(canonicalRepoRoot(repoRoot), mapDefaultMaxAreas, cached); err != nil {
-		t.Fatal(err)
+	{
+		err := saveMapOutputCache(canonicalRepoRoot(repoRoot), mapDefaultMaxAreas, cached)
+		require.NoError(t, err)
 	}
 
 	writeMapTestFile(t, repoRoot, "app/billing/invoices.go", "package billing\n\nfunc SendInvoices() {}\n")
@@ -2175,19 +2452,21 @@ func TestMapOutputCacheMissScansWhenGitHeadMoved(t *testing.T) {
 	errBuf := &bytes.Buffer{}
 	cmd.SetOut(outBuf)
 	cmd.SetErr(errBuf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
-	if errBuf.Len() != 0 {
-		t.Fatalf("map --json stale cache rebuild should suppress auto-scan stderr, got: %s", errBuf.String())
-	}
+	assert.Equalf(t, 0, errBuf.Len(),
+		"map --json stale cache rebuild should suppress auto-scan stderr, got: %s", errBuf.String())
+
 	var out mapOutput
-	if err := json.Unmarshal(outBuf.Bytes(), &out); err != nil {
-		t.Fatalf("map stale cache stdout should remain JSON: %v\n%s", err, outBuf.String())
+	{
+		err := json.Unmarshal(outBuf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"map stale cache stdout should remain JSON: %v\n%s", err, outBuf.String())
 	}
-	if mapOutputHasAreaLabel(out, "Stale Cached Boundary") {
-		t.Fatalf("stale cached output was served: %#v", out.Areas)
-	}
+	assert.False(t, mapOutputHasAreaLabel(out, "Stale Cached Boundary"))
+
 }
 
 func TestMapBoundaryRawAnchorsAreStable(t *testing.T) {
@@ -2208,9 +2487,9 @@ func TestMapBoundaryRawAnchorsAreStable(t *testing.T) {
 		"apps/api/internal/app/operations",
 		"docs/operations",
 	}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("raw anchors not stable:\n got=%#v\nwant=%#v", got, want)
-	}
+	assert.Equalf(t, strings.Join(want, "\n"), strings.Join(got, "\n"),
+		"raw anchors not stable:\n got=%#v\nwant=%#v", got, want)
+
 }
 
 func TestMapBoundaryRawAnchorsPreferEvidenceOrder(t *testing.T) {
@@ -2235,23 +2514,24 @@ func TestMapBoundaryRawAnchorsPreferEvidenceOrder(t *testing.T) {
 		"apps/api/internal/ports",
 		".devspecs/tasks/v0-foundation",
 	}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("raw anchors did not preserve evidence order:\n got=%#v\nwant=%#v", got, want)
-	}
+	assert.Equalf(t, strings.Join(want, "\n"), strings.Join(got, "\n"),
+		"raw anchors did not preserve evidence order:\n got=%#v\nwant=%#v", got, want)
+
 }
 
 func insertFreshMapCacheRepo(t *testing.T, repoRoot string) {
 	t.Helper()
 	db, err := openDB()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 	now := "2026-06-01T00:00:00Z"
 	head := strings.TrimSpace(string(runMapTestGitOutput(t, repoRoot, "rev-parse", "HEAD")))
-	if _, err := db.Exec("INSERT INTO repos (id, root_path, last_scan_commit, last_scan_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", "repo_cache_"+safeFilenamePart(filepath.Base(repoRoot)), canonicalRepoRoot(repoRoot), head, now, now, now); err != nil {
-		t.Fatal(err)
+	{
+		_, err := db.Exec("INSERT INTO repos (id, root_path, last_scan_commit, last_scan_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", "repo_cache_"+safeFilenamePart(filepath.Base(repoRoot)), canonicalRepoRoot(repoRoot), head, now, now, now)
+		require.NoError(t, err)
 	}
+
 }
 
 func runMapTestGitOutput(t *testing.T, dir string, args ...string) []byte {
@@ -2264,9 +2544,9 @@ func runMapTestGitOutput(t *testing.T, dir string, args ...string) []byte {
 		"GIT_COMMITTER_EMAIL=test@test.com",
 	)
 	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v failed: %v\n%s", args, err, out)
-	}
+	require.NoErrorf(t, err,
+		"git %v failed: %v\n%s", args, err, out)
+
 	return out
 }
 
@@ -2279,7 +2559,7 @@ func mapOutputHasAreaLabel(out mapOutput, label string) bool {
 	return false
 }
 
-func TestMapDefaultAutoScanLeavesUsableIndexForFindPack(t *testing.T) {
+func TestMapDefaultAutoScanCreatesUsableIndex(t *testing.T) {
 	repoRoot := setupGitRepo(t)
 	home := t.TempDir()
 	t.Setenv("DEVSPECS_HOME", home)
@@ -2295,37 +2575,47 @@ func TestMapDefaultAutoScanLeavesUsableIndexForFindPack(t *testing.T) {
 	mapErr := &bytes.Buffer{}
 	mapCmd.SetOut(mapOut)
 	mapCmd.SetErr(mapErr)
-	if err := mapCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := mapCmd.Execute()
+		require.NoError(t, err)
 	}
-	if !strings.Contains(mapErr.String(), "Index updated") {
-		t.Fatalf("map should build substrate on first run, stderr: %s", mapErr.String())
-	}
-	if strings.Contains(mapOut.String(), mapIndexRequiredCaveat) {
-		t.Fatalf("default map should not disclose a missing index when handoff commands can auto-index:\n%s", mapOut.String())
-	}
-	if !strings.Contains(mapOut.String(), "Workspace Identity") || !strings.Contains(mapOut.String(), "app/auth/credentials.go") {
-		t.Fatalf("map should still return path-boundary output:\n%s", mapOut.String())
-	}
+	assert.Containsf(t, mapErr.String(), "Index updated",
+		"map should build substrate on first run, stderr: %s", mapErr.String())
+	assert.NotContainsf(t, mapOut.String(), mapIndexRequiredCaveat,
+		"default map should not disclose a missing index when handoff commands can auto-index:\n%s", mapOut.String())
+	assert.Contains(t, mapOut.String(), "Workspace Identity")
+	assert.Contains(t, mapOut.String(), "app/auth/credentials.go")
 
 	db, err := openDB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	count, countErr := db.CountArtifacts(store.FilterParams{RepoRoot: canonicalRepoRoot(repoRoot)})
-	if closeErr := db.Close(); closeErr != nil {
-		t.Fatal(closeErr)
-	}
-	if countErr != nil {
-		t.Fatal(countErr)
-	}
-	if count == 0 {
-		t.Fatalf("map default first run should create index artifacts")
-	}
+	require.NoError(t, err)
 
-	oldWd, _ := os.Getwd()
-	os.Chdir(repoRoot)
-	defer os.Chdir(oldWd)
+	count, countErr := db.CountArtifacts(store.FilterParams{RepoRoot: canonicalRepoRoot(repoRoot)})
+	{
+		closeErr := db.Close()
+		require.NoError(t, closeErr)
+	}
+	require.NoError(t, countErr)
+	assert.NotEqualf(t, 0, count,
+		"map default first run should create index artifacts")
+}
+
+func TestFindNoRefreshUsesIndexCreatedByMapWithoutRescanning(t *testing.T) {
+	repoRoot := setupGitRepo(t)
+	home := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", home)
+
+	writeMapTestFile(t, repoRoot, "plans/credentials-plan.md", "# Credentials Rotation\n\nRotate credentials for webhook ingestion.\n")
+	writeMapTestFile(t, repoRoot, "app/auth/credentials.go", "package auth\n\nfunc RotateCredentials() {}\n")
+	runGitForFindPack(t, repoRoot, "add", ".")
+	runGitForFindPack(t, repoRoot, "commit", "-m", "add credentials rotation context")
+	createMapIndex(t, repoRoot)
+
+	oldWd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(repoRoot))
+	t.Cleanup(func() {
+		assert.NoError(t, os.Chdir(oldWd))
+	})
 
 	findCmd := NewFindCmd()
 	findCmd.SetArgs([]string{"credentials rotation", "--no-refresh"})
@@ -2333,16 +2623,26 @@ func TestMapDefaultAutoScanLeavesUsableIndexForFindPack(t *testing.T) {
 	findErr := &bytes.Buffer{}
 	findCmd.SetOut(findOut)
 	findCmd.SetErr(findErr)
-	if err := findCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(findErr.String(), "Index updated") {
-		t.Fatalf("find --no-refresh should use map-created index without rescanning, stderr: %s", findErr.String())
-	}
+
+	err = findCmd.Execute()
+
+	require.NoError(t, err)
+	assert.NotContainsf(t, findErr.String(), "Index updated",
+		"find --no-refresh should use map-created index without rescanning, stderr: %s", findErr.String())
+
 	output := findOut.String()
-	if !strings.Contains(output, "Working set: credentials rotation") || !strings.Contains(output, "Credentials Rotation") {
-		t.Fatalf("find did not use map-created index.\nOutput: %s\nStderr: %s", output, findErr.String())
-	}
+	assert.Contains(t, output, "Working set: credentials rotation")
+	assert.Contains(t, output, "Credentials Rotation")
+}
+
+func createMapIndex(t *testing.T, repoRoot string) {
+	t.Helper()
+
+	cmd := NewMapCmd()
+	cmd.SetArgs([]string{"--path", repoRoot, "--max-areas", "4"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
 }
 
 func TestMapNoRefreshSkipsAutoScan(t *testing.T) {
@@ -2361,15 +2661,15 @@ func TestMapNoRefreshSkipsAutoScan(t *testing.T) {
 	mapErr := &bytes.Buffer{}
 	mapCmd.SetOut(mapOut)
 	mapCmd.SetErr(mapErr)
-	if err := mapCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := mapCmd.Execute()
+		require.NoError(t, err)
 	}
-	if strings.Contains(mapErr.String(), "Index updated") {
-		t.Fatalf("map --no-refresh should not auto-scan, stderr: %s", mapErr.String())
-	}
-	if !strings.Contains(mapOut.String(), mapIndexRequiredCaveat) {
-		t.Fatalf("map --no-refresh should disclose missing local index:\n%s", mapOut.String())
-	}
+	assert.NotContainsf(t, mapErr.String(), "Index updated",
+		"map --no-refresh should not auto-scan, stderr: %s", mapErr.String())
+	assert.Containsf(t, mapOut.String(), mapIndexRequiredCaveat,
+		"map --no-refresh should disclose missing local index:\n%s", mapOut.String())
+
 }
 
 func TestMapJSONAutoScanKeepsResultStreamsClean(t *testing.T) {
@@ -2388,37 +2688,39 @@ func TestMapJSONAutoScanKeepsResultStreamsClean(t *testing.T) {
 	errBuf := &bytes.Buffer{}
 	cmd.SetOut(outBuf)
 	cmd.SetErr(errBuf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
-	if errBuf.Len() != 0 {
-		t.Fatalf("map --json should suppress auto-scan stderr, got: %s", errBuf.String())
-	}
+	assert.Equalf(t, 0, errBuf.Len(),
+		"map --json should suppress auto-scan stderr, got: %s", errBuf.String())
+
 	var out mapOutput
-	if err := json.Unmarshal(outBuf.Bytes(), &out); err != nil {
-		t.Fatalf("map --json stdout should remain valid JSON: %v\nstdout=%s\nstderr=%s", err, outBuf.String(), errBuf.String())
+	{
+		err := json.Unmarshal(outBuf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"map --json stdout should remain valid JSON: %v\nstdout=%s\nstderr=%s", err, outBuf.String(), errBuf.String())
 	}
-	if out.Schema != mapSchemaVersion || out.Repo.Path == "" {
-		t.Fatalf("unexpected JSON map payload: %#v", out)
-	}
-	if strings.Contains(strings.Join(out.Caveats, "\n"), mapIndexRequiredCaveat) {
-		t.Fatalf("default JSON map should not disclose missing index: %#v", out.Caveats)
-	}
+	assert.Equal(t, mapSchemaVersion, out.Schema)
+	assert.NotEmpty(t, out.Repo.Path)
+
+	assert.NotContainsf(t, strings.Join(out.Caveats, "\n"), mapIndexRequiredCaveat,
+		"default JSON map should not disclose missing index: %#v", out.Caveats)
+
 	hasPackability := false
 	for _, area := range out.Areas {
 		if area.Diagnostics.Packability != nil {
 			hasPackability = true
-			if area.Diagnostics.Packability.KeyPathCount == 0 {
-				t.Fatalf("substrate-backed packability should include key paths: %#v", area.Diagnostics.Packability)
-			}
+			assert.NotEqualf(t, 0, area.Diagnostics.Packability.KeyPathCount,
+				"substrate-backed packability should include key paths: %#v", area.Diagnostics.Packability)
+
 		}
 	}
-	if !hasPackability {
-		t.Fatalf("map --json should preserve packability diagnostics after auto-scan: %#v", out.Areas)
-	}
-	if strings.Contains(outBuf.String(), "Index updated") {
-		t.Fatalf("scan notice leaked into JSON stdout:\n%s", outBuf.String())
-	}
+	assert.Truef(t, hasPackability,
+		"map --json should preserve packability diagnostics after auto-scan: %#v", out.Areas)
+	assert.NotContainsf(t, outBuf.String(), "Index updated",
+		"scan notice leaked into JSON stdout:\n%s", outBuf.String())
+
 }
 
 func TestMapQuietAutoScanKeepsStdoutResultOnly(t *testing.T) {
@@ -2437,74 +2739,80 @@ func TestMapQuietAutoScanKeepsStdoutResultOnly(t *testing.T) {
 	errBuf := &bytes.Buffer{}
 	cmd.SetOut(outBuf)
 	cmd.SetErr(errBuf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
-	if errBuf.Len() != 0 {
-		t.Fatalf("map --quiet should suppress auto-scan stderr, got: %s", errBuf.String())
-	}
+	assert.Equalf(t, 0, errBuf.Len(),
+		"map --quiet should suppress auto-scan stderr, got: %s", errBuf.String())
+
 	var out mapOutput
-	if err := json.Unmarshal(outBuf.Bytes(), &out); err != nil {
-		t.Fatalf("map --quiet stdout should remain valid JSON: %v\nstdout=%s\nstderr=%s", err, outBuf.String(), errBuf.String())
+	{
+		err := json.Unmarshal(outBuf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"map --quiet stdout should remain valid JSON: %v\nstdout=%s\nstderr=%s", err, outBuf.String(), errBuf.String())
 	}
-	if out.Schema != mapSchemaVersion || out.Repo.Path == "" {
-		t.Fatalf("unexpected quiet map JSON payload: %#v", out)
-	}
+	assert.Equal(t, mapSchemaVersion, out.Schema)
+	assert.NotEmpty(t, out.Repo.Path)
+
 	db, err := openDB()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	count, countErr := db.CountArtifacts(store.FilterParams{RepoRoot: canonicalRepoRoot(repoRoot)})
-	if closeErr := db.Close(); closeErr != nil {
-		t.Fatal(closeErr)
+	{
+		closeErr := db.Close()
+		require.NoError(t, closeErr)
 	}
-	if countErr != nil {
-		t.Fatal(countErr)
-	}
-	if count == 0 {
-		t.Fatalf("map --quiet should still build substrate-backed index")
-	}
-	if strings.Contains(outBuf.String(), "Index updated") || strings.Contains(outBuf.String(), "Auto-index progress") {
-		t.Fatalf("auto-scan chatter leaked into quiet stdout:\n%s", outBuf.String())
-	}
+	require.NoError(t, countErr)
+	assert.NotEqualf(t, 0, count,
+		"map --quiet should still build substrate-backed index")
+	assert.NotContains(t, outBuf.String(), "Index updated")
+	assert.NotContains(t, outBuf.String(), "Auto-index progress")
+
 }
 
 func TestFilterMapOutputByAreaQueryNarrowsJSONPayload(t *testing.T) {
 	out := buildProductMapTestOutput(t)
 	filtered := filterMapOutputByAreaQuery(out, "redaction")
-	if len(filtered.Areas) != 1 {
-		t.Fatalf("filtered area count = %d, want 1; areas=%#v", len(filtered.Areas), filtered.Areas)
-	}
-	if filtered.Areas[0].Label != "Submission" {
-		t.Fatalf("filtered label = %q, want Submission", filtered.Areas[0].Label)
-	}
-	if filtered.Diagnostics.AreaQuery != "redaction" || filtered.Diagnostics.MatchedAreaCount != 1 {
-		t.Fatalf("unexpected diagnostics: %#v", filtered.Diagnostics)
-	}
+	require.Lenf(t, filtered.Areas, 1,
+		"filtered area count = %d, want 1; areas=%#v", len(filtered.Areas), filtered.Areas)
+	assert.Equalf(t, "Submission", filtered.Areas[0].Label,
+		"filtered label = %q, want Submission", filtered.Areas[0].Label)
+	assert.Equal(t, "redaction", filtered.Diagnostics.AreaQuery)
+	assert.Equal(t, 1, filtered.Diagnostics.MatchedAreaCount)
+
 }
 
 func TestRefineMapAreaLabelMakesLayerLabelsMoreProductReadable(t *testing.T) {
-	if got := refineMapAreaLabel("Lib Anthropic", []string{"Anthropic Ts"}); got != "Anthropic" {
-		t.Fatalf("refined lib label = %q, want Anthropic", got)
+	{
+		got := refineMapAreaLabel("Lib Anthropic", []string{"Anthropic Ts"})
+		assert.Equalf(t, "Anthropic", got,
+			"refined lib label = %q, want Anthropic", got)
 	}
-	if got := refineMapAreaLabel("Application", []string{"Blip Get Canonical Path"}); got != "Blip Application" {
-		t.Fatalf("refined application label = %q, want Blip Application", got)
+	{
+
+		got := refineMapAreaLabel("Application", []string{"Blip Get Canonical Path"})
+		assert.Equalf(t, "Blip Application", got,
+			"refined application label = %q, want Blip Application", got)
 	}
-	if got := cleanMapCovers("Game", []string{"Ks", "Rts Camera Mode"}); strings.Join(got, ", ") != "Rts Camera Mode" {
-		t.Fatalf("clean covers kept short raw anchor: %#v", got)
+	{
+
+		got := cleanMapCovers("Game", []string{"Ks", "Rts Camera Mode"})
+		assert.Equalf(t, "Rts Camera Mode", strings.Join(got, ", "),
+			"clean covers kept short raw anchor: %#v", got)
 	}
+
 }
 
 func TestMapRecentSubjectTermsFiltersFillerLabels(t *testing.T) {
 	got := mapRecentSubjectTerms("fix: clean up error handling, fix a proto-pollution gap, and seal a few loose ends")
-	if strings.Join(got, " ") != "proto pollution" {
-		t.Fatalf("recent subject terms = %#v", got)
-	}
+	assert.Equalf(t, "proto pollution", strings.Join(got, " "),
+		"recent subject terms = %#v", got)
 
 	got = mapRecentSubjectTerms("feat: add open spec")
-	if len(got) != 0 {
-		t.Fatalf("open spec subject should defer to path terms, got %#v", got)
-	}
+	require.Lenf(t, got, 0,
+		"open spec subject should defer to path terms, got %#v", got)
+
 }
 
 func buildProductMapTestOutput(t *testing.T) mapOutput {
@@ -2547,20 +2855,23 @@ func buildProductMapTestOutput(t *testing.T) mapOutput {
 
 func mustMapTestNoErr(t *testing.T, err error) {
 	t.Helper()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 }
 
 func writeMapTestFile(t *testing.T, repoRoot, rel, body string) {
 	t.Helper()
 	full := filepath.Join(repoRoot, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		t.Fatal(err)
+	{
+		err := os.MkdirAll(filepath.Dir(full), 0o755)
+		require.NoError(t, err)
 	}
-	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
+	{
+
+		err := os.WriteFile(full, []byte(body), 0o644)
+		require.NoError(t, err)
 	}
+
 }
 
 func findMapTestArea(areas []mapArea, label string) *mapArea {

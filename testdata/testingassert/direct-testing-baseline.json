@@ -1,12 +1,4 @@
 {
   "version": 1,
-  "counts": {
-    "internal/commands/acceptance_test.go": 64,
-    "internal/commands/apply_test.go": 43,
-    "internal/commands/change_test.go": 14,
-    "internal/commands/map_test.go": 262,
-    "internal/commands/slice_test.go": 22,
-    "internal/commands/task_test.go": 530,
-    "internal/commands/write_test.go": 34
-  }
+  "counts": {}
 }
