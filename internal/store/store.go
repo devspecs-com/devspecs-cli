@@ -19,15 +19,14 @@ var schemaDDL string
 // SchemaVersion is the current schema version. Bump when schema.sql changes.
 const SchemaVersion = 15
 
-// SQLiteBusyTimeoutMS bounds SQLite's crash-safe writer queue. Cold scans on
-// very large repositories can hold the single-writer slot for several minutes,
-// so competing agent commands must outwait ordinary indexing rather than fail
-// after a short interactive timeout.
-const SQLiteBusyTimeoutMS = 30 * 60 * 1000
+// SQLiteBusyTimeoutMS is the fallback for short writes that contend outside the
+// process-level index writer queue. Command contexts own longer operation limits.
+const SQLiteBusyTimeoutMS = 60 * 1000
 
 // DB wraps *sql.DB with DevSpecs-specific operations.
 type DB struct {
 	*sql.DB
+	path string
 }
 
 // Open opens or creates the SQLite database at the given path.
@@ -44,7 +43,7 @@ func Open(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
 
-	db := &DB{DB: sqlDB}
+	db := &DB{DB: sqlDB, path: dbPath}
 	if err := db.migrate(); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("migrate: %w", err)

@@ -71,6 +71,13 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 	if err != nil {
 		return fmt.Errorf("resolve db: %w", err)
 	}
+	captureCtx, cancel := context.WithTimeout(cmd.Context(), autoIndexDeadline)
+	defer cancel()
+	lease, err := store.AcquireIndexWriter(captureCtx, dbPath, indexWaitNotice(cmd, "Capture"))
+	if err != nil {
+		return indexOperationError("capture writer wait", autoIndexDeadlineLabel, err)
+	}
+	defer func() { _ = lease.Release() }()
 	db, err := store.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("open db: %w", store.FriendlySQLiteBusyError(err))
@@ -84,7 +91,7 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 		RelPath:     relPath,
 		AdapterName: "markdown",
 	}
-	art, _, pr, err := mdAdapter.Parse(context.Background(), candidate)
+	art, _, pr, err := mdAdapter.Parse(captureCtx, candidate)
 	if err != nil {
 		return fmt.Errorf("parse file: %w", err)
 	}
@@ -106,7 +113,10 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 	sourceIdentity := relPath + "|capture"
 	now := time.Now().UTC().Format(time.RFC3339)
 	ids := idgen.NewFactory()
-	info := repo.DetectIdentity(wd)
+	info := repo.DetectIdentityContext(captureCtx, wd)
+	if err := captureCtx.Err(); err != nil {
+		return indexOperationError("capture", autoIndexDeadlineLabel, err)
+	}
 	if strings.TrimSpace(info.RootPath) == "" {
 		info.RootPath = wd
 	}
@@ -172,7 +182,10 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 		return err
 	}
 
-	authoredAt := repo.FileFirstCommitDate(wd, filepath.ToSlash(relPath))
+	authoredAt := repo.FileFirstCommitDateContext(captureCtx, wd, filepath.ToSlash(relPath))
+	if err := captureCtx.Err(); err != nil {
+		return indexOperationError("capture", autoIndexDeadlineLabel, err)
+	}
 	if authoredAt == "" {
 		authoredAt = now
 	}

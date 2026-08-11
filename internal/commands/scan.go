@@ -148,6 +148,18 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	if err != nil {
 		return fmt.Errorf("resolve db: %w", err)
 	}
+	scanCtx, cancel := context.WithTimeout(cmd.Context(), explicitScanDeadline)
+	defer cancel()
+	var progressCmd *cobra.Command
+	if !quiet && !asJSON {
+		progressCmd = cmd
+	}
+	writeIndexDeadline(progressCmd, "Scan", explicitScanDeadlineLabel)
+	lease, err := store.AcquireIndexWriter(scanCtx, dbPath, indexWaitNotice(progressCmd, "Scan"))
+	if err != nil {
+		return indexOperationError("scan", explicitScanDeadlineLabel, err)
+	}
+	defer func() { _ = lease.Release() }()
 
 	if rebuild {
 		if err := os.Remove(dbPath); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -181,7 +193,7 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	if verbose && !quiet && !noGitignore {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Respecting repo-root .gitignore, .git/info/exclude, and .aiignore during configured walks\n")
 	}
-	scanOpts, err := liveScanRunOptions(db, repoRoot)
+	scanOpts, err := liveScanRunOptionsContext(scanCtx, db, repoRoot)
 	if err != nil {
 		return fmt.Errorf("inspect index state: %w", err)
 	}
@@ -202,9 +214,9 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	if verbose && !quiet && scanOpts.FreshIndex {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Using fresh-index scan path for empty/rebuilt index\n")
 	}
-	result, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, scanOpts)
+	result, err := scanner.RunWithOptions(scanCtx, repoRoot, cfg, scanOpts)
 	if err != nil {
-		return scanTraversalError(repoRoot, err)
+		return indexOperationError("scan", explicitScanDeadlineLabel, scanTraversalError(repoRoot, err))
 	}
 	result.RootWarning = rootWarning
 
@@ -492,7 +504,14 @@ func scanTraversalError(repoRoot string, err error) error {
 }
 
 func liveScanRunOptions(db *store.DB, repoRoot string) (scan.RunOptions, error) {
-	info := repo.Detect(repoRoot)
+	return liveScanRunOptionsContext(context.Background(), db, repoRoot)
+}
+
+func liveScanRunOptionsContext(ctx context.Context, db *store.DB, repoRoot string) (scan.RunOptions, error) {
+	info := repo.DetectContext(ctx, repoRoot)
+	if err := ctx.Err(); err != nil {
+		return scan.RunOptions{}, err
+	}
 	if strings.TrimSpace(info.RootPath) == "" {
 		info.RootPath = repoRoot
 	}
@@ -503,7 +522,10 @@ func liveScanRunOptions(db *store.DB, repoRoot string) (scan.RunOptions, error) 
 	if meta != nil {
 		if info.IsGit && strings.TrimSpace(info.RemoteURL) != "" &&
 			(strings.TrimSpace(meta.GitIdentity) == "" || repo.CanonicalRemoteURL(meta.GitRemoteURL) != repo.CanonicalRemoteURL(info.RemoteURL)) {
-			info = repo.WithIdentity(info)
+			info = repo.WithIdentityContext(ctx, info)
+			if err := ctx.Err(); err != nil {
+				return opts, err
+			}
 			opts.RepositoryInfo = &info
 		}
 		hasArtifacts, err = db.RepoHasArtifacts(meta.ID)
@@ -511,7 +533,10 @@ func liveScanRunOptions(db *store.DB, repoRoot string) (scan.RunOptions, error) 
 			return opts, err
 		}
 	} else {
-		info = repo.WithIdentity(info)
+		info = repo.WithIdentityContext(ctx, info)
+		if err := ctx.Err(); err != nil {
+			return opts, err
+		}
 		opts.RepositoryInfo = &info
 		hasArtifacts, _, err = scanTargetHasArtifacts(db, repoRoot, info.GitIdentity)
 		if err != nil {

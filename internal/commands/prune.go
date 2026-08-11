@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -53,7 +54,6 @@ func runPrune(cmd *cobra.Command, dryRun, vacuum, asJSON bool) error {
 	}
 	progress := newPruneProgressReporter(cmd.ErrOrStderr(), !asJSON, pruneProgressDelay)
 	defer progress.stop()
-	progress.setPhase("inspect")
 
 	dbPath, err := config.DBPath()
 	if err != nil {
@@ -67,6 +67,21 @@ func runPrune(cmd *cobra.Command, dryRun, vacuum, asJSON bool) error {
 		}
 		return fmt.Errorf("inspect index: %w", err)
 	}
+	var lease *store.IndexWriterLease
+	if !dryRun {
+		waitCtx, cancel := context.WithTimeout(cmd.Context(), autoIndexDeadline)
+		defer cancel()
+		var noticeCmd *cobra.Command
+		if !asJSON {
+			noticeCmd = cmd
+		}
+		lease, err = store.AcquireIndexWriter(waitCtx, dbPath, indexWaitNotice(noticeCmd, "Prune"))
+		if err != nil {
+			return indexOperationError("prune writer wait", autoIndexDeadlineLabel, err)
+		}
+		defer func() { _ = lease.Release() }()
+	}
+	progress.setPhase("inspect")
 	db, err := openDBAtPath(dbPath)
 	if err != nil {
 		return err

@@ -73,7 +73,9 @@ func runResume(cmd *cobra.Command, query string, fp store.FilterParams, repoName
 	defer db.Close()
 
 	if !noRefresh {
-		ensureFresh(cmd, db)
+		if err := ensureFresh(cmd, db); err != nil {
+			return err
+		}
 	}
 
 	repoRoot := resolveRepoScope(db, repoName, false)

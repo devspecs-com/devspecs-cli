@@ -40,7 +40,9 @@ func runContext(cmd *cobra.Command, idOrPrefix string, asJSON, copyToClipboard, 
 	defer db.Close()
 
 	if !noRefresh {
-		ensureFresh(cmd, db)
+		if err := ensureFresh(cmd, db); err != nil {
+			return err
+		}
 	}
 
 	art, err := db.GetArtifact(idOrPrefix)
