@@ -2,6 +2,7 @@
 package userident
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"os"
@@ -13,7 +14,12 @@ import (
 
 // Detect returns the user identity using: git config user.name > OS username > generated fallback.
 func Detect(repoRoot string) string {
-	if name := gitUserName(repoRoot); name != "" {
+	return DetectContext(context.Background(), repoRoot)
+}
+
+// DetectContext is Detect with cancellation for Git configuration lookup.
+func DetectContext(ctx context.Context, repoRoot string) string {
+	if name := gitUserNameContext(ctx, repoRoot); name != "" {
 		return name
 	}
 	if name := osUserName(); name != "" {
@@ -23,7 +29,11 @@ func Detect(repoRoot string) string {
 }
 
 func gitUserName(repoRoot string) string {
-	cmd := exec.Command("git", "config", "user.name")
+	return gitUserNameContext(context.Background(), repoRoot)
+}
+
+func gitUserNameContext(ctx context.Context, repoRoot string) string {
+	cmd := exec.CommandContext(ctx, "git", "config", "user.name")
 	cmd.Dir = repoRoot
 	out, err := cmd.Output()
 	if err != nil {

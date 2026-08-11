@@ -2740,7 +2740,9 @@ func buildTaskPreflight(cmd *cobra.Command, repoRoot, query string, noRefresh bo
 	defer db.Close()
 
 	if !noRefresh {
-		ensureRepoIndexedForTask(cmd, db, repoRoot)
+		if err := ensureRepoIndexedForTask(cmd, db, repoRoot); err != nil {
+			return taskPreflight{}, err
+		}
 	}
 	fp := store.FilterParams{RepoRoot: repoRoot}
 	loadResult, err := loadRetrievalCandidatesForQueryWithReport(db, fp, query)
@@ -4675,7 +4677,7 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 		if err != nil {
 			return err
 		}
-		if err := indexTaskCheckpointFact(repoRoot, manifest, record, checkpointPath, checkpointJSONPath, workspace, now); err != nil {
+		if err := indexTaskCheckpointFact(cmd.Context(), repoRoot, manifest, record, checkpointPath, checkpointJSONPath, workspace, now); err != nil {
 			return err
 		}
 		factIndexed = true
@@ -5178,13 +5180,24 @@ func parseTaskCheckpointCreatedAt(createdAt string) time.Time {
 	return time.Unix(0, 0).UTC()
 }
 
-func indexTaskCheckpointFact(repoRoot string, manifest taskManifest, record taskCheckpointRecord, checkpointPath, checkpointJSONPath, workspace string, now time.Time) error {
-	db, err := openDB()
+func indexTaskCheckpointFact(ctx context.Context, repoRoot string, manifest taskManifest, record taskCheckpointRecord, checkpointPath, checkpointJSONPath, workspace string, now time.Time) error {
+	dbPath, err := config.DBPath()
+	if err != nil {
+		return fmt.Errorf("resolve db: %w", err)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, autoIndexDeadline)
+	defer cancel()
+	lease, err := store.AcquireIndexWriter(waitCtx, dbPath, nil)
+	if err != nil {
+		return indexOperationError("task checkpoint writer wait", autoIndexDeadlineLabel, err)
+	}
+	defer func() { _ = lease.Release() }()
+	db, err := openDBAtPath(dbPath)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	repoID, err := ensureTaskFactRepo(db, repoRoot, now.Format(time.RFC3339))
+	repoID, err := ensureTaskFactRepoContext(waitCtx, db, repoRoot, now.Format(time.RFC3339))
 	if err != nil {
 		return err
 	}
@@ -5229,8 +5242,15 @@ func indexTaskCheckpointFact(repoRoot string, manifest taskManifest, record task
 }
 
 func ensureTaskFactRepo(db *store.DB, repoRoot, now string) (string, error) {
+	return ensureTaskFactRepoContext(context.Background(), db, repoRoot, now)
+}
+
+func ensureTaskFactRepoContext(ctx context.Context, db *store.DB, repoRoot, now string) (string, error) {
 	ids := idgen.NewFactory()
-	info := repo.DetectIdentity(repoRoot)
+	info := repo.DetectIdentityContext(ctx, repoRoot)
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if strings.TrimSpace(info.RootPath) == "" {
 		info.RootPath = repoRoot
 	}
@@ -6342,6 +6362,7 @@ func captureTaskArtifacts(cmd *cobra.Command, repoRoot string, requests []taskCa
 	var indexed []string
 	for _, request := range requests {
 		silent := &cobra.Command{}
+		silent.SetContext(cmd.Context())
 		silent.SetOut(io.Discard)
 		silent.SetErr(io.Discard)
 		status := request.Status

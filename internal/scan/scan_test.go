@@ -10,12 +10,14 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/codecomment"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/markdown"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/openspec"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/testcase"
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/todoparse"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/format"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
@@ -25,6 +27,43 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type cancellationTestAdapter struct {
+	name                string
+	sourceIdentity      string
+	entered             chan struct{}
+	waitForCancellation bool
+}
+
+func (a *cancellationTestAdapter) Name() string {
+	return a.name
+}
+
+func (a *cancellationTestAdapter) Discover(context.Context, string, *config.RepoConfig) ([]adapters.Candidate, error) {
+	return []adapters.Candidate{{RelPath: a.sourceIdentity + ".md", AdapterName: a.name}}, nil
+}
+
+func (a *cancellationTestAdapter) Parse(ctx context.Context, candidate adapters.Candidate) (adapters.Artifact, []adapters.Source, todoparse.ParseResult, error) {
+	if a.waitForCancellation {
+		close(a.entered)
+		<-ctx.Done()
+		return adapters.Artifact{}, nil, todoparse.ParseResult{}, ctx.Err()
+	}
+	artifact := adapters.Artifact{
+		SourceIdentity: a.sourceIdentity,
+		Kind:           config.KindPlan,
+		Title:          a.sourceIdentity,
+		Status:         "implementing",
+		PrimaryPath:    candidate.RelPath,
+		Body:           "# " + a.sourceIdentity,
+	}
+	source := adapters.Source{
+		SourceType:     a.name,
+		Path:           candidate.RelPath,
+		SourceIdentity: a.sourceIdentity,
+	}
+	return artifact, []adapters.Source{source}, todoparse.ParseResult{}, nil
+}
 
 func setupTestRepo(t *testing.T) (string, *store.DB) {
 	t.Helper()
@@ -41,6 +80,60 @@ func setupTestRepo(t *testing.T) (string, *store.DB) {
 
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	return filepath.Join(tmp, "repo"), db
+}
+
+func TestScan_WhenCanceledAfterPartialWrite_RollsBackTransaction(t *testing.T) {
+	repoRoot := t.TempDir()
+	db, err := store.Open(filepath.Join(t.TempDir(), "devspecs.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	db.SetMaxOpenConns(1)
+	entered := make(chan struct{})
+	first := &cancellationTestAdapter{name: "first", sourceIdentity: "first"}
+	second := &cancellationTestAdapter{
+		name:                "second",
+		sourceIdentity:      "second",
+		entered:             entered,
+		waitForCancellation: true,
+	}
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{first, second})
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	type scanOutcome struct {
+		result *Result
+		err    error
+	}
+	completed := make(chan scanOutcome, 1)
+	go func() {
+		result, scanErr := scanner.RunWithOptions(ctx, repoRoot, nil, RunOptions{
+			UseTransaction:       true,
+			SkipAuthoredAtLookup: true,
+			FileWorkerCount:      1,
+		})
+		completed <- scanOutcome{result: result, err: scanErr}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		require.FailNow(t, "scan did not reach cancellable adapter")
+	}
+
+	cancel()
+	var outcome scanOutcome
+	select {
+	case outcome = <-completed:
+	case <-time.After(2 * time.Second):
+		require.FailNow(t, "scan did not return after cancellation")
+	}
+	var artifactCount int
+	require.NoError(t, db.QueryRow("SELECT COUNT(*) FROM artifacts").Scan(&artifactCount))
+	var completedScanCount int
+	require.NoError(t, db.QueryRow("SELECT COUNT(*) FROM repos WHERE last_scan_at IS NOT NULL AND last_scan_at <> ''").Scan(&completedScanCount))
+
+	assert.Nil(t, outcome.result)
+	assert.ErrorIs(t, outcome.err, context.Canceled)
+	assert.Zero(t, artifactCount)
+	assert.Zero(t, completedScanCount)
 }
 
 type seededMarkdownScanState struct {
@@ -1214,7 +1307,7 @@ func TestScan_AuthoredAtLookupCachedPerPath(t *testing.T) {
 	const authoredAt = "2020-01-02T03:04:05Z"
 	lookupsByPath := map[string]int{}
 	previous := fileFirstCommitDate
-	fileFirstCommitDate = func(repoRoot, relPath string) string {
+	fileFirstCommitDate = func(ctx context.Context, repoRoot, relPath string) string {
 		lookupsByPath[relPath]++
 		return authoredAt
 	}
@@ -1280,14 +1373,14 @@ func TestScan_AuthoredAtPrefetchUsesBulkWithExactFallback(t *testing.T) {
 	bulkCalls := 0
 	var lookupMu sync.Mutex
 	singleLookups := map[string]int{}
-	fileFirstCommitDates = func(repoRoot string, rels []string) map[string]string {
+	fileFirstCommitDates = func(ctx context.Context, repoRoot string, rels []string) map[string]string {
 		bulkCalls++
 		require.Len(t, rels, minBulkAuthoredAtPaths,
 			"bulk rel count = %d, want %d", len(rels), minBulkAuthoredAtPaths)
 
 		return map[string]string{"tests/test_00.py": bulkDate}
 	}
-	fileFirstCommitDate = func(repoRoot, relPath string) string {
+	fileFirstCommitDate = func(ctx context.Context, repoRoot, relPath string) string {
 		lookupMu.Lock()
 		singleLookups[relPath]++
 		lookupMu.Unlock()

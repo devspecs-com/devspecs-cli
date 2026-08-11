@@ -2,9 +2,11 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/adr"
@@ -22,14 +24,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	autoIndexDeadline         = 10 * time.Minute
+	autoIndexDeadlineLabel    = "10m"
+	explicitScanDeadline      = 30 * time.Minute
+	explicitScanDeadlineLabel = "30m"
+)
+
 // ensureFresh checks if the index is stale and auto-scans if needed.
 // Resolves the repo root by walking up from cwd (via .git or .devspecs/).
 // Prints a one-line notice to stderr when updates occur.
-func ensureFresh(cmd *cobra.Command, db *store.DB) {
+func ensureFresh(cmd *cobra.Command, db *store.DB) error {
 	wd, err := os.Getwd()
 	if err != nil {
 		debugLog("ensureFresh: Getwd failed: %v", err)
-		return
+		return nil
 	}
 
 	repoRoot := resolveIndexedRepoRoot(db, wd)
@@ -41,29 +50,29 @@ func ensureFresh(cmd *cobra.Command, db *store.DB) {
 	status := freshness.Check(db, repoRoot)
 	if status == nil {
 		debugLog("ensureFresh: no repo row found for %s — skipping", repoRoot)
-		return
+		return nil
 	}
 	if !status.Stale {
 		debugLog("ensureFresh: index is fresh for %s", repoRoot)
-		return
+		return nil
 	}
 
 	debugLog("ensureFresh: stale — reason=%s, triggering auto-scan", status.Reason)
 	if !commandSuppressNonResultProgress(cmd) {
 		maybeWarnWorkspaceRoot(cmd, repoRoot)
 	}
-	runScanQuietAndNotify(cmd, db, repoRoot)
+	return runScanQuietAndNotify(cmd, db, repoRoot)
 }
 
-func ensureRepoIndexed(cmd *cobra.Command, db *store.DB, repoRoot string) {
+func ensureRepoIndexed(cmd *cobra.Command, db *store.DB, repoRoot string) error {
 	repoRoot = canonicalRepoRoot(repoRoot)
 	if repoRoot == "" {
-		return
+		return nil
 	}
 	status := freshness.Check(db, repoRoot)
 	if status != nil && !status.Stale {
 		debugLog("ensureRepoIndexed: index is fresh for %s", repoRoot)
-		return
+		return nil
 	}
 	if status == nil {
 		debugLog("ensureRepoIndexed: no repo row for %s; triggering auto-scan", repoRoot)
@@ -73,19 +82,19 @@ func ensureRepoIndexed(cmd *cobra.Command, db *store.DB, repoRoot string) {
 	if !commandSuppressNonResultProgress(cmd) {
 		maybeWarnWorkspaceRoot(cmd, repoRoot)
 	}
-	runScanQuietAndNotify(cmd, db, repoRoot)
+	return runScanQuietAndNotify(cmd, db, repoRoot)
 }
 
-func ensureRepoIndexedForTask(cmd *cobra.Command, db *store.DB, repoRoot string) {
+func ensureRepoIndexedForTask(cmd *cobra.Command, db *store.DB, repoRoot string) error {
 	repoRoot = canonicalRepoRoot(repoRoot)
 	if repoRoot == "" {
-		return
+		return nil
 	}
 	status := freshness.Check(db, repoRoot)
 	substrateReady, substrateReason := taskIndexSubstrateReady(db, repoRoot)
 	if status != nil && !status.Stale && substrateReady {
 		debugLog("ensureRepoIndexedForTask: task substrate is fresh for %s", repoRoot)
-		return
+		return nil
 	}
 	if status == nil {
 		debugLog("ensureRepoIndexedForTask: no repo row for %s; triggering task auto-scan", repoRoot)
@@ -97,7 +106,7 @@ func ensureRepoIndexedForTask(cmd *cobra.Command, db *store.DB, repoRoot string)
 	if !commandSuppressNonResultProgress(cmd) {
 		maybeWarnWorkspaceRoot(cmd, repoRoot)
 	}
-	runTaskScanQuietAndNotify(cmd, db, repoRoot)
+	return runTaskScanQuietAndNotify(cmd, db, repoRoot)
 }
 
 func taskIndexSubstrateReady(db *store.DB, repoRoot string) (bool, string) {
@@ -127,28 +136,36 @@ func countRepoSourcesByType(db *store.DB, repoID, sourceType string) int {
 	return count
 }
 
-func runScanQuietAndNotify(cmd *cobra.Command, db *store.DB, repoRoot string) {
+func runScanQuietAndNotify(cmd *cobra.Command, db *store.DB, repoRoot string) error {
 	quiet := commandSuppressNonResultProgress(cmd)
 	scanCmd := cmd
 	if quiet {
 		scanCmd = nil
 	}
-	result := runScanQuiet(scanCmd, db, repoRoot)
+	result, err := runScanQuiet(cmd.Context(), scanCmd, db, repoRoot)
+	if err != nil {
+		return err
+	}
 	if !quiet && result != nil && (result.New > 0 || result.Updated > 0) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Index updated (%d new, %d updated)\n", result.New, result.Updated)
 	}
+	return nil
 }
 
-func runTaskScanQuietAndNotify(cmd *cobra.Command, db *store.DB, repoRoot string) {
+func runTaskScanQuietAndNotify(cmd *cobra.Command, db *store.DB, repoRoot string) error {
 	quiet := commandSuppressNonResultProgress(cmd)
 	scanCmd := cmd
 	if quiet {
 		scanCmd = nil
 	}
-	result := runTaskScanQuiet(scanCmd, db, repoRoot)
+	result, err := runTaskScanQuiet(cmd.Context(), scanCmd, db, repoRoot)
+	if err != nil {
+		return err
+	}
 	if !quiet && result != nil && (result.New > 0 || result.Updated > 0) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Task index updated (%d new, %d updated)\n", result.New, result.Updated)
 	}
+	return nil
 }
 
 // resolveRepoRootFromWd finds the project root by checking for .git or .devspecs/
@@ -179,7 +196,22 @@ func findDevspecsRoot(dir string) string {
 	}
 }
 
-func runScanQuiet(cmd *cobra.Command, db *store.DB, repoRoot string) *scan.Result {
+func runScanQuiet(parent context.Context, cmd *cobra.Command, db *store.DB, repoRoot string) (*scan.Result, error) {
+	ctx, cancel := context.WithTimeout(parent, autoIndexDeadline)
+	defer cancel()
+	writeIndexDeadline(cmd, "Auto-index", autoIndexDeadlineLabel)
+	lease, err := db.AcquireIndexWriter(ctx, indexWaitNotice(cmd, "Auto-index"))
+	if err != nil {
+		return nil, indexOperationError("auto-index", autoIndexDeadlineLabel, err)
+	}
+	defer func() { _ = lease.Release() }()
+	status := freshness.Check(db, canonicalRepoRoot(repoRoot))
+	if status != nil && !status.Stale {
+		debugLog("runScanQuiet: queued refresh became redundant for %s", repoRoot)
+		return nil, nil
+	}
+	db.SetMaxOpenConns(1)
+
 	cfg, err := config.LoadRepoConfig(repoRoot)
 	if err != nil {
 		debugLog("runScanQuiet: LoadRepoConfig error: %v", err)
@@ -193,26 +225,38 @@ func runScanQuiet(cmd *cobra.Command, db *store.DB, repoRoot string) *scan.Resul
 		adpts = append(adpts, &codecomment.Adapter{})
 	}
 	scanner := scan.New(db, ids, adpts)
-	scanOpts, err := liveScanRunOptions(db, repoRoot)
+	scanOpts, err := liveScanRunOptionsContext(ctx, db, repoRoot)
 	if err != nil {
-		debugLog("runScanQuiet: live scan option error: %v", err)
-		return nil
+		return nil, fmt.Errorf("auto-index options: %w", err)
 	}
 	if cmd != nil {
 		scanOpts.Progress = scanProgressStderr(cmd.ErrOrStderr(), "Auto-index", commandVerboseProgress(cmd))
 	}
-	result, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, scanOpts)
+	result, err := scanner.RunWithOptions(ctx, repoRoot, cfg, scanOpts)
 	if err != nil {
-		debugLog("runScanQuiet: scan error: %v", err)
-		if cmd != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Auto-index skipped: %v\n", scanTraversalError(repoRoot, err))
-		}
-		return nil
+		return nil, indexOperationError("auto-index", autoIndexDeadlineLabel, scanTraversalError(repoRoot, err))
 	}
-	return result
+	return result, nil
 }
 
-func runTaskScanQuiet(cmd *cobra.Command, db *store.DB, repoRoot string) *scan.Result {
+func runTaskScanQuiet(parent context.Context, cmd *cobra.Command, db *store.DB, repoRoot string) (*scan.Result, error) {
+	ctx, cancel := context.WithTimeout(parent, autoIndexDeadline)
+	defer cancel()
+	writeIndexDeadline(cmd, "Task auto-index", autoIndexDeadlineLabel)
+	lease, err := db.AcquireIndexWriter(ctx, indexWaitNotice(cmd, "Task auto-index"))
+	if err != nil {
+		return nil, indexOperationError("task auto-index", autoIndexDeadlineLabel, err)
+	}
+	defer func() { _ = lease.Release() }()
+	repoRoot = canonicalRepoRoot(repoRoot)
+	status := freshness.Check(db, repoRoot)
+	substrateReady, _ := taskIndexSubstrateReady(db, repoRoot)
+	if status != nil && !status.Stale && substrateReady {
+		debugLog("runTaskScanQuiet: queued refresh became redundant for %s", repoRoot)
+		return nil, nil
+	}
+	db.SetMaxOpenConns(1)
+
 	cfg, err := config.LoadRepoConfig(repoRoot)
 	if err != nil {
 		debugLog("runTaskScanQuiet: LoadRepoConfig error: %v", err)
@@ -225,24 +269,45 @@ func runTaskScanQuiet(cmd *cobra.Command, db *store.DB, repoRoot string) *scan.R
 		adpts = append(adpts, &codecomment.Adapter{})
 	}
 	scanner := scan.New(db, ids, adpts)
-	scanOpts, err := liveScanRunOptions(db, repoRoot)
+	scanOpts, err := liveScanRunOptionsContext(ctx, db, repoRoot)
 	if err != nil {
-		debugLog("runTaskScanQuiet: live scan option error: %v", err)
-		return nil
+		return nil, fmt.Errorf("task auto-index options: %w", err)
 	}
 	scanOpts.SourceManifest = true
 	if cmd != nil {
 		scanOpts.Progress = scanProgressStderr(cmd.ErrOrStderr(), "Task auto-index", commandVerboseProgress(cmd))
 	}
-	result, err := scanner.RunWithOptions(context.Background(), repoRoot, cfg, scanOpts)
+	result, err := scanner.RunWithOptions(ctx, repoRoot, cfg, scanOpts)
 	if err != nil {
-		debugLog("runTaskScanQuiet: scan error: %v", err)
-		if cmd != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Task auto-index skipped: %v\n", scanTraversalError(repoRoot, err))
-		}
+		return nil, indexOperationError("task auto-index", autoIndexDeadlineLabel, scanTraversalError(repoRoot, err))
+	}
+	return result, nil
+}
+
+func writeIndexDeadline(cmd *cobra.Command, label, deadlineLabel string) {
+	if cmd != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "%s: starting (deadline %s)\n", label, deadlineLabel)
+	}
+}
+
+func indexWaitNotice(cmd *cobra.Command, label string) func() {
+	if cmd == nil {
 		return nil
 	}
-	return result
+	return func() {
+		fmt.Fprintf(cmd.ErrOrStderr(), "%s: waiting for another index update\n", label)
+	}
+}
+
+func indexOperationError(label, deadlineLabel string, err error) error {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return fmt.Errorf("%s exceeded its %s deadline: %w", label, deadlineLabel, err)
+	case errors.Is(err, context.Canceled):
+		return fmt.Errorf("%s canceled: %w", label, err)
+	default:
+		return err
+	}
 }
 
 // debugLog prints to stderr only when DS_DEBUG=1 is set.

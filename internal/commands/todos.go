@@ -58,7 +58,9 @@ func runTodos(cmd *cobra.Command, artifactID string, fp store.FilterParams, repo
 	defer db.Close()
 
 	if !noRefresh {
-		ensureFresh(cmd, db)
+		if err := ensureFresh(cmd, db); err != nil {
+			return err
+		}
 	}
 
 	if artifactID != "" {

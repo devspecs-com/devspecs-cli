@@ -60,7 +60,9 @@ func runCriteria(cmd *cobra.Command, artifactID string, fp store.FilterParams, r
 	defer db.Close()
 
 	if !noRefresh {
-		ensureFresh(cmd, db)
+		if err := ensureFresh(cmd, db); err != nil {
+			return err
+		}
 	}
 
 	if artifactID != "" {

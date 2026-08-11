@@ -67,7 +67,9 @@ func runList(cmd *cobra.Command, fp store.FilterParams, repoName string, allRepo
 	defer db.Close()
 
 	if !noRefresh {
-		ensureFresh(cmd, db)
+		if err := ensureFresh(cmd, db); err != nil {
+			return err
+		}
 	}
 
 	fp.RepoRoot = resolveRepoScope(db, repoName, allRepos)
