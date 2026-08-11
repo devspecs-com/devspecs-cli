@@ -19,9 +19,11 @@ var schemaDDL string
 // SchemaVersion is the current schema version. Bump when schema.sql changes.
 const SchemaVersion = 15
 
-// SQLiteBusyTimeoutMS is the local index write-wait window for concurrent CLI
-// commands before SQLite returns a busy/locked error.
-const SQLiteBusyTimeoutMS = 5000
+// SQLiteBusyTimeoutMS bounds SQLite's crash-safe writer queue. Cold scans on
+// very large repositories can hold the single-writer slot for several minutes,
+// so competing agent commands must outwait ordinary indexing rather than fail
+// after a short interactive timeout.
+const SQLiteBusyTimeoutMS = 30 * 60 * 1000
 
 // DB wraps *sql.DB with DevSpecs-specific operations.
 type DB struct {
