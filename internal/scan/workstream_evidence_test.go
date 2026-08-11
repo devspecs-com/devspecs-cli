@@ -5,6 +5,8 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/gitfacts"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWorkstreamEvidence_TaskIDConnectsPlanAndChangedSource(t *testing.T) {
@@ -54,28 +56,19 @@ func TestWorkstreamEvidence_TaskIDConnectsPlanAndChangedSource(t *testing.T) {
 	}
 
 	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, facts)
-	if built.diagnostics.AnchorsMaterialized == 0 {
-		t.Fatalf("expected materialized anchors, got diagnostics %#v", built.diagnostics)
-	}
-	if len(built.edges) == 0 {
-		t.Fatalf("expected same_workstream_anchor edge")
-	}
+	require.NotEqual(t, 0, built.diagnostics.AnchorsMaterialized,
+		"expected materialized anchors, got diagnostics %#v", built.diagnostics)
+	require.NotEmpty(t, built.edges,
+		"expected same_workstream_anchor edge")
+
 	edge := built.edges[0]
-	if edge.EdgeType != edgeTypeSameWorkstreamAnchor {
-		t.Fatalf("edge type: got %q", edge.EdgeType)
-	}
-	if edge.SrcArtifactID != "art_plan" || edge.DstArtifactID != "art_source" {
-		t.Fatalf("edge endpoints: got %s -> %s", edge.SrcArtifactID, edge.DstArtifactID)
-	}
-	if edge.Confidence < 0.9 {
-		t.Fatalf("expected high-confidence task edge, got %.3f", edge.Confidence)
-	}
-	if len(built.diagnostics.TopClusters) == 0 || built.diagnostics.TopClusters[0].PackStrength != workstreamPackStrengthStrong {
-		t.Fatalf("expected strong pack candidate, got %#v", built.diagnostics.TopClusters)
-	}
-	if built.diagnostics.TopClusters[0].Dialect != workstreamDialectTicketLikeUpper {
-		t.Fatalf("expected ticket-like dialect, got %#v", built.diagnostics.TopClusters[0])
-	}
+	assert.Equal(t, edgeTypeSameWorkstreamAnchor, edge.EdgeType)
+	assert.Equal(t, "art_plan", edge.SrcArtifactID)
+	assert.Equal(t, "art_source", edge.DstArtifactID)
+	assert.GreaterOrEqual(t, edge.Confidence, 0.9)
+	require.NotEmpty(t, built.diagnostics.TopClusters)
+	assert.Equal(t, workstreamPackStrengthStrong, built.diagnostics.TopClusters[0].PackStrength)
+	assert.Equal(t, workstreamDialectTicketLikeUpper, built.diagnostics.TopClusters[0].Dialect)
 }
 
 func TestWorkstreamEvidence_SlugWindowsConnectPlanAndChangedSource(t *testing.T) {
@@ -131,9 +124,9 @@ func TestWorkstreamEvidence_SlugWindowsConnectPlanAndChangedSource(t *testing.T)
 			break
 		}
 	}
-	if !found {
-		t.Fatalf("expected slug-window workstream edge, got %#v", built.diagnostics.TopClusters)
-	}
+	require.True(t, found,
+		"expected slug-window workstream edge, got %#v", built.diagnostics.TopClusters)
+
 }
 
 func TestWorkstreamEvidence_SourceTestOnlySlugIsLocalityOnly(t *testing.T) {
@@ -182,12 +175,11 @@ func TestWorkstreamEvidence_SourceTestOnlySlugIsLocalityOnly(t *testing.T) {
 	}
 
 	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, facts)
-	if len(built.edges) != 0 {
-		t.Fatalf("expected source/test-only locality to avoid edge materialization, got %#v", built.edges)
-	}
-	if len(built.diagnostics.TopClusters) == 0 || built.diagnostics.TopClusters[0].PackStrength != workstreamPackStrengthSupportLocal {
-		t.Fatalf("expected locality-support pack cluster, got %#v", built.diagnostics.TopClusters)
-	}
+	require.Empty(t, built.edges,
+		"expected source/test-only locality to avoid edge materialization, got %#v", built.edges)
+	require.NotEmpty(t, built.diagnostics.TopClusters)
+	assert.Equal(t, workstreamPackStrengthSupportLocal, built.diagnostics.TopClusters[0].PackStrength)
+
 }
 
 func TestWorkstreamEvidence_PlanSourceSlugIsCrossRoleSupport(t *testing.T) {
@@ -222,12 +214,11 @@ func TestWorkstreamEvidence_PlanSourceSlugIsCrossRoleSupport(t *testing.T) {
 	}
 
 	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, gitfacts.Facts{})
-	if len(built.diagnostics.TopClusters) == 0 || built.diagnostics.TopClusters[0].PackStrength != workstreamPackStrengthSupportCross {
-		t.Fatalf("expected cross-role support pack cluster, got %#v", built.diagnostics.TopClusters)
-	}
-	if len(built.edges) == 0 {
-		t.Fatalf("expected cross-role support edge")
-	}
+	require.NotEmpty(t, built.diagnostics.TopClusters)
+	assert.Equal(t, workstreamPackStrengthSupportCross, built.diagnostics.TopClusters[0].PackStrength)
+	require.NotEmpty(t, built.edges,
+		"expected cross-role support edge")
+
 }
 
 func TestWorkstreamEvidence_CappedClusterPreservesImplementationRepresentative(t *testing.T) {
@@ -286,29 +277,25 @@ func TestWorkstreamEvidence_CappedClusterPreservesImplementationRepresentative(t
 	}
 
 	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, facts)
-	for _, cluster := range built.diagnostics.TopClusters {
-		if cluster.Anchor != "billing-entitlements" {
+	var target *WorkstreamClusterExample
+	for index := range built.diagnostics.TopClusters {
+		if built.diagnostics.TopClusters[index].Anchor != "billing-entitlements" {
 			continue
 		}
-		if cluster.PackStrength != workstreamPackStrengthStrong {
-			t.Fatalf("expected capped doc/source cluster to stay strong, got %#v", cluster)
-		}
-		if cluster.RoleFamilyMix["source"] == 0 {
-			t.Fatalf("expected capped cluster to keep source representative, got %#v", cluster)
-		}
-		return
+		target = &built.diagnostics.TopClusters[index]
+		break
 	}
-	t.Fatalf("expected billing-entitlements cluster, got %#v", built.diagnostics.TopClusters)
+	require.NotNil(t, target, "expected billing-entitlements cluster, got %#v", built.diagnostics.TopClusters)
+	assert.Equal(t, workstreamPackStrengthStrong, target.PackStrength)
+	assert.NotZero(t, target.RoleFamilyMix["source"])
 }
 
 func TestWorkstreamEvidence_RejectsDateLikeBareGithubRef(t *testing.T) {
 	extracted := extractFormalWorkstreamAnchors("See #2026 for the annual plan.", "body")
-	if len(extracted.anchors) != 0 {
-		t.Fatalf("expected no anchors, got %#v", extracted.anchors)
-	}
-	if len(extracted.rejected) == 0 || extracted.rejected[0].reason != "date_like_number" {
-		t.Fatalf("expected date_like_number rejection, got %#v", extracted.rejected)
-	}
+	require.Empty(t, extracted.anchors,
+		"expected no anchors, got %#v", extracted.anchors)
+	require.Len(t, extracted.rejected, 1)
+	assert.Equal(t, "date_like_number", extracted.rejected[0].reason)
 }
 
 func TestWorkstreamEvidence_ExplicitWorkRefDialects(t *testing.T) {
@@ -317,22 +304,16 @@ func TestWorkstreamEvidence_ExplicitWorkRefDialects(t *testing.T) {
 	for _, anchor := range extracted.anchors {
 		got[anchor.canonical] = anchor.dialect
 	}
-	want := map[string]string{
-		"pr-42":    workstreamDialectExplicitPRRef,
-		"pr-43":    workstreamDialectExplicitPRRef,
-		"issue-44": workstreamDialectExplicitIssueRef,
-		"issue-45": workstreamDialectExplicitIssueRef,
-		"gh-46":    workstreamDialectExplicitGHRef,
-		"gh-47":    workstreamDialectBareHashRef,
-		"ADR-001":  workstreamDialectDocumentNumberRef,
-		"GPT-2":    workstreamDialectGenericTechnical,
-		"LM-19":    workstreamDialectTicketLikeUpper,
-	}
-	for canonical, dialect := range want {
-		if got[canonical] != dialect {
-			t.Fatalf("dialect for %s: got %q want %q from %#v", canonical, got[canonical], dialect, extracted.anchors)
-		}
-	}
+	require.Len(t, got, 12)
+	assert.Equal(t, workstreamDialectExplicitPRRef, got["pr-42"])
+	assert.Equal(t, workstreamDialectExplicitPRRef, got["pr-43"])
+	assert.Equal(t, workstreamDialectExplicitIssueRef, got["issue-44"])
+	assert.Equal(t, workstreamDialectExplicitIssueRef, got["issue-45"])
+	assert.Equal(t, workstreamDialectExplicitGHRef, got["gh-46"])
+	assert.Equal(t, workstreamDialectBareHashRef, got["gh-47"])
+	assert.Equal(t, workstreamDialectDocumentNumberRef, got["ADR-001"])
+	assert.Equal(t, workstreamDialectGenericTechnical, got["GPT-2"])
+	assert.Equal(t, workstreamDialectTicketLikeUpper, got["LM-19"])
 }
 
 func TestWorkstreamEvidence_OpenSpecChangeSlugStaysStrong(t *testing.T) {
@@ -370,12 +351,11 @@ func TestWorkstreamEvidence_OpenSpecChangeSlugStaysStrong(t *testing.T) {
 
 	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, gitfacts.Facts{})
 	cluster := findWorkstreamTestCluster(t, built.diagnostics.TopClusters, "token-refresh")
-	if cluster.Dialect != workstreamDialectOpenSpecChangeSlug {
-		t.Fatalf("expected OpenSpec change dialect, got %#v", cluster)
-	}
-	if cluster.PackStrength != workstreamPackStrengthStrong {
-		t.Fatalf("expected OpenSpec change slug to remain strong, got %#v", cluster)
-	}
+	require.Equal(t, workstreamDialectOpenSpecChangeSlug, cluster.Dialect,
+		"expected OpenSpec change dialect, got %#v", cluster)
+	require.Equal(t, workstreamPackStrengthStrong, cluster.PackStrength,
+		"expected OpenSpec change slug to remain strong, got %#v", cluster)
+
 }
 
 func TestWorkstreamEvidence_BareHashRefNeverStrong(t *testing.T) {
@@ -423,20 +403,21 @@ func TestWorkstreamEvidence_BareHashRefNeverStrong(t *testing.T) {
 
 	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, facts)
 	cluster := findWorkstreamTestCluster(t, built.diagnostics.TopClusters, "gh-42")
-	if cluster.Dialect != workstreamDialectBareHashRef {
-		t.Fatalf("expected bare hash dialect, got %#v", cluster)
-	}
-	if cluster.PackStrength == workstreamPackStrengthStrong {
-		t.Fatalf("expected bare hash to avoid strong evidence, got %#v", cluster)
-	}
+	require.Equal(t, workstreamDialectBareHashRef, cluster.Dialect,
+		"expected bare hash dialect, got %#v", cluster)
+	require.NotEqual(t, workstreamPackStrengthStrong, cluster.PackStrength,
+		"expected bare hash to avoid strong evidence, got %#v", cluster)
+
 	for _, edge := range built.edges {
 		meta := decodeEvidenceJSON(edge.MetadataJSON)
 		anchors, _ := meta["anchors"].([]any)
 		for _, rawAnchor := range anchors {
-			anchor, _ := rawAnchor.(map[string]any)
-			if evidenceString(anchor["canonical"]) == "gh-42" && evidenceString(anchor["pack_strength"]) == workstreamPackStrengthStrong {
-				t.Fatalf("expected no strong bare-hash edge, got %#v", edge)
+			anchor, ok := rawAnchor.(map[string]any)
+			require.True(t, ok)
+			if evidenceString(anchor["canonical"]) == "gh-42" {
+				assert.NotEqual(t, workstreamPackStrengthStrong, evidenceString(anchor["pack_strength"]))
 			}
+
 		}
 	}
 }
@@ -478,70 +459,66 @@ func TestWorkstreamEvidence_BranchSlugDemotedBelowStrong(t *testing.T) {
 
 	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, facts)
 	cluster := findWorkstreamTestCluster(t, built.diagnostics.TopClusters, "token-refresh")
-	if cluster.Dialect != workstreamDialectBranchSlug {
-		t.Fatalf("expected branch dialect to be tracked, got %#v", cluster)
-	}
-	if cluster.PackStrength == workstreamPackStrengthStrong {
-		t.Fatalf("expected branch-derived slug below strong, got %#v", cluster)
-	}
+	require.Equal(t, workstreamDialectBranchSlug, cluster.Dialect,
+		"expected branch dialect to be tracked, got %#v", cluster)
+	require.NotEqual(t, workstreamPackStrengthStrong, cluster.PackStrength,
+		"expected branch-derived slug below strong, got %#v", cluster)
+
 }
 
-func TestWorkstreamEvidence_ExtractsPRFossilsFromMergeAndSquash(t *testing.T) {
-	merge := extractWorkstreamAnchorsFromCommit(gitfacts.Commit{
+func TestWorkstreamEvidence_MergeCommitExtractsPRAndTitleFossils(t *testing.T) {
+	extracted := extractWorkstreamAnchorsFromCommit(gitfacts.Commit{
 		Message:     "Merge pull request #123 from owner/fix-parser-regression",
 		BodyPreview: "Fix parser regression for optional chaining",
 		IsMerge:     true,
 	})
-	gotMerge := map[string]string{}
-	for _, anchor := range merge.anchors {
-		gotMerge[anchor.canonical] = anchor.dialect
+	got := map[string]string{}
+	for _, anchor := range extracted.anchors {
+		got[anchor.canonical] = anchor.dialect
 	}
-	if gotMerge["pr-123"] != workstreamDialectGitHubMergePRRef {
-		t.Fatalf("expected merge PR fossil, got %#v", merge.anchors)
-	}
-	if gotMerge["parser-regression"] != workstreamDialectPRTitleSlug {
-		t.Fatalf("expected PR title fossil, got %#v", merge.anchors)
-	}
-	mergeBranchOnly := extractWorkstreamAnchorsFromCommit(gitfacts.Commit{
+
+	assert.Equal(t, workstreamDialectGitHubMergePRRef, got["pr-123"])
+	assert.Equal(t, workstreamDialectPRTitleSlug, got["parser-regression"])
+}
+
+func TestWorkstreamEvidence_MergeCommitWithoutTitleExtractsSourceBranchFossil(t *testing.T) {
+	extracted := extractWorkstreamAnchorsFromCommit(gitfacts.Commit{
 		Message: "Merge pull request #124 from owner/fix-parser-regression",
 		IsMerge: true,
 	})
-	gotBranchOnly := map[string]string{}
-	for _, anchor := range mergeBranchOnly.anchors {
-		gotBranchOnly[anchor.canonical] = anchor.dialect
-	}
-	if gotBranchOnly["parser-regression"] != workstreamDialectMergeSourceBranch {
-		t.Fatalf("expected merge source branch fossil when title is absent, got %#v", mergeBranchOnly.anchors)
+	got := map[string]string{}
+	for _, anchor := range extracted.anchors {
+		got[anchor.canonical] = anchor.dialect
 	}
 
-	squash := extractWorkstreamAnchorsFromCommit(gitfacts.Commit{
+	assert.Equal(t, workstreamDialectMergeSourceBranch, got["parser-regression"])
+}
+
+func TestWorkstreamEvidence_SquashCommitExtractsPRAndTitleFossils(t *testing.T) {
+	extracted := extractWorkstreamAnchorsFromCommit(gitfacts.Commit{
 		Message: "Fix parser regression (#456)",
 	})
-	gotSquash := map[string]string{}
-	for _, anchor := range squash.anchors {
-		gotSquash[anchor.canonical] = anchor.dialect
-	}
-	if gotSquash["pr-456"] != workstreamDialectSquashPRRef {
-		t.Fatalf("expected squash PR fossil, got %#v", squash.anchors)
-	}
-	if gotSquash["parser-regression"] != workstreamDialectPRTitleSlug {
-		t.Fatalf("expected squash title fossil, got %#v", squash.anchors)
-	}
-	if gotSquash["gh-456"] != "" {
-		t.Fatalf("expected squash PR number not to materialize as bare hash, got %#v", squash.anchors)
+	got := map[string]string{}
+	for _, anchor := range extracted.anchors {
+		got[anchor.canonical] = anchor.dialect
 	}
 
-	closing := extractWorkstreamAnchorsFromCommit(gitfacts.Commit{
+	assert.Equal(t, workstreamDialectSquashPRRef, got["pr-456"])
+	assert.Equal(t, workstreamDialectPRTitleSlug, got["parser-regression"])
+	assert.Empty(t, got["gh-456"])
+}
+
+func TestWorkstreamEvidence_ClosingReferenceExtractsIssueFossil(t *testing.T) {
+	extracted := extractWorkstreamAnchorsFromCommit(gitfacts.Commit{
 		Message:     "release parser fix",
 		BodyPreview: "Fixes: #789",
 	})
-	gotClosing := map[string]string{}
-	for _, anchor := range closing.anchors {
-		gotClosing[anchor.canonical] = anchor.dialect
+	got := map[string]string{}
+	for _, anchor := range extracted.anchors {
+		got[anchor.canonical] = anchor.dialect
 	}
-	if gotClosing["issue-789"] != workstreamDialectIssueClosingRef {
-		t.Fatalf("expected issue closing fossil, got %#v", closing.anchors)
-	}
+
+	assert.Equal(t, workstreamDialectIssueClosingRef, got["issue-789"])
 }
 
 func TestWorkstreamEvidence_PRRefFossilNeverStrong(t *testing.T) {
@@ -565,9 +542,9 @@ func TestWorkstreamEvidence_PRRefFossilNeverStrong(t *testing.T) {
 	}
 	profile := buildWorkstreamDialectProfile(map[string]*workstreamAnchorAccumulator{"pr-123": acc})
 	_, _, _, packStrength := workstreamScore(acc, []string{"art_doc", "art_source"}, profile)
-	if packStrength == workstreamPackStrengthStrong {
-		t.Fatalf("expected PR ref fossil below strong")
-	}
+	require.NotEqual(t, workstreamPackStrengthStrong, packStrength,
+		"expected PR ref fossil below strong")
+
 }
 
 func TestWorkstreamEvidence_PRTitleFossilCanBecomeStrongWhenDocBacked(t *testing.T) {
@@ -617,15 +594,13 @@ func TestWorkstreamEvidence_PRTitleFossilCanBecomeStrongWhenDocBacked(t *testing
 
 	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, facts)
 	cluster := findWorkstreamTestCluster(t, built.diagnostics.TopClusters, "parser-regression")
-	if cluster.Dialect != workstreamDialectPRTitleSlug {
-		t.Fatalf("expected PR title dialect, got %#v", cluster)
-	}
-	if cluster.PackStrength != workstreamPackStrengthStrong {
-		t.Fatalf("expected PR title fossil to become strong with doc/source backing, got %#v", cluster)
-	}
-	if built.diagnostics.PRFossilsSeen == 0 || built.diagnostics.PRFossilsMaterialized == 0 {
-		t.Fatalf("expected PR fossil diagnostics, got %#v", built.diagnostics)
-	}
+	require.Equal(t, workstreamDialectPRTitleSlug, cluster.Dialect,
+		"expected PR title dialect, got %#v", cluster)
+	require.Equal(t, workstreamPackStrengthStrong, cluster.PackStrength,
+		"expected PR title fossil to become strong with doc/source backing, got %#v", cluster)
+	assert.Positive(t, built.diagnostics.PRFossilsSeen)
+	assert.Positive(t, built.diagnostics.PRFossilsMaterialized)
+
 }
 
 func TestWorkstreamEvidence_TitleOnlyCrossRoleSlugIsLocality(t *testing.T) {
@@ -666,12 +641,11 @@ func TestWorkstreamEvidence_TitleOnlyCrossRoleSlugIsLocality(t *testing.T) {
 
 	built := buildWorkstreamEvidence("repo", artifacts, byPath, byID, gitfacts.Facts{})
 	cluster := findWorkstreamTestCluster(t, built.diagnostics.TopClusters, "jupyter-lab")
-	if cluster.Dialect != workstreamDialectTitleHeadingSlug {
-		t.Fatalf("expected title/heading dialect, got %#v", cluster)
-	}
-	if cluster.PackStrength != workstreamPackStrengthSupportLocal {
-		t.Fatalf("expected title-only cross-role slug to stay local support, got %#v", cluster)
-	}
+	require.Equal(t, workstreamDialectTitleHeadingSlug, cluster.Dialect,
+		"expected title/heading dialect, got %#v", cluster)
+	require.Equal(t, workstreamPackStrengthSupportLocal, cluster.PackStrength,
+		"expected title-only cross-role slug to stay local support, got %#v", cluster)
+
 }
 
 func TestWorkstreamEvidence_GenericTechnicalTermNeverStrong(t *testing.T) {
@@ -696,21 +670,22 @@ func TestWorkstreamEvidence_GenericTechnicalTermNeverStrong(t *testing.T) {
 	profile := buildWorkstreamDialectProfile(map[string]*workstreamAnchorAccumulator{"sha-256": acc})
 	ids := []string{"art_doc", "art_source"}
 	_, _, _, packStrength := workstreamScore(acc, ids, profile)
-	if packStrength == workstreamPackStrengthStrong {
-		t.Fatalf("expected generic technical term below strong")
-	}
-	if profile.trust[workstreamDialectGenericTechnical] != workstreamTrustWeak {
-		t.Fatalf("expected weak trust for generic technical term, got %#v", profile.trust)
-	}
+	require.NotEqual(t, workstreamPackStrengthStrong, packStrength,
+		"expected generic technical term below strong")
+	require.Equal(t, workstreamTrustWeak, profile.trust[workstreamDialectGenericTechnical],
+		"expected weak trust for generic technical term, got %#v", profile.trust)
+
 }
 
 func findWorkstreamTestCluster(t *testing.T, clusters []WorkstreamClusterExample, anchor string) WorkstreamClusterExample {
 	t.Helper()
-	for _, cluster := range clusters {
-		if cluster.Anchor == anchor {
-			return cluster
+	var target *WorkstreamClusterExample
+	for index := range clusters {
+		if clusters[index].Anchor == anchor {
+			target = &clusters[index]
+			break
 		}
 	}
-	t.Fatalf("expected cluster %q, got %#v", anchor, clusters)
-	return WorkstreamClusterExample{}
+	require.NotNil(t, target, "expected cluster %q, got %#v", anchor, clusters)
+	return *target
 }

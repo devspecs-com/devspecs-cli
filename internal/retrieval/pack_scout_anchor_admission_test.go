@@ -1,6 +1,11 @@
 package retrieval
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
 
 func TestAddScoutAnchorAdmissionCandidatesAddsDominantAnchorMiss(t *testing.T) {
 	selected := []Candidate{
@@ -53,27 +58,23 @@ func TestAddScoutAnchorAdmissionCandidatesAddsDominantAnchorMiss(t *testing.T) {
 	)
 
 	got := AddScoutAnchorAdmissionCandidates(selected, universe, "Improve bookmark flow")
-	if len(got) <= len(selected) {
-		t.Fatalf("expected dominant bookmark anchor admissions, got %#v", CandidatePaths(got))
-	}
-	want := []string{
-		"app/src/modules/content/components/bookmark-add.vue",
-		"app/src/modules/content/components/bookmark-delete.vue",
-		"app/src/modules/content/composables/use-delete-bookmark.ts",
-		"app/src/modules/content/composables/use-delete-bookmark.test.ts",
-	}
-	for _, path := range want {
-		if !containsCandidatePath(got, path) {
-			t.Fatalf("missing admitted bookmark candidate %s, got %#v", path, CandidatePaths(got))
-		}
-	}
+	require.Greater(t, len(got), len(selected),
+		"expected dominant bookmark anchor admissions, got %#v", CandidatePaths(got))
+
+	assert.True(t, containsCandidatePath(got, "app/src/modules/content/components/bookmark-add.vue"),
+		"missing admitted bookmark add candidate: %#v", CandidatePaths(got))
+	assert.True(t, containsCandidatePath(got, "app/src/modules/content/components/bookmark-delete.vue"),
+		"missing admitted bookmark delete candidate: %#v", CandidatePaths(got))
+	assert.True(t, containsCandidatePath(got, "app/src/modules/content/composables/use-delete-bookmark.ts"),
+		"missing admitted bookmark composable: %#v", CandidatePaths(got))
+	assert.True(t, containsCandidatePath(got, "app/src/modules/content/composables/use-delete-bookmark.test.ts"),
+		"missing admitted bookmark test: %#v", CandidatePaths(got))
 	for _, candidate := range got[len(selected):] {
-		if candidate.Metadata["retrieval_expansion_reason"] != "scout_anchor_admission" {
-			t.Fatalf("missing scout admission metadata: %#v", candidate.Metadata)
-		}
-		if candidate.Metadata["pack_tier"] != PackTierPrimary {
-			t.Fatalf("admitted anchor should start primary for family-primary selection: %#v", candidate.Metadata)
-		}
+		require.Equal(t, "scout_anchor_admission", candidate.Metadata["retrieval_expansion_reason"],
+			"missing scout admission metadata: %#v", candidate.Metadata)
+		require.Equal(t, PackTierPrimary, candidate.Metadata["pack_tier"],
+			"admitted anchor should start primary for family-primary selection: %#v", candidate.Metadata)
+
 	}
 }
 
@@ -95,9 +96,9 @@ func TestAddScoutAnchorAdmissionCandidatesNoopsWhenDominantAnchorAlreadySelected
 	})
 
 	got := AddScoutAnchorAdmissionCandidates(selected, universe, "Improve bookmark flow")
-	if len(got) != len(selected) {
-		t.Fatalf("expected no admission when dominant anchor is already selected, got %#v", CandidatePaths(got))
-	}
+	require.Len(t, got, len(selected),
+		"expected no admission when dominant anchor is already selected, got %#v", CandidatePaths(got))
+
 }
 
 func TestAddScoutAnchorAdmissionCandidatesSkipsSymbolOnlyDominantAnchor(t *testing.T) {
@@ -121,9 +122,9 @@ func TestAddScoutAnchorAdmissionCandidatesSkipsSymbolOnlyDominantAnchor(t *testi
 	})
 
 	got := AddScoutAnchorAdmissionCandidates(selected, universe, "Improve bookmark flow")
-	if len(got) != len(selected) {
-		t.Fatalf("symbol-only dominant anchor should not be admitted, got %#v", CandidatePaths(got))
-	}
+	require.Len(t, got, len(selected),
+		"symbol-only dominant anchor should not be admitted, got %#v", CandidatePaths(got))
+
 }
 
 func TestAddScoutAnchorAdmissionCandidatesRequiresSourceCluster(t *testing.T) {
@@ -152,7 +153,7 @@ func TestAddScoutAnchorAdmissionCandidatesRequiresSourceCluster(t *testing.T) {
 	)
 
 	got := AddScoutAnchorAdmissionCandidates(selected, universe, "Fix UI freeze when non-editable state toggles")
-	if len(got) != len(selected) {
-		t.Fatalf("thin source cluster should not displace selected rows, got %#v", CandidatePaths(got))
-	}
+	require.Len(t, got, len(selected),
+		"thin source cluster should not displace selected rows, got %#v", CandidatePaths(got))
+
 }

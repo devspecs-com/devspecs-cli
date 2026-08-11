@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuildEvidenceGraphSkipsArtifactRoleMentions(t *testing.T) {
@@ -30,19 +32,19 @@ func TestBuildEvidenceGraphSkipsArtifactRoleMentions(t *testing.T) {
 	}})
 
 	for _, concept := range result.concepts {
-		if concept.Kind == conceptKindArtifactRole {
-			t.Fatalf("artifact role concept should not be persisted: %#v", concept)
-		}
+		require.NotEqual(t, conceptKindArtifactRole, concept.Kind,
+			"artifact role concept should not be persisted: %#v", concept)
+
 	}
 	for _, mention := range result.mentions {
-		switch mention.Field {
-		case "kind", "subtype", "status", "source_type", "format_profile", "language", "framework", "mode", "artifact_scope":
-			t.Fatalf("role metadata mention should not be persisted: %#v", mention)
-		}
+		assert.NotContains(t, []string{
+			"kind", "subtype", "status", "source_type", "format_profile",
+			"language", "framework", "mode", "artifact_scope",
+		}, mention.Field, "role metadata mention should not be persisted: %#v", mention)
 	}
-	if result.diagnostics.ConceptsByKind[conceptKindArtifactRole] != 0 {
-		t.Fatalf("diagnostics should not count persisted artifact role concepts: %#v", result.diagnostics.ConceptsByKind)
-	}
+	require.Equal(t, 0, result.diagnostics.ConceptsByKind[conceptKindArtifactRole],
+		"diagnostics should not count persisted artifact role concepts: %#v", result.diagnostics.ConceptsByKind)
+
 }
 
 func TestSharedConceptEdgesRejectGenericRareTerms(t *testing.T) {
@@ -50,13 +52,15 @@ func TestSharedConceptEdgesRejectGenericRareTerms(t *testing.T) {
 		evidenceTestArtifact("a1", "Local Test Notes", "docs/a.md"),
 		evidenceTestArtifact("a2", "Local Test Notes", "docs/b.md"),
 	})
+	{
 
-	if got := countEdgesByType(result.edges, edgeTypeMentionsSameConcept); got != 0 {
-		t.Fatalf("generic rare terms should not create shared-concept edges, got %d edges: %#v", got, result.edges)
+		got := countEdgesByType(result.edges, edgeTypeMentionsSameConcept)
+		require.Equal(t, 0, got,
+			"generic rare terms should not create shared-concept edges, got %d edges: %#v", got, result.edges)
 	}
-	if result.diagnostics.NoisyConceptsSkipped == 0 {
-		t.Fatalf("expected skipped noisy concepts in diagnostics")
-	}
+	require.NotEqual(t, 0, result.diagnostics.NoisyConceptsSkipped,
+		"expected skipped noisy concepts in diagnostics")
+
 }
 
 func TestSharedConceptEdgesCapWeakOnlyConfidence(t *testing.T) {
@@ -66,9 +70,9 @@ func TestSharedConceptEdgesCapWeakOnlyConfidence(t *testing.T) {
 	})
 
 	edge := singleEdgeByType(t, result.edges, edgeTypeMentionsSameConcept)
-	if edge.Confidence > 0.84 {
-		t.Fatalf("weak-only shared concept should not become high confidence: %.3f", edge.Confidence)
-	}
+	require.LessOrEqual(t, edge.Confidence, 0.84,
+		"weak-only shared concept should not become high confidence: %.3f", edge.Confidence)
+
 }
 
 func TestSharedConceptEdgesAllowHighConfidenceStrongAnchors(t *testing.T) {
@@ -78,9 +82,9 @@ func TestSharedConceptEdgesAllowHighConfidenceStrongAnchors(t *testing.T) {
 	})
 
 	edge := singleEdgeByType(t, result.edges, edgeTypeMentionsSameConcept)
-	if edge.Confidence < 0.9 {
-		t.Fatalf("strong shared anchors should retain high confidence, got %.3f", edge.Confidence)
-	}
+	require.GreaterOrEqual(t, edge.Confidence, 0.9,
+		"strong shared anchors should retain high confidence, got %.3f", edge.Confidence)
+
 }
 
 func TestSharedConceptEdgesCapCompactOnlyConfidence(t *testing.T) {
@@ -90,9 +94,9 @@ func TestSharedConceptEdgesCapCompactOnlyConfidence(t *testing.T) {
 	})
 
 	edge := singleEdgeByType(t, result.edges, edgeTypeMentionsSameConcept)
-	if edge.Confidence > 0.84 {
-		t.Fatalf("compact/path-only shared concepts should not become high confidence: %.3f", edge.Confidence)
-	}
+	require.LessOrEqual(t, edge.Confidence, 0.84,
+		"compact/path-only shared concepts should not become high confidence: %.3f", edge.Confidence)
+
 }
 
 func TestSharedConceptEdgesRejectTemplatePhrases(t *testing.T) {
@@ -102,9 +106,10 @@ func TestSharedConceptEdgesRejectTemplatePhrases(t *testing.T) {
 	})
 
 	for _, edge := range result.edges {
-		if edge.EdgeType == edgeTypeMentionsSameConcept && edge.Confidence > 0.84 {
-			t.Fatalf("template phrases should not create high-confidence edges: %#v", edge)
+		if edge.EdgeType == edgeTypeMentionsSameConcept {
+			assert.LessOrEqual(t, edge.Confidence, 0.84)
 		}
+
 	}
 }
 
@@ -114,10 +119,13 @@ func TestSharedConceptEdgesSkipConceptsWithTooManyArtifacts(t *testing.T) {
 		artifacts = append(artifacts, evidenceTestArtifact(string(rune('a'+i)), "Refresh Token Rotation", "docs/path-"+string(rune('a'+i))+".md"))
 	}
 	result := buildEvidenceGraph("repo", artifacts)
+	{
 
-	if got := countEdgesByType(result.edges, edgeTypeMentionsSameConcept); got != 0 {
-		t.Fatalf("too-broad shared concept should not create edges, got %d", got)
+		got := countEdgesByType(result.edges, edgeTypeMentionsSameConcept)
+		require.Equal(t, 0, got,
+			"too-broad shared concept should not create edges, got %d", got)
 	}
+
 }
 
 func TestEvidenceMentionBudgetCapsDenseArtifacts(t *testing.T) {
@@ -130,16 +138,13 @@ func TestEvidenceMentionBudgetCapsDenseArtifacts(t *testing.T) {
 	}
 
 	result := buildEvidenceGraph("repo", []evidenceArtifact{artifact})
+	require.LessOrEqual(t, len(result.mentions), maxEvidenceMentionsPerArtifact,
+		"dense artifact should be capped at %d mentions, got %d", maxEvidenceMentionsPerArtifact, len(result.mentions))
+	require.True(t, hasMentionField(result.mentions, "path"),
+		"path anchors should survive dense-artifact cap")
+	require.True(t, hasMentionField(result.mentions, "title"),
+		"title anchors should survive dense-artifact cap")
 
-	if len(result.mentions) > maxEvidenceMentionsPerArtifact {
-		t.Fatalf("dense artifact should be capped at %d mentions, got %d", maxEvidenceMentionsPerArtifact, len(result.mentions))
-	}
-	if !hasMentionField(result.mentions, "path") {
-		t.Fatalf("path anchors should survive dense-artifact cap")
-	}
-	if !hasMentionField(result.mentions, "title") {
-		t.Fatalf("title anchors should survive dense-artifact cap")
-	}
 }
 
 func TestEvidenceMentionBudgetCapsDenseRepos(t *testing.T) {
@@ -158,37 +163,51 @@ func TestEvidenceMentionBudgetCapsDenseRepos(t *testing.T) {
 	}
 
 	limited := limitRepoEvidenceMentions(mentions)
+	require.Len(t, limited, maxEvidenceMentionsPerRepo,
+		"dense repo should be capped at %d mentions, got %d", maxEvidenceMentionsPerRepo, len(limited))
 
-	if len(limited) != maxEvidenceMentionsPerRepo {
-		t.Fatalf("dense repo should be capped at %d mentions, got %d", maxEvidenceMentionsPerRepo, len(limited))
-	}
 	byArtifact := map[string]int{}
 	for _, mention := range limited {
 		byArtifact[mention.artifactID]++
 	}
 	for artifact := 0; artifact < 20; artifact++ {
 		id := fmt.Sprintf("a%02d", artifact)
-		if byArtifact[id] < minEvidenceMentionsPerArtifact {
-			t.Fatalf("artifact %s should retain at least %d mentions, got %d", id, minEvidenceMentionsPerArtifact, byArtifact[id])
-		}
+		require.GreaterOrEqual(t, byArtifact[id], minEvidenceMentionsPerArtifact,
+			"artifact %s should retain at least %d mentions, got %d", id, minEvidenceMentionsPerArtifact, byArtifact[id])
+
 	}
 }
 
-func TestCompactMentionEvidenceJSONMatchesMapEncoding(t *testing.T) {
-	mentions := []rawConceptMention{
-		{source: "source_path"},
-		{source: "metadata", form: "Swagger OAuth redirect"},
-		{source: "section", form: `quotes " slash \ html <tag> & more`},
-		{source: "metadata", form: strings.Repeat("a", maxMentionEvidenceFormLength+8)},
-	}
+func TestCompactMentionEvidenceJSON_WithSourcePath_MatchesMapEncoding(t *testing.T) {
+	mention := rawConceptMention{source: "source_path"}
 
-	for _, mention := range mentions {
-		want := evidenceJSON(compactMentionEvidence(mention))
-		got := compactMentionEvidenceJSON(mention)
-		if got != want {
-			t.Fatalf("compact mention JSON mismatch:\ngot  %s\nwant %s", got, want)
-		}
-	}
+	got := compactMentionEvidenceJSON(mention)
+
+	assert.Equal(t, evidenceJSON(compactMentionEvidence(mention)), got)
+}
+
+func TestCompactMentionEvidenceJSON_WithMetadataForm_MatchesMapEncoding(t *testing.T) {
+	mention := rawConceptMention{source: "metadata", form: "Swagger OAuth redirect"}
+
+	got := compactMentionEvidenceJSON(mention)
+
+	assert.Equal(t, evidenceJSON(compactMentionEvidence(mention)), got)
+}
+
+func TestCompactMentionEvidenceJSON_WithEscapedSectionForm_MatchesMapEncoding(t *testing.T) {
+	mention := rawConceptMention{source: "section", form: `quotes " slash \ html <tag> & more`}
+
+	got := compactMentionEvidenceJSON(mention)
+
+	assert.Equal(t, evidenceJSON(compactMentionEvidence(mention)), got)
+}
+
+func TestCompactMentionEvidenceJSON_WithLongForm_MatchesMapEncoding(t *testing.T) {
+	mention := rawConceptMention{source: "metadata", form: strings.Repeat("a", maxMentionEvidenceFormLength+8)}
+
+	got := compactMentionEvidenceJSON(mention)
+
+	assert.Equal(t, evidenceJSON(compactMentionEvidence(mention)), got)
 }
 
 func TestTestSourceTriangulationExactStem(t *testing.T) {
@@ -198,15 +217,10 @@ func TestTestSourceTriangulationExactStem(t *testing.T) {
 	})
 
 	edge := singleEdgeByType(t, result.edges, edgeTypeTestsSource)
-	if edge.SrcArtifactID != "test_webhooks" || edge.DstArtifactID != "src_webhooks" {
-		t.Fatalf("tests_source should point test to source, got %#v", edge)
-	}
-	if edge.SourceSignal != "test_source_stem" {
-		t.Fatalf("expected stem signal, got %q", edge.SourceSignal)
-	}
-	if edge.Confidence < 0.9 {
-		t.Fatalf("near test/source stem should be high confidence, got %.3f", edge.Confidence)
-	}
+	assert.Equal(t, "test_webhooks", edge.SrcArtifactID)
+	assert.Equal(t, "src_webhooks", edge.DstArtifactID)
+	assert.Equal(t, "test_source_stem", edge.SourceSignal)
+	assert.GreaterOrEqual(t, edge.Confidence, 0.9)
 }
 
 func TestTestSourceTriangulationDirectImport(t *testing.T) {
@@ -216,12 +230,11 @@ func TestTestSourceTriangulationDirectImport(t *testing.T) {
 	})
 
 	edge := singleEdgeByType(t, result.edges, edgeTypeTestsSource)
-	if edge.SourceSignal != "direct_import" {
-		t.Fatalf("expected direct import signal, got %q: %#v", edge.SourceSignal, edge)
-	}
-	if edge.Confidence < 0.9 {
-		t.Fatalf("direct import should be high confidence, got %.3f", edge.Confidence)
-	}
+	require.Equal(t, "direct_import", edge.SourceSignal,
+		"expected direct import signal, got %q: %#v", edge.SourceSignal, edge)
+	require.GreaterOrEqual(t, edge.Confidence, 0.9,
+		"direct import should be high confidence, got %.3f", edge.Confidence)
+
 }
 
 func TestTestSourceTriangulationAvoidsSiblingOnly(t *testing.T) {
@@ -229,10 +242,13 @@ func TestTestSourceTriangulationAvoidsSiblingOnly(t *testing.T) {
 		evidenceSourceArtifact("src_tokens", "src/auth/tokens.ts", "export function rotateToken() { return true }\n"),
 		evidenceTestCaseArtifact("test_session", "src/auth/session.test.ts", "handles session expiry", "", nil),
 	})
+	{
 
-	if got := countEdgesByType(result.edges, edgeTypeTestsSource); got != 0 {
-		t.Fatalf("same-directory sibling-only tests should not create tests_source edges, got %d: %#v", got, result.edges)
+		got := countEdgesByType(result.edges, edgeTypeTestsSource)
+		require.Equal(t, 0, got,
+			"same-directory sibling-only tests should not create tests_source edges, got %d: %#v", got, result.edges)
 	}
+
 }
 
 func TestTestSourceTriangulationSymbolMatch(t *testing.T) {
@@ -242,12 +258,15 @@ func TestTestSourceTriangulationSymbolMatch(t *testing.T) {
 	})
 
 	edge := singleEdgeByType(t, result.edges, edgeTypeTestsSource)
-	if edge.SourceSignal != "source_symbol_match" {
-		t.Fatalf("expected symbol-match signal, got %q: %#v", edge.SourceSignal, edge)
+	require.Equal(t, "source_symbol_match", edge.SourceSignal,
+		"expected symbol-match signal, got %q: %#v", edge.SourceSignal, edge)
+	{
+
+		got := countEdgesByType(result.edges, edgeTypeMentionsSymbol)
+		require.Equal(t, 1, got,
+			"symbol match should emit one mentions_symbol edge, got %d: %#v", got, result.edges)
 	}
-	if got := countEdgesByType(result.edges, edgeTypeMentionsSymbol); got != 1 {
-		t.Fatalf("symbol match should emit one mentions_symbol edge, got %d: %#v", got, result.edges)
-	}
+
 }
 
 func TestTestSourceTriangulationPythonSymbolMatch(t *testing.T) {
@@ -259,32 +278,32 @@ func TestTestSourceTriangulationPythonSymbolMatch(t *testing.T) {
 	})
 
 	edge := singleEdgeByType(t, result.edges, edgeTypeTestsSource)
-	if edge.SourceSignal != "test_source_stem" || !strings.Contains(edge.MetadataJSON, "create_user") {
-		t.Fatalf("expected python symbol evidence on stem match, got %#v", edge)
+	assert.Equal(t, "test_source_stem", edge.SourceSignal)
+	assert.Contains(t, edge.MetadataJSON, "create_user")
+	{
+
+		got := countEdgesByType(result.edges, edgeTypeMentionsSymbol)
+		require.Equal(t, 1, got,
+			"python symbol match should emit one mentions_symbol edge, got %d: %#v", got, result.edges)
 	}
-	if got := countEdgesByType(result.edges, edgeTypeMentionsSymbol); got != 1 {
-		t.Fatalf("python symbol match should emit one mentions_symbol edge, got %d: %#v", got, result.edges)
-	}
+
 }
 
 func TestRichTypedIndexAddsSourceSymbolMentions(t *testing.T) {
 	result := buildEvidenceGraphWithOptions("repo", []evidenceArtifact{
 		evidenceSourceArtifact("src_refresh", "src/auth/token_service.ts", "export class RefreshTokenService {}\n"),
 	}, evidenceGraphBuildOptions{RichTypedIndex: true})
+	assert.True(t, hasConcept(result.concepts, conceptKindSymbol, "refreshtokenservice"))
+	require.NotNil(t, result.diagnostics)
+	assert.True(t, result.diagnostics.RichTypedIndex)
+}
 
-	if !hasConcept(result.concepts, conceptKindSymbol, "refreshtokenservice") {
-		t.Fatalf("rich typed index should persist source symbol concept, got %#v", result.concepts)
-	}
-	if result.diagnostics == nil || !result.diagnostics.RichTypedIndex {
-		t.Fatalf("rich typed diagnostics flag missing: %#v", result.diagnostics)
-	}
-
-	defaultResult := buildEvidenceGraph("repo", []evidenceArtifact{
+func TestDefaultTypedIndexDoesNotAddSourceSymbolMentions(t *testing.T) {
+	result := buildEvidenceGraph("repo", []evidenceArtifact{
 		evidenceSourceArtifact("src_refresh", "src/auth/token_service.ts", "export class RefreshTokenService {}\n"),
 	})
-	if hasConcept(defaultResult.concepts, conceptKindSymbol, "refreshtokenservice") {
-		t.Fatalf("default graph should not persist rich source symbol concept: %#v", defaultResult.concepts)
-	}
+
+	assert.False(t, hasConcept(result.concepts, conceptKindSymbol, "refreshtokenservice"))
 }
 
 func TestRichTypedIndexResolvesRelativeImportPathForGenericIndex(t *testing.T) {
@@ -293,19 +312,21 @@ func TestRichTypedIndexResolvesRelativeImportPathForGenericIndex(t *testing.T) {
 		evidenceTestCaseArtifact("test_index", "src/auth/index.test.ts", "loads auth index", "import { createAuth } from './index'\n", nil),
 	}
 
-	defaultResult := buildEvidenceGraph("repo", artifacts)
-	if got := countEdgesByType(defaultResult.edges, edgeTypeTestsSource); got != 0 {
-		t.Fatalf("default graph should not use rich relative import path signal, got %d: %#v", got, defaultResult.edges)
-	}
-
 	result := buildEvidenceGraphWithOptions("repo", artifacts, evidenceGraphBuildOptions{RichTypedIndex: true})
 	edge := singleEdgeByType(t, result.edges, edgeTypeTestsSource)
-	if edge.SourceSignal != "relative_import_path" {
-		t.Fatalf("expected relative import path signal, got %q: %#v", edge.SourceSignal, edge)
+	assert.Equal(t, "relative_import_path", edge.SourceSignal)
+	assert.GreaterOrEqual(t, edge.Confidence, 0.95)
+}
+
+func TestDefaultTypedIndexDoesNotResolveRelativeImportPathForGenericIndex(t *testing.T) {
+	artifacts := []evidenceArtifact{
+		evidenceSourceArtifact("src_index", "src/auth/index.ts", "export function createAuth() { return true }\n"),
+		evidenceTestCaseArtifact("test_index", "src/auth/index.test.ts", "loads auth index", "import { createAuth } from './index'\n", nil),
 	}
-	if edge.Confidence < 0.95 {
-		t.Fatalf("relative import path should be high confidence, got %.3f", edge.Confidence)
-	}
+
+	result := buildEvidenceGraph("repo", artifacts)
+
+	assert.Zero(t, countEdgesByType(result.edges, edgeTypeTestsSource))
 }
 
 func TestRichTypedIndexAddsSymbolReferenceEdge(t *testing.T) {
@@ -317,20 +338,20 @@ func TestRichTypedIndexAddsSymbolReferenceEdge(t *testing.T) {
 	}, evidenceGraphBuildOptions{RichTypedIndex: true})
 
 	edge := singleEdgeByType(t, result.edges, edgeTypeMentionsSymbol)
-	if edge.SourceSignal != "symbol_reference" {
-		t.Fatalf("expected symbol_reference signal, got %q: %#v", edge.SourceSignal, edge)
-	}
-	if edge.SrcArtifactID != "doc_refresh" || edge.DstArtifactID != "src_refresh" {
-		t.Fatalf("symbol reference should point doc to source, got %#v", edge)
-	}
+	assert.Equal(t, "symbol_reference", edge.SourceSignal)
+	assert.Equal(t, "doc_refresh", edge.SrcArtifactID)
+	assert.Equal(t, "src_refresh", edge.DstArtifactID)
+}
 
-	defaultResult := buildEvidenceGraph("repo", []evidenceArtifact{
+func TestDefaultTypedIndexDoesNotAddSymbolReferenceEdge(t *testing.T) {
+	doc := evidenceTestArtifact("doc_refresh", "Token Refresh Plan", "docs/auth-refresh.md")
+	doc.body = "Wire the retry behavior through RefreshTokenService before updating the runbook."
+	result := buildEvidenceGraph("repo", []evidenceArtifact{
 		evidenceSourceArtifact("src_refresh", "src/auth/token_service.ts", "export class RefreshTokenService {}\n"),
 		doc,
 	})
-	if got := countEdgesByType(defaultResult.edges, edgeTypeMentionsSymbol); got != 0 {
-		t.Fatalf("default graph should not emit rich symbol reference edges, got %d: %#v", got, defaultResult.edges)
-	}
+
+	assert.Zero(t, countEdgesByType(result.edges, edgeTypeMentionsSymbol))
 }
 
 func evidenceTestArtifact(id, title, path string) evidenceArtifact {
@@ -429,8 +450,8 @@ func singleEdgeByType(t *testing.T, edges []store.ArtifactEdgeInput, edgeType st
 			out = append(out, edge)
 		}
 	}
-	if len(out) != 1 {
-		t.Fatalf("expected one %s edge, got %d: %#v", edgeType, len(out), out)
-	}
+	require.Len(t, out, 1,
+		"expected one %s edge, got %d: %#v", edgeType, len(out), out)
+
 	return out[0]
 }

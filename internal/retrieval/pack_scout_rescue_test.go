@@ -1,6 +1,11 @@
 package retrieval
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
 
 func TestApplyScoutSourceTestRescuePromotesRelatedAnimatorSource(t *testing.T) {
 	pack := RoleGroupedPack{
@@ -33,12 +38,11 @@ func TestApplyScoutSourceTestRescuePromotesRelatedAnimatorSource(t *testing.T) {
 			tiers[item.Path] = item.PackTier
 		}
 	}
-	if tiers["src/textual/_animator.py"] != PackTierPrimary {
-		t.Fatalf("animator should be promoted to primary: %#v", tiers)
-	}
-	if got.Metadata[packScoutSourceRescueCountKey] != "1" {
-		t.Fatalf("missing source rescue metadata: %#v", got.Metadata)
-	}
+	require.Equal(t, PackTierPrimary, tiers["src/textual/_animator.py"],
+		"animator should be promoted to primary: %#v", tiers)
+	require.Equal(t, "1", got.Metadata[packScoutSourceRescueCountKey],
+		"missing source rescue metadata: %#v", got.Metadata)
+
 }
 
 func TestApplyScoutSourceTestRescueRequiresPrimaryTestEvidence(t *testing.T) {
@@ -55,9 +59,9 @@ func TestApplyScoutSourceTestRescueRequiresPrimaryTestEvidence(t *testing.T) {
 	}
 
 	got := ApplyScoutSourceTestRescueForQuery(pack, "Fix on complete animation callback")
-	if got.Groups[0].Items[1].PackTier != PackTierRelated {
-		t.Fatalf("source should stay related without primary test evidence: %#v", got.Groups[0].Items)
-	}
+	require.Equal(t, PackTierRelated, got.Groups[0].Items[1].PackTier,
+		"source should stay related without primary test evidence: %#v", got.Groups[0].Items)
+
 }
 
 func TestApplyScoutSourceTestRescueStopsAtPrimaryCap(t *testing.T) {
@@ -90,9 +94,10 @@ func TestApplyScoutSourceTestRescueStopsAtPrimaryCap(t *testing.T) {
 	got := ApplyScoutSourceTestRescueForQuery(pack, "Fix animation callback")
 	for _, group := range got.Groups {
 		for _, item := range group.Items {
-			if item.Path == "src/textual/_animator.py" && item.PackTier == PackTierPrimary {
-				t.Fatalf("source should not promote once cap is full: %#v", got.Groups)
+			if item.Path == "src/textual/_animator.py" {
+				assert.NotEqual(t, PackTierPrimary, item.PackTier)
 			}
+
 		}
 	}
 }
@@ -120,12 +125,11 @@ func TestApplyScoutSourcePrimaryPreservationPromotesHighRankRelatedSource(t *tes
 
 	got := ApplyScoutSourcePrimaryPreservationForQuery(pack, "fix unstable comment in arrow function with sequence expression body")
 	tiers := familyPrimaryTestTiers(got)
-	if tiers["src/language-js/comments/handle-comments.js"] != PackTierPrimary {
-		t.Fatalf("high-rank comment source should be preserved as primary: %#v", tiers)
-	}
-	if got.Metadata[packScoutSourcePreservationCountKey] != "1" {
-		t.Fatalf("missing preservation metadata: %#v", got.Metadata)
-	}
+	require.Equal(t, PackTierPrimary, tiers["src/language-js/comments/handle-comments.js"],
+		"high-rank comment source should be preserved as primary: %#v", tiers)
+	require.Equal(t, "1", got.Metadata[packScoutSourcePreservationCountKey],
+		"missing preservation metadata: %#v", got.Metadata)
+
 }
 
 func TestApplyScoutSourcePrimaryPreservationCanPromoteOverRescueCap(t *testing.T) {
@@ -156,7 +160,7 @@ func TestApplyScoutSourcePrimaryPreservationCanPromoteOverRescueCap(t *testing.T
 
 	got := ApplyScoutSourcePrimaryPreservationForQuery(pack, "search package versions by type name version and reject duplicate versions")
 	tiers := familyPrimaryTestTiers(got)
-	if tiers["models/packages/package.go"] != PackTierPrimary {
-		t.Fatalf("package source should be preserved beyond old rescue cap: %#v", tiers)
-	}
+	require.Equal(t, PackTierPrimary, tiers["models/packages/package.go"],
+		"package source should be preserved beyond old rescue cap: %#v", tiers)
+
 }

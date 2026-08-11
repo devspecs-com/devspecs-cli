@@ -2,26 +2,32 @@ package store
 
 import (
 	"errors"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-func TestSQLiteBusyErrorHelpers(t *testing.T) {
-	busyErr := errors.New("migrate: apply schema: database is locked (SQLITE_BUSY)")
-	if !IsSQLiteBusyError(busyErr) {
-		t.Fatalf("expected busy error to be recognized")
-	}
+func TestIsSQLiteBusyError_WithBusyError_ReturnsTrue(t *testing.T) {
+	err := errors.New("migrate: apply schema: database is locked (SQLITE_BUSY)")
 
-	wrapped := FriendlySQLiteBusyError(busyErr)
-	if wrapped == busyErr {
-		t.Fatalf("expected friendly wrapper")
-	}
-	if !strings.Contains(wrapped.Error(), "another ds command is writing") {
-		t.Fatalf("friendly message missing writer hint: %v", wrapped)
-	}
+	busy := IsSQLiteBusyError(err)
 
-	otherErr := errors.New("syntax error")
-	if FriendlySQLiteBusyError(otherErr) != otherErr {
-		t.Fatalf("non-busy errors should pass through")
-	}
+	assert.True(t, busy)
+}
+
+func TestFriendlySQLiteBusyError_WithBusyError_ReturnsWriterGuidance(t *testing.T) {
+	err := errors.New("migrate: apply schema: database is locked (SQLITE_BUSY)")
+
+	wrapped := FriendlySQLiteBusyError(err)
+
+	assert.NotEqual(t, err, wrapped)
+	assert.ErrorContains(t, wrapped, "another ds command is writing")
+}
+
+func TestFriendlySQLiteBusyError_WithOtherError_ReturnsOriginalError(t *testing.T) {
+	err := errors.New("syntax error")
+
+	got := FriendlySQLiteBusyError(err)
+
+	assert.Equal(t, err, got)
 }

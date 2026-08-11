@@ -1,8 +1,10 @@
 package retrieval
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestApplyFamilyPrimaryPackForQueryKeepsExactSourceAndTestPrimary(t *testing.T) {
@@ -33,30 +35,31 @@ func TestApplyFamilyPrimaryPackForQueryKeepsExactSourceAndTestPrimary(t *testing
 	}
 
 	got := ApplyFamilyPrimaryPackForQuery(pack, "Handle RDS clusters without instances in AWS discovery")
-	if got.Mode != FamilyPrimaryPackMode {
-		t.Fatalf("mode = %q", got.Mode)
-	}
-	if got.Metadata["family_primary"] != "true" {
-		t.Fatalf("missing metadata: %#v", got.Metadata)
-	}
+	require.Equal(t, FamilyPrimaryPackMode, got.Mode,
+		"mode = %q", got.Mode)
+	require.Equal(t, "true", got.Metadata["family_primary"],
+		"missing metadata: %#v", got.Metadata)
+
 	tiers := map[string]string{}
 	for _, group := range got.Groups {
 		for _, item := range group.Items {
 			tiers[item.Path] = item.PackTier
-			if item.Boundary == "" {
-				t.Fatalf("item missing family boundary: %#v", item)
-			}
+			require.NotEqual(t, "", item.Boundary,
+				"item missing family boundary: %#v", item)
+
 		}
 	}
-	if tiers["discovery/aws/rds.go"] != PackTierPrimary {
-		t.Fatalf("rds source should be primary, tiers=%#v", tiers)
+	require.Equal(t, PackTierPrimary, tiers["discovery/aws/rds.go"],
+		"rds source should be primary, tiers=%#v", tiers)
+	require.Equal(t, PackTierPrimary, tiers["discovery/aws/rds_test.go#L439"],
+		"rds test should be primary, tiers=%#v", tiers)
+	{
+
+		related := FamilyPrimaryRelatedSummaries(got)
+		require.NotEmpty(t, related,
+			"expected related family summaries")
 	}
-	if tiers["discovery/aws/rds_test.go#L439"] != PackTierPrimary {
-		t.Fatalf("rds test should be primary, tiers=%#v", tiers)
-	}
-	if related := FamilyPrimaryRelatedSummaries(got); len(related) == 0 {
-		t.Fatalf("expected related family summaries")
-	}
+
 }
 
 func TestApplyFamilyPrimaryPackForQuerySuppressesGenericMetadataAnchors(t *testing.T) {
@@ -74,12 +77,12 @@ func TestApplyFamilyPrimaryPackForQuerySuppressesGenericMetadataAnchors(t *testi
 
 	got := ApplyFamilyPrimaryPackForQuery(pack, "Fix on complete animation callback")
 	suppressed := got.Metadata["family_primary_suppressed_anchors"]
-	if !(strings.Contains(suppressed, "fix") && strings.Contains(suppressed, "on")) {
-		t.Fatalf("suppressed anchors = %#v", got.Metadata)
-	}
-	if anchors := got.Metadata["family_primary_anchors"]; anchors == "" || anchors == "on" {
-		t.Fatalf("specific anchors missing or generic: %#v", got.Metadata)
-	}
+	assert.Contains(t, suppressed, "fix")
+	assert.Contains(t, suppressed, "on")
+	anchors := got.Metadata["family_primary_anchors"]
+	assert.NotEmpty(t, anchors)
+	assert.NotEqual(t, "on", anchors)
+
 }
 
 func TestApplyFamilyPrimaryPackV1ForQueryProtectsTopRankedEditTargets(t *testing.T) {
@@ -105,24 +108,22 @@ func TestApplyFamilyPrimaryPackV1ForQueryProtectsTopRankedEditTargets(t *testing
 	}
 
 	got := ApplyFamilyPrimaryPackV1ForQuery(pack, "tell users to enable hidden search when their pattern only matches dotfiles")
-	if got.Mode != FamilyPrimaryPackModeV1 {
-		t.Fatalf("mode = %q", got.Mode)
-	}
-	if got.Metadata["family_primary_exact_protection"] != "true" {
-		t.Fatalf("missing exact protection metadata: %#v", got.Metadata)
-	}
+	require.Equal(t, FamilyPrimaryPackModeV1, got.Mode,
+		"mode = %q", got.Mode)
+	require.Equal(t, "true", got.Metadata["family_primary_exact_protection"],
+		"missing exact protection metadata: %#v", got.Metadata)
+
 	tiers := map[string]string{}
 	for _, group := range got.Groups {
 		for _, item := range group.Items {
 			tiers[item.Path] = item.PackTier
 		}
 	}
-	if tiers["src/cli.rs"] != PackTierPrimary {
-		t.Fatalf("top-ranked cli edit target should stay primary: %#v", tiers)
-	}
-	if tiers["src/main.rs"] != PackTierPrimary {
-		t.Fatalf("top-ranked main edit target should stay primary: %#v", tiers)
-	}
+	require.Equal(t, PackTierPrimary, tiers["src/cli.rs"],
+		"top-ranked cli edit target should stay primary: %#v", tiers)
+	require.Equal(t, PackTierPrimary, tiers["src/main.rs"],
+		"top-ranked main edit target should stay primary: %#v", tiers)
+
 }
 
 func TestFamilyPrimaryProtectedEntrySkipsWeakTutorialSource(t *testing.T) {
@@ -135,9 +136,9 @@ func TestFamilyPrimaryProtectedEntrySkipsWeakTutorialSource(t *testing.T) {
 		},
 		score: 12,
 	}
-	if familyPrimaryProtectedEntry(entry) {
-		t.Fatalf("tutorial source should not be exact-protected")
-	}
+	require.False(t, familyPrimaryProtectedEntry(entry),
+		"tutorial source should not be exact-protected")
+
 }
 
 func TestFamilyPrimaryProtectedEntryKeepsLossSafePreservedSource(t *testing.T) {
@@ -151,9 +152,9 @@ func TestFamilyPrimaryProtectedEntryKeepsLossSafePreservedSource(t *testing.T) {
 		},
 		score: 2,
 	}
-	if !familyPrimaryProtectedEntry(entry) {
-		t.Fatalf("loss-safe preserved source should stay protected")
-	}
+	require.True(t, familyPrimaryProtectedEntry(entry),
+		"loss-safe preserved source should stay protected")
+
 }
 
 func TestApplyFamilyPrimaryPackV1ProtectsScoutAnchorAdmissions(t *testing.T) {
@@ -175,12 +176,11 @@ func TestApplyFamilyPrimaryPackV1ProtectsScoutAnchorAdmissions(t *testing.T) {
 
 	got := ApplyFamilyPrimaryPackV1ForQuery(pack, "Improve bookmark flow")
 	tiers := familyPrimaryTestTiers(got)
-	if tiers["app/src/modules/content/components/bookmark-add.vue"] != PackTierPrimary {
-		t.Fatalf("admitted bookmark source should be primary: %#v", tiers)
-	}
-	if tiers["app/src/modules/content/components/bookmark-delete.vue"] != PackTierPrimary {
-		t.Fatalf("second admitted bookmark source should be primary: %#v", tiers)
-	}
+	require.Equal(t, PackTierPrimary, tiers["app/src/modules/content/components/bookmark-add.vue"],
+		"admitted bookmark source should be primary: %#v", tiers)
+	require.Equal(t, PackTierPrimary, tiers["app/src/modules/content/components/bookmark-delete.vue"],
+		"second admitted bookmark source should be primary: %#v", tiers)
+
 }
 
 func TestApplyFamilyPrimaryPackV2KeepsSameFamilyTestPrimary(t *testing.T) {
@@ -210,12 +210,11 @@ func TestApplyFamilyPrimaryPackV2KeepsSameFamilyTestPrimary(t *testing.T) {
 
 	got := ApplyFamilyPrimaryPackV2ForQuery(pack, "parse html description metadata when building link preview cards")
 	tiers := familyPrimaryTestTiers(got)
-	if tiers["internal/httpgetter/html_meta.go"] != PackTierPrimary {
-		t.Fatalf("html_meta source should stay primary: %#v", tiers)
-	}
-	if tiers["internal/httpgetter/html_meta_test.go"] != PackTierPrimary {
-		t.Fatalf("same-family html_meta test should be primary: %#v", tiers)
-	}
+	require.Equal(t, PackTierPrimary, tiers["internal/httpgetter/html_meta.go"],
+		"html_meta source should stay primary: %#v", tiers)
+	require.Equal(t, PackTierPrimary, tiers["internal/httpgetter/html_meta_test.go"],
+		"same-family html_meta test should be primary: %#v", tiers)
+
 }
 
 func TestApplyFamilyPrimaryPackV2UsesAnchorVariantsForSharedPages(t *testing.T) {
@@ -235,9 +234,9 @@ func TestApplyFamilyPrimaryPackV2UsesAnchorVariantsForSharedPages(t *testing.T) 
 
 	got := ApplyFamilyPrimaryPackV2ForQuery(pack, "repair permission checks and API hooks for shared dashboard pages")
 	tiers := familyPrimaryTestTiers(got)
-	if tiers["src/components/hooks/queries/useShareTokenQuery.ts"] != PackTierPrimary {
-		t.Fatalf("share-token hook should be primary via shared/share anchor variant: %#v", tiers)
-	}
+	require.Equal(t, PackTierPrimary, tiers["src/components/hooks/queries/useShareTokenQuery.ts"],
+		"share-token hook should be primary via shared/share anchor variant: %#v", tiers)
+
 }
 
 func TestApplyFamilyPrimaryPackV2UsesSynchronizationVariant(t *testing.T) {
@@ -256,9 +255,9 @@ func TestApplyFamilyPrimaryPackV2UsesSynchronizationVariant(t *testing.T) {
 
 	got := ApplyFamilyPrimaryPackV2ForQuery(pack, "make oauth sign in synchronization apply external claims during the first login")
 	tiers := familyPrimaryTestTiers(got)
-	if tiers["routers/web/auth/oauth_signin_sync.go"] != PackTierPrimary {
-		t.Fatalf("signin sync source should be primary via synchronization/sync variant: %#v", tiers)
-	}
+	require.Equal(t, PackTierPrimary, tiers["routers/web/auth/oauth_signin_sync.go"],
+		"signin sync source should be primary via synchronization/sync variant: %#v", tiers)
+
 }
 
 func familyPrimaryTestTiers(pack RoleGroupedPack) map[string]string {

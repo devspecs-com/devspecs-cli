@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWeightedFilesRetrieverV0_RetrievesAndExplainsCandidates(t *testing.T) {
@@ -21,20 +24,19 @@ func TestWeightedFilesRetrieverV0_RetrievesAndExplainsCandidates(t *testing.T) {
 
 	retriever := WeightedFilesRetrieverV0{}
 	got := retriever.Retrieve(candidates, "stripe_event_id idempotency")
-	if retriever.Name() != "eval_weighted_files_v0" {
-		t.Fatalf("retriever name = %q", retriever.Name())
-	}
-	if len(got) != 1 {
-		t.Fatalf("retrieved %d candidates, want 1: %#v", len(got), got)
-	}
-	if got[0].Path != "openspec/changes/harden-entitlement-sync/design.md" {
-		t.Fatalf("retrieved path = %q", got[0].Path)
-	}
-
+	name := retriever.Name()
 	reasons := ExplainCandidates(got, "stripe_event_id idempotency")
-	if len(reasons) != 1 || reasons[0].Path != got[0].Path || len(reasons[0].Reasons) == 0 {
-		t.Fatalf("missing reasons: %#v", reasons)
-	}
+
+	assert.Equal(t, "eval_weighted_files_v0", name,
+		"retriever name = %q", name)
+	require.Len(t, got, 1,
+		"retrieved %d candidates, want 1: %#v", len(got), got)
+	assert.Equal(t, "openspec/changes/harden-entitlement-sync/design.md", got[0].Path,
+		"retrieved path = %q", got[0].Path)
+	require.Len(t, reasons, 1)
+	assert.Equal(t, got[0].Path, reasons[0].Path)
+	assert.NotEmpty(t, reasons[0].Reasons)
+
 }
 
 func TestExplainCandidatesOrdersTermReasonsByEvidenceStrength(t *testing.T) {
@@ -45,141 +47,173 @@ func TestExplainCandidatesOrdersTermReasonsByEvidenceStrength(t *testing.T) {
 	}}
 
 	reasons := ExplainCandidates(candidates, "Fix MCP OAuth DCR metadata handling")
-	if len(reasons) != 1 {
-		t.Fatalf("reasons = %#v", reasons)
-	}
+	require.Len(t, reasons, 1,
+		"reasons = %#v", reasons)
+
 	got := reasons[0].Reasons
 	wantPrefix := []string{
 		"query term match in path: mcp",
 		"query term match in path: oauth",
 		"query term match in body: dcr",
 	}
-	if len(got) < len(wantPrefix) {
-		t.Fatalf("too few reasons: %#v", got)
-	}
+	require.GreaterOrEqual(t, len(got), len(wantPrefix),
+		"too few reasons: %#v", got)
+
 	for i, want := range wantPrefix {
-		if got[i] != want {
-			t.Fatalf("reason[%d] = %q, want %q; all=%#v", i, got[i], want, got)
-		}
+		require.Equal(t, want, got[i],
+			"reason[%d] = %q, want %q; all=%#v", i, got[i], want, got)
+
 	}
 }
 
-func TestArtifactRolePrefersDetectedSubtypeBeforeClassifierFallback(t *testing.T) {
-	cases := []struct {
-		name string
-		in   Candidate
-		want string
-	}{
-		{
-			name: "protocol skill subtype beats conflicting classifier family",
-			in: Candidate{
-				Path:    ".codex/skills/review/SKILL.md",
-				Kind:    "markdown_artifact",
-				Subtype: "skill",
-				Metadata: map[string]string{
-					"classifier_model":   "protocol",
-					"classifier_subtype": "agent_instruction",
-					"classifier_family":  "protocol.agent_instruction",
-				},
-			},
-			want: "skill",
-		},
-		{
-			name: "template subtype beats conflicting classifier model",
-			in: Candidate{
-				Path:    ".github/PULL_REQUEST_TEMPLATE.md",
-				Kind:    "markdown_artifact",
-				Subtype: "pull_request_template",
-				Metadata: map[string]string{
-					"classifier_model":   "protocol",
-					"classifier_subtype": "agent_instruction",
-				},
-			},
-			want: "template",
-		},
-		{
-			name: "classifier metadata remains fallback for older candidates",
-			in: Candidate{
-				Path: "docs/process/repo-rules.md",
-				Metadata: map[string]string{
-					"classifier_model":   "protocol",
-					"classifier_subtype": "agent_instruction",
-				},
-			},
-			want: "agent_instruction",
-		},
-		{
-			name: "openspec path refines broad subtype",
-			in: Candidate{
-				Path:    "openspec/changes/harden-entitlement-sync/design.md",
-				Kind:    "spec",
-				Subtype: "openspec_child",
-			},
-			want: "openspec_design",
+func TestArtifactRole_WithSkillSubtype_PrefersSubtypeOverClassifierFamily(t *testing.T) {
+	candidate := Candidate{
+		Path:    ".codex/skills/review/SKILL.md",
+		Kind:    "markdown_artifact",
+		Subtype: "skill",
+		Metadata: map[string]string{
+			"classifier_model":   "protocol",
+			"classifier_subtype": "agent_instruction",
+			"classifier_family":  "protocol.agent_instruction",
 		},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := artifactRole(tc.in); got != tc.want {
-				t.Fatalf("artifactRole() = %q, want %q", got, tc.want)
-			}
-			if got := candidateRole(tc.in); got != tc.want {
-				t.Fatalf("candidateRole() = %q, want %q", got, tc.want)
-			}
-		})
-	}
+
+	actual := artifactRole(candidate)
+
+	assert.Equal(t, "skill", actual)
 }
 
-func TestNonIntentCandidateModePrefersDetectedSubtypeBeforeFallback(t *testing.T) {
-	cases := []struct {
-		name string
-		in   Candidate
-		want string
-	}{
-		{
-			name: "template subtype beats conflicting classifier model",
-			in: Candidate{
-				Subtype: "pull_request_template",
-				Metadata: map[string]string{
-					"classifier_model": "protocol",
-				},
-			},
-			want: "template",
-		},
-		{
-			name: "protocol skill subtype beats conflicting classifier model",
-			in: Candidate{
-				Subtype: "skill",
-				Metadata: map[string]string{
-					"classifier_model": "template",
-				},
-			},
-			want: "protocol",
-		},
-		{
-			name: "classifier model remains fallback",
-			in: Candidate{
-				Metadata: map[string]string{
-					"classifier_model": "protocol",
-				},
-			},
-			want: "protocol",
-		},
-		{
-			name: "skill path remains fallback for partially normalized candidates",
-			in: Candidate{
-				Path: ".codex/skills/review/SKILL.md",
-			},
-			want: "protocol",
+func TestCandidateRole_WithSkillSubtype_PrefersSubtypeOverClassifierFamily(t *testing.T) {
+	candidate := Candidate{
+		Path:    ".codex/skills/review/SKILL.md",
+		Kind:    "markdown_artifact",
+		Subtype: "skill",
+		Metadata: map[string]string{
+			"classifier_model":   "protocol",
+			"classifier_subtype": "agent_instruction",
+			"classifier_family":  "protocol.agent_instruction",
 		},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := nonIntentCandidateMode(tc.in); got != tc.want {
-				t.Fatalf("nonIntentCandidateMode() = %q, want %q", got, tc.want)
-			}
-		})
+
+	actual := candidateRole(candidate)
+
+	assert.Equal(t, "skill", actual)
+}
+
+func TestArtifactRole_WithTemplateSubtype_PrefersSubtypeOverClassifierModel(t *testing.T) {
+	candidate := Candidate{
+		Path:    ".github/PULL_REQUEST_TEMPLATE.md",
+		Kind:    "markdown_artifact",
+		Subtype: "pull_request_template",
+		Metadata: map[string]string{
+			"classifier_model":   "protocol",
+			"classifier_subtype": "agent_instruction",
+		},
 	}
+
+	actual := artifactRole(candidate)
+
+	assert.Equal(t, "template", actual)
+}
+
+func TestCandidateRole_WithTemplateSubtype_PrefersSubtypeOverClassifierModel(t *testing.T) {
+	candidate := Candidate{
+		Path:    ".github/PULL_REQUEST_TEMPLATE.md",
+		Kind:    "markdown_artifact",
+		Subtype: "pull_request_template",
+		Metadata: map[string]string{
+			"classifier_model":   "protocol",
+			"classifier_subtype": "agent_instruction",
+		},
+	}
+
+	actual := candidateRole(candidate)
+
+	assert.Equal(t, "template", actual)
+}
+
+func TestArtifactRole_WithoutDetectedSubtype_UsesClassifierMetadata(t *testing.T) {
+	candidate := Candidate{
+		Path: "docs/process/repo-rules.md",
+		Metadata: map[string]string{
+			"classifier_model":   "protocol",
+			"classifier_subtype": "agent_instruction",
+		},
+	}
+
+	actual := artifactRole(candidate)
+
+	assert.Equal(t, "agent_instruction", actual)
+}
+
+func TestCandidateRole_WithoutDetectedSubtype_UsesClassifierMetadata(t *testing.T) {
+	candidate := Candidate{
+		Path: "docs/process/repo-rules.md",
+		Metadata: map[string]string{
+			"classifier_model":   "protocol",
+			"classifier_subtype": "agent_instruction",
+		},
+	}
+
+	actual := candidateRole(candidate)
+
+	assert.Equal(t, "agent_instruction", actual)
+}
+
+func TestArtifactRole_WithOpenSpecDesignPath_RefinesBroadSubtype(t *testing.T) {
+	candidate := Candidate{
+		Path:    "openspec/changes/harden-entitlement-sync/design.md",
+		Kind:    "spec",
+		Subtype: "openspec_child",
+	}
+
+	actual := artifactRole(candidate)
+
+	assert.Equal(t, "openspec_design", actual)
+}
+
+func TestCandidateRole_WithOpenSpecDesignPath_RefinesBroadSubtype(t *testing.T) {
+	candidate := Candidate{
+		Path:    "openspec/changes/harden-entitlement-sync/design.md",
+		Kind:    "spec",
+		Subtype: "openspec_child",
+	}
+
+	actual := candidateRole(candidate)
+
+	assert.Equal(t, "openspec_design", actual)
+}
+
+func TestNonIntentCandidateMode_WithTemplateSubtype_PrefersSubtype(t *testing.T) {
+	candidate := Candidate{Subtype: "pull_request_template", Metadata: map[string]string{"classifier_model": "protocol"}}
+
+	actual := nonIntentCandidateMode(candidate)
+
+	assert.Equal(t, "template", actual)
+}
+
+func TestNonIntentCandidateMode_WithSkillSubtype_PrefersSubtype(t *testing.T) {
+	candidate := Candidate{Subtype: "skill", Metadata: map[string]string{"classifier_model": "template"}}
+
+	actual := nonIntentCandidateMode(candidate)
+
+	assert.Equal(t, "protocol", actual)
+}
+
+func TestNonIntentCandidateMode_WithoutSubtype_UsesClassifierModel(t *testing.T) {
+	candidate := Candidate{Metadata: map[string]string{"classifier_model": "protocol"}}
+
+	actual := nonIntentCandidateMode(candidate)
+
+	assert.Equal(t, "protocol", actual)
+}
+
+func TestNonIntentCandidateMode_WithSkillPath_UsesPathFallback(t *testing.T) {
+	candidate := Candidate{Path: ".codex/skills/review/SKILL.md"}
+
+	actual := nonIntentCandidateMode(candidate)
+
+	assert.Equal(t, "protocol", actual)
 }
 
 func TestWeightedFilesRetrieverV0_UsesIndexedSectionEvidence(t *testing.T) {
@@ -203,16 +237,16 @@ func TestWeightedFilesRetrieverV0_UsesIndexedSectionEvidence(t *testing.T) {
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "stripe_event_id idempotency")
-	if !containsCandidatePath(got, "docs/plans/broad.md") {
-		t.Fatalf("missing section-selected artifact: %#v", CandidatePaths(got))
-	}
-	if got[0].Metadata["indexed_section_retrieval_mode"] != "section_aware" {
-		t.Fatalf("expected indexed section match metadata, got %#v", got[0].Metadata)
-	}
 	reasons := ExplainCandidates(got, "stripe_event_id idempotency")
-	if len(reasons) == 0 || !strings.Contains(strings.Join(reasons[0].Reasons, "\n"), "indexed section match") {
-		t.Fatalf("expected indexed section reason, got %#v", reasons)
-	}
+
+	assert.True(t, containsCandidatePath(got, "docs/plans/broad.md"),
+		"missing section-selected artifact: %#v", CandidatePaths(got))
+	require.NotEmpty(t, got)
+	assert.Equal(t, "section_aware", got[0].Metadata["indexed_section_retrieval_mode"],
+		"expected indexed section match metadata, got %#v", got[0].Metadata)
+	require.NotEmpty(t, reasons)
+	assert.Contains(t, strings.Join(reasons[0].Reasons, "\n"), "indexed section match")
+
 }
 
 func TestWeightedFilesRetrieverV0_BalancedEvidenceOrdersAnchoredCandidate(t *testing.T) {
@@ -232,56 +266,33 @@ func TestWeightedFilesRetrieverV0_BalancedEvidenceOrdersAnchoredCandidate(t *tes
 
 	retriever := WeightedFilesRetrieverV0{EvidenceMode: EvidenceModeBalanced}
 	got := retriever.Retrieve(candidates, "resume entitlement sync rollout plan")
-	if retriever.Name() != "eval_weighted_files_v0_evidence_balanced" {
-		t.Fatalf("retriever name = %q", retriever.Name())
-	}
-	if len(got) == 0 || got[0].Path != "docs/plans/entitlement-sync-rollout.md" {
-		t.Fatalf("anchored plan should rank first, got %#v", CandidatePaths(got))
-	}
-	if got[0].Metadata["retrieval_evidence_mode"] != EvidenceModeBalanced {
-		t.Fatalf("missing balanced evidence metadata: %#v", got[0].Metadata)
-	}
+	require.Equal(t, "eval_weighted_files_v0_evidence_balanced", retriever.Name(),
+		"retriever name = %q", retriever.Name())
+	require.NotEmpty(t, got)
+	assert.Equal(t, "docs/plans/entitlement-sync-rollout.md", got[0].Path)
+	require.Equal(t, EvidenceModeBalanced, got[0].Metadata["retrieval_evidence_mode"],
+		"missing balanced evidence metadata: %#v", got[0].Metadata)
+
 }
 
-func TestWeightedFilesRetrieverV0_UsesAttachedSectionsForPackingAndAblationDisablesThem(t *testing.T) {
-	candidates := []Candidate{
-		{
-			ID:    "plan_broad",
-			Path:  "docs/plans/broad.md",
-			Title: "Broad Plan",
-			Kind:  "plan",
-			Body:  "# Broad Plan\n\n" + strings.Repeat("general implementation background.\n", 140) + "\nstripe_event_id idempotency protects webhook replay behavior.\n",
-			Sections: []IndexedSection{
-				{
-					ID:           "sec_replay",
-					ArtifactID:   "plan_broad",
-					SourcePath:   "docs/plans/broad.md",
-					HeadingPath:  "Requirements > Replay Boundary",
-					Title:        "Replay Boundary",
-					StartLine:    22,
-					EndLine:      40,
-					Body:         "stripe_event_id idempotency protects webhook replay behavior.",
-					HeadingDepth: 2,
-				},
-			},
-		},
-		{ID: "unrelated", Path: "docs/plans/unrelated.md", Body: "general implementation background"},
-	}
+func TestWeightedFilesRetrieverV0_WithAttachedSectionsUsesSectionsForPacking(t *testing.T) {
+	candidates := attachedSectionCandidates()
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "stripe_event_id idempotency")
-	if !containsCandidatePath(got, "docs/plans/broad.md") {
-		t.Fatalf("missing section-selected artifact: %#v", CandidatePaths(got))
-	}
-	if got[0].Metadata["indexed_section_match_source"] != "candidate_sections" {
-		t.Fatalf("expected attached section metadata, got %#v", got[0].Metadata)
-	}
+	require.True(t, containsCandidatePath(got, "docs/plans/broad.md"),
+		"missing section-selected artifact: %#v", CandidatePaths(got))
+	require.Equal(t, "candidate_sections", got[0].Metadata["indexed_section_match_source"],
+		"expected attached section metadata, got %#v", got[0].Metadata)
+}
 
-	disabled := (WeightedFilesRetrieverV0{DisableSectionAware: true}).Retrieve(candidates, "stripe_event_id idempotency")
-	if !containsCandidatePath(disabled, "docs/plans/broad.md") {
-		t.Fatalf("ablation should keep the file-level match: %#v", CandidatePaths(disabled))
-	}
-	if disabled[0].Metadata != nil && disabled[0].Metadata["indexed_section_retrieval_mode"] == "section_aware" {
-		t.Fatalf("section-aware ablation should not annotate section evidence: %#v", disabled[0].Metadata)
+func TestWeightedFilesRetrieverV0_WithSectionAwareDisabledDoesNotAnnotateSectionEvidence(t *testing.T) {
+	candidates := attachedSectionCandidates()
+
+	got := (WeightedFilesRetrieverV0{DisableSectionAware: true}).Retrieve(candidates, "stripe_event_id idempotency")
+
+	require.True(t, containsCandidatePath(got, "docs/plans/broad.md"))
+	if got[0].Metadata != nil {
+		assert.NotEqual(t, "section_aware", got[0].Metadata["indexed_section_retrieval_mode"])
 	}
 }
 
@@ -309,51 +320,82 @@ func TestEnrichCandidatesWithSectionMatchesRejectsGenericBodyOnlyMatches(t *test
 	}
 
 	got := EnrichCandidatesWithSectionMatches(candidates, "implementation plan context")
-	if got[0].Metadata != nil && got[0].Metadata["indexed_section_retrieval_mode"] == "section_aware" {
-		t.Fatalf("generic body-only section should not be selected: %#v", got[0].Metadata)
+	require.Len(t, got, 1)
+	if got[0].Metadata != nil {
+		assert.NotEqual(t, "section_aware", got[0].Metadata["indexed_section_retrieval_mode"])
+	}
+
+}
+
+func TestEnrichCandidatesWithSectionMatchesWithoutRoadmapIntentDoesNotRescueRoadmap(t *testing.T) {
+	candidates := roadmapSectionCandidates()
+
+	got := EnrichCandidatesWithSectionMatches(candidates, "repository agent operating instructions and contributor guidance for AReaL")
+	require.Len(t, got, 1)
+	if got[0].Metadata != nil {
+		assert.NotEqual(t, "section_aware", got[0].Metadata["indexed_section_retrieval_mode"])
 	}
 }
 
-func TestEnrichCandidatesWithSectionMatchesDoesNotRescueRoadmapWithoutRoadmapIntent(t *testing.T) {
-	candidates := []Candidate{
+func TestEnrichCandidatesWithSectionMatchesWithRoadmapIntentRescuesRoadmap(t *testing.T) {
+	candidates := roadmapSectionCandidates()
+
+	got := EnrichCandidatesWithSectionMatches(candidates, "AReaL roadmap future work and milestones")
+
+	require.Len(t, got, 1)
+	require.NotNil(t, got[0].Metadata)
+	assert.Equal(t, "section_aware", got[0].Metadata["indexed_section_retrieval_mode"])
+}
+
+func attachedSectionCandidates() []Candidate {
+	return []Candidate{
 		{
-			ID:    "roadmap",
-			Path:  "ROADMAP.md",
-			Title: "AReaL Roadmap",
+			ID:    "plan_broad",
+			Path:  "docs/plans/broad.md",
+			Title: "Broad Plan",
 			Kind:  "plan",
-			Body:  "# AReaL Roadmap\n\nGeneral future planning.",
-			Sections: []IndexedSection{
-				{
-					ID:          "sec_roadmap",
-					ArtifactID:  "roadmap",
-					SourcePath:  "ROADMAP.md",
-					HeadingPath: "AReaL Roadmap",
-					Title:       "AReaL Roadmap",
-					StartLine:   1,
-					EndLine:     9,
-					Body:        "AReaL project timeline and future planning notes.",
-				},
-			},
+			Body:  "# Broad Plan\n\n" + strings.Repeat("general implementation background.\n", 140) + "\nstripe_event_id idempotency protects webhook replay behavior.\n",
+			Sections: []IndexedSection{{
+				ID:           "sec_replay",
+				ArtifactID:   "plan_broad",
+				SourcePath:   "docs/plans/broad.md",
+				HeadingPath:  "Requirements > Replay Boundary",
+				Title:        "Replay Boundary",
+				StartLine:    22,
+				EndLine:      40,
+				Body:         "stripe_event_id idempotency protects webhook replay behavior.",
+				HeadingDepth: 2,
+			}},
 		},
+		{ID: "unrelated", Path: "docs/plans/unrelated.md", Body: "general implementation background"},
 	}
+}
 
-	got := EnrichCandidatesWithSectionMatches(candidates, "repository agent operating instructions and contributor guidance for AReaL")
-	if got[0].Metadata != nil && got[0].Metadata["indexed_section_retrieval_mode"] == "section_aware" {
-		t.Fatalf("roadmap should not be section-rescued without roadmap intent: %#v", got[0].Metadata)
-	}
-
-	roadmap := EnrichCandidatesWithSectionMatches(candidates, "AReaL roadmap future work and milestones")
-	if roadmap[0].Metadata == nil || roadmap[0].Metadata["indexed_section_retrieval_mode"] != "section_aware" {
-		t.Fatalf("roadmap intent should allow section evidence: %#v", roadmap[0].Metadata)
-	}
+func roadmapSectionCandidates() []Candidate {
+	return []Candidate{{
+		ID:    "roadmap",
+		Path:  "ROADMAP.md",
+		Title: "AReaL Roadmap",
+		Kind:  "plan",
+		Body:  "# AReaL Roadmap\n\nGeneral future planning.",
+		Sections: []IndexedSection{{
+			ID:          "sec_roadmap",
+			ArtifactID:  "roadmap",
+			SourcePath:  "ROADMAP.md",
+			HeadingPath: "AReaL Roadmap",
+			Title:       "AReaL Roadmap",
+			StartLine:   1,
+			EndLine:     9,
+			Body:        "AReaL project timeline and future planning notes.",
+		}},
+	}}
 }
 
 func mustJSONList(t *testing.T, values []string) string {
 	t.Helper()
 	b, err := json.Marshal(values)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	return string(b)
 }
 
@@ -366,9 +408,9 @@ func TestQueryBaselineMatchesPathOrBody(t *testing.T) {
 
 	got := QueryBaseline(candidates, "stripe_event_id idempotency")
 	paths := CandidatePaths(got)
-	if len(paths) != 1 || paths[0] != "docs/adr/0002-webhook-idempotency-boundary.md" {
-		t.Fatalf("paths = %#v", paths)
-	}
+	require.Len(t, paths, 1)
+	assert.Equal(t, "docs/adr/0002-webhook-idempotency-boundary.md", paths[0])
+
 }
 
 func TestWeightedFilesRetrieverV0_UsesCandidateTitle(t *testing.T) {
@@ -377,13 +419,14 @@ func TestWeightedFilesRetrieverV0_UsesCandidateTitle(t *testing.T) {
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "Golden")
-	if len(got) != 1 {
-		t.Fatalf("retrieved %d candidates, want 1", len(got))
-	}
 	reasons := ExplainCandidates(got, "Golden")
-	if len(reasons) == 0 || len(reasons[0].Reasons) == 0 || reasons[0].Reasons[0] != "query term match in title: golden" {
-		t.Fatalf("reasons = %#v", reasons)
-	}
+
+	require.Len(t, got, 1,
+		"retrieved %d candidates, want 1", len(got))
+	require.NotEmpty(t, reasons)
+	require.NotEmpty(t, reasons[0].Reasons)
+	assert.Equal(t, "query term match in title: golden", reasons[0].Reasons[0])
+
 }
 
 func TestWeightedFilesRetrieverV0_SourceIntentPrefersExactSourceFiles(t *testing.T) {
@@ -397,15 +440,13 @@ func TestWeightedFilesRetrieverV0_SourceIntentPrefersExactSourceFiles(t *testing
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "authorization_details customer_id source file")
-	if !containsCandidatePath(got, "services/api/src/auth/session.ts") {
-		t.Fatalf("missing session source file: %#v", CandidatePaths(got))
-	}
-	if !containsCandidatePath(got, "services/api/src/billing/entitlements.ts") {
-		t.Fatalf("missing entitlements source file: %#v", CandidatePaths(got))
-	}
-	if containsCandidatePath(got, "docs/plans/billing-ops-runbook.md") {
-		t.Fatalf("broad runbook should not outrank exact source matches: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "services/api/src/auth/session.ts"),
+		"missing session source file: %#v", CandidatePaths(got))
+	require.True(t, containsCandidatePath(got, "services/api/src/billing/entitlements.ts"),
+		"missing entitlements source file: %#v", CandidatePaths(got))
+	require.False(t, containsCandidatePath(got, "docs/plans/billing-ops-runbook.md"),
+		"broad runbook should not outrank exact source matches: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_RFCIntentUsesRFCAndCoreTerms(t *testing.T) {
@@ -419,12 +460,11 @@ func TestWeightedFilesRetrieverV0_RFCIntentUsesRFCAndCoreTerms(t *testing.T) {
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "RFC for webhook replay protection alternatives")
-	if !containsCandidatePath(got, "docs/rfcs/0008-billing-webhook-replay-protection.md") {
-		t.Fatalf("missing RFC candidate: %#v", CandidatePaths(got))
-	}
-	if containsCandidatePath(got, "docs/rfcs/0009-support-search-ranking.md") {
-		t.Fatalf("unrelated RFC should not be selected: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "docs/rfcs/0008-billing-webhook-replay-protection.md"),
+		"missing RFC candidate: %#v", CandidatePaths(got))
+	require.False(t, containsCandidatePath(got, "docs/rfcs/0009-support-search-ranking.md"),
+		"unrelated RFC should not be selected: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_GenericPlanNeedsCoreEvidence(t *testing.T) {
@@ -434,15 +474,14 @@ func TestWeightedFilesRetrieverV0_GenericPlanNeedsCoreEvidence(t *testing.T) {
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "resume entitlement sync hardening")
-	if !containsCandidatePath(got, "docs/plans/2026-05-01-entitlement-sync-plan.md") {
-		t.Fatalf("missing specific plan: %#v", CandidatePaths(got))
-	}
-	if containsCandidatePath(got, "docs/plans/generic-implementation-plan.md") {
-		t.Fatalf("generic plan should not pass without core evidence: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "docs/plans/2026-05-01-entitlement-sync-plan.md"),
+		"missing specific plan: %#v", CandidatePaths(got))
+	require.False(t, containsCandidatePath(got, "docs/plans/generic-implementation-plan.md"),
+		"generic plan should not pass without core evidence: %#v", CandidatePaths(got))
+
 }
 
-func TestWeightedFilesRetrieverV0_DemotesNonIntentLanesUnlessRequested(t *testing.T) {
+func TestWeightedFilesRetrieverV0_DemotesNonIntentLanesForOrdinaryPlanQuery(t *testing.T) {
 	candidates := []Candidate{
 		{
 			Path:  "docs/plans/auth-token-rollout.md",
@@ -459,17 +498,35 @@ func TestWeightedFilesRetrieverV0_DemotesNonIntentLanesUnlessRequested(t *testin
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "resume auth token rollout")
-	if !containsCandidatePath(got, "docs/plans/auth-token-rollout.md") {
-		t.Fatalf("missing plan: %#v", CandidatePaths(got))
-	}
-	if containsCandidatePath(got, "CLAUDE.md") {
-		t.Fatalf("protocol instructions should not appear in ordinary plan retrieval: %#v", CandidatePaths(got))
+
+	assert.True(t, containsCandidatePath(got, "docs/plans/auth-token-rollout.md"),
+		"missing plan: %#v", CandidatePaths(got))
+	assert.False(t, containsCandidatePath(got, "CLAUDE.md"),
+		"protocol instructions should not appear in ordinary plan retrieval: %#v", CandidatePaths(got))
+
+}
+
+func TestWeightedFilesRetrieverV0_IncludesNonIntentLaneWhenExplicitlyRequested(t *testing.T) {
+	candidates := []Candidate{
+		{
+			Path:  "docs/plans/auth-token-rollout.md",
+			Body:  "Current progress for auth token rollout and migration tasks.",
+			Title: "Auth Token Rollout Plan",
+		},
+		{
+			Path:     "CLAUDE.md",
+			Title:    "Claude Instructions",
+			Subtype:  "agent_instruction",
+			Body:     "Auth token rollout rules and instructions for contributors.",
+			Metadata: map[string]string{"classifier_mode": "protocol"},
+		},
 	}
 
-	got = (WeightedFilesRetrieverV0{}).Retrieve(candidates, "claude instructions auth token rollout")
-	if !containsCandidatePath(got, "CLAUDE.md") {
-		t.Fatalf("missing explicitly requested instructions: %#v", CandidatePaths(got))
-	}
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "claude instructions auth token rollout")
+
+	assert.True(t, containsCandidatePath(got, "CLAUDE.md"),
+		"missing explicitly requested instructions: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_UsesTestCasesForBehaviorQueries(t *testing.T) {
@@ -493,23 +550,16 @@ func TestWeightedFilesRetrieverV0_UsesTestCasesForBehaviorQueries(t *testing.T) 
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "what regression tests protect stripe_event_id idempotency?")
-	if !containsCandidatePath(got, "services/billing/webhook_test.go#L12") {
-		t.Fatalf("missing test-case candidate: %#v", CandidatePaths(got))
-	}
 	reasons := ExplainCandidates(got, "what regression tests protect stripe_event_id idempotency?")
-	var found bool
-	for _, reason := range reasons {
-		if reason.Path != "services/billing/webhook_test.go#L12" {
-			continue
-		}
-		found = true
-		if !reasonContains(reason.Reasons, "test-case behavior signal") {
-			t.Fatalf("missing test behavior reason: %#v", reason.Reasons)
-		}
-	}
-	if !found {
-		t.Fatalf("missing reasons for test candidate: %#v", reasons)
-	}
+
+	assert.True(t, containsCandidatePath(got, "services/billing/webhook_test.go#L12"),
+		"missing test-case candidate: %#v", CandidatePaths(got))
+	reasonIndex := reasonPathIndex(reasons, "services/billing/webhook_test.go#L12")
+	require.GreaterOrEqual(t, reasonIndex, 0,
+		"missing reasons for test candidate: %#v", reasons)
+	assert.True(t, reasonContains(reasons[reasonIndex].Reasons, "test-case behavior signal"),
+		"missing test behavior reason: %#v", reasons[reasonIndex].Reasons)
+
 }
 
 func TestWeightedFilesRetrieverV0_UsesTestsForImplementationTaskQueries(t *testing.T) {
@@ -541,12 +591,11 @@ func TestWeightedFilesRetrieverV0_UsesTestsForImplementationTaskQueries(t *testi
 
 	query := "add Agent Deck cost collection support for MiniMax usage strings and MiniMax model pricing"
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, query)
-	if !containsCandidatePath(got, "internal/costs/parser_minimax.go") {
-		t.Fatalf("missing implementation source candidate: %#v", CandidatePaths(got))
-	}
-	if !containsCandidatePath(got, "internal/costs/parser_minimax_integration_test.go#L12") {
-		t.Fatalf("implementation task should admit directly matching behavior test: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "internal/costs/parser_minimax.go"),
+		"missing implementation source candidate: %#v", CandidatePaths(got))
+	require.True(t, containsCandidatePath(got, "internal/costs/parser_minimax_integration_test.go#L12"),
+		"implementation task should admit directly matching behavior test: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_AnchorsCamelCaseTestNames(t *testing.T) {
@@ -576,13 +625,16 @@ func TestWeightedFilesRetrieverV0_AnchorsCamelCaseTestNames(t *testing.T) {
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "what tests cover TestPutAndGetExposedTool behavior?")
-	if len(got) == 0 || got[0].Path != "internal/tools/tool_test.go#L42" {
-		t.Fatalf("expected exact test-name anchor first, got %#v", CandidatePaths(got))
-	}
 	reasons := ExplainCandidates(got, "what tests cover TestPutAndGetExposedTool behavior?")
-	if len(reasons) == 0 || !reasonContains(reasons[0].Reasons, "exact test-name anchor") {
-		t.Fatalf("missing exact test-name reason: %#v", reasons)
-	}
+
+	require.NotEmpty(t, got, "expected exact test-name anchor, got %#v", CandidatePaths(got))
+	assert.Equal(t, "internal/tools/tool_test.go#L42", got[0].Path,
+		"expected exact test-name anchor first, got %#v", CandidatePaths(got))
+
+	require.NotEmpty(t, reasons, "missing exact test-name reasons")
+	assert.True(t, reasonContains(reasons[0].Reasons, "exact test-name anchor"),
+		"missing exact test-name reason: %#v", reasons)
+
 }
 
 func TestWeightedFilesRetrieverV0_AnchorsNaturalLanguageTestNameParts(t *testing.T) {
@@ -612,13 +664,16 @@ func TestWeightedFilesRetrieverV0_AnchorsNaturalLanguageTestNameParts(t *testing
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "what tests cover put and get exposed tool behavior?")
-	if len(got) == 0 || got[0].Path != "internal/tools/tool_test.go#L42" {
-		t.Fatalf("expected token test-name anchor first, got %#v", CandidatePaths(got))
-	}
 	reasons := ExplainCandidates(got, "what tests cover put and get exposed tool behavior?")
-	if len(reasons) == 0 || !reasonContains(reasons[0].Reasons, "test-name token anchor") {
-		t.Fatalf("missing token test-name reason: %#v", reasons)
-	}
+
+	require.NotEmpty(t, got, "expected token test-name anchor, got %#v", CandidatePaths(got))
+	assert.Equal(t, "internal/tools/tool_test.go#L42", got[0].Path,
+		"expected token test-name anchor first, got %#v", CandidatePaths(got))
+
+	require.NotEmpty(t, reasons, "missing token test-name reasons")
+	assert.True(t, reasonContains(reasons[0].Reasons, "test-name token anchor"),
+		"missing token test-name reason: %#v", reasons)
+
 }
 
 func TestWeightedFilesRetrieverV0_AnchorsSnakeCaseTestNames(t *testing.T) {
@@ -637,9 +692,10 @@ func TestWeightedFilesRetrieverV0_AnchorsSnakeCaseTestNames(t *testing.T) {
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "what tests cover test_put_and_get_exposed_tool behavior?")
-	if len(got) == 0 || got[0].Path != "tests/tools_test.py#L12" {
-		t.Fatalf("expected snake-case test-name anchor first, got %#v", CandidatePaths(got))
-	}
+	require.NotEmpty(t, got, "expected snake-case test-name anchor, got %#v", CandidatePaths(got))
+	assert.Equal(t, "tests/tools_test.py#L12", got[0].Path,
+		"expected snake-case test-name anchor first, got %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_DoesNotUseTestCasesForOrdinaryRoadmapQueries(t *testing.T) {
@@ -662,12 +718,11 @@ func TestWeightedFilesRetrieverV0_DoesNotUseTestCasesForOrdinaryRoadmapQueries(t
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "roadmap for realtime multimodal voice agents")
-	if !containsCandidatePath(got, "docs/roadmap.md") {
-		t.Fatalf("missing roadmap: %#v", CandidatePaths(got))
-	}
-	if containsCandidatePath(got, "tests/voice_test.py#L20") {
-		t.Fatalf("test case should not appear in ordinary roadmap retrieval: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "docs/roadmap.md"),
+		"missing roadmap: %#v", CandidatePaths(got))
+	require.False(t, containsCandidatePath(got, "tests/voice_test.py#L20"),
+		"test case should not appear in ordinary roadmap retrieval: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_SuppressesRawTestFilesForOrdinaryPlanningQueries(t *testing.T) {
@@ -685,12 +740,11 @@ func TestWeightedFilesRetrieverV0_SuppressesRawTestFilesForOrdinaryPlanningQueri
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "engineering context for mode active critical user flow")
-	if !containsCandidatePath(got, "docs/plans/interactive-mode.md") {
-		t.Fatalf("missing planning doc: %#v", CandidatePaths(got))
-	}
-	if containsCandidatePath(got, "packages/coding-agent/test/interactive-mode-plan-review.test.ts") {
-		t.Fatalf("raw test file should not appear in non-test planning retrieval: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "docs/plans/interactive-mode.md"),
+		"missing planning doc: %#v", CandidatePaths(got))
+	require.False(t, containsCandidatePath(got, "packages/coding-agent/test/interactive-mode-plan-review.test.ts"),
+		"raw test file should not appear in non-test planning retrieval: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_PrefersTestUnitsOverRawTestFiles(t *testing.T) {
@@ -714,12 +768,11 @@ func TestWeightedFilesRetrieverV0_PrefersTestUnitsOverRawTestFiles(t *testing.T)
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "what tests cover TestWebhookReplayProtection stripe_event_id behavior")
-	if !containsCandidatePath(got, "services/billing/webhook_test.go#L12") {
-		t.Fatalf("missing precise test unit: %#v", CandidatePaths(got))
-	}
-	if containsCandidatePath(got, "services/billing/webhook_test.go") {
-		t.Fatalf("raw test file should be suppressed when unit-level artifact exists: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "services/billing/webhook_test.go#L12"),
+		"missing precise test unit: %#v", CandidatePaths(got))
+	require.False(t, containsCandidatePath(got, "services/billing/webhook_test.go"),
+		"raw test file should be suppressed when unit-level artifact exists: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_DoesNotRouteLegacyWordToCodeComments(t *testing.T) {
@@ -748,12 +801,11 @@ func TestWeightedFilesRetrieverV0_DoesNotRouteLegacyWordToCodeComments(t *testin
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "what tests cover testSerializationLegacyString behavior")
-	if !containsCandidatePath(got, "processing/src/test/java/org/example/QuerySegmentSpecTest.java#L39") {
-		t.Fatalf("missing test unit: %#v", CandidatePaths(got))
-	}
-	if containsCandidatePath(got, "processing/src/main/java/org/example/LegacyParser.java#L20") {
-		t.Fatalf("legacy inside test name should not request code comments: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "processing/src/test/java/org/example/QuerySegmentSpecTest.java#L39"),
+		"missing test unit: %#v", CandidatePaths(got))
+	require.False(t, containsCandidatePath(got, "processing/src/main/java/org/example/LegacyParser.java#L20"),
+		"legacy inside test name should not request code comments: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_DomainWordsDoNotRequestTests(t *testing.T) {
@@ -781,12 +833,11 @@ func TestWeightedFilesRetrieverV0_DomainWordsDoNotRequestTests(t *testing.T) {
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "course visit analytics product spec")
-	if !containsCandidatePath(got, "docs/product-specs/course-visit-analytics.md") {
-		t.Fatalf("missing product spec: %#v", CandidatePaths(got))
-	}
-	if containsCandidatePath(got, "src/app/courseVisitTracking.test.ts#L11") {
-		t.Fatalf("analytics domain word should not route tests without test intent: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "docs/product-specs/course-visit-analytics.md"),
+		"missing product spec: %#v", CandidatePaths(got))
+	require.False(t, containsCandidatePath(got, "src/app/courseVisitTracking.test.ts#L11"),
+		"analytics domain word should not route tests without test intent: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_CodeTaskModePrefersSpecificEmbeddingSourceOverGenericModels(t *testing.T) {
@@ -818,21 +869,20 @@ func TestWeightedFilesRetrieverV0_CodeTaskModePrefersSpecificEmbeddingSourceOver
 	}
 
 	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true, AnchorFirstMode: AnchorFirstModeCodeTask}).Retrieve(candidates, "refactor: update embedding model and endpoint to use 'nomic' and 'appwrite-embedding'")
-	if len(got) < 2 {
-		t.Fatalf("expected embedding results, got %#v", CandidatePaths(got))
-	}
-	if got[0].Path != "src/Appwrite/Platform/Modules/Databases/Http/VectorsDB/Embeddings/Text/Create.php" &&
-		got[0].Path != "src/Appwrite/Utopia/Response/Model/Embedding.php" {
-		t.Fatalf("generic model won code-task ranking: %#v", CandidatePaths(got))
-	}
-	if !containsCandidatePath(got[:2], "src/Appwrite/Utopia/Response/Model/Embedding.php") &&
-		!containsCandidatePath(got[:2], "src/Appwrite/Platform/Modules/Databases/Http/VectorsDB/Embeddings/Text/Create.php") {
-		t.Fatalf("specific embedding sources should be in top two: %#v", CandidatePaths(got))
-	}
 	reasons := ExplainCandidates(got, "refactor: update embedding model and endpoint to use 'nomic' and 'appwrite-embedding'")
-	if len(reasons) == 0 || !reasonContainsPrefix(reasons[0].Reasons, "source query ranking:") {
-		t.Fatalf("missing source query ranking reason: %#v", reasons)
-	}
+
+	require.GreaterOrEqual(t, len(got), 2,
+		"expected embedding results, got %#v", CandidatePaths(got))
+	assert.Contains(t, []string{
+		"src/Appwrite/Platform/Modules/Databases/Http/VectorsDB/Embeddings/Text/Create.php",
+		"src/Appwrite/Utopia/Response/Model/Embedding.php",
+	}, got[0].Path,
+		"generic model won code-task ranking: %#v", CandidatePaths(got))
+
+	require.NotEmpty(t, reasons, "missing source query ranking reasons")
+	assert.True(t, reasonContainsPrefix(reasons[0].Reasons, "source query ranking:"),
+		"missing source query ranking reason: %#v", reasons)
+
 }
 
 func TestWeightedFilesRetrieverV0_CodeTaskModeDemotesAgentInstructionsForProductAgentTerm(t *testing.T) {
@@ -859,15 +909,13 @@ func TestWeightedFilesRetrieverV0_CodeTaskModeDemotesAgentInstructionsForProduct
 	}
 
 	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true, AnchorFirstMode: AnchorFirstModeCodeTask}).Retrieve(candidates, "Allow agents as application for secrets")
-	if len(got) == 0 {
-		t.Fatal("expected results")
-	}
-	if got[0].Path == "AGENTS.md" {
-		t.Fatalf("agent instruction won product-agent code task: %#v", CandidatePaths(got))
-	}
-	if !containsCandidatePath(got[:minInt(len(got), 2)], "pkg/cmd/secret/set/set.go") {
-		t.Fatalf("missing secret command source near top: %#v", CandidatePaths(got))
-	}
+	require.NotEmpty(t, got,
+		"expected results")
+	require.NotEqual(t, "AGENTS.md", got[0].Path,
+		"agent instruction won product-agent code task: %#v", CandidatePaths(got))
+	require.True(t, containsCandidatePath(got[:minInt(len(got), 2)], "pkg/cmd/secret/set/set.go"),
+		"missing secret command source near top: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_CodeTaskFamilyPrefersCoreSourceFamilyOverDocsSrcTutorials(t *testing.T) {
@@ -899,16 +947,16 @@ func TestWeightedFilesRetrieverV0_CodeTaskFamilyPrefersCoreSourceFamilyOverDocsS
 	}
 
 	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true, AnchorFirstMode: AnchorFirstModeCodeTaskFamily}).Retrieve(candidates, "Update Pydantic v2 code to address deprecations")
-	if len(got) < 2 {
-		t.Fatalf("expected results, got %#v", CandidatePaths(got))
-	}
-	top := CandidatePaths(got[:2])
-	if !containsCandidatePath(got[:2], "fastapi/encoders.py") || !containsCandidatePath(got[:2], "fastapi/_compat.py") {
-		t.Fatalf("core source family should beat docs_src tutorials, got top=%#v all=%#v", top, CandidatePaths(got))
-	}
-	if got[0].Metadata["source_family_primary_role"] != "core_runtime" {
-		t.Fatalf("expected core runtime family metadata, got %#v", got[0].Metadata)
-	}
+	require.GreaterOrEqual(t, len(got), 2,
+		"expected results, got %#v", CandidatePaths(got))
+
+	assert.True(t, containsCandidatePath(got[:2], "fastapi/encoders.py"),
+		"core source family should beat docs_src tutorials, got top=%#v all=%#v", CandidatePaths(got[:2]), CandidatePaths(got))
+	assert.True(t, containsCandidatePath(got[:2], "fastapi/_compat.py"),
+		"core source family should beat docs_src tutorials, got top=%#v all=%#v", CandidatePaths(got[:2]), CandidatePaths(got))
+	assert.Equal(t, "core_runtime", got[0].Metadata["source_family_primary_role"],
+		"expected core runtime family metadata, got %#v", got[0].Metadata)
+
 }
 
 func TestWeightedFilesRetrieverV0_CodeTaskFamilyProfilesMixedSourceTestDocsWithoutFlattening(t *testing.T) {
@@ -941,23 +989,21 @@ func TestWeightedFilesRetrieverV0_CodeTaskFamilyProfilesMixedSourceTestDocsWitho
 	}
 
 	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true, AnchorFirstMode: AnchorFirstModeCodeTaskFamily}).Retrieve(candidates, "enforce token scopes on attachment downloads")
-	if len(got) < 2 {
-		t.Fatalf("expected mixed family results, got %#v", CandidatePaths(got))
-	}
-	if got[0].Path != "services/context/permission.go" {
-		t.Fatalf("implementation member should lead mixed family, got %#v", CandidatePaths(got))
-	}
+	require.GreaterOrEqual(t, len(got), 2,
+		"expected mixed family results, got %#v", CandidatePaths(got))
+	require.Equal(t, "services/context/permission.go", got[0].Path,
+		"implementation member should lead mixed family, got %#v", CandidatePaths(got))
+
 	testIdx := candidatePathIndex(got, "services/context/permission_test.go")
-	if testIdx < 0 {
-		t.Fatalf("missing colocated test family member: %#v", CandidatePaths(got))
-	}
-	if got[testIdx].Metadata["source_family_member_role"] != "test_family" {
-		t.Fatalf("test member role was flattened: %#v", got[testIdx].Metadata)
-	}
-	if !strings.Contains(got[testIdx].Metadata["source_family_member_roles_json"], "service_logic") ||
-		!strings.Contains(got[testIdx].Metadata["source_family_member_roles_json"], "test_family") {
-		t.Fatalf("family profile should preserve mixed member roles: %#v", got[testIdx].Metadata)
-	}
+	require.GreaterOrEqual(t, testIdx, 0,
+		"missing colocated test family member: %#v", CandidatePaths(got))
+	assert.Equal(t, "test_family", got[testIdx].Metadata["source_family_member_role"],
+		"test member role was flattened: %#v", got[testIdx].Metadata)
+	assert.Contains(t, got[testIdx].Metadata["source_family_member_roles_json"], "service_logic",
+		"family profile should preserve service role: %#v", got[testIdx].Metadata)
+	assert.Contains(t, got[testIdx].Metadata["source_family_member_roles_json"], "test_family",
+		"family profile should preserve mixed member roles: %#v", got[testIdx].Metadata)
+
 }
 
 func TestWeightedFilesRetrieverV0_CodeTaskFamilyDemotesGeneratedClientSurfaceForRuntimeTask(t *testing.T) {
@@ -984,15 +1030,13 @@ func TestWeightedFilesRetrieverV0_CodeTaskFamilyDemotesGeneratedClientSurfaceFor
 	}
 
 	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true, AnchorFirstMode: AnchorFirstModeCodeTaskFamily}).Retrieve(candidates, "support Prometheus operator rule validation")
-	if len(got) < 2 {
-		t.Fatalf("expected operator rule results, got %#v", CandidatePaths(got))
-	}
-	if got[0].Path != "pkg/operator/rules/rules.go" {
-		t.Fatalf("runtime operator source should beat generated client surface: %#v", CandidatePaths(got))
-	}
-	if containsCandidatePath(got[:minInt(len(got), 2)], "pkg/client/applyconfiguration/monitoring/v1/prometheusrule.go") {
-		t.Fatalf("generated client surface should not be in top two for runtime task: %#v", CandidatePaths(got))
-	}
+	require.GreaterOrEqual(t, len(got), 2,
+		"expected operator rule results, got %#v", CandidatePaths(got))
+	require.Equal(t, "pkg/operator/rules/rules.go", got[0].Path,
+		"runtime operator source should beat generated client surface: %#v", CandidatePaths(got))
+	require.False(t, containsCandidatePath(got[:minInt(len(got), 2)], "pkg/client/applyconfiguration/monitoring/v1/prometheusrule.go"),
+		"generated client surface should not be in top two for runtime task: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_CodeTaskFamilyV2LetsRareAnchorBeatGenericFlow(t *testing.T) {
@@ -1043,24 +1087,27 @@ func TestWeightedFilesRetrieverV0_CodeTaskFamilyV2LetsRareAnchorBeatGenericFlow(
 	}
 
 	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true, AnchorFirstMode: AnchorFirstModeCodeTaskFamilyV2}).Retrieve(candidates, "Improve bookmark flow")
-	if len(got) < 3 {
-		t.Fatalf("expected bookmark results, got %#v", CandidatePaths(got))
-	}
-	topGroup := got[:minInt(len(got), 4)]
-	top := CandidatePaths(topGroup)
-	if !containsCandidatePath(topGroup, "app/src/modules/content/components/bookmark-add.vue") ||
-		!containsCandidatePath(topGroup, "app/src/modules/content/components/bookmark-delete.vue") ||
-		!containsCandidatePath(topGroup, "app/src/modules/content/composables/use-delete-bookmark.ts") ||
-		!containsCandidatePath(topGroup, "app/src/modules/content/composables/use-delete-bookmark.test.ts") {
-		t.Fatalf("rare bookmark anchor should beat generic flow family, top=%#v all=%#v", top, CandidatePaths(got))
-	}
-	if containsCandidatePath(topGroup, "api/src/ai/tools/trigger-flow/index.ts") {
-		t.Fatalf("generic flow family should not lead bookmark query: %#v", CandidatePaths(got))
-	}
 	reasons := ExplainCandidates(got, "Improve bookmark flow")
-	if len(reasons) == 0 || !reasonContainsPrefix(reasons[0].Reasons, "query hygiene:") {
-		t.Fatalf("missing query hygiene reason: %#v", reasons)
-	}
+
+	require.GreaterOrEqual(t, len(got), 3,
+		"expected bookmark results, got %#v", CandidatePaths(got))
+
+	topGroup := got[:minInt(len(got), 4)]
+	assert.True(t, containsCandidatePath(topGroup, "app/src/modules/content/components/bookmark-add.vue"),
+		"missing bookmark add from top group: %#v", CandidatePaths(topGroup))
+	assert.True(t, containsCandidatePath(topGroup, "app/src/modules/content/components/bookmark-delete.vue"),
+		"missing bookmark delete from top group: %#v", CandidatePaths(topGroup))
+	assert.True(t, containsCandidatePath(topGroup, "app/src/modules/content/composables/use-delete-bookmark.ts"),
+		"missing bookmark composable from top group: %#v", CandidatePaths(topGroup))
+	assert.True(t, containsCandidatePath(topGroup, "app/src/modules/content/composables/use-delete-bookmark.test.ts"),
+		"missing bookmark test from top group: %#v", CandidatePaths(topGroup))
+	assert.False(t, containsCandidatePath(topGroup, "api/src/ai/tools/trigger-flow/index.ts"),
+		"generic flow family should not lead bookmark query: %#v", CandidatePaths(got))
+
+	require.NotEmpty(t, reasons, "missing query hygiene reasons")
+	assert.True(t, reasonContainsPrefix(reasons[0].Reasons, "query hygiene:"),
+		"missing query hygiene reason: %#v", reasons)
+
 }
 
 func TestWeightedFilesRetrieverV0_CodeTaskFamilyV2PrefersSpecificPluginTestOverPlayground(t *testing.T) {
@@ -1094,15 +1141,13 @@ func TestWeightedFilesRetrieverV0_CodeTaskFamilyV2PrefersSpecificPluginTestOverP
 	}
 
 	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true, AnchorFirstMode: AnchorFirstModeCodeTaskFamilyV2}).Retrieve(candidates, "Match import glob common base by path segment correctly")
-	if len(got) < 2 {
-		t.Fatalf("expected import glob results, got %#v", CandidatePaths(got))
-	}
-	if got[0].Path != "packages/vite/src/node/plugins/importMetaGlob.ts" {
-		t.Fatalf("plugin source should lead import glob query: %#v", CandidatePaths(got))
-	}
-	if strings.HasPrefix(got[0].Path, "playground/") {
-		t.Fatalf("playground fixtures should not lead implementation query: %#v", CandidatePaths(got))
-	}
+	require.GreaterOrEqual(t, len(got), 2,
+		"expected import glob results, got %#v", CandidatePaths(got))
+	require.Equal(t, "packages/vite/src/node/plugins/importMetaGlob.ts", got[0].Path,
+		"plugin source should lead import glob query: %#v", CandidatePaths(got))
+	require.False(t, strings.HasPrefix(got[0].Path, "playground/"),
+		"playground fixtures should not lead implementation query: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_UsesCodeCommentsForRationaleQueries(t *testing.T) {
@@ -1126,22 +1171,16 @@ func TestWeightedFilesRetrieverV0_UsesCodeCommentsForRationaleQueries(t *testing
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "implementation rationale for stripe_event_id invariant in code")
-	if !containsCandidatePath(got, "services/billing/webhook.go#L18") {
-		t.Fatalf("missing code-comment candidate: %#v", CandidatePaths(got))
-	}
 	reasons := ExplainCandidates(got, "implementation rationale for stripe_event_id invariant in code")
-	var found bool
-	for _, reason := range reasons {
-		if reason.Path == "services/billing/webhook.go#L18" {
-			found = true
-			if !reasonContains(reason.Reasons, "code-comment rationale signal") {
-				t.Fatalf("missing code-comment reason: %#v", reason.Reasons)
-			}
-		}
-	}
-	if !found {
-		t.Fatalf("missing reasons for code-comment candidate: %#v", reasons)
-	}
+
+	assert.True(t, containsCandidatePath(got, "services/billing/webhook.go#L18"),
+		"missing code-comment candidate: %#v", CandidatePaths(got))
+	reasonIndex := reasonPathIndex(reasons, "services/billing/webhook.go#L18")
+	require.GreaterOrEqual(t, reasonIndex, 0,
+		"missing reasons for code-comment candidate: %#v", reasons)
+	assert.True(t, reasonContains(reasons[reasonIndex].Reasons, "code-comment rationale signal"),
+		"missing code-comment reason: %#v", reasons[reasonIndex].Reasons)
+
 }
 
 func TestWeightedFilesRetrieverV0_DoesNotBackfillWeakBodyOnlyMarkdown(t *testing.T) {
@@ -1176,19 +1215,17 @@ func TestWeightedFilesRetrieverV0_DoesNotBackfillWeakBodyOnlyMarkdown(t *testing
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "fix Langfuse trace association so ask and runtime generations share the same trace tree")
-	if !containsCandidatePath(got, "docs/design-docs/langfuse-trace-association.md") {
-		t.Fatalf("missing anchored design doc: %#v", CandidatePaths(got))
-	}
-	for _, unwanted := range []string{
-		"AGENTS.md",
-		"docs/billing-subscription-design.md",
-		"docs/shared-admin-table-component.md",
-		"docs/engineering-baseline.md",
-	} {
-		if containsCandidatePath(got, unwanted) {
-			t.Fatalf("%s should not backfill body-only retrieval: %#v", unwanted, CandidatePaths(got))
-		}
-	}
+	require.True(t, containsCandidatePath(got, "docs/design-docs/langfuse-trace-association.md"),
+		"missing anchored design doc: %#v", CandidatePaths(got))
+
+	assert.False(t, containsCandidatePath(got, "AGENTS.md"),
+		"agent instructions should not backfill body-only retrieval: %#v", CandidatePaths(got))
+	assert.False(t, containsCandidatePath(got, "docs/billing-subscription-design.md"),
+		"billing design should not backfill body-only retrieval: %#v", CandidatePaths(got))
+	assert.False(t, containsCandidatePath(got, "docs/shared-admin-table-component.md"),
+		"admin table design should not backfill body-only retrieval: %#v", CandidatePaths(got))
+	assert.False(t, containsCandidatePath(got, "docs/engineering-baseline.md"),
+		"engineering baseline should not backfill body-only retrieval: %#v", CandidatePaths(got))
 }
 
 func TestWeightedFilesRetrieverV0_KeepsSmallCandidateSets(t *testing.T) {
@@ -1206,9 +1243,9 @@ func TestWeightedFilesRetrieverV0_KeepsSmallCandidateSets(t *testing.T) {
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "CloudNativePG operator architecture direct pod management no StatefulSets instance manager failover")
-	if !containsCandidatePath(got, "docs/src/architecture.md") {
-		t.Fatalf("missing architecture doc from small candidate set: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "docs/src/architecture.md"),
+		"missing architecture doc from small candidate set: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_ResumeIntentKeepsMatchingDecisionContext(t *testing.T) {
@@ -1220,9 +1257,9 @@ func TestWeightedFilesRetrieverV0_ResumeIntentKeepsMatchingDecisionContext(t *te
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "resume entitlement sync hardening")
-	if !containsCandidatePath(got, "docs/adr/0002-webhook-idempotency-boundary.md") {
-		t.Fatalf("missing matching ADR decision context: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "docs/adr/0002-webhook-idempotency-boundary.md"),
+		"missing matching ADR decision context: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_LifecycleIntentPrefersStaleDecision(t *testing.T) {
@@ -1233,12 +1270,11 @@ func TestWeightedFilesRetrieverV0_LifecycleIntentPrefersStaleDecision(t *testing
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "continue local entitlement caching plan")
-	if !containsCandidatePath(got, "docs/adr/0003-superseded-local-entitlements.md") {
-		t.Fatalf("missing superseded ADR: %#v", CandidatePaths(got))
-	}
-	if containsCandidatePath(got, "docs/plans/active-entitlement-rollout.md") {
-		t.Fatalf("active rollout should not beat lifecycle candidates: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "docs/adr/0003-superseded-local-entitlements.md"),
+		"missing superseded ADR: %#v", CandidatePaths(got))
+	require.False(t, containsCandidatePath(got, "docs/plans/active-entitlement-rollout.md"),
+		"active rollout should not beat lifecycle candidates: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_ExpandsOpenSpecCompanionsWithoutParentNoise(t *testing.T) {
@@ -1276,20 +1312,17 @@ func TestWeightedFilesRetrieverV0_ExpandsOpenSpecCompanionsWithoutParentNoise(t 
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "resume OAuth provider tasks")
-	if !containsCandidatePath(got, "openspec/changes/add-sso/tasks.md") {
-		t.Fatalf("missing tasks child: %#v", CandidatePaths(got))
-	}
-	if !containsCandidatePath(got, "openspec/changes/add-sso/design.md") {
-		t.Fatalf("missing expanded design companion: %#v", CandidatePaths(got))
-	}
-	if containsCandidatePath(got, "openspec/changes/add-sso") {
-		t.Fatalf("structural parent bundle should not be included for ordinary task retrieval: %#v", CandidatePaths(got))
-	}
-	for _, candidate := range got {
-		if candidate.Path == "openspec/changes/add-sso/design.md" && candidate.Metadata["retrieval_expansion_reason"] != "openspec_companion" {
-			t.Fatalf("companion expansion reason = %#v", candidate.Metadata)
-		}
-	}
+	require.True(t, containsCandidatePath(got, "openspec/changes/add-sso/tasks.md"),
+		"missing tasks child: %#v", CandidatePaths(got))
+	require.True(t, containsCandidatePath(got, "openspec/changes/add-sso/design.md"),
+		"missing expanded design companion: %#v", CandidatePaths(got))
+	require.False(t, containsCandidatePath(got, "openspec/changes/add-sso"),
+		"structural parent bundle should not be included for ordinary task retrieval: %#v", CandidatePaths(got))
+
+	designIndex := candidatePathIndex(got, "openspec/changes/add-sso/design.md")
+	require.GreaterOrEqual(t, designIndex, 0, "missing design companion: %#v", CandidatePaths(got))
+	assert.Equal(t, "openspec_companion", got[designIndex].Metadata["retrieval_expansion_reason"],
+		"companion expansion reason = %#v", got[designIndex].Metadata)
 }
 
 func TestWeightedFilesRetrieverV0_IncludesOpenSpecParentForStructureIntent(t *testing.T) {
@@ -1315,9 +1348,9 @@ func TestWeightedFilesRetrieverV0_IncludesOpenSpecParentForStructureIntent(t *te
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "OpenSpec change bundle for add-sso OAuth provider")
-	if !containsCandidatePath(got, "openspec/changes/add-sso") {
-		t.Fatalf("missing explicit OpenSpec parent bundle: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "openspec/changes/add-sso"),
+		"missing explicit OpenSpec parent bundle: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_ProductBackgroundAnchorsNamedSubject(t *testing.T) {
@@ -1333,26 +1366,22 @@ func TestWeightedFilesRetrieverV0_ProductBackgroundAnchorsNamedSubject(t *testin
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "product background for billing entitlements and customer access")
-	for _, want := range []string{
-		"docs/prd/billing-entitlements-v1.md",
-		"docs/adr/0001-use-stripe-as-billing-source.md",
-		"docs/adr/0002-webhook-idempotency-boundary.md",
-	} {
-		if !containsCandidatePath(got, want) {
-			t.Fatalf("missing %s: %#v", want, CandidatePaths(got))
-		}
-	}
-	for _, unwanted := range []string{
-		"docs/prd/billing-analytics-v1.md",
-		"docs/prd/customer-portal-v2.md",
-		"docs/adr/0004-admin-billing-overrides.md",
-		"services/api/src/billing/entitlements.ts",
-		"docs/plans/customer-access-notes.md",
-	} {
-		if containsCandidatePath(got, unwanted) {
-			t.Fatalf("%s should not be selected for product background: %#v", unwanted, CandidatePaths(got))
-		}
-	}
+	assert.True(t, containsCandidatePath(got, "docs/prd/billing-entitlements-v1.md"),
+		"missing billing entitlements PRD: %#v", CandidatePaths(got))
+	assert.True(t, containsCandidatePath(got, "docs/adr/0001-use-stripe-as-billing-source.md"),
+		"missing Stripe source ADR: %#v", CandidatePaths(got))
+	assert.True(t, containsCandidatePath(got, "docs/adr/0002-webhook-idempotency-boundary.md"),
+		"missing webhook idempotency ADR: %#v", CandidatePaths(got))
+	assert.False(t, containsCandidatePath(got, "docs/prd/billing-analytics-v1.md"),
+		"billing analytics PRD should not be selected: %#v", CandidatePaths(got))
+	assert.False(t, containsCandidatePath(got, "docs/prd/customer-portal-v2.md"),
+		"customer portal PRD should not be selected: %#v", CandidatePaths(got))
+	assert.False(t, containsCandidatePath(got, "docs/adr/0004-admin-billing-overrides.md"),
+		"admin override ADR should not be selected: %#v", CandidatePaths(got))
+	assert.False(t, containsCandidatePath(got, "services/api/src/billing/entitlements.ts"),
+		"implementation source should not be selected: %#v", CandidatePaths(got))
+	assert.False(t, containsCandidatePath(got, "docs/plans/customer-access-notes.md"),
+		"planning notes should not be selected: %#v", CandidatePaths(got))
 }
 
 func TestWeightedFilesRetrieverV0_BridgesArtifactPhrasesToAcronyms(t *testing.T) {
@@ -1381,12 +1410,11 @@ func TestWeightedFilesRetrieverV0_BridgesArtifactPhrasesToAcronyms(t *testing.T)
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "agent instructions for generating a product requirements document with user stories and acceptance criteria")
-	if !containsCandidatePath(got, "agents/prd.agent.md") {
-		t.Fatalf("missing PRD agent via product requirements document bridge: %#v", CandidatePaths(got))
-	}
-	if containsCandidatePath(got, "skills/reference/documentation-full.md") {
-		t.Fatalf("generic documentation should not beat PRD path/title match: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "agents/prd.agent.md"),
+		"missing PRD agent via product requirements document bridge: %#v", CandidatePaths(got))
+	require.False(t, containsCandidatePath(got, "skills/reference/documentation-full.md"),
+		"generic documentation should not beat PRD path/title match: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_UsesClassifierRoleForDesignDocs(t *testing.T) {
@@ -1415,14 +1443,13 @@ func TestWeightedFilesRetrieverV0_UsesClassifierRoleForDesignDocs(t *testing.T) 
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "architecture design for master worker api alert and dao modules")
-	if !containsCandidatePath(got, "docs/docs/en/architecture/design.md") {
-		t.Fatalf("missing classified architecture design doc: %#v", CandidatePaths(got))
-	}
-	for _, unwanted := range []string{"CLAUDE.md", "module/CLAUDE.md"} {
-		if containsCandidatePath(got, unwanted) {
-			t.Fatalf("%s should not appear for non-protocol design query: %#v", unwanted, CandidatePaths(got))
-		}
-	}
+	require.True(t, containsCandidatePath(got, "docs/docs/en/architecture/design.md"),
+		"missing classified architecture design doc: %#v", CandidatePaths(got))
+
+	assert.False(t, containsCandidatePath(got, "CLAUDE.md"),
+		"root instructions should not appear for non-protocol design query: %#v", CandidatePaths(got))
+	assert.False(t, containsCandidatePath(got, "module/CLAUDE.md"),
+		"module instructions should not appear for non-protocol design query: %#v", CandidatePaths(got))
 }
 
 func TestWeightedFilesRetrieverV0_IncludesProtocolGuidelinesWhenRequested(t *testing.T) {
@@ -1447,9 +1474,9 @@ func TestWeightedFilesRetrieverV0_IncludesProtocolGuidelinesWhenRequested(t *tes
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "add or update an AWS MCP server; follow the MCP server design guidelines first")
-	if !containsCandidatePath(got, "DESIGN_GUIDELINES.md") {
-		t.Fatalf("missing requested protocol guidelines: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "DESIGN_GUIDELINES.md"),
+		"missing requested protocol guidelines: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_PrefersRepositoryWideInstructionsWhenRequested(t *testing.T) {
@@ -1471,12 +1498,11 @@ func TestWeightedFilesRetrieverV0_PrefersRepositoryWideInstructionsWhenRequested
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "Claude Code repository instructions and development guidance")
-	if !containsCandidatePath(got, "CLAUDE.md") {
-		t.Fatalf("missing shallow repository instructions: %#v", CandidatePaths(got))
-	}
-	if containsCandidatePath(got, "service/CLAUDE.md") {
-		t.Fatalf("nested instructions should not backfill repository-wide instruction query: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "CLAUDE.md"),
+		"missing shallow repository instructions: %#v", CandidatePaths(got))
+	require.False(t, containsCandidatePath(got, "service/CLAUDE.md"),
+		"nested instructions should not backfill repository-wide instruction query: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_KeepsRoadmapPathSignal(t *testing.T) {
@@ -1491,13 +1517,13 @@ func TestWeightedFilesRetrieverV0_KeepsRoadmapPathSignal(t *testing.T) {
 
 	query := "roadmap for realtime multimodal voice agents, tool invocation, and production readiness"
 	score := scoreCandidate(candidates[0], expandedTerms(query), query)
-	if score < 4.0 {
-		t.Fatalf("roadmap score = %.2f, want retrievable", score)
-	}
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, query)
-	if !containsCandidatePath(got, "docs/roadmap.md") {
-		t.Fatalf("missing roadmap path signal: %#v", CandidatePaths(got))
-	}
+
+	require.GreaterOrEqual(t, score, 4.0,
+		"roadmap score = %.2f, want retrievable", score)
+	require.True(t, containsCandidatePath(got, "docs/roadmap.md"),
+		"missing roadmap path signal: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_AuthorityPriorDoesNotCreateUnrelatedMatches(t *testing.T) {
@@ -1511,9 +1537,9 @@ func TestWeightedFilesRetrieverV0_AuthorityPriorDoesNotCreateUnrelatedMatches(t 
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "oauth provider session handoff")
-	if len(got) != 0 {
-		t.Fatalf("authority prior should not rescue unrelated canonical docs: %#v", CandidatePaths(got))
-	}
+	require.Empty(t, got,
+		"authority prior should not rescue unrelated canonical docs: %#v", CandidatePaths(got))
+
 }
 
 func TestRankConceptCandidates_CompactTestIdentifier(t *testing.T) {
@@ -1533,12 +1559,12 @@ func TestRankConceptCandidates_CompactTestIdentifier(t *testing.T) {
 	}
 
 	ranks := RankConceptCandidates(candidates, "what tests cover testputandgetexposedtool behavior")
-	if len(ranks) == 0 || ranks[0].Path != "pkg/tools/exposed_tool_test.go#L24-L39" {
-		t.Fatalf("compact test identifier should rank first: %#v", ranks)
-	}
-	if !containsString(ranks[0].MatchedCompacts, "testputandgetexposedtool") {
-		t.Fatalf("missing compact diagnostic: %#v", ranks[0])
-	}
+	require.NotEmpty(t, ranks, "expected compact test identifier rank")
+	assert.Equal(t, "pkg/tools/exposed_tool_test.go#L24-L39", ranks[0].Path,
+		"compact test identifier should rank first: %#v", ranks)
+	assert.True(t, containsString(ranks[0].MatchedCompacts, "testputandgetexposedtool"),
+		"missing compact diagnostic: %#v", ranks[0])
+
 }
 
 func TestApplyConceptBackfill_AddsSpecificProductRequirementsDoc(t *testing.T) {
@@ -1561,14 +1587,13 @@ func TestApplyConceptBackfill_AddsSpecificProductRequirementsDoc(t *testing.T) {
 
 	query := "FluxNova AIGF requirements"
 	got := applyConceptBackfill(selected, universe, query, strings.ToLower(query), expandedTerms(query), 5, false, false)
-	if !containsCandidatePath(got, "docs/product-specs/fluxnova-aigf.md") {
-		t.Fatalf("missing specific product requirements backfill: %#v", CandidatePaths(got))
-	}
-	for _, c := range got {
-		if c.Path == "docs/product-specs/fluxnova-aigf.md" && c.Metadata["concept_backfill_score"] == "" {
-			t.Fatalf("missing concept backfill metadata: %#v", c.Metadata)
-		}
-	}
+	require.True(t, containsCandidatePath(got, "docs/product-specs/fluxnova-aigf.md"),
+		"missing specific product requirements backfill: %#v", CandidatePaths(got))
+
+	backfillIndex := candidatePathIndex(got, "docs/product-specs/fluxnova-aigf.md")
+	require.GreaterOrEqual(t, backfillIndex, 0)
+	assert.NotEmpty(t, got[backfillIndex].Metadata["concept_backfill_score"],
+		"missing concept backfill metadata: %#v", got[backfillIndex].Metadata)
 }
 
 func TestApplyConceptBackfill_IgnoresBroadTemplateNoise(t *testing.T) {
@@ -1584,9 +1609,9 @@ func TestApplyConceptBackfill_IgnoresBroadTemplateNoise(t *testing.T) {
 
 	query := "architecture requirements instructions"
 	got := applyConceptBackfill(nil, universe, query, strings.ToLower(query), expandedTerms(query), 5, false, false)
-	if len(got) != 0 {
-		t.Fatalf("broad query should not backfill template noise: %#v", CandidatePaths(got))
-	}
+	require.Empty(t, got,
+		"broad query should not backfill template noise: %#v", CandidatePaths(got))
+
 }
 
 func TestApplyConceptBackfillWithGlossary_SuppressesBroadRepoConcept(t *testing.T) {
@@ -1608,9 +1633,9 @@ func TestApplyConceptBackfillWithGlossary_SuppressesBroadRepoConcept(t *testing.
 
 	query := "CloudNativePG roadmap process"
 	got := applyConceptBackfill(nil, universe, query, strings.ToLower(query), expandedTerms(query), 5, true, false)
-	if len(got) != 0 {
-		t.Fatalf("glossary should suppress broad repo concept backfill: %#v", CandidatePaths(got))
-	}
+	require.Empty(t, got,
+		"glossary should suppress broad repo concept backfill: %#v", CandidatePaths(got))
+
 }
 
 func TestApplyConceptBackfillWithGlossary_KeepsRareProductConcept(t *testing.T) {
@@ -1633,14 +1658,13 @@ func TestApplyConceptBackfillWithGlossary_KeepsRareProductConcept(t *testing.T) 
 
 	query := "FluxNova AIGF requirements"
 	got := applyConceptBackfill(selected, universe, query, strings.ToLower(query), expandedTerms(query), 5, true, false)
-	if !containsCandidatePath(got, "calm-suite/calm-studio/docs/REQ_fluxnova_aigf_integration.md") {
-		t.Fatalf("glossary should preserve rare product concept backfill: %#v", CandidatePaths(got))
-	}
-	for _, c := range got {
-		if c.Path == "calm-suite/calm-studio/docs/REQ_fluxnova_aigf_integration.md" && c.Metadata["concept_glossary_enabled"] != "true" {
-			t.Fatalf("missing glossary metadata: %#v", c.Metadata)
-		}
-	}
+	require.True(t, containsCandidatePath(got, "calm-suite/calm-studio/docs/REQ_fluxnova_aigf_integration.md"),
+		"glossary should preserve rare product concept backfill: %#v", CandidatePaths(got))
+
+	backfillIndex := candidatePathIndex(got, "calm-suite/calm-studio/docs/REQ_fluxnova_aigf_integration.md")
+	require.GreaterOrEqual(t, backfillIndex, 0)
+	assert.Equal(t, "true", got[backfillIndex].Metadata["concept_glossary_enabled"],
+		"missing glossary metadata: %#v", got[backfillIndex].Metadata)
 }
 
 func TestApplyConceptBackfillWithGlossary_KeepsExactTestNameConcept(t *testing.T) {
@@ -1656,9 +1680,9 @@ func TestApplyConceptBackfillWithGlossary_KeepsExactTestNameConcept(t *testing.T
 
 	query := "what tests cover testputandgetexposedtool behavior"
 	got := applyConceptBackfill(nil, universe, query, strings.ToLower(query), expandedTerms(query), 5, true, false)
-	if !containsCandidatePath(got, "pkg/tools/exposed_tool_test.go#L24-L39") {
-		t.Fatalf("glossary should preserve exact test-name concept: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "pkg/tools/exposed_tool_test.go#L24-L39"),
+		"glossary should preserve exact test-name concept: %#v", CandidatePaths(got))
+
 }
 
 func TestConceptBackfillTier_PrimaryForExactTestName(t *testing.T) {
@@ -1678,9 +1702,9 @@ func TestConceptBackfillTier_PrimaryForExactTestName(t *testing.T) {
 	profile := buildConceptQueryProfile("what tests cover testputandgetexposedtool behavior")
 
 	tier, reason := conceptBackfillTier(rank, profile, profile.queryLower, true)
-	if tier != PackTierPrimary {
-		t.Fatalf("exact test-name concept should stay primary, tier=%q reason=%q", tier, reason)
-	}
+	require.Equal(t, PackTierPrimary, tier,
+		"exact test-name concept should stay primary, tier=%q reason=%q", tier, reason)
+
 }
 
 func TestApplyConceptBackfillTiered_DemotesPlausiblePlanToRelated(t *testing.T) {
@@ -1697,16 +1721,16 @@ func TestApplyConceptBackfillTiered_DemotesPlausiblePlanToRelated(t *testing.T) 
 
 	query := "billing entitlement rollout integration"
 	got := applyConceptBackfill(selected, universe, query, strings.ToLower(query), expandedTerms(query), 5, false, true)
-	for _, c := range got {
-		if c.Path != "docs/plans/billing-entitlement-rollout.md" {
+	var target *Candidate
+	for index := range got {
+		if got[index].Path != "docs/plans/billing-entitlement-rollout.md" {
 			continue
 		}
-		if c.Metadata["pack_tier"] != PackTierRelated {
-			t.Fatalf("plausible non-requested concept should be related, metadata=%#v", c.Metadata)
-		}
-		return
+		target = &got[index]
+		break
 	}
-	t.Fatalf("missing tiered concept backfill: %#v", CandidatePaths(got))
+	require.NotNil(t, target, "missing tiered concept backfill: %#v", CandidatePaths(got))
+	assert.Equal(t, PackTierRelated, target.Metadata["pack_tier"])
 }
 
 func TestWeightedFilesRetrieverV0_AuthorityPriorRanksCanonicalCurrentArtifacts(t *testing.T) {
@@ -1730,9 +1754,9 @@ func TestWeightedFilesRetrieverV0_AuthorityPriorRanksCanonicalCurrentArtifacts(t
 
 	canonicalScore := scoreCandidate(canonical, terms, queryLower) + authorityPrior(canonical, candidateRole(canonical), queryLower).score
 	archivedScore := scoreCandidate(archived, terms, queryLower) + authorityPrior(archived, candidateRole(archived), queryLower).score
-	if canonicalScore <= archivedScore {
-		t.Fatalf("canonical score %.2f should beat archived score %.2f", canonicalScore, archivedScore)
-	}
+	require.Greater(t, canonicalScore, archivedScore,
+		"canonical score %.2f should beat archived score %.2f", canonicalScore, archivedScore)
+
 }
 
 func TestWeightedFilesRetrieverV0_RanksActiveIntentAboveBlockedHistoricalPlan(t *testing.T) {
@@ -1767,30 +1791,113 @@ func TestWeightedFilesRetrieverV0_RanksActiveIntentAboveBlockedHistoricalPlan(t 
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, query)
-	if len(got) == 0 {
-		t.Fatal("expected matches")
-	}
+	require.NotEmpty(t, got,
+		"expected matches")
+
 	topTwo := CandidatePaths(got)
 	if len(topTwo) > 2 {
 		topTwo = topTwo[:2]
 	}
-	if !containsString(topTwo, "docs/notes/next_epoch_decision_memo.md") || !containsString(topTwo, "docs/north_star.md") {
-		t.Fatalf("active decision docs should outrank historical plans, got %#v", CandidatePaths(got))
-	}
+	assert.True(t, containsString(topTwo, "docs/notes/next_epoch_decision_memo.md"),
+		"active decision memo should rank in the top two, got %#v", CandidatePaths(got))
+	assert.True(t, containsString(topTwo, "docs/north_star.md"),
+		"active decision docs should outrank historical plans, got %#v", CandidatePaths(got))
+
 	blockedIndex := candidatePathIndex(got, "docs/plans/D4.2-blocked-external-validity-bridge.md")
 	activeIndex := candidatePathIndex(got, "docs/notes/next_epoch_decision_memo.md")
-	if blockedIndex >= 0 && activeIndex >= 0 && blockedIndex < activeIndex {
-		t.Fatalf("blocked historical plan outranked active intent: %#v", CandidatePaths(got))
+	if blockedIndex >= 0 && activeIndex >= 0 {
+		assert.Greater(t, blockedIndex, activeIndex,
+			"blocked historical plan outranked active intent: %#v", CandidatePaths(got))
 	}
-	reasons := ExplainCandidates([]Candidate{candidates[1]}, query)
-	if len(reasons) == 0 || !reasonContains(reasons[0].Reasons, "authority prior: owner decision record") {
-		t.Fatalf("missing owner decision authority reason: %#v", reasons)
-	}
+
 }
 
-func TestWeightedFilesRetrieverV0_BrownfieldRecoveryBeforeAndAfterCurrentDecisionDocs(t *testing.T) {
+func TestExplainCandidates_ActiveOwnerDecisionReportsAuthorityPrior(t *testing.T) {
 	query := "epoch 4 external validity bridge"
-	beforeCurrentDocs := []Candidate{
+	candidates := []Candidate{{
+		Path:   "docs/notes/next_epoch_decision_memo.md",
+		Kind:   "plan",
+		Title:  "Epoch 4 external validity bridge decision memo",
+		Status: "next",
+		Body:   "Status: next\nOwner decision: Epoch 4 external validity bridge is the active work.",
+	}}
+
+	reasons := ExplainCandidates(candidates, query)
+
+	require.NotEmpty(t, reasons, "missing owner decision reasons")
+	assert.True(t, reasonContains(reasons[0].Reasons, "authority prior: owner decision record"),
+		"missing owner decision authority reason: %#v", reasons)
+
+}
+
+func TestWeightedFilesRetrieverV0_BrownfieldRecoveryWithoutCurrentDecisionDocsKeepsBlockedPlanVisible(t *testing.T) {
+	query := "epoch 4 external validity bridge"
+	candidates := brownfieldRecoveryHistoricalCandidates()
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, query)
+
+	assert.True(t, containsCandidatePath(got, "docs/plans/D4.2-blocked-external-validity-bridge.md"),
+		"blocked historical plan should remain visible when no current decision artifact exists, got %#v", CandidatePaths(got))
+}
+
+func TestExplainCandidates_BrownfieldRecoveryBlockedPlanExplainsInactiveLifecycle(t *testing.T) {
+	query := "epoch 4 external validity bridge"
+	candidates := brownfieldRecoveryHistoricalCandidates()
+
+	reasons := ExplainCandidates([]Candidate{candidates[0]}, query)
+
+	require.NotEmpty(t, reasons, "missing blocked plan reasons")
+	assert.True(t, reasonContains(reasons[0].Reasons, "authority prior: blocked, closed, stale, or superseded"),
+		"blocked historical plan should explain inactive lifecycle, got %#v", reasons)
+}
+
+func TestWeightedFilesRetrieverV0_BrownfieldRecoveryWithCurrentDecisionDocsPrefersCurrentAnchors(t *testing.T) {
+	query := "epoch 4 external validity bridge"
+	candidates := append(brownfieldRecoveryHistoricalCandidates(),
+		Candidate{
+			Path:   "docs/notes/next_epoch_decision_memo.md",
+			Kind:   "plan",
+			Title:  "Epoch 4 external validity bridge decision memo",
+			Status: "next",
+			Body:   "Status: next\nOwner decision: Epoch 4 external validity bridge is the active bridge work.",
+		},
+		Candidate{
+			Path:  "docs/north_star.md",
+			Kind:  "plan",
+			Title: "Research north star",
+			Body:  "Active phase: Epoch 4 external validity bridge. Route current implementation slices here.",
+		},
+	)
+
+	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, query)
+
+	topTwo := CandidatePaths(got)
+	if len(topTwo) > 2 {
+		topTwo = topTwo[:2]
+	}
+	assert.True(t, containsString(topTwo, "docs/notes/next_epoch_decision_memo.md"),
+		"decision memo should become a brownfield recovery anchor: %#v", CandidatePaths(got))
+	assert.True(t, containsString(topTwo, "docs/north_star.md"),
+		"north star should become a brownfield recovery anchor: %#v", CandidatePaths(got))
+
+	northStarIndex := candidatePathIndex(got, "docs/north_star.md")
+	require.GreaterOrEqual(t, northStarIndex, 0, "missing north star: %#v", CandidatePaths(got))
+	assert.NotEmpty(t, got[northStarIndex].Metadata["current_intent_anchor_reason"],
+		"active phase doc should carry current-intent anchor metadata, got %#v", got)
+
+	blockedIndex := candidatePathIndex(got, "docs/plans/D4.2-blocked-external-validity-bridge.md")
+	decisionIndex := candidatePathIndex(got, "docs/notes/next_epoch_decision_memo.md")
+	require.GreaterOrEqual(t, blockedIndex, 0, "missing blocked historical plan: %#v", CandidatePaths(got))
+	require.GreaterOrEqual(t, decisionIndex, 0, "missing current decision memo: %#v", CandidatePaths(got))
+	assert.Greater(t, blockedIndex, decisionIndex,
+		"blocked historical plan outranked current decision doc after it existed: %#v", CandidatePaths(got))
+	assert.NotEmpty(t, got[blockedIndex].Metadata["current_intent_demotion_reason"],
+		"blocked historical plan should carry current-intent demotion metadata, got %#v", got[blockedIndex].Metadata)
+
+}
+
+func brownfieldRecoveryHistoricalCandidates() []Candidate {
+	return []Candidate{
 		{
 			Path:   "docs/plans/D4.2-blocked-external-validity-bridge.md",
 			Kind:   "plan",
@@ -1811,53 +1918,6 @@ func TestWeightedFilesRetrieverV0_BrownfieldRecoveryBeforeAndAfterCurrentDecisio
 			Title: "PLAN-008.1 synthetic repo world",
 			Body:  "Historical external validity analogy for synthetic repo world experiments.",
 		},
-	}
-
-	before := (WeightedFilesRetrieverV0{}).Retrieve(beforeCurrentDocs, query)
-	if !containsCandidatePath(before, "docs/plans/D4.2-blocked-external-validity-bridge.md") {
-		t.Fatalf("blocked historical plan should remain visible when no current decision artifact exists, got %#v", CandidatePaths(before))
-	}
-	beforeReasons := ExplainCandidates([]Candidate{beforeCurrentDocs[0]}, query)
-	if len(beforeReasons) == 0 || !reasonContains(beforeReasons[0].Reasons, "authority prior: blocked, closed, stale, or superseded") {
-		t.Fatalf("blocked historical plan should explain inactive lifecycle, got %#v", beforeReasons)
-	}
-
-	afterCurrentDocs := append([]Candidate{}, beforeCurrentDocs...)
-	afterCurrentDocs = append(afterCurrentDocs,
-		Candidate{
-			Path:   "docs/notes/next_epoch_decision_memo.md",
-			Kind:   "plan",
-			Title:  "Epoch 4 external validity bridge decision memo",
-			Status: "next",
-			Body:   "Status: next\nOwner decision: Epoch 4 external validity bridge is the active bridge work.",
-		},
-		Candidate{
-			Path:  "docs/north_star.md",
-			Kind:  "plan",
-			Title: "Research north star",
-			Body:  "Active phase: Epoch 4 external validity bridge. Route current implementation slices here.",
-		},
-	)
-
-	after := (WeightedFilesRetrieverV0{}).Retrieve(afterCurrentDocs, query)
-	topTwo := CandidatePaths(after)
-	if len(topTwo) > 2 {
-		topTwo = topTwo[:2]
-	}
-	if !containsString(topTwo, "docs/notes/next_epoch_decision_memo.md") || !containsString(topTwo, "docs/north_star.md") {
-		t.Fatalf("current decision docs should become the brownfield recovery anchors, paths=%#v candidates=%#v", CandidatePaths(after), after)
-	}
-	northStarIndex := candidatePathIndex(after, "docs/north_star.md")
-	if northStarIndex < 0 || after[northStarIndex].Metadata["current_intent_anchor_reason"] == "" {
-		t.Fatalf("active phase doc should carry current-intent anchor metadata, got %#v", after)
-	}
-	blockedIndex := candidatePathIndex(after, "docs/plans/D4.2-blocked-external-validity-bridge.md")
-	decisionIndex := candidatePathIndex(after, "docs/notes/next_epoch_decision_memo.md")
-	if blockedIndex >= 0 && decisionIndex >= 0 && blockedIndex < decisionIndex {
-		t.Fatalf("blocked historical plan outranked current decision doc after it existed: %#v", CandidatePaths(after))
-	}
-	if blockedIndex >= 0 && after[blockedIndex].Metadata["current_intent_demotion_reason"] == "" {
-		t.Fatalf("blocked historical plan should carry current-intent demotion metadata, got %#v", after[blockedIndex].Metadata)
 	}
 }
 
@@ -1897,22 +1957,38 @@ func TestWeightedFilesRetrieverV0_ExactPlanIDKeepsDirectArtifactAndLinkedNeighbo
 	direct := candidatePathIndex(got, "docs/plans/PLAN-EV-R1-external-validity-bridge.md")
 	neighbor := candidatePathIndex(got, "docs/plans/PLAN-EV00-index.md")
 	historical := candidatePathIndex(got, "docs/plans/PLAN-008.1-synthetic-repo-world.md")
-	if direct != 0 {
-		t.Fatalf("direct exact ID artifact should rank first, got %#v", paths)
+	require.Equal(t, 0, direct,
+		"direct exact ID artifact should rank first, got %#v", paths)
+	require.GreaterOrEqual(t, neighbor, 0,
+		"explicit EV-R1 neighbor should be retained, got %#v", paths)
+	if historical >= 0 {
+		assert.Greater(t, historical, neighbor,
+			"historical analog outranked explicit neighbor: %#v", paths)
+		assert.Equal(t, PackTierRelated, got[historical].Metadata["pack_tier"],
+			"historical analog should be related in exact ID mode, metadata=%#v", got[historical].Metadata)
 	}
-	if neighbor < 0 {
-		t.Fatalf("explicit EV-R1 neighbor should be retained, got %#v", paths)
-	}
-	if historical >= 0 && historical < neighbor {
-		t.Fatalf("historical analog outranked explicit neighbor: %#v", paths)
-	}
-	if historical >= 0 && got[historical].Metadata["pack_tier"] != PackTierRelated {
-		t.Fatalf("historical analog should be related in exact ID mode, metadata=%#v", got[historical].Metadata)
-	}
-	reasons := ExplainCandidates([]Candidate{got[direct]}, query)
-	if len(reasons) == 0 || !reasonContainsPrefix(reasons[0].Reasons, "exact intent ID:") {
-		t.Fatalf("missing exact intent ID reason: %#v", reasons)
-	}
+
+}
+
+func TestExplainCandidates_ExactPlanIDReportsIntentIDReason(t *testing.T) {
+	query := "EV-R1 external validity bridge"
+	candidates := []Candidate{{
+		Path:   "docs/plans/PLAN-EV-R1-external-validity-bridge.md",
+		Kind:   "plan",
+		Title:  "PLAN-EV-R1: external validity bridge",
+		Status: "next",
+		Body:   "Status: next\nImplement the EV-R1 external validity bridge.",
+		Metadata: map[string]string{
+			"exact_intent_id_reasons": "query exact intent ID EV-R1 matched artifact",
+		},
+	}}
+
+	reasons := ExplainCandidates(candidates, query)
+
+	require.NotEmpty(t, reasons, "missing exact intent ID reasons")
+	assert.True(t, reasonContainsPrefix(reasons[0].Reasons, "exact intent ID:"),
+		"missing exact intent ID reason: %#v", reasons)
+
 }
 
 func TestWeightedFilesRetrieverV0_ExactPlanIDModeDoesNotDampenWhenIDAbsent(t *testing.T) {
@@ -1933,13 +2009,13 @@ func TestWeightedFilesRetrieverV0_ExactPlanIDModeDoesNotDampenWhenIDAbsent(t *te
 	}
 
 	got := (WeightedFilesRetrieverV0{AnchorFirstRanking: true}).Retrieve(candidates, query)
-	if len(got) == 0 {
-		t.Fatal("expected useful results even when the exact ID is absent")
-	}
+	require.NotEmpty(t, got,
+		"expected useful results even when the exact ID is absent")
+
 	for _, candidate := range got {
-		if candidate.Metadata["exact_intent_id_score"] != "" {
-			t.Fatalf("exact ID mode should not mark candidates when no exact ID exists, got %#v", candidate.Metadata)
-		}
+		require.Equal(t, "", candidate.Metadata["exact_intent_id_score"],
+			"exact ID mode should not mark candidates when no exact ID exists, got %#v", candidate.Metadata)
+
 	}
 }
 
@@ -1957,12 +2033,11 @@ func TestExplainCandidatesIncludesAuthorityPriorReason(t *testing.T) {
 	}
 
 	reasons := ExplainCandidates(candidates, "why billing source decision")
-	if len(reasons) != 1 {
-		t.Fatalf("reasons = %#v", reasons)
-	}
-	if !reasonContains(reasons[0].Reasons, "authority prior: canonical ADR path") {
-		t.Fatalf("missing authority reason: %#v", reasons[0].Reasons)
-	}
+	require.Len(t, reasons, 1,
+		"reasons = %#v", reasons)
+	require.True(t, reasonContains(reasons[0].Reasons, "authority prior: canonical ADR path"),
+		"missing authority reason: %#v", reasons[0].Reasons)
+
 }
 
 func TestExplainCandidatesIncludesClassifierAuthorityPrior(t *testing.T) {
@@ -1977,12 +2052,11 @@ func TestExplainCandidatesIncludesClassifierAuthorityPrior(t *testing.T) {
 	}
 
 	reasons := ExplainCandidates(candidates, "api migration roadmap")
-	if len(reasons) != 1 {
-		t.Fatalf("reasons = %#v", reasons)
-	}
-	if !reasonContains(reasons[0].Reasons, "authority prior: classifier working-plan authority") {
-		t.Fatalf("missing classifier authority reason: %#v", reasons[0].Reasons)
-	}
+	require.Len(t, reasons, 1,
+		"reasons = %#v", reasons)
+	require.True(t, reasonContains(reasons[0].Reasons, "authority prior: classifier working-plan authority"),
+		"missing classifier authority reason: %#v", reasons[0].Reasons)
+
 }
 
 func TestAuthorityCuesAreSparse(t *testing.T) {
@@ -1995,12 +2069,11 @@ func TestAuthorityCuesAreSparse(t *testing.T) {
 	}
 
 	cues := AuthorityCues(candidate)
-	if len(cues) != 2 {
-		t.Fatalf("cues = %#v", cues)
-	}
-	if cues[0] != "decision authority" || cues[1] != "accepted" {
-		t.Fatalf("cues = %#v", cues)
-	}
+	require.Len(t, cues, 2,
+		"cues = %#v", cues)
+	assert.Equal(t, "decision authority", cues[0])
+	assert.Equal(t, "accepted", cues[1])
+
 }
 
 func TestWeightedFilesRetrieverV0_CollapsesLocalizedMirror(t *testing.T) {
@@ -2020,12 +2093,11 @@ func TestWeightedFilesRetrieverV0_CollapsesLocalizedMirror(t *testing.T) {
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "architecture design for billing boundary entitlement sync")
-	if containsCandidatePath(got, "docs/zh/architecture/billing-boundary.md") {
-		t.Fatalf("localized mirror should be collapsed: %#v", CandidatePaths(got))
-	}
-	if !containsCandidatePath(got, "docs/en/architecture/billing-boundary.md") {
-		t.Fatalf("missing default-language candidate: %#v", CandidatePaths(got))
-	}
+	require.False(t, containsCandidatePath(got, "docs/zh/architecture/billing-boundary.md"),
+		"localized mirror should be collapsed: %#v", CandidatePaths(got))
+	require.True(t, containsCandidatePath(got, "docs/en/architecture/billing-boundary.md"),
+		"missing default-language candidate: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_CollapsesArchiveCurrentVariant(t *testing.T) {
@@ -2045,15 +2117,13 @@ func TestWeightedFilesRetrieverV0_CollapsesArchiveCurrentVariant(t *testing.T) {
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "architecture design for billing boundary entitlement sync")
-	if containsCandidatePath(got, "docs/archive/architecture/billing-boundary.md") {
-		t.Fatalf("archive variant should be collapsed: %#v", CandidatePaths(got))
-	}
-	if !containsCandidatePath(got, "docs/architecture/billing-boundary.md") {
-		t.Fatalf("missing current candidate: %#v", CandidatePaths(got))
-	}
-	if got[0].Metadata["variant_collapsed_count"] != "1" {
-		t.Fatalf("missing collapsed metadata: %#v", got[0].Metadata)
-	}
+	require.False(t, containsCandidatePath(got, "docs/archive/architecture/billing-boundary.md"),
+		"archive variant should be collapsed: %#v", CandidatePaths(got))
+	require.True(t, containsCandidatePath(got, "docs/architecture/billing-boundary.md"),
+		"missing current candidate: %#v", CandidatePaths(got))
+	require.Equal(t, "1", got[0].Metadata["variant_collapsed_count"],
+		"missing collapsed metadata: %#v", got[0].Metadata)
+
 }
 
 func TestWeightedFilesRetrieverV0_PreservesRequestedArchiveVariant(t *testing.T) {
@@ -2073,9 +2143,9 @@ func TestWeightedFilesRetrieverV0_PreservesRequestedArchiveVariant(t *testing.T)
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "historical archive docs/archive/architecture/billing-boundary.md")
-	if !containsCandidatePath(got, "docs/archive/architecture/billing-boundary.md") {
-		t.Fatalf("explicitly requested archive variant should remain visible: %#v", CandidatePaths(got))
-	}
+	require.True(t, containsCandidatePath(got, "docs/archive/architecture/billing-boundary.md"),
+		"explicitly requested archive variant should remain visible: %#v", CandidatePaths(got))
+
 }
 
 func TestWeightedFilesRetrieverV0_CollapsesTemplateInstanceVariant(t *testing.T) {
@@ -2097,12 +2167,11 @@ func TestWeightedFilesRetrieverV0_CollapsesTemplateInstanceVariant(t *testing.T)
 	}
 
 	got := (WeightedFilesRetrieverV0{}).Retrieve(candidates, "billing product requirements entitlement sync")
-	if containsCandidatePath(got, "docs/templates/product/billing-prd.md") {
-		t.Fatalf("template variant should be collapsed for non-template query: %#v", CandidatePaths(got))
-	}
-	if !containsCandidatePath(got, "docs/product/billing-prd.md") {
-		t.Fatalf("missing concrete PRD instance: %#v", CandidatePaths(got))
-	}
+	require.False(t, containsCandidatePath(got, "docs/templates/product/billing-prd.md"),
+		"template variant should be collapsed for non-template query: %#v", CandidatePaths(got))
+	require.True(t, containsCandidatePath(got, "docs/product/billing-prd.md"),
+		"missing concrete PRD instance: %#v", CandidatePaths(got))
+
 }
 
 func TestExtractMarkdownSectionsTracksStructureAndSignals(t *testing.T) {
@@ -2123,27 +2192,25 @@ func TestExtractMarkdownSectionsTracksStructureAndSignals(t *testing.T) {
 	}, "\n")
 
 	sections := extractMarkdownSections(body)
-	if len(sections) != 3 {
-		t.Fatalf("sections = %#v", sections)
-	}
-	if sections[1].HeadingPath != "Root > Plan" {
-		t.Fatalf("nested heading path = %q", sections[1].HeadingPath)
-	}
-	if sections[1].Frontmatter["status"] != "accepted" || sections[1].Frontmatter["owner"] != "platform" {
-		t.Fatalf("frontmatter not inherited: %#v", sections[1].Frontmatter)
-	}
-	if len(sections[1].Tasks) != 1 || !strings.Contains(sections[1].Tasks[0], "billing worker") {
-		t.Fatalf("tasks = %#v", sections[1].Tasks)
-	}
-	if len(sections[2].AcceptanceCriteria) == 0 {
-		t.Fatalf("missing acceptance criteria: %#v", sections[2])
-	}
-	if strings.Contains(sections[2].HeadingPath, "Not A Heading") {
-		t.Fatalf("code fence heading leaked into section path: %#v", sections)
-	}
-	if len(sections[0].Links) != 1 || sections[0].Links[0] != "docs/design.md" {
-		t.Fatalf("links = %#v", sections[0].Links)
-	}
+	require.Len(t, sections, 3,
+		"sections = %#v", sections)
+	assert.Equal(t, "Root > Plan", sections[1].HeadingPath,
+		"nested heading path = %q", sections[1].HeadingPath)
+	assert.Equal(t, "accepted", sections[1].Frontmatter["status"],
+		"status frontmatter not inherited: %#v", sections[1].Frontmatter)
+	assert.Equal(t, "platform", sections[1].Frontmatter["owner"],
+		"owner frontmatter not inherited: %#v", sections[1].Frontmatter)
+	require.Len(t, sections[1].Tasks, 1,
+		"tasks = %#v", sections[1].Tasks)
+	assert.Contains(t, sections[1].Tasks[0], "billing worker")
+	assert.NotEmpty(t, sections[2].AcceptanceCriteria,
+		"missing acceptance criteria: %#v", sections[2])
+	assert.NotContains(t, sections[2].HeadingPath, "Not A Heading",
+		"code fence heading leaked into section path: %#v", sections)
+	require.Len(t, sections[0].Links, 1,
+		"links = %#v", sections[0].Links)
+	assert.Equal(t, "docs/design.md", sections[0].Links[0])
+
 }
 
 func TestPackCandidateSectionsSelectsRelevantLargeSections(t *testing.T) {
@@ -2163,18 +2230,17 @@ func TestPackCandidateSectionsSelectsRelevantLargeSections(t *testing.T) {
 	}
 
 	got := packCandidateSection(candidate, "stripe_event_id idempotency", expandedTerms("stripe_event_id idempotency"))
-	if got.Metadata["section_pack_mode"] != "sections" {
-		t.Fatalf("expected section-packed candidate, metadata=%#v body=%s", got.Metadata, got.Body)
-	}
-	if !strings.Contains(got.Body, "### Billing Boundary") {
-		t.Fatalf("packed body missing selected heading: %s", got.Body)
-	}
-	if !strings.Contains(got.Body, "Source: docs/rfcs/webhook-replay.md") || !strings.Contains(got.Body, "Lines:") {
-		t.Fatalf("packed body missing source/line citation: %s", got.Body)
-	}
-	if strings.Contains(got.Body, "irrelevant appendix sentence") {
-		t.Fatalf("packed body retained unrelated appendix: %s", got.Body)
-	}
+	assert.Equal(t, "sections", got.Metadata["section_pack_mode"],
+		"expected section-packed candidate, metadata=%#v body=%s", got.Metadata, got.Body)
+	assert.Contains(t, got.Body, "### Billing Boundary",
+		"packed body missing selected heading: %s", got.Body)
+	assert.Contains(t, got.Body, "Source: docs/rfcs/webhook-replay.md",
+		"packed body missing source citation: %s", got.Body)
+	assert.Contains(t, got.Body, "Lines:",
+		"packed body missing line citation: %s", got.Body)
+	assert.NotContains(t, got.Body, "irrelevant appendix sentence",
+		"packed body retained unrelated appendix: %s", got.Body)
+
 }
 
 func TestPackCandidateSectionsFallsBackForShortFiles(t *testing.T) {
@@ -2184,12 +2250,13 @@ func TestPackCandidateSectionsFallsBackForShortFiles(t *testing.T) {
 	}
 
 	got := packCandidateSection(candidate, "stripe_event_id idempotency", expandedTerms("stripe_event_id idempotency"))
-	if got.Metadata != nil && got.Metadata["section_pack_mode"] != "" {
-		t.Fatalf("short file should not be section packed: %#v", got.Metadata)
+	if got.Metadata != nil {
+		assert.Empty(t, got.Metadata["section_pack_mode"],
+			"short file should not be section packed: %#v", got.Metadata)
 	}
-	if got.Body != candidate.Body {
-		t.Fatalf("body changed for short file")
-	}
+	assert.Equal(t, candidate.Body, got.Body,
+		"body changed for short file")
+
 }
 
 func reasonContains(reasons []string, want string) bool {
@@ -2218,6 +2285,15 @@ func candidatePathIndex(candidates []Candidate, path string) int {
 	for i, c := range candidates {
 		if c.Path == path {
 			return i
+		}
+	}
+	return -1
+}
+
+func reasonPathIndex(reasons []Reason, path string) int {
+	for index, reason := range reasons {
+		if reason.Path == path {
+			return index
 		}
 	}
 	return -1

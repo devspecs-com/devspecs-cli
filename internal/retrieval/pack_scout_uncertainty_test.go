@@ -3,6 +3,9 @@ package retrieval
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestApplyScoutUncertaintyForQueryWarnsOnThinSourceAndMissingAnchor(t *testing.T) {
@@ -26,16 +29,15 @@ func TestApplyScoutUncertaintyForQueryWarnsOnThinSourceAndMissingAnchor(t *testi
 	}
 
 	got := ApplyScoutUncertaintyForQuery(pack, "Fix selection disappearing")
-	if got.Metadata[PackScoutUncertaintyKey] != "true" {
-		t.Fatalf("missing uncertainty metadata: %#v", got.Metadata)
-	}
+	require.Equal(t, "true", got.Metadata[PackScoutUncertaintyKey],
+		"missing uncertainty metadata: %#v", got.Metadata)
+
 	reasons := got.Metadata[PackScoutUncertaintyReasonsKey]
-	if !strings.Contains(reasons, "implementation surface is thin") {
-		t.Fatalf("missing thin source warning: %q", reasons)
-	}
-	if !strings.Contains(reasons, "disappear") {
-		t.Fatalf("missing query-anchor warning: %q", reasons)
-	}
+	require.True(t, strings.Contains(reasons, "implementation surface is thin"),
+		"missing thin source warning: %q", reasons)
+	require.True(t, strings.Contains(reasons, "disappear"),
+		"missing query-anchor warning: %q", reasons)
+
 }
 
 func TestApplyScoutUncertaintyForQuerySkipsBalancedSourceTestPack(t *testing.T) {
@@ -57,9 +59,10 @@ func TestApplyScoutUncertaintyForQuerySkipsBalancedSourceTestPack(t *testing.T) 
 	}
 
 	got := ApplyScoutUncertaintyForQuery(pack, "Handle RDS clusters without instances in AWS discovery")
-	if got.Metadata != nil && got.Metadata[PackScoutUncertaintyKey] == "true" {
-		t.Fatalf("balanced source/test pack should not warn: %#v", got.Metadata)
+	if got.Metadata != nil {
+		assert.NotEqual(t, "true", got.Metadata[PackScoutUncertaintyKey])
 	}
+
 }
 
 func TestApplyScoutUncertaintyForQueryDoesNotWarnWhenSingleTestSupportsBroadSourcePack(t *testing.T) {
@@ -84,9 +87,10 @@ func TestApplyScoutUncertaintyForQueryDoesNotWarnWhenSingleTestSupportsBroadSour
 	}
 
 	got := ApplyScoutUncertaintyForQuery(pack, "upgrade old HTTPie session files and bind legacy cookies to the current host")
-	if got.Metadata != nil && got.Metadata[PackScoutUncertaintyKey] == "true" {
-		t.Fatalf("single supporting test should not warn by itself: %#v", got.Metadata)
+	if got.Metadata != nil {
+		assert.NotEqual(t, "true", got.Metadata[PackScoutUncertaintyKey])
 	}
+
 }
 
 func TestApplyScoutUncertaintyForQueryWarnsWhenSingleTestFamilyLacksSourceSupport(t *testing.T) {
@@ -110,14 +114,13 @@ func TestApplyScoutUncertaintyForQueryWarnsWhenSingleTestFamilyLacksSourceSuppor
 	}
 
 	got := ApplyScoutUncertaintyForQuery(pack, "[ty] Add function parentheses completion")
-	if got.Metadata[PackScoutUncertaintyKey] != "true" {
-		t.Fatalf("missing uncertainty metadata: %#v", got.Metadata)
-	}
+	require.Equal(t, "true", got.Metadata[PackScoutUncertaintyKey],
+		"missing uncertainty metadata: %#v", got.Metadata)
+
 	reasons := got.Metadata[PackScoutUncertaintyReasonsKey]
-	if !strings.Contains(reasons, "visible behavior test is not backed") {
-		t.Fatalf("missing source-family gap warning: %q", reasons)
-	}
-	if !strings.Contains(reasons, "completion") {
-		t.Fatalf("missing test family root in warning: %q", reasons)
-	}
+	require.True(t, strings.Contains(reasons, "visible behavior test is not backed"),
+		"missing source-family gap warning: %q", reasons)
+	require.True(t, strings.Contains(reasons, "completion"),
+		"missing test family root in warning: %q", reasons)
+
 }

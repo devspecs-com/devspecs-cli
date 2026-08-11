@@ -12,6 +12,8 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSourceCompanionAdmissionDerivesCommonStemsAndImports(t *testing.T) {
@@ -31,25 +33,19 @@ func TestSourceCompanionAdmissionDerivesCommonStemsAndImports(t *testing.T) {
 		{RelPath: "tests/test_publish_keys.py"},
 		{RelPath: "src/test/java/com/acme/FooTest.java"},
 	}, nil)
+	require.NotNil(t, diagnostics)
+	assert.Positive(t, diagnostics.Admitted)
 
-	if diagnostics == nil || diagnostics.Admitted == 0 {
-		t.Fatalf("expected companion diagnostics and admissions, got %#v", diagnostics)
-	}
 	got := companionCandidatePaths(companions)
-	for _, want := range []string{
-		"internal/auth/session.go",
-		"src/ui/webhooks.ts",
-		"scripts/publish_keys.py",
-		"src/main/java/com/acme/Foo.java",
-	} {
-		if !got[want] {
-			t.Fatalf("missing companion %s in %#v", want, got)
-		}
-	}
+	require.Len(t, got, 4)
+	assert.True(t, got["internal/auth/session.go"])
+	assert.True(t, got["src/ui/webhooks.ts"])
+	assert.True(t, got["scripts/publish_keys.py"])
+	assert.True(t, got["src/main/java/com/acme/Foo.java"])
 	for _, companion := range companions {
-		if companion.Metadata["admission_reason"] != sourceCompanionAdmissionReason {
-			t.Fatalf("missing admission metadata on %#v", companion)
-		}
+		require.Equal(t, sourceCompanionAdmissionReason, companion.Metadata["admission_reason"],
+			"missing admission metadata on %#v", companion)
+
 	}
 }
 
@@ -61,18 +57,10 @@ func TestSourceCompanionAdmissionRejectsUnsafeAndTestLike(t *testing.T) {
 	writeCompanionTestFile(t, root, "src/vendor/pkg/client.ts", "export const client = true\n")
 
 	diagnostics, companions := buildTestSourceCompanionCandidates(context.Background(), root, []adapters.Candidate{{RelPath: "src/foo/foo.test.ts"}, {RelPath: "src/bar/bar.test.ts"}}, nil)
-	if len(companions) != 0 {
-		t.Fatalf("unsafe/test-like companions should not be admitted: %#v", companions)
-	}
-	if diagnostics == nil {
-		t.Fatal("expected diagnostics")
-	}
-	if diagnostics.RejectedByReason["test_like_source"] == 0 {
-		t.Fatalf("expected test-like rejection: %#v", diagnostics.RejectedByReason)
-	}
-	if diagnostics.RejectedByReason["generated_vendor_or_build"] == 0 {
-		t.Fatalf("expected vendor/build rejection: %#v", diagnostics.RejectedByReason)
-	}
+	assert.Empty(t, companions)
+	require.NotNil(t, diagnostics)
+	assert.Positive(t, diagnostics.RejectedByReason["test_like_source"])
+	assert.Positive(t, diagnostics.RejectedByReason["generated_vendor_or_build"])
 }
 
 func TestSourceCompanionAdmissionDedupesExistingSourceCandidates(t *testing.T) {
@@ -84,13 +72,9 @@ func TestSourceCompanionAdmissionDedupesExistingSourceCandidates(t *testing.T) {
 		[]adapters.Candidate{{RelPath: "src/rules_test.go"}},
 		[]adapters.Candidate{{RelPath: "src/rules.go"}},
 	)
-
-	if len(companions) != 0 {
-		t.Fatalf("existing source candidate should not be duplicated: %#v", companions)
-	}
-	if diagnostics == nil || diagnostics.AlreadyPresent != 1 {
-		t.Fatalf("expected already-present count, got %#v", diagnostics)
-	}
+	assert.Empty(t, companions)
+	require.NotNil(t, diagnostics)
+	assert.Equal(t, 1, diagnostics.AlreadyPresent)
 }
 
 func TestScanAdmitsTestSourceCompanionsAndBuildsEdges(t *testing.T) {
@@ -99,22 +83,17 @@ func TestScanAdmitsTestSourceCompanionsAndBuildsEdges(t *testing.T) {
 	writeCompanionTestFile(t, root, "services/auth/session_test.go", "package auth\nimport \"testing\"\nfunc TestSession(t *testing.T) { RotateToken() }\n")
 
 	db, err := store.Open(filepath.Join(t.TempDir(), "devspecs.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 
 	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}, &testcase.Adapter{}})
 	result, err := scanner.RunWithOptions(context.Background(), root, config.WithTestCaseArtifacts(config.DefaultRepoConfig(), true), RunOptions{SkipAuthoredAtLookup: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.SourceCompanions == nil || result.SourceCompanions.Admitted != 1 {
-		t.Fatalf("expected one admitted source companion, got %#v", result.SourceCompanions)
-	}
-	if result.EvidenceGraph == nil || result.EvidenceGraph.EdgesByType[edgeTypeTestsSource] == 0 {
-		t.Fatalf("expected tests_source edge after companion admission, got %#v", result.EvidenceGraph)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, result.SourceCompanions)
+	assert.Equal(t, 1, result.SourceCompanions.Admitted)
+	require.NotNil(t, result.EvidenceGraph)
+	assert.Positive(t, result.EvidenceGraph.EdgesByType[edgeTypeTestsSource])
 }
 
 func companionCandidatePaths(candidates []adapters.Candidate) map[string]bool {
@@ -128,10 +107,6 @@ func companionCandidatePaths(candidates []adapters.Candidate) map[string]bool {
 func writeCompanionTestFile(t *testing.T, root, rel, body string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o644))
 }
