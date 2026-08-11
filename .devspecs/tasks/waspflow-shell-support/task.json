@@ -1,0 +1,380 @@
+{
+  "task_id": "waspflow-shell-support",
+  "series": "W",
+  "profile": "code-change",
+  "query": "Make DevSpecs understand shell-first repositories and investigate direct Waspflow task-lane support without weakening first-run quality or adding redundant CLI surface",
+  "status": "packed",
+  "created_at": "2026-08-11T20:49:32Z",
+  "updated_at": "2026-08-11T20:54:16Z",
+  "repo_root": "C:\\Users\\brenn\\go\\src\\github.com\\devspecs-com\\_worktrees\\devspecs-cli-waspflow",
+  "workspace": "C:/Users/brenn/go/src/github.com/devspecs-com/_worktrees/devspecs-cli-waspflow/.devspecs/tasks/waspflow-shell-support",
+  "artifacts": {
+    "series": "W",
+    "index": "W00-index.md",
+    "first_slice": "W01-pin-waspflow-baseline-and-define-ground-truth-qu-plan.md",
+    "result": "W01-pin-waspflow-baseline-and-define-ground-truth-qu-result.md",
+    "slices": [
+      {
+        "id": "W01",
+        "title": "Pin Waspflow baseline and define ground-truth quality",
+        "plan": "W01-pin-waspflow-baseline-and-define-ground-truth-qu-plan.md",
+        "result": "W01-pin-waspflow-baseline-and-define-ground-truth-qu-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "W02",
+        "title": "Admit shell implementation on the first cold scan",
+        "plan": "W02-admit-shell-implementation-on-the-first-cold-sca-plan.md",
+        "result": "W02-admit-shell-implementation-on-the-first-cold-sca-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "W03",
+        "title": "Extract shell semantics and behavioral tests",
+        "plan": "W03-extract-shell-semantics-and-behavioral-tests-plan.md",
+        "result": "W03-extract-shell-semantics-and-behavioral-tests-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "W04",
+        "title": "Improve map find and task quality for shell orchestration repositories",
+        "plan": "W04-improve-map-find-and-task-quality-for-shell-orch-plan.md",
+        "result": "W04-improve-map-find-and-task-quality-for-shell-orch-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "W05",
+        "title": "Define the DevSpecs to Waspflow handoff contract",
+        "plan": "W05-define-the-devspecs-to-waspflow-handoff-contract-plan.md",
+        "result": "W05-define-the-devspecs-to-waspflow-handoff-contract-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "W06",
+        "title": "Prototype and evaluate the thin integration boundary",
+        "plan": "W06-prototype-and-evaluate-the-thin-integration-boun-plan.md",
+        "result": "W06-prototype-and-evaluate-the-thin-integration-boun-result.md",
+        "kind": "slice"
+      },
+      {
+        "id": "W07",
+        "title": "Prove worktree lifecycle quality and performance regression gates",
+        "plan": "W07-prove-worktree-lifecycle-quality-and-performance-plan.md",
+        "result": "W07-prove-worktree-lifecycle-quality-and-performance-result.md",
+        "kind": "slice"
+      }
+    ]
+  },
+  "predicted_context": {
+    "relevant_areas": [
+      "internal/commands",
+      "internal/scan",
+      "internal/evalharness",
+      "internal/retrieval"
+    ],
+    "primary_files": [
+      {
+        "path": "internal/scan/first_party_source_context.go",
+        "title": "internal/scan/first_party_source_context.go (go)",
+        "kind": "source_context",
+        "role": "implementation_surface",
+        "evidence": [
+          "relationship expansion: filesystem_source_family_recovery",
+          "query term match in path: first",
+          "query term match in body: cli"
+        ]
+      }
+    ],
+    "tests": [
+      {
+        "path": "internal/commands/task_test.go",
+        "title": "internal/commands/task_test.go",
+        "kind": "source_context",
+        "subtype": "test_case",
+        "role": "behavior_tests",
+        "evidence": [
+          "relationship expansion: source_manifest_test_reservation",
+          "pack tier: related (reserved manifest test with direct query evidence)",
+          "query term match in path: task"
+        ]
+      },
+      {
+        "path": "internal/retrieval/retrieval_test.go#L1864",
+        "title": "TestWeightedFilesRetrieverV0_ExactPlanIDKeepsDirectArtifactAndLinkedNeighborAheadOfHistoricalAnalog",
+        "kind": "source_context",
+        "subtype": "test_case",
+        "role": "behavior_tests",
+        "evidence": [
+          "relationship expansion: source_manifest_loss_safe_preserved",
+          "query term match in title: direct",
+          "query term match in body: first"
+        ]
+      },
+      {
+        "path": "internal/commands/eval_test.go#L578",
+        "title": "TestRunFindForEvalRecordsGraphContextSeparately",
+        "kind": "source_context",
+        "subtype": "test_case",
+        "role": "behavior_tests",
+        "evidence": [
+          "relationship expansion: source_manifest_loss_safe_preserved",
+          "query term match in title: run",
+          "query term match in body: direct"
+        ]
+      },
+      {
+        "path": "internal/evalharness/eval_test.go#L428",
+        "title": "TestRun_IndexedCacheTelemetryAndBudgets",
+        "kind": "source_context",
+        "subtype": "test_case",
+        "role": "behavior_tests",
+        "evidence": [
+          "relationship expansion: source_manifest_loss_safe_preserved",
+          "query term match in title: run",
+          "query term match in body: first"
+        ]
+      },
+      {
+        "path": "internal/scan/first_party_source_context_test.go",
+        "title": "internal/scan/first_party_source_context_test.go",
+        "kind": "source_context",
+        "subtype": "test_case",
+        "role": "behavior_tests",
+        "evidence": [
+          "relationship expansion: source_manifest_test_reservation",
+          "pack tier: related (reserved manifest test with direct query evidence)",
+          "query term match in path: first"
+        ]
+      },
+      {
+        "path": "internal/scan/scan_test.go#L85",
+        "title": "TestScan_SourceIdentityIsScopedToLogicalRepository",
+        "kind": "source_context",
+        "subtype": "test_case",
+        "role": "behavior_tests",
+        "evidence": [
+          "relationship expansion: source_manifest_family_recovery",
+          "query term match in body: devspecs",
+          "query term match in body: repositories"
+        ]
+      },
+      {
+        "path": "internal/commands/task_test.go#L2239",
+        "title": "TestTaskSliceAddReasonRequiresAfter",
+        "kind": "source_context",
+        "subtype": "test_case",
+        "role": "behavior_tests",
+        "evidence": [
+          "relationship expansion: source_manifest_loss_safe_preserved",
+          "query term match in path: task",
+          "query term match in body: first"
+        ]
+      },
+      {
+        "path": "internal/commands/eval_activation_test.go#L506",
+        "title": "TestActivationMapActionQualityAcceptsNonActionDeltas",
+        "kind": "source_context",
+        "subtype": "test_case",
+        "role": "behavior_tests",
+        "evidence": [
+          "relationship expansion: source_manifest_loss_safe_preserved",
+          "query term match in title: quality",
+          "query term match in body: shell"
+        ]
+      },
+      {
+        "path": "internal/commands/scan_output_test.go#L45",
+        "title": "TestScanJSON_ConsecutiveRunsIdentical",
+        "kind": "source_context",
+        "subtype": "test_case",
+        "role": "behavior_tests",
+        "evidence": [
+          "relationship expansion: source_manifest_loss_safe_preserved",
+          "query term match in title: run",
+          "query term match in body: first"
+        ]
+      },
+      {
+        "path": "internal/commands/retrieval_bridge_test.go#L101",
+        "title": "TestLoadRetrievalCandidatesForQueryAddsSectionEvidence",
+        "kind": "source_context",
+        "subtype": "test_case",
+        "role": "behavior_tests",
+        "evidence": [
+          "relationship expansion: same_directory_test_companion",
+          "pack tier: related (same_directory_test_companion)",
+          "query term match in body: devspecs"
+        ]
+      },
+      {
+        "path": "internal/commands/scan_empty_hints_test.go#L96",
+        "title": "TestScan_EmptyArtifacts_NoCandidates_JSONOmitsHintsKey",
+        "kind": "source_context",
+        "subtype": "test_case",
+        "role": "behavior_tests",
+        "evidence": [
+          "relationship expansion: same_directory_test_companion",
+          "pack tier: related (same_directory_test_companion)",
+          "query term match in body: make"
+        ]
+      }
+    ],
+    "noise_risks": [
+      {
+        "path": "internal/commands/task.go",
+        "title": "internal/commands/task.go (go)",
+        "kind": "source_context",
+        "role": "excluded_noise",
+        "evidence": [
+          "query term match in path: task",
+          "query term match in body: adding",
+          "query term match in body: cli",
+          "authority prior: stale or superseded",
+          "negative evidence: blocked, closed, stale, or superseded intent; current decision context is present"
+        ]
+      },
+      {
+        "path": "internal/evalharness/eval.go",
+        "title": "internal/evalharness/eval.go (go)",
+        "kind": "source_context",
+        "role": "excluded_noise",
+        "evidence": [
+          "query term match in body: cli",
+          "query term match in body: devspecs",
+          "query term match in body: direct",
+          "authority prior: stale or superseded",
+          "negative evidence: blocked, closed, stale, or superseded intent; current decision context is present"
+        ]
+      },
+      {
+        "path": "internal/retrieval/retrieval.go",
+        "title": "internal/retrieval/retrieval.go (go)",
+        "kind": "source_context",
+        "role": "excluded_noise",
+        "evidence": [
+          "query term match in body: cli",
+          "query term match in body: devspecs",
+          "query term match in body: first",
+          "authority prior: stale or superseded",
+          "lifecycle signal: superseded-or-stale"
+        ]
+      },
+      {
+        "path": "internal/commands/eval.go",
+        "title": "internal/commands/eval.go (go)",
+        "kind": "source_context",
+        "role": "excluded_noise",
+        "evidence": [
+          "query term match in body: cli",
+          "query term match in body: devspecs",
+          "query term match in body: direct",
+          "authority prior: stale or superseded",
+          "negative evidence: blocked, closed, stale, or superseded intent; current decision context is present"
+        ]
+      },
+      {
+        "path": "internal/commands/scan.go",
+        "title": "internal/commands/scan.go (go)",
+        "kind": "source_context",
+        "role": "excluded_noise",
+        "evidence": [
+          "query term match in body: cli",
+          "query term match in body: devspecs",
+          "query term match in body: direct",
+          "authority prior: stale or superseded",
+          "negative evidence: blocked, closed, stale, or superseded intent; current decision context is present"
+        ]
+      }
+    ],
+    "related_git_receipts": [
+      {
+        "sha": "b67bff311655b305e8c0bca5341afef8b8d99bea",
+        "short_sha": "b67bff3",
+        "committed_at": "2026-08-06",
+        "subject": "fix(index): deduplicate worktrees and prune stale repositories",
+        "matched_paths": [
+          "internal/commands/scan.go",
+          "internal/commands/task.go",
+          "internal/evalharness/eval.go"
+        ],
+        "matched_terms": [
+          "repositories",
+          "and"
+        ],
+        "signals": [
+          "touched 4 packed path(s)",
+          "matched query anchors",
+          "cross-file change"
+        ]
+      },
+      {
+        "sha": "a50bab8a015e6c87e9d2a2f6953800ffbccc4ba7",
+        "short_sha": "a50bab8",
+        "committed_at": "2026-05-29",
+        "subject": "wip: feat: adapter classifier pipeline (#2)",
+        "matched_paths": [
+          "internal/commands/eval.go",
+          "internal/commands/scan.go",
+          "internal/evalharness/eval.go"
+        ],
+        "matched_terms": [
+          "and"
+        ],
+        "signals": [
+          "touched 5 packed path(s)",
+          "matched query anchors",
+          "PR/issue reference",
+          "cross-file change"
+        ]
+      },
+      {
+        "sha": "0b5217c84a5fdec84c55bdd094658ce32ff77ac3",
+        "short_sha": "0b5217c",
+        "committed_at": "2026-07-11",
+        "subject": "Optimize activation indexing and regression harnesses",
+        "matched_paths": [
+          "internal/commands/eval.go",
+          "internal/commands/eval_activation.go",
+          "internal/commands/scan.go"
+        ],
+        "matched_terms": [
+          "and"
+        ],
+        "signals": [
+          "touched 4 packed path(s)",
+          "matched query anchors",
+          "cross-file change"
+        ]
+      }
+    ]
+  },
+  "risk_cards": [
+    {
+      "id": "prior-noise",
+      "title": "Prior checkpoint recorded distracting context",
+      "severity": "low",
+      "source": "checkpoint_fact",
+      "evidence": [
+        "task testify-coverage-hardening checkpoint cp_20260810T125254Z_t01_validated called distracting `internal/commands/task.go`",
+        "task testify-coverage-hardening checkpoint cp_20260810T125254Z_t01_validated called distracting `internal/retrieval/retrieval.go`"
+      ],
+      "agent_check": "Keep that family as reference-only unless this task verifies it.",
+      "count": 2
+    }
+  ],
+  "confidence": {
+    "primary_file_confidence": "medium",
+    "test_coverage_confidence": "high",
+    "docs_config_confidence": "low",
+    "git_receipt_confidence": "high",
+    "noise_risk": "high",
+    "pack_completeness": "low",
+    "why": [
+      "found 1 likely primary file(s)",
+      "found 11 likely test file(s)",
+      "found 3 related Git receipt(s)",
+      "5 file(s) were downgraded as likely noise"
+    ],
+    "agent_instruction": "Validate the test and integration surface before editing. Record critical misses and distracting inclusions in the slice result or a task checkpoint."
+  }
+}
