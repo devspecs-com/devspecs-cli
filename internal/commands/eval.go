@@ -52,6 +52,7 @@ func NewEvalCmd() *cobra.Command {
 		activationIndexState             string
 		activationBaselineIndexState     string
 		activationCandidateIndexState    string
+		activationRepetitions            int
 		activationMapStructured          bool
 		activationQuiet                  bool
 		activationUpdate                 bool
@@ -117,6 +118,12 @@ func NewEvalCmd() *cobra.Command {
 				if (strings.TrimSpace(activationBaselineBin) == "") != (strings.TrimSpace(activationCandidateBin) == "") {
 					return fmt.Errorf("--activation-baseline-bin and --activation-candidate-bin must be provided together")
 				}
+				if err := validateActivationRepetitions(activationRepetitions); err != nil {
+					return err
+				}
+				if activationRepetitions > 1 && strings.TrimSpace(activationBaselineBin) == "" {
+					return fmt.Errorf("--activation-repetitions requires --activation-baseline-bin and --activation-candidate-bin")
+				}
 				result, err := runActivationMatrix(args[0], activationMatrixOptions{
 					Profile:             activationProfile,
 					CloneMode:           activationCloneMode,
@@ -127,6 +134,7 @@ func NewEvalCmd() *cobra.Command {
 					IndexState:          activationIndexState,
 					BaselineIndexState:  activationBaselineIndexState,
 					CandidateIndexState: activationCandidateIndexState,
+					Repetitions:         activationRepetitions,
 					MapStructured:       activationMapStructured,
 					Quiet:               activationQuiet,
 					Update:              activationUpdate,
@@ -332,6 +340,7 @@ func NewEvalCmd() *cobra.Command {
 	cmd.Flags().StringVar(&activationIndexState, "activation-index-state", "cold", "Activation matrix index state before command runs: cold or warm")
 	cmd.Flags().StringVar(&activationBaselineIndexState, "activation-baseline-index-state", "", "Index state for baseline binary comparison runs; defaults to --activation-index-state")
 	cmd.Flags().StringVar(&activationCandidateIndexState, "activation-candidate-index-state", "", "Index state for candidate binary comparison runs; defaults to --activation-index-state")
+	cmd.Flags().IntVar(&activationRepetitions, "activation-repetitions", 1, "Odd number of paired binary comparison samples")
 	cmd.Flags().BoolVar(&activationMapStructured, "activation-map-structured", false, "Accept structured non-action ds map deltas during activation binary comparison")
 	cmd.Flags().BoolVar(&activationQuiet, "activation-quiet", true, "Force --quiet for activation matrix commands that support it")
 	cmd.Flags().BoolVar(&activationUpdate, "activation-update", false, "Write activation matrix golden output files instead of comparing")

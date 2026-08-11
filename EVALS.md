@@ -183,6 +183,33 @@ warm binary-comparison runs. Cold is the default because the first command on a
 fresh local install is the activation bar; warm comparisons are an audit tool,
 not a product promise that weaker cold output is acceptable.
 
+Performance investigations can add an odd repetition count without changing
+the default one-sample PR gate:
+
+```bash
+ds eval activation-matrix.yaml \
+  --activation-matrix \
+  --activation-baseline-bin /tmp/ds-baseline \
+  --activation-candidate-bin ./ds \
+  --activation-repetitions 3 \
+  --activation-result-dir .devspecs/eval-runs/paired \
+  --json
+```
+
+Repeated mode alternates which binary runs first, retains every sample, and
+uses median baseline/candidate runs for the existing per-case and aggregate
+timing fields. Exact output, JSON, exit-code, and quiet-stderr gates apply to
+every repetition; one failed sample fails the case. Repeated output files use
+`-r001`, `-r002`, and similar suffixes so evidence is not overwritten.
+
+Run the same binary in both roles first when measuring a new host or repository
+set. The result marks this as `self_comparison` and reports median and maximum
+absolute paired deltas in `comparison_timing`. The signed
+`median_paired_delta_ms` is the primary direction estimate under alternating
+order; treat the self-comparison absolute deltas as the local noise floor before
+classifying it. Keep repeated fat/full runs scheduled or manual rather than
+multiplying the default PR smoke runtime.
+
 Keep raw manifests and generated goldens in ignored eval-run storage unless a
 public-safe fixture is deliberately derived. Optimization subiterations should
 run the skinny gate while iterating and run the fat gate before promotion when

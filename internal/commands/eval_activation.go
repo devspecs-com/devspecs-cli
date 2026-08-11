@@ -41,6 +41,7 @@ type activationMatrixOptions struct {
 	IndexState          string
 	BaselineIndexState  string
 	CandidateIndexState string
+	Repetitions         int
 	MapStructured       bool
 	Quiet               bool
 	Update              bool
@@ -93,6 +94,8 @@ type activationMatrixResult struct {
 	IndexState           string                       `json:"index_state"`
 	BaselineIndexState   string                       `json:"baseline_index_state,omitempty"`
 	CandidateIndexState  string                       `json:"candidate_index_state,omitempty"`
+	Repetitions          int                          `json:"repetitions"`
+	SelfComparison       bool                         `json:"self_comparison,omitempty"`
 	MapStructured        bool                         `json:"map_structured,omitempty"`
 	Quiet                bool                         `json:"quiet"`
 	Update               bool                         `json:"update"`
@@ -169,6 +172,8 @@ type activationMatrixCaseResult struct {
 	StdoutMatch      bool                                  `json:"stdout_match,omitempty"`
 	Baseline         *activationMatrixCommandRun           `json:"baseline,omitempty"`
 	Candidate        *activationMatrixCommandRun           `json:"candidate,omitempty"`
+	ComparisonTiming *activationMatrixComparisonTiming     `json:"comparison_timing,omitempty"`
+	Samples          []activationMatrixComparisonSample    `json:"samples,omitempty"`
 	MapActionQuality *activationMapActionQualityComparison `json:"map_action_quality,omitempty"`
 	Error            string                                `json:"error,omitempty"`
 	Diff             string                                `json:"diff,omitempty"`
@@ -204,6 +209,28 @@ type activationMatrixCommandRun struct {
 	normalizationPaths []string
 }
 
+type activationMatrixComparisonTiming struct {
+	BaselineMedianMillis       int `json:"baseline_median_ms"`
+	CandidateMedianMillis      int `json:"candidate_median_ms"`
+	CandidateDeltaMillis       int `json:"candidate_delta_ms"`
+	MedianPairedDeltaMillis    int `json:"median_paired_delta_ms"`
+	MedianAbsolutePairDeltaMS  int `json:"median_absolute_pair_delta_ms"`
+	MaximumAbsolutePairDeltaMS int `json:"maximum_absolute_pair_delta_ms"`
+}
+
+type activationMatrixComparisonSample struct {
+	Repetition       int                                   `json:"repetition"`
+	FirstRole        string                                `json:"first_role"`
+	DurationMillis   int                                   `json:"duration_ms"`
+	Baseline         activationMatrixCommandRun            `json:"baseline"`
+	Candidate        activationMatrixCommandRun            `json:"candidate"`
+	StdoutMatch      bool                                  `json:"stdout_match"`
+	Status           string                                `json:"status"`
+	MapActionQuality *activationMapActionQualityComparison `json:"map_action_quality,omitempty"`
+	Error            string                                `json:"error,omitempty"`
+	Diff             string                                `json:"diff,omitempty"`
+}
+
 type activationRepoMetadata struct {
 	URL            string
 	CommitSHA      string
@@ -217,6 +244,15 @@ type activationRepoMetadata struct {
 
 func runActivationMatrix(manifestPath string, opts activationMatrixOptions) (*activationMatrixResult, error) {
 	start := time.Now()
+	if opts.Repetitions == 0 {
+		opts.Repetitions = 1
+	}
+	if err := validateActivationRepetitions(opts.Repetitions); err != nil {
+		return nil, err
+	}
+	if opts.Repetitions > 1 && !activationBinaryCompare(opts) {
+		return nil, fmt.Errorf("--activation-repetitions requires binary comparison mode")
+	}
 	if strings.TrimSpace(opts.Profile) == "" {
 		opts.Profile = "skinny"
 	}
@@ -288,6 +324,8 @@ func runActivationMatrix(manifestPath string, opts activationMatrixOptions) (*ac
 		IndexState:           opts.IndexState,
 		BaselineIndexState:   opts.BaselineIndexState,
 		CandidateIndexState:  opts.CandidateIndexState,
+		Repetitions:          opts.Repetitions,
+		SelfComparison:       activationSameBinary(baselineBin, candidateBin, baselineID, candidateID),
 		MapStructured:        opts.MapStructured,
 		Quiet:                opts.Quiet,
 		Update:               opts.Update,
@@ -423,7 +461,7 @@ func runActivationMatrixCase(repo activationMatrixRepo, repoPath string, meta ac
 		return out
 	}
 	if activationBinaryCompare(opts) {
-		return runActivationMatrixBinaryCompareCase(out, repoPath, commandName, args, opts, resultDir, start)
+		return runActivationMatrixBinaryCompareCase(out, repoPath, commandName, args, opts, resultDir)
 	}
 	stdout, stderr, normalizationPaths, err := runActivationCommandIsolated(commandName, args, repoPath, opts.IndexState)
 	out.StdoutBytes = len(stdout)
@@ -488,72 +526,132 @@ func runActivationMatrixCase(repo activationMatrixRepo, repoPath string, meta ac
 	return out
 }
 
-func runActivationMatrixBinaryCompareCase(out activationMatrixCaseResult, repoPath, commandName string, args []string, opts activationMatrixOptions, resultDir string, start time.Time) activationMatrixCaseResult {
-	baseline, baselineStdout := runExternalActivationCommandIsolated(opts.BaselineBin, commandName, args, repoPath, out.RepoID, "baseline", resultDir, opts.BaselineIndexState)
-	candidate, candidateStdout := runExternalActivationCommandIsolated(opts.CandidateBin, commandName, args, repoPath, out.RepoID, "candidate", resultDir, opts.CandidateIndexState)
+func runActivationMatrixBinaryCompareCase(out activationMatrixCaseResult, repoPath, commandName string, args []string, opts activationMatrixOptions, resultDir string) activationMatrixCaseResult {
+	samples := make([]activationMatrixComparisonSample, 0, opts.Repetitions)
+	for repetition := 1; repetition <= opts.Repetitions; repetition++ {
+		sample := runActivationMatrixBinaryComparisonSample(out, repoPath, commandName, args, opts, resultDir, repetition)
+		samples = append(samples, sample)
+	}
+	return summarizeActivationMatrixBinaryComparison(out, samples)
+}
+
+func summarizeActivationMatrixBinaryComparison(out activationMatrixCaseResult, samples []activationMatrixComparisonSample) activationMatrixCaseResult {
+	out.Samples = samples
+	baseline := activationMedianComparisonRun(samples, true)
+	candidate := activationMedianComparisonRun(samples, false)
 	out.Baseline = &baseline
 	out.Candidate = &candidate
+	out.ComparisonTiming = activationComparisonTiming(samples, baseline.DurationMillis, candidate.DurationMillis)
 	out.StdoutBytes = candidate.StdoutBytes
 	out.StderrBytes = candidate.StderrBytes
-	out.DurationMillis = activationElapsedMillis(start)
-	normalizedBaseline := normalizeActivationOutput(baselineStdout, repoPath, baseline.normalizationPaths...)
-	normalizedCandidate := normalizeActivationOutput(candidateStdout, repoPath, candidate.normalizationPaths...)
-	out.StdoutSHA256 = activationSHA256(normalizedCandidate)
-	out.StdoutMatch = bytes.Equal(normalizedBaseline, normalizedCandidate)
-	if baseline.Error != "" {
-		out.Status = "failed"
-		out.Error = "baseline command failed: " + baseline.Error
-		return out
+	out.StdoutSHA256 = candidate.StdoutSHA256
+	out.StdoutMatch = true
+	out.DurationMillis = activationMedianComparisonSampleDuration(samples)
+	for i := range samples {
+		sample := samples[i]
+		if !sample.StdoutMatch {
+			out.StdoutMatch = false
+		}
+		if out.Status == "" && sample.Status != "passed" {
+			out.Status = "failed"
+			out.Error = fmt.Sprintf("repetition %d failed: %s", sample.Repetition, sample.Error)
+			if sample.MapActionQuality != nil {
+				comparison := *sample.MapActionQuality
+				out.MapActionQuality = &comparison
+			}
+			if sample.Diff != "" {
+				out.Diff = sample.Diff
+			}
+			continue
+		}
+		if out.MapActionQuality == nil && sample.MapActionQuality != nil {
+			comparison := *sample.MapActionQuality
+			out.MapActionQuality = &comparison
+		}
+		if out.Diff == "" && sample.Diff != "" {
+			out.Diff = sample.Diff
+		}
 	}
-	if candidate.Error != "" {
-		out.Status = "failed"
-		out.Error = "candidate command failed: " + candidate.Error
-		return out
-	}
-	if baseline.ExitCode != 0 || candidate.ExitCode != 0 {
-		out.Status = "failed"
-		out.Error = fmt.Sprintf("baseline exit=%d candidate exit=%d", baseline.ExitCode, candidate.ExitCode)
-		return out
-	}
-	if !baseline.ValidJSON || !candidate.ValidJSON {
-		out.Status = "failed"
-		out.Error = fmt.Sprintf("baseline valid_json=%t candidate valid_json=%t", baseline.ValidJSON, candidate.ValidJSON)
-		return out
-	}
-	if activationCommandRequiresStrictStderr(commandName, opts.Quiet) && (baseline.StderrBytes > 0 || candidate.StderrBytes > 0) {
-		out.Status = "failed"
-		out.Error = fmt.Sprintf("quiet binary comparison wrote stderr: baseline=%d candidate=%d", baseline.StderrBytes, candidate.StderrBytes)
-		return out
-	}
-	if out.CompareMode == activationCompareModeJSONSmoke {
+	if out.Status == "" {
 		out.Status = "passed"
-		return out
 	}
-	if !out.StdoutMatch {
+	return out
+}
+
+func runActivationMatrixBinaryComparisonSample(out activationMatrixCaseResult, repoPath, commandName string, args []string, opts activationMatrixOptions, resultDir string, repetition int) activationMatrixComparisonSample {
+	start := time.Now()
+	sample := activationMatrixComparisonSample{Repetition: repetition, FirstRole: "baseline"}
+	var baselineStdout, candidateStdout []byte
+	if repetition%2 == 0 {
+		sample.FirstRole = "candidate"
+		sample.Candidate, candidateStdout = runExternalActivationCommandIsolated(opts.CandidateBin, commandName, args, repoPath, out.RepoID, "candidate", resultDir, opts.CandidateIndexState, repetition, opts.Repetitions)
+		sample.Baseline, baselineStdout = runExternalActivationCommandIsolated(opts.BaselineBin, commandName, args, repoPath, out.RepoID, "baseline", resultDir, opts.BaselineIndexState, repetition, opts.Repetitions)
+	} else {
+		sample.Baseline, baselineStdout = runExternalActivationCommandIsolated(opts.BaselineBin, commandName, args, repoPath, out.RepoID, "baseline", resultDir, opts.BaselineIndexState, repetition, opts.Repetitions)
+		sample.Candidate, candidateStdout = runExternalActivationCommandIsolated(opts.CandidateBin, commandName, args, repoPath, out.RepoID, "candidate", resultDir, opts.CandidateIndexState, repetition, opts.Repetitions)
+	}
+	sample.DurationMillis = activationElapsedMillis(start)
+	normalizedBaseline := normalizeActivationOutput(baselineStdout, repoPath, sample.Baseline.normalizationPaths...)
+	normalizedCandidate := normalizeActivationOutput(candidateStdout, repoPath, sample.Candidate.normalizationPaths...)
+	evaluateActivationMatrixBinaryComparisonSample(&sample, commandName, out.CompareMode, opts, normalizedBaseline, normalizedCandidate)
+	return sample
+}
+
+func evaluateActivationMatrixBinaryComparisonSample(sample *activationMatrixComparisonSample, commandName, compareMode string, opts activationMatrixOptions, normalizedBaseline, normalizedCandidate []byte) {
+	sample.StdoutMatch = bytes.Equal(normalizedBaseline, normalizedCandidate)
+	if sample.Baseline.Error != "" {
+		sample.Status = "failed"
+		sample.Error = "baseline command failed: " + sample.Baseline.Error
+		return
+	}
+	if sample.Candidate.Error != "" {
+		sample.Status = "failed"
+		sample.Error = "candidate command failed: " + sample.Candidate.Error
+		return
+	}
+	if sample.Baseline.ExitCode != 0 || sample.Candidate.ExitCode != 0 {
+		sample.Status = "failed"
+		sample.Error = fmt.Sprintf("baseline exit=%d candidate exit=%d", sample.Baseline.ExitCode, sample.Candidate.ExitCode)
+		return
+	}
+	if !sample.Baseline.ValidJSON || !sample.Candidate.ValidJSON {
+		sample.Status = "failed"
+		sample.Error = fmt.Sprintf("baseline valid_json=%t candidate valid_json=%t", sample.Baseline.ValidJSON, sample.Candidate.ValidJSON)
+		return
+	}
+	if activationCommandRequiresStrictStderr(commandName, opts.Quiet) && (sample.Baseline.StderrBytes > 0 || sample.Candidate.StderrBytes > 0) {
+		sample.Status = "failed"
+		sample.Error = fmt.Sprintf("quiet binary comparison wrote stderr: baseline=%d candidate=%d", sample.Baseline.StderrBytes, sample.Candidate.StderrBytes)
+		return
+	}
+	if compareMode == activationCompareModeJSONSmoke {
+		sample.Status = "passed"
+		return
+	}
+	if !sample.StdoutMatch {
 		if commandName == "map" {
 			comparison := compareActivationMapActionQuality(normalizedBaseline, normalizedCandidate)
-			out.MapActionQuality = &comparison
+			sample.MapActionQuality = &comparison
 			if opts.MapStructured && comparison.Accepted {
-				out.Status = "passed"
-				out.Diff = activationFirstDiff(normalizedBaseline, normalizedCandidate)
-				return out
+				sample.Status = "passed"
+				sample.Diff = activationFirstDiff(normalizedBaseline, normalizedCandidate)
+				return
 			}
 			if comparison.Reason != "" {
-				out.Error = "baseline and candidate stdout differed; map action-quality gate " + comparison.Status + ": " + comparison.Reason
+				sample.Error = "baseline and candidate stdout differed; map action-quality gate " + comparison.Status + ": " + comparison.Reason
 			} else {
-				out.Error = "baseline and candidate stdout differed"
+				sample.Error = "baseline and candidate stdout differed"
 			}
-			out.Status = "failed"
-			out.Diff = activationFirstDiff(normalizedBaseline, normalizedCandidate)
-			return out
+			sample.Status = "failed"
+			sample.Diff = activationFirstDiff(normalizedBaseline, normalizedCandidate)
+			return
 		}
-		out.Status = "failed"
-		out.Error = "baseline and candidate stdout differed"
-		out.Diff = activationFirstDiff(normalizedBaseline, normalizedCandidate)
-		return out
+		sample.Status = "failed"
+		sample.Error = "baseline and candidate stdout differed"
+		sample.Diff = activationFirstDiff(normalizedBaseline, normalizedCandidate)
+		return
 	}
-	out.Status = "passed"
-	return out
+	sample.Status = "passed"
 }
 
 func compareActivationMapActionQuality(baselineOutput, candidateOutput []byte) activationMapActionQualityComparison {
@@ -983,7 +1081,7 @@ func runActivationCommandIsolated(name string, args []string, repoPath, indexSta
 	return stdout, stderr, normalizationPaths, err
 }
 
-func runExternalActivationCommandIsolated(binary, commandName string, args []string, repoPath, repoID, role, resultDir, indexState string) (activationMatrixCommandRun, []byte) {
+func runExternalActivationCommandIsolated(binary, commandName string, args []string, repoPath, repoID, role, resultDir, indexState string, repetition, repetitions int) (activationMatrixCommandRun, []byte) {
 	start := time.Now()
 	out := activationMatrixCommandRun{
 		Binary:     filepath.ToSlash(binary),
@@ -1037,7 +1135,7 @@ func runExternalActivationCommandIsolated(binary, commandName string, args []str
 		out.ExitCode = 0
 	}
 	if resultDir != "" {
-		stdoutPath, stderrPath, writeErr := writeActivationBinaryOutputs(resultDir, role, repoID, commandName, stdout.Bytes(), stderr.Bytes())
+		stdoutPath, stderrPath, writeErr := writeActivationBinaryOutputs(resultDir, role, repoID, commandName, stdout.Bytes(), stderr.Bytes(), repetition, repetitions)
 		if writeErr != nil && out.Error == "" {
 			out.Error = writeErr.Error()
 		}
@@ -1065,12 +1163,15 @@ func runExternalActivationWarmup(binary, repoPath, devspecsHome string) ([]byte,
 	return stdout.Bytes(), stderr.Bytes(), err
 }
 
-func writeActivationBinaryOutputs(resultDir, role, repoID, commandName string, stdout, stderr []byte) (string, string, error) {
+func writeActivationBinaryOutputs(resultDir, role, repoID, commandName string, stdout, stderr []byte, repetition, repetitions int) (string, string, error) {
 	dir := filepath.Join(resultDir, "outputs", safeFilenamePart(role))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", "", err
 	}
 	prefix := strings.Join([]string{safeFilenamePart(repoID), safeFilenamePart(commandName)}, "-")
+	if repetitions > 1 {
+		prefix += fmt.Sprintf("-r%03d", repetition)
+	}
 	stdoutPath := filepath.Join(dir, prefix+".stdout.json")
 	stderrPath := filepath.Join(dir, prefix+".stderr.txt")
 	if err := os.WriteFile(stdoutPath, stdout, 0o644); err != nil {
@@ -1110,6 +1211,16 @@ func activationBinaryCompare(opts activationMatrixOptions) bool {
 	return strings.TrimSpace(opts.BaselineBin) != "" || strings.TrimSpace(opts.CandidateBin) != ""
 }
 
+func validateActivationRepetitions(repetitions int) error {
+	if repetitions < 1 {
+		return fmt.Errorf("--activation-repetitions must be positive")
+	}
+	if repetitions%2 == 0 {
+		return fmt.Errorf("--activation-repetitions must be odd")
+	}
+	return nil
+}
+
 func activationBinaryPathAndID(path string) (string, string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", "", nil
@@ -1135,6 +1246,21 @@ func activationBinaryID(path string) string {
 		return filepath.ToSlash(path)
 	}
 	return filepath.Base(path) + ":" + activationSHA256(data)
+}
+
+func activationSameBinary(baselinePath, candidatePath, baselineID, candidateID string) bool {
+	if baselinePath == "" || candidatePath == "" {
+		return false
+	}
+	if filepath.Clean(baselinePath) == filepath.Clean(candidatePath) {
+		return true
+	}
+	baselineSeparator := strings.LastIndex(baselineID, ":")
+	candidateSeparator := strings.LastIndex(candidateID, ":")
+	if baselineSeparator < 0 || candidateSeparator < 0 {
+		return false
+	}
+	return baselineID[baselineSeparator+1:] == candidateID[candidateSeparator+1:]
 }
 
 func normalizeActivationCloneMode(value string) string {
@@ -1309,6 +1435,69 @@ func activationTimingStats(values []int) activationMatrixTimingStats {
 		P95:   activationPercentile(values, 95),
 		Max:   values[len(values)-1],
 	}
+}
+
+func activationMedianComparisonRun(samples []activationMatrixComparisonSample, baseline bool) activationMatrixCommandRun {
+	runs := make([]activationMatrixCommandRun, 0, len(samples))
+	for _, sample := range samples {
+		if baseline {
+			runs = append(runs, sample.Baseline)
+		} else {
+			runs = append(runs, sample.Candidate)
+		}
+	}
+	if len(runs) == 0 {
+		return activationMatrixCommandRun{}
+	}
+	sort.SliceStable(runs, func(i, j int) bool {
+		return runs[i].DurationMillis < runs[j].DurationMillis
+	})
+	return runs[len(runs)/2]
+}
+
+func activationMedianComparisonSampleDuration(samples []activationMatrixComparisonSample) int {
+	durations := make([]int, 0, len(samples))
+	for _, sample := range samples {
+		durations = append(durations, sample.DurationMillis)
+	}
+	return activationMedianMillis(durations)
+}
+
+func activationComparisonTiming(samples []activationMatrixComparisonSample, baselineMedian, candidateMedian int) *activationMatrixComparisonTiming {
+	if len(samples) == 0 {
+		return nil
+	}
+	absoluteDeltas := make([]int, 0, len(samples))
+	pairedDeltas := make([]int, 0, len(samples))
+	maximumAbsoluteDelta := 0
+	for _, sample := range samples {
+		delta := sample.Candidate.DurationMillis - sample.Baseline.DurationMillis
+		pairedDeltas = append(pairedDeltas, delta)
+		if delta < 0 {
+			delta = -delta
+		}
+		absoluteDeltas = append(absoluteDeltas, delta)
+		if delta > maximumAbsoluteDelta {
+			maximumAbsoluteDelta = delta
+		}
+	}
+	return &activationMatrixComparisonTiming{
+		BaselineMedianMillis:       baselineMedian,
+		CandidateMedianMillis:      candidateMedian,
+		CandidateDeltaMillis:       candidateMedian - baselineMedian,
+		MedianPairedDeltaMillis:    activationMedianMillis(pairedDeltas),
+		MedianAbsolutePairDeltaMS:  activationMedianMillis(absoluteDeltas),
+		MaximumAbsolutePairDeltaMS: maximumAbsoluteDelta,
+	}
+}
+
+func activationMedianMillis(values []int) int {
+	if len(values) == 0 {
+		return 0
+	}
+	sorted := append([]int(nil), values...)
+	sort.Ints(sorted)
+	return sorted[len(sorted)/2]
 }
 
 func activationSlowestCases(cases []activationMatrixCaseResult, limit int) []activationMatrixSlowCase {
