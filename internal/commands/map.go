@@ -1407,7 +1407,7 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 		return err
 	}
 	if !opts.Recent {
-		if out, ok, err := loadMapOutputCache(repoRoot, opts.MaxAreas); err != nil {
+		if out, ok, err := loadMapOutputCache(cmd.Context(), repoRoot, opts.MaxAreas); err != nil {
 			debugLog("map output cache unavailable: %v", err)
 		} else if ok {
 			success = true
@@ -1530,7 +1530,10 @@ func ensureMapRepoIndexedQuiet(ctx context.Context, db *store.DB, repoRoot strin
 	if repoRoot == "" {
 		return nil
 	}
-	status := freshness.Check(db, repoRoot)
+	status, err := freshness.CheckContext(ctx, db, repoRoot)
+	if err != nil {
+		return err
+	}
 	if status != nil && !status.Stale {
 		debugLog("ensureMapRepoIndexedQuiet: index is fresh for %s", repoRoot)
 		return nil
@@ -1540,7 +1543,7 @@ func ensureMapRepoIndexedQuiet(ctx context.Context, db *store.DB, repoRoot strin
 	} else {
 		debugLog("ensureMapRepoIndexedQuiet: stale reason=%s; triggering silent auto-scan", status.Reason)
 	}
-	_, err := runScanQuiet(ctx, nil, db, repoRoot)
+	_, err = runScanQuiet(ctx, nil, db, repoRoot)
 	return err
 }
 
@@ -1567,7 +1570,7 @@ type cachedMapOutputFile struct {
 	Output         mapOutput `json:"output"`
 }
 
-func loadMapOutputCache(repoRoot string, maxAreas int) (mapOutput, bool, error) {
+func loadMapOutputCache(ctx context.Context, repoRoot string, maxAreas int) (mapOutput, bool, error) {
 	db, err := openDB()
 	if err != nil {
 		return mapOutput{}, false, fmt.Errorf("open map output cache db: %w", err)
@@ -1579,7 +1582,12 @@ func loadMapOutputCache(repoRoot string, maxAreas int) (mapOutput, bool, error) 
 		debugLog("map output cache miss: repo not indexed")
 		return mapOutput{}, false, nil
 	}
-	if status := freshness.Check(db, repoRoot); status == nil || status.Stale {
+	status, err := freshness.CheckContext(ctx, db, repoRoot)
+	if err != nil {
+		_ = db.Close()
+		return mapOutput{}, false, err
+	}
+	if status == nil || status.Stale {
 		_ = db.Close()
 		if status == nil {
 			debugLog("map output cache miss: freshness unavailable")

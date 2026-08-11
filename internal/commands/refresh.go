@@ -47,7 +47,10 @@ func ensureFresh(cmd *cobra.Command, db *store.DB) error {
 	}
 	debugLog("ensureFresh: wd=%s resolved_root=%s", wd, repoRoot)
 
-	status := freshness.Check(db, repoRoot)
+	status, err := freshness.CheckContext(cmd.Context(), db, repoRoot)
+	if err != nil {
+		return err
+	}
 	if status == nil {
 		debugLog("ensureFresh: no repo row found for %s — skipping", repoRoot)
 		return nil
@@ -69,7 +72,10 @@ func ensureRepoIndexed(cmd *cobra.Command, db *store.DB, repoRoot string) error 
 	if repoRoot == "" {
 		return nil
 	}
-	status := freshness.Check(db, repoRoot)
+	status, err := freshness.CheckContext(cmd.Context(), db, repoRoot)
+	if err != nil {
+		return err
+	}
 	if status != nil && !status.Stale {
 		debugLog("ensureRepoIndexed: index is fresh for %s", repoRoot)
 		return nil
@@ -90,7 +96,10 @@ func ensureRepoIndexedForTask(cmd *cobra.Command, db *store.DB, repoRoot string)
 	if repoRoot == "" {
 		return nil
 	}
-	status := freshness.Check(db, repoRoot)
+	status, err := freshness.CheckContext(cmd.Context(), db, repoRoot)
+	if err != nil {
+		return err
+	}
 	substrateReady, substrateReason := taskIndexSubstrateReady(db, repoRoot)
 	if status != nil && !status.Stale && substrateReady {
 		debugLog("ensureRepoIndexedForTask: task substrate is fresh for %s", repoRoot)
@@ -205,7 +214,10 @@ func runScanQuiet(parent context.Context, cmd *cobra.Command, db *store.DB, repo
 		return nil, indexOperationError("auto-index", autoIndexDeadlineLabel, err)
 	}
 	defer func() { _ = lease.Release() }()
-	status := freshness.Check(db, canonicalRepoRoot(repoRoot))
+	status, err := freshness.CheckContext(ctx, db, canonicalRepoRoot(repoRoot))
+	if err != nil {
+		return nil, indexOperationError("auto-index", autoIndexDeadlineLabel, err)
+	}
 	if status != nil && !status.Stale {
 		debugLog("runScanQuiet: queued refresh became redundant for %s", repoRoot)
 		return nil, nil
@@ -249,7 +261,10 @@ func runTaskScanQuiet(parent context.Context, cmd *cobra.Command, db *store.DB, 
 	}
 	defer func() { _ = lease.Release() }()
 	repoRoot = canonicalRepoRoot(repoRoot)
-	status := freshness.Check(db, repoRoot)
+	status, err := freshness.CheckContext(ctx, db, repoRoot)
+	if err != nil {
+		return nil, indexOperationError("task auto-index", autoIndexDeadlineLabel, err)
+	}
 	substrateReady, _ := taskIndexSubstrateReady(db, repoRoot)
 	if status != nil && !status.Stale && substrateReady {
 		debugLog("runTaskScanQuiet: queued refresh became redundant for %s", repoRoot)

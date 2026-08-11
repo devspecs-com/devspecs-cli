@@ -185,7 +185,7 @@ func TestLoadCandidatesForQuery_EnrichesMatchingSections(t *testing.T) {
 
 func TestArtifactCandidate_WithSourceAndTodo_RendersCandidate(t *testing.T) {
 	artifact := store.ArtifactRow{ID: "artifact-1", RepoID: "repo-1", Kind: "plan", Title: "Plan", Status: "active"}
-	sources := []store.SourceRow{{SourceType: "markdown", Path: `docs\plan.md`}}
+	sources := []store.SourceRow{{SourceType: "markdown", Path: filepath.FromSlash("docs/plan.md")}}
 	todos := []store.TodoRow{{Text: "Ship it", Done: true}}
 
 	candidate := ArtifactCandidate(artifact, sources, todos, "Body", "")
