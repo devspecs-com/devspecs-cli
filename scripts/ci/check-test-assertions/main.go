@@ -5,8 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"go/ast"
+	"go/importer"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"io"
 	"io/fs"
 	"os"
@@ -92,7 +94,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func collectDirectAssertions(root string) (map[string]int, error) {
-	counts := map[string]int{}
+	type packageFiles struct {
+		files []*ast.File
+		paths []string
+	}
+
+	fileSet := token.NewFileSet()
+	packages := map[string]*packageFiles{}
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -103,26 +111,43 @@ func collectDirectAssertions(root string) (map[string]int, error) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(entry.Name(), "_test.go") {
+		if !strings.HasSuffix(entry.Name(), ".go") {
 			return nil
 		}
 
-		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		parsed, err := parser.ParseFile(fileSet, path, nil, 0)
 		if err != nil {
 			return fmt.Errorf("parse %s: %w", path, err)
-		}
-		count := countDirectAssertions(parsed)
-		if count == 0 {
-			return nil
 		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return fmt.Errorf("resolve relative path for %s: %w", path, err)
 		}
-		counts[filepath.ToSlash(rel)] = count
+		packageKey := filepath.Dir(rel) + "\x00" + parsed.Name.Name
+		group := packages[packageKey]
+		if group == nil {
+			group = &packageFiles{}
+			packages[packageKey] = group
+		}
+		group.files = append(group.files, parsed)
+		group.paths = append(group.paths, filepath.ToSlash(rel))
 		return nil
 	})
-	return counts, err
+	if err != nil {
+		return nil, err
+	}
+
+	counts := map[string]int{}
+	for _, group := range packages {
+		info := resolveTestingMethods(fileSet, group.files)
+		for index, file := range group.files {
+			count := countResolvedDirectAssertions(file, info)
+			if count > 0 {
+				counts[group.paths[index]] = count
+			}
+		}
+	}
+	return counts, nil
 }
 
 func ignoredAssertionDir(name string) bool {
@@ -135,54 +160,40 @@ func ignoredAssertionDir(name string) bool {
 }
 
 func countDirectAssertions(file *ast.File) int {
+	fileSet := token.NewFileSet()
+	fileSet.AddFile("fixture.go", -1, int(file.End())+1)
+	return countDirectAssertionsWithFileSet(fileSet, file)
+}
+
+func countDirectAssertionsWithFileSet(fileSet *token.FileSet, file *ast.File) int {
+	info := resolveTestingMethods(fileSet, []*ast.File{file})
+	return countResolvedDirectAssertions(file, info)
+}
+
+func resolveTestingMethods(fileSet *token.FileSet, files []*ast.File) *types.Info {
+	info := &types.Info{Uses: map[*ast.Ident]types.Object{}}
+	checker := types.Config{
+		Importer: importer.Default(),
+		Error:    func(error) {},
+	}
+	_, _ = checker.Check(files[0].Name.Name, fileSet, files, info)
+	return info
+}
+
+func countResolvedDirectAssertions(file *ast.File, info *types.Info) int {
 	count := 0
 	ast.Inspect(file, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		selector, ok := call.Fun.(*ast.SelectorExpr)
+		selector, ok := node.(*ast.SelectorExpr)
 		if !ok || !directAssertionMethods[selector.Sel.Name] {
 			return true
 		}
-		receiver, ok := selector.X.(*ast.Ident)
-		if ok && isTestingHandle(receiver) {
+		method := info.Uses[selector.Sel]
+		if method != nil && method.Pkg() != nil && method.Pkg().Path() == "testing" {
 			count++
 		}
 		return true
 	})
 	return count
-}
-
-func isTestingHandle(identifier *ast.Ident) bool {
-	if identifier.Obj == nil {
-		return false
-	}
-	field, ok := identifier.Obj.Decl.(*ast.Field)
-	if !ok {
-		return false
-	}
-	return isTestingType(field.Type)
-}
-
-func isTestingType(expr ast.Expr) bool {
-	if pointer, ok := expr.(*ast.StarExpr); ok {
-		expr = pointer.X
-	}
-	selector, ok := expr.(*ast.SelectorExpr)
-	if !ok {
-		return false
-	}
-	pkg, ok := selector.X.(*ast.Ident)
-	if !ok || pkg.Name != "testing" {
-		return false
-	}
-	switch selector.Sel.Name {
-	case "T", "B", "F", "TB":
-		return true
-	default:
-		return false
-	}
 }
 
 func loadBaseline(path string) (assertionBaseline, error) {

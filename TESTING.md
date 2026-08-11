@@ -100,7 +100,11 @@ documented exception that cannot safely use Testify.
 
 ## Coverage
 
-Run the aggregate report with `make cover`. Coverage changes must exercise
-observable behavior or failure handling; do not add production abstractions or
-empty calls solely to increase the percentage. The hardening track starts at
-78.04% and targets a stable CI floor of at least 80%.
+Run the aggregate report with `make cover` and enforce the release floor with
+`make cover-check`. Local and CI checks use exact covered/total statement counts
+from `coverage.out`; rounded `go tool cover` display percentages are not used for
+the decision. The aggregate floor is 80.0%, and CI combines it with `-race` and
+atomic coverage mode.
+
+Coverage changes must exercise observable behavior or failure handling. Do not
+add production abstractions or empty calls solely to increase the percentage.

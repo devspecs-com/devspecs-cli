@@ -77,6 +77,105 @@ func TestSample(t *testing.T) {
 	assert.Equal(t, 1, actual)
 }
 
+func TestCountDirectAssertions_WhenTestingImportIsAliased_CountsCall(t *testing.T) {
+	parsed := mustParseTestSource(t, `package sample
+import testpkg "testing"
+func TestSample(t *testpkg.T) { t.Fatal("failure") }
+`)
+
+	actual := countDirectAssertions(parsed)
+
+	assert.Equal(t, 1, actual)
+}
+
+func TestCountDirectAssertions_WhenTestingImportIsDotted_CountsCall(t *testing.T) {
+	parsed := mustParseTestSource(t, `package sample
+import . "testing"
+func TestSample(t *T) { t.Fatal("failure") }
+`)
+
+	actual := countDirectAssertions(parsed)
+
+	assert.Equal(t, 1, actual)
+}
+
+func TestCountDirectAssertions_WhenTestingTypeHasLocalAlias_CountsCall(t *testing.T) {
+	parsed := mustParseTestSource(t, `package sample
+import "testing"
+type TestHandle = testing.T
+func TestSample(t *TestHandle) { t.Fatal("failure") }
+`)
+
+	actual := countDirectAssertions(parsed)
+
+	assert.Equal(t, 1, actual)
+}
+
+func TestCountDirectAssertions_WhenTestingHandleIsReassigned_CountsCall(t *testing.T) {
+	parsed := mustParseTestSource(t, `package sample
+import "testing"
+func TestSample(t *testing.T) {
+	other := t
+	other.Fatal("failure")
+}
+`)
+
+	actual := countDirectAssertions(parsed)
+
+	assert.Equal(t, 1, actual)
+}
+
+func TestCountDirectAssertions_WhenReceiverIsParenthesized_CountsCall(t *testing.T) {
+	parsed := mustParseTestSource(t, `package sample
+import "testing"
+func TestSample(t *testing.T) { (t).Fatal("failure") }
+`)
+
+	actual := countDirectAssertions(parsed)
+
+	assert.Equal(t, 1, actual)
+}
+
+func TestCountDirectAssertions_WhenAssertionMethodIsCaptured_CountsMethodValue(t *testing.T) {
+	parsed := mustParseTestSource(t, `package sample
+import "testing"
+func TestSample(t *testing.T) {
+	fail := t.Fatal
+	fail("failure")
+}
+`)
+
+	actual := countDirectAssertions(parsed)
+
+	assert.Equal(t, 1, actual)
+}
+
+func TestCountDirectAssertions_WhenAssertionUsesMethodExpression_CountsReference(t *testing.T) {
+	parsed := mustParseTestSource(t, `package sample
+import "testing"
+func TestSample(t *testing.T) { (*testing.T).Fatal(t, "failure") }
+`)
+
+	actual := countDirectAssertions(parsed)
+
+	assert.Equal(t, 1, actual)
+}
+
+func TestCountDirectAssertions_WhenTestingHandleIsEmbedded_CountsPromotedMethod(t *testing.T) {
+	parsed := mustParseTestSource(t, `package sample
+import "testing"
+type testHelper struct { *testing.T }
+func TestSample(t *testing.T) {
+	helper := testHelper{T: t}
+	helper.Fatal("failure")
+}
+`)
+
+	actual := countDirectAssertions(parsed)
+
+	assert.Equal(t, 1, actual)
+}
+
 func TestCompareCounts_WhenCountIncreases_ReturnsRegression(t *testing.T) {
 	baseline := map[string]int{"sample_test.go": 2}
 	current := map[string]int{"sample_test.go": 3}
@@ -111,6 +210,37 @@ func TestCollectDirectAssertions_WhenTestFileContainsDirectAssertion_ReportsFile
 	writeTestSource(t, filepath.Join(root, "sample_test.go"), `package sample
 import "testing"
 func TestSample(t *testing.T) { t.Fatal("counted") }
+`)
+
+	counts, err := collectDirectAssertions(root)
+
+	require.NoError(t, err)
+	require.Len(t, counts, 1)
+	assert.Equal(t, 1, counts["sample_test.go"])
+}
+
+func TestCollectDirectAssertions_WhenNonTestHelperContainsDirectAssertion_ReportsFileCount(t *testing.T) {
+	root := t.TempDir()
+	writeTestSource(t, filepath.Join(root, "assertions.go"), `package sample
+import "testing"
+func helper(t *testing.T) { t.Fatal("counted") }
+`)
+
+	counts, err := collectDirectAssertions(root)
+
+	require.NoError(t, err)
+	require.Len(t, counts, 1)
+	assert.Equal(t, 1, counts["assertions.go"])
+}
+
+func TestCollectDirectAssertions_WhenTestingAliasIsDeclaredInNeighborFile_ReportsFileCount(t *testing.T) {
+	root := t.TempDir()
+	writeTestSource(t, filepath.Join(root, "handle_test.go"), `package sample
+import "testing"
+type testHandle = testing.T
+`)
+	writeTestSource(t, filepath.Join(root, "sample_test.go"), `package sample
+func TestSample(t *testHandle) { t.Fatal("counted") }
 `)
 
 	counts, err := collectDirectAssertions(root)
