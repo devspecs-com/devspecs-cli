@@ -12,6 +12,62 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAdapter_Name_ReturnsTestCase(t *testing.T) {
+	adapter := &Adapter{}
+
+	name := adapter.Name()
+
+	assert.Equal(t, sourceType, name)
+}
+
+func TestAcceptsFile_WithEnabledGoTest_ReturnsTrue(t *testing.T) {
+	adapter := &Adapter{}
+	cfg := config.WithTestCaseArtifacts(config.DefaultRepoConfig(), true)
+
+	accepted := adapter.AcceptsFile("tests/webhook_test.go", 1024, cfg)
+
+	assert.True(t, accepted)
+}
+
+func TestAcceptsFile_WithOrdinarySourceFile_ReturnsFalse(t *testing.T) {
+	adapter := &Adapter{}
+	cfg := config.WithTestCaseArtifacts(config.DefaultRepoConfig(), true)
+
+	accepted := adapter.AcceptsFile("service/webhook.go", 1024, cfg)
+
+	assert.False(t, accepted)
+}
+
+func TestDiscoverFile_WithGoTest_ReturnsNamedTestCandidate(t *testing.T) {
+	adapter := &Adapter{}
+	cfg := config.WithTestCaseArtifacts(config.DefaultRepoConfig(), true)
+	file := adapters.FileCandidate{
+		PrimaryPath: "tests/webhook_test.go",
+		RelPath:     "tests/webhook_test.go",
+		Size:        120,
+		Body:        []byte("package tests\n\nfunc TestWebhookReplayProtection(t *testing.T) {\n\trequire.NoError(t, err)\n}\n"),
+	}
+
+	candidates, err := adapter.DiscoverFile(context.Background(), file, cfg)
+
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	assert.Equal(t, "TestWebhookReplayProtection", candidates[0].UnitName)
+	assert.Equal(t, "go test", candidates[0].UnitFramework)
+}
+
+func TestDiscoverFile_WithCanceledContext_ReturnsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	adapter := &Adapter{}
+	cfg := config.WithTestCaseArtifacts(config.DefaultRepoConfig(), true)
+
+	candidates, err := adapter.DiscoverFile(ctx, adapters.FileCandidate{RelPath: "tests/webhook_test.go"}, cfg)
+
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, candidates)
+}
+
 func TestExtractUnits_WithGoTest_ReturnsGoTestUnit(t *testing.T) {
 	body := "package service\n\nfunc TestWebhookReplayProtection(t *testing.T) {\n\trequire.NoError(t, err)\n}\n"
 

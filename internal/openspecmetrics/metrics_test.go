@@ -9,6 +9,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestMetricsHasData_WithEmptyMetrics_ReturnsFalse(t *testing.T) {
+	metrics := Metrics{}
+
+	hasData := metrics.HasData()
+
+	assert.False(t, hasData)
+}
+
+func TestMetricsHasData_WithMarkdownLeakage_ReturnsTrue(t *testing.T) {
+	metrics := Metrics{MarkdownLeakage: 1}
+
+	hasData := metrics.HasData()
+
+	assert.True(t, hasData)
+}
+
 func TestAnalyzeOpenSpecMetrics(t *testing.T) {
 	repoRoot := t.TempDir()
 	changeDir := filepath.Join(repoRoot, "openspec", "changes", "add-sso")

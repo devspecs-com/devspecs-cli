@@ -12,6 +12,62 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAdapter_Name_ReturnsCodeComment(t *testing.T) {
+	adapter := &Adapter{}
+
+	name := adapter.Name()
+
+	assert.Equal(t, sourceType, name)
+}
+
+func TestAcceptsFile_WithEnabledSupportedFile_ReturnsTrue(t *testing.T) {
+	adapter := &Adapter{}
+	cfg := config.WithCodeCommentArtifacts(config.DefaultRepoConfig(), true)
+
+	accepted := adapter.AcceptsFile("billing/webhook.go", 1024, cfg)
+
+	assert.True(t, accepted)
+}
+
+func TestAcceptsFile_WithOversizedFile_ReturnsFalse(t *testing.T) {
+	adapter := &Adapter{}
+	cfg := config.WithCodeCommentArtifacts(config.DefaultRepoConfig(), true)
+
+	accepted := adapter.AcceptsFile("billing/webhook.go", maxFileBytes+1, cfg)
+
+	assert.False(t, accepted)
+}
+
+func TestDiscoverFile_WithIntentComment_ReturnsSectionCandidate(t *testing.T) {
+	adapter := &Adapter{}
+	cfg := config.WithCodeCommentArtifacts(config.DefaultRepoConfig(), true)
+	file := adapters.FileCandidate{
+		PrimaryPath: "billing/webhook.go",
+		RelPath:     "billing/webhook.go",
+		Size:        90,
+		Body:        []byte("package billing\n\n// Invariant: stripe_event_id must be unique.\nfunc apply() {}\n"),
+	}
+
+	candidates, err := adapter.DiscoverFile(context.Background(), file, cfg)
+
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	assert.Equal(t, "billing/webhook.go", candidates[0].RelPath)
+	assert.Equal(t, "invariant", candidates[0].Role)
+}
+
+func TestDiscoverFile_WithCanceledContext_ReturnsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	adapter := &Adapter{}
+	cfg := config.WithCodeCommentArtifacts(config.DefaultRepoConfig(), true)
+
+	candidates, err := adapter.DiscoverFile(ctx, adapters.FileCandidate{RelPath: "billing/webhook.go"}, cfg)
+
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, candidates)
+}
+
 func TestExtractComments_WithIntentComments_ReturnsIntentUnitsOnly(t *testing.T) {
 	body := `package billing
 

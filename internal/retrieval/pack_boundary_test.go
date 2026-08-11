@@ -7,6 +7,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestIsBoundaryPrimaryPack_WithBoundaryMode_ReturnsTrue(t *testing.T) {
+	pack := RoleGroupedPack{Mode: BoundaryPrimaryPackMode}
+
+	isBoundaryPrimary := IsBoundaryPrimaryPack(pack)
+
+	assert.True(t, isBoundaryPrimary)
+}
+
 func TestApplyBoundaryPrimaryPackMarksRelatedDocsButKeepsSourcePrimary(t *testing.T) {
 	pack := RoleGroupedPack{
 		Mode: "role_grouped_pack_v0",

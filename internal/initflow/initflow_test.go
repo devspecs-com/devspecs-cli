@@ -262,6 +262,36 @@ func generatedStatus(files []AgentToolFile, relPath string) string {
 	return ""
 }
 
+func TestSelectAgentToolsByID_WithRequestedSubset_PreservesDetectionOrder(t *testing.T) {
+	tools := []AgentTool{
+		{ID: "codex", Label: "Codex"},
+		{ID: "cursor", Label: "Cursor"},
+		{ID: "claude", Label: "Claude"},
+	}
+
+	selected := selectAgentToolsByID(tools, []string{"claude", "codex"})
+
+	require.Len(t, selected, 2)
+	assert.Equal(t, "codex", selected[0].ID)
+	assert.Equal(t, "claude", selected[1].ID)
+}
+
+func TestFilterAgentTools_WithDetectedPredicate_ReturnsOnlyDetectedTools(t *testing.T) {
+	tools := []AgentTool{
+		{ID: "codex", Detected: true},
+		{ID: "cursor", Detected: false},
+		{ID: "claude", Detected: true},
+	}
+
+	selected := filterAgentTools(tools, func(tool AgentTool) bool {
+		return tool.Detected
+	})
+
+	require.Len(t, selected, 2)
+	assert.Equal(t, "codex", selected[0].ID)
+	assert.Equal(t, "claude", selected[1].ID)
+}
+
 func assertGeneratedFileContains(t *testing.T, root, relPath, want string) {
 	t.Helper()
 	data := readGeneratedFile(t, root, relPath)

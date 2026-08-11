@@ -14,6 +14,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAdapter_Name_ReturnsADR(t *testing.T) {
+	adapter := &Adapter{}
+
+	name := adapter.Name()
+
+	assert.Equal(t, "adr", name)
+}
+
 func TestDiscover_WithDefaultADRPath_ReturnsCandidate(t *testing.T) {
 	root := t.TempDir()
 	writeADRFile(t, root, "docs/adr/0001-use-sqlite.md", "# Use SQLite\n\nStatus: Accepted\n")

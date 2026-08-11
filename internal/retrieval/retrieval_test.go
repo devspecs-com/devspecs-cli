@@ -1638,6 +1638,25 @@ func TestApplyConceptBackfillWithGlossary_SuppressesBroadRepoConcept(t *testing.
 
 }
 
+func TestRankConceptCandidatesWithGlossary_WithExactTestName_RetainsDiagnosticEvidence(t *testing.T) {
+	candidates := []Candidate{{
+		Path:    "pkg/tools/exposed_tool_test.go#L24-L39",
+		Subtype: "test_case",
+		Title:   "TestPutAndGetExposedTool",
+		Body:    "Test: TestPutAndGetExposedTool\nassert exposed tool is returned.",
+		Metadata: map[string]string{
+			"source_type": "test_case",
+			"test_name":   "TestPutAndGetExposedTool",
+		},
+	}}
+
+	ranks := RankConceptCandidatesWithGlossary(candidates, "what tests cover testputandgetexposedtool behavior")
+
+	require.Len(t, ranks, 1)
+	assert.Equal(t, "pkg/tools/exposed_tool_test.go#L24-L39", ranks[0].Path)
+	assert.NotEmpty(t, ranks[0].MatchedCompacts)
+}
+
 func TestApplyConceptBackfillWithGlossary_KeepsRareProductConcept(t *testing.T) {
 	selected := []Candidate{{Path: "docs/roadmap.md", Body: "Roadmap for unrelated launch work."}}
 	universe := append([]Candidate{}, selected...)

@@ -9,6 +9,41 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestWithIntentCandidateDiscovery_WithNilConfig_EnablesExperimentOnCopy(t *testing.T) {
+	cfg := (*RepoConfig)(nil)
+
+	updated := WithIntentCandidateDiscovery(cfg, true)
+
+	require.NotNil(t, updated.Experiments.IntentCandidateDiscovery)
+	assert.True(t, *updated.Experiments.IntentCandidateDiscovery)
+}
+
+func TestWithDefaultIntentCandidateDiscovery_WithExplicitChoice_PreservesChoice(t *testing.T) {
+	cfg := WithIntentCandidateDiscovery(DefaultRepoConfig(), false)
+
+	updated := WithDefaultIntentCandidateDiscovery(cfg, true)
+
+	require.NotNil(t, updated.Experiments.IntentCandidateDiscovery)
+	assert.False(t, *updated.Experiments.IntentCandidateDiscovery)
+}
+
+func TestWithSupportDocDiscovery_WithDisabledChoice_DisablesExperiment(t *testing.T) {
+	cfg := DefaultRepoConfig()
+
+	updated := WithSupportDocDiscovery(cfg, false)
+
+	require.NotNil(t, updated.Experiments.SupportDocDiscovery)
+	assert.False(t, updated.Experiments.SupportDocDiscoveryEnabled(true))
+}
+
+func TestIntentCandidateDiscoveryEnabled_WithoutChoice_ReturnsCallerDefault(t *testing.T) {
+	experiments := ExperimentConfig{}
+
+	enabled := experiments.IntentCandidateDiscoveryEnabled(true)
+
+	assert.True(t, enabled)
+}
+
 func TestHomeDir_Default(t *testing.T) {
 	t.Setenv("DEVSPECS_HOME", "")
 	dir, err := HomeDir()

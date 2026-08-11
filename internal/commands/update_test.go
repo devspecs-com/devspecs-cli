@@ -15,6 +15,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestNewUpdateCmd_ReturnsOfflineSafeCommandSurface(t *testing.T) {
+	cmd := NewUpdateCmd()
+
+	assert.Equal(t, "update", cmd.Use)
+	assert.Contains(t, cmd.Short, "update")
+	assert.NotNil(t, cmd.Flags().Lookup("json"))
+	assert.NotNil(t, cmd.Flags().Lookup("no-check"))
+	assert.NotNil(t, cmd.Flags().Lookup("refresh"))
+}
+
 func TestDetectInstallSource_WithAppleHomebrewPath_ReturnsHomebrewGuidance(t *testing.T) {
 	source, confidence, command, alternatives := detectInstallSource("/opt/homebrew/bin/ds")
 

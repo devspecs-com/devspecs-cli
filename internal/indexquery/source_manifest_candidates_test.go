@@ -1,6 +1,7 @@
 package indexquery
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +11,56 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestParseSourceManifestCandidateMode_WithMixedCaseWindow_ReturnsWindow(t *testing.T) {
+	mode, err := ParseSourceManifestCandidateMode("  WINDOW ")
+
+	require.NoError(t, err)
+	assert.Equal(t, SourceManifestCandidateModeWindow, mode)
+}
+
+func TestParseSourceManifestCandidateMode_WithUnknownMode_ReturnsActionableError(t *testing.T) {
+	mode, err := ParseSourceManifestCandidateMode("fast")
+
+	assert.ErrorContains(t, err, "valid values: off, metadata, window")
+	assert.Empty(t, mode)
+}
+
+func TestSourceManifestBodyWindow_WithRankedTerm_ReturnsBoundedExcerptAroundSpecificMatch(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "src", "oauth.go")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	body := strings.Repeat("generic setup line\n", 12) +
+		"func handleSwaggerOAuthRedirect() error { return nil }\n" +
+		strings.Repeat("generic cleanup line\n", 12)
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o644))
+
+	snippet := sourceManifestBodyWindow(root, "src/oauth.go", []string{"generic", "SwaggerOAuth"}, 120)
+
+	assert.Contains(t, snippet, "handleSwaggerOAuthRedirect")
+	assert.True(t, strings.HasPrefix(snippet, "...\n"))
+	assert.True(t, strings.HasSuffix(snippet, "\n..."))
+}
+
+func TestSourceManifestBodyWindow_WithEscapingPath_ReturnsEmpty(t *testing.T) {
+	root := t.TempDir()
+
+	snippet := sourceManifestBodyWindow(root, "../outside.go", []string{"outside"}, 100)
+
+	assert.Empty(t, snippet)
+}
+
+func TestSourceManifestWindowTermsByPriority_WithSpecificAndGenericTerms_RanksSpecificFirst(t *testing.T) {
+	terms := []string{"docs", "oauth", "swagger_redirect", "client"}
+
+	ranked := sourceManifestWindowTermsByPriority(terms)
+
+	require.Len(t, ranked, 4)
+	assert.Equal(t, "swagger_redirect", ranked[0])
+	assert.Equal(t, "oauth", ranked[1])
+	assert.Equal(t, "client", ranked[2])
+	assert.Equal(t, "docs", ranked[3])
+}
 
 func TestLoadSourceManifestCandidatesForQueryMaterializesTestCandidate(t *testing.T) {
 	tmp := t.TempDir()

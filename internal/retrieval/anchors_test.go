@@ -8,6 +8,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestValidAnchorFirstModes_ReturnsEverySupportedModeInStableOrder(t *testing.T) {
+	modes := ValidAnchorFirstModes()
+
+	require.Len(t, modes, 8)
+	assert.Equal(t, AnchorFirstModeV1, modes[0])
+	assert.Equal(t, AnchorFirstModeRerankOnly, modes[1])
+	assert.Equal(t, AnchorFirstModeSelectedOnly, modes[2])
+	assert.Equal(t, AnchorFirstModeStrongField, modes[3])
+	assert.Equal(t, AnchorFirstModeStrict, modes[4])
+	assert.Equal(t, AnchorFirstModeCodeTask, modes[5])
+	assert.Equal(t, AnchorFirstModeCodeTaskFamily, modes[6])
+	assert.Equal(t, AnchorFirstModeCodeTaskFamilyV2, modes[7])
+}
+
 func TestBuildAnchorProfileClassifiesQueryTerms(t *testing.T) {
 	profile := BuildAnchorProfile("fix Langfuse trace association for REQ_fluxnova_aigf_integration and testPutAndGetExposedTool behavior")
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
@@ -30,6 +31,54 @@ func setupOpenSpecRepo(t *testing.T) string {
 	require.NoError(t, os.WriteFile(filepath.Join(changeDir, "design.md"), []byte("# Design\nDetails here.\n"), 0o644))
 
 	return tmp
+}
+
+func TestAdapter_Name_ReturnsOpenSpec(t *testing.T) {
+	adapter := &Adapter{}
+
+	name := adapter.Name()
+
+	assert.Equal(t, "openspec", name)
+}
+
+func TestParse_WithCollectionCandidate_SummarizesActiveArchivedAndCapabilityEntries(t *testing.T) {
+	root := t.TempDir()
+	baseDir := filepath.Join(root, "openspec")
+	require.NoError(t, os.MkdirAll(filepath.Join(baseDir, "changes", "add-login"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(baseDir, "changes", "archive", "retire-passwords"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(baseDir, "specs", "authentication"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(baseDir, "specs", "authentication", "spec.md"), []byte("# Authentication\n"), 0o644))
+	adapter := &Adapter{}
+	candidate := adapters.Candidate{
+		PrimaryPath: baseDir, RelPath: "openspec", ArtifactScope: scopeCollection, Role: roleCollection,
+	}
+
+	artifact, sources, parsed, err := adapter.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, config.SubtypeOpenspecCollection, artifact.Subtype)
+	assert.Equal(t, 2, artifact.Extracted["openspec_change_count"])
+	assert.Equal(t, 1, artifact.Extracted["openspec_capability_count"])
+	assert.Contains(t, artifact.Body, "## Active Changes\n\n- add-login")
+	assert.Contains(t, artifact.Body, "## Archived Changes\n\n- retire-passwords")
+	assert.Contains(t, artifact.Body, "## Capability Specs\n\n- specs/authentication/spec.md")
+	require.Len(t, sources, 1)
+	assert.Equal(t, "openspec", sources[0].Path)
+	assert.Empty(t, parsed.Todos)
+}
+
+func TestParse_WithEmptyCollectionCandidate_RendersNoneForEveryCollection(t *testing.T) {
+	baseDir := filepath.Join(t.TempDir(), "openspec")
+	require.NoError(t, os.MkdirAll(baseDir, 0o755))
+	adapter := &Adapter{}
+	candidate := adapters.Candidate{
+		PrimaryPath: baseDir, RelPath: "openspec", ArtifactScope: scopeCollection, Role: roleCollection,
+	}
+
+	artifact, _, _, err := adapter.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, 3, strings.Count(artifact.Body, "- none"))
 }
 
 func TestOpenSpec_ProposalDetected(t *testing.T) {

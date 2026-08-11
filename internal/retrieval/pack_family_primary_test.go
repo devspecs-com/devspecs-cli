@@ -7,6 +7,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestIsFamilyPrimaryPack_WithFamilyMetadata_ReturnsTrue(t *testing.T) {
+	pack := RoleGroupedPack{Metadata: map[string]string{"family_primary": "true"}}
+
+	isFamilyPrimary := IsFamilyPrimaryPack(pack)
+
+	assert.True(t, isFamilyPrimary)
+}
+
 func TestApplyFamilyPrimaryPackForQueryKeepsExactSourceAndTestPrimary(t *testing.T) {
 	pack := RoleGroupedPack{
 		Mode: "role_grouped_pack_v0",

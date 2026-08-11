@@ -12,6 +12,86 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAdapter_Name_ReturnsSourceContext(t *testing.T) {
+	adapter := &Adapter{}
+
+	name := adapter.Name()
+
+	assert.Equal(t, sourceType, name)
+}
+
+func TestAcceptsFile_WithConfiguredMatchingSourcePath_ReturnsTrue(t *testing.T) {
+	adapter := &Adapter{}
+	cfg := &config.RepoConfig{Sources: []config.SourceConfig{{Type: sourceType, Path: "services"}}}
+
+	accepted := adapter.AcceptsFile("services/api/handler.ts", 1024, cfg)
+
+	assert.True(t, accepted)
+}
+
+func TestAcceptsFile_WithConfiguredNonmatchingSourcePath_ReturnsFalse(t *testing.T) {
+	adapter := &Adapter{}
+	cfg := &config.RepoConfig{Sources: []config.SourceConfig{{Type: sourceType, Path: "scripts"}}}
+
+	accepted := adapter.AcceptsFile("services/api/handler.ts", 1024, cfg)
+
+	assert.False(t, accepted)
+}
+
+func TestDiscoverFile_WithAdmittedSource_ReturnsReasonMetadata(t *testing.T) {
+	adapter := &Adapter{}
+	file := adapters.FileCandidate{
+		PrimaryPath: "services/api/handler.ts",
+		RelPath:     "services/api/handler.ts",
+		Size:        42,
+		Body:        []byte("export function handler() {}\n"),
+	}
+
+	candidates, err := adapter.DiscoverFile(context.Background(), file, nil)
+
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	assert.Equal(t, "default_source_context", candidates[0].Metadata["admission_reason"])
+}
+
+func TestDiscoverFile_WithCanceledContext_ReturnsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	adapter := &Adapter{}
+
+	candidates, err := adapter.DiscoverFile(ctx, adapters.FileCandidate{RelPath: "services/api/handler.ts"}, nil)
+
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, candidates)
+}
+
+func TestLanguageForPath_WithPowerShellFile_ReturnsPowerShell(t *testing.T) {
+	language := LanguageForPath("scripts/install.ps1")
+
+	assert.Equal(t, "powershell", language)
+}
+
+func TestExtractTestNames_WithDuplicateNames_ReturnsUniqueNames(t *testing.T) {
+	body := "func TestLogin(t *testing.T) {}\nfunc TestLogin(t *testing.T) {}\ndef test_logout():\n    pass\n"
+
+	names := ExtractTestNames(body)
+
+	require.Len(t, names, 2)
+	assert.Equal(t, "TestLogin", names[0])
+	assert.Equal(t, "test_logout", names[1])
+}
+
+func TestExtractSymbols_WithGoAndTypeScriptDeclarations_ReturnsUniqueSymbols(t *testing.T) {
+	body := "func HandleLogin() {}\ntype Session struct{}\nfunction refreshSession() {}\n"
+
+	symbols := ExtractSymbols(body)
+
+	require.Len(t, symbols, 3)
+	assert.Equal(t, "HandleLogin", symbols[0])
+	assert.Equal(t, "Session", symbols[1])
+	assert.Equal(t, "refreshSession", symbols[2])
+}
+
 func TestDiscoverIndexesBoundedSourceFiles(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "services", "api", "handler.ts"), "export function handler() {}\n")
