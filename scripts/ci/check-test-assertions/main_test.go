@@ -1,6 +1,7 @@
 package main
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -11,78 +12,191 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCountDirectAssertionsFindsTestingCallsOnly(t *testing.T) {
-	parsed, err := parser.ParseFile(token.NewFileSet(), "sample_test.go", `package sample
+func TestCountDirectAssertions_WhenTestingMethodsAreCalled_CountsEachCall(t *testing.T) {
+	parsed := mustParseTestSource(t, `package sample
+import "testing"
+func TestSample(t *testing.T) {
+	t.Error("first")
+	t.Fatalf("second")
+}
+`)
+
+	actual := countDirectAssertions(parsed)
+
+	assert.Equal(t, 2, actual)
+}
+
+func TestCountDirectAssertions_WhenErrorMethodBelongsToNonTestingValue_DoesNotCountCall(t *testing.T) {
+	parsed := mustParseTestSource(t, `package sample
 import "testing"
 func TestSample(t *testing.T) {
 	err := example()
 	_ = err.Error()
-	t.Error("first")
-	t.Fatalf("second")
+}
+`)
+
+	actual := countDirectAssertions(parsed)
+
+	assert.Equal(t, 0, actual)
+}
+
+func TestCountDirectAssertions_WhenAssertionNameAppearsInString_DoesNotCountIt(t *testing.T) {
+	parsed := mustParseTestSource(t, `package sample
+import "testing"
+func TestSample(t *testing.T) {
 	_ = "t.Fatal is fixture source, not a call"
 }
-`, 0)
-	require.NoError(t, err)
+`)
 
-	assert.Equal(t, 2, countDirectAssertions(parsed))
+	actual := countDirectAssertions(parsed)
+
+	assert.Equal(t, 0, actual)
 }
 
-func TestCountDirectAssertionsSupportsHelpersAndSubtests(t *testing.T) {
-	parsed, err := parser.ParseFile(token.NewFileSet(), "sample_test.go", `package sample
+func TestCountDirectAssertions_WhenTestingHandleIsHelperParameter_CountsCall(t *testing.T) {
+	parsed := mustParseTestSource(t, `package sample
 import "testing"
 func helper(testingHandle *testing.T) { testingHandle.FailNow() }
+`)
+
+	actual := countDirectAssertions(parsed)
+
+	assert.Equal(t, 1, actual)
+}
+
+func TestCountDirectAssertions_WhenTestingHandleIsSubtestParameter_CountsCall(t *testing.T) {
+	parsed := mustParseTestSource(t, `package sample
+import "testing"
 func TestSample(t *testing.T) {
 	t.Run("child", func(child *testing.T) { child.Errorf("failure") })
 }
-`, 0)
-	require.NoError(t, err)
+`)
 
-	assert.Equal(t, 2, countDirectAssertions(parsed))
+	actual := countDirectAssertions(parsed)
+
+	assert.Equal(t, 1, actual)
 }
 
-func TestCompareCountsRejectsIncreasesAndRequiresRatchet(t *testing.T) {
-	problems := compareCounts(
-		map[string]int{"increased_test.go": 3, "reduced_test.go": 1},
-		map[string]int{"increased_test.go": 2, "reduced_test.go": 2},
-	)
+func TestCompareCounts_WhenCountIncreases_ReturnsRegression(t *testing.T) {
+	baseline := map[string]int{"sample_test.go": 2}
+	current := map[string]int{"sample_test.go": 3}
 
-	assert.Equal(t, []string{
-		"increased_test.go: direct testing assertions increased from 2 to 3",
-		"reduced_test.go: direct testing assertions fell from 2 to 1; ratchet the baseline",
-	}, problems)
+	problems := compareCounts(current, baseline)
+
+	require.Len(t, problems, 1)
+	assert.Equal(t, "sample_test.go: direct testing assertions increased from 2 to 3", problems[0])
 }
 
-func TestCompareCountsAcceptsExactBaseline(t *testing.T) {
-	counts := map[string]int{"sample_test.go": 2}
-	assert.Empty(t, compareCounts(counts, counts))
+func TestCompareCounts_WhenCountDecreases_RequiresBaselineRatchet(t *testing.T) {
+	baseline := map[string]int{"sample_test.go": 2}
+	current := map[string]int{"sample_test.go": 1}
+
+	problems := compareCounts(current, baseline)
+
+	require.Len(t, problems, 1)
+	assert.Equal(t, "sample_test.go: direct testing assertions fell from 2 to 1; ratchet the baseline", problems[0])
 }
 
-func TestCollectDirectAssertionsSkipsIgnoredTreesAndFixtureStrings(t *testing.T) {
+func TestCompareCounts_WhenCountsMatch_ReturnsNoProblems(t *testing.T) {
+	baseline := map[string]int{"sample_test.go": 2}
+	current := map[string]int{"sample_test.go": 2}
+
+	problems := compareCounts(current, baseline)
+
+	assert.Empty(t, problems)
+}
+
+func TestCollectDirectAssertions_WhenTestFileContainsDirectAssertion_ReportsFileCount(t *testing.T) {
 	root := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(root, "sample_test.go"), []byte(`package sample
+	writeTestSource(t, filepath.Join(root, "sample_test.go"), `package sample
 import "testing"
-func TestSample(t *testing.T) {
-	t.Fatal("counted")
-	_ = "t.Fatalf is fixture source"
-}
-`), 0o644))
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "_ignore"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "_ignore", "ignored_test.go"), []byte(`package ignored
-import "testing"
-func TestIgnored(t *testing.T) { t.Fatal("ignored") }
-`), 0o644))
+func TestSample(t *testing.T) { t.Fatal("counted") }
+`)
 
 	counts, err := collectDirectAssertions(root)
+
 	require.NoError(t, err)
-	assert.Equal(t, map[string]int{"sample_test.go": 1}, counts)
+	require.Len(t, counts, 1)
+	assert.Equal(t, 1, counts["sample_test.go"])
 }
 
-func TestBaselineRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "baseline.json")
-	want := map[string]int{"a_test.go": 2, "b_test.go": 1}
-	require.NoError(t, writeBaseline(path, want))
+func TestCollectDirectAssertions_WhenAssertionNameAppearsOnlyInString_OmitsFile(t *testing.T) {
+	root := t.TempDir()
+	writeTestSource(t, filepath.Join(root, "sample_test.go"), `package sample
+import "testing"
+func TestSample(t *testing.T) { _ = "t.Fatalf is fixture source" }
+`)
 
-	got, err := loadBaseline(path)
+	counts, err := collectDirectAssertions(root)
+
 	require.NoError(t, err)
-	assert.Equal(t, assertionBaseline{Version: 1, Counts: want}, got)
+	assert.Empty(t, counts)
+}
+
+func TestCollectDirectAssertions_WhenTestFileIsInIgnoredDirectory_OmitsFile(t *testing.T) {
+	root := t.TempDir()
+	ignoredDir := filepath.Join(root, "_ignore")
+	require.NoError(t, os.MkdirAll(ignoredDir, 0o755))
+	writeTestSource(t, filepath.Join(ignoredDir, "ignored_test.go"), `package ignored
+import "testing"
+func TestIgnored(t *testing.T) { t.Fatal("ignored") }
+`)
+
+	counts, err := collectDirectAssertions(root)
+
+	require.NoError(t, err)
+	assert.Empty(t, counts)
+}
+
+func TestLoadBaseline_WhenJSONIsValid_ReturnsBaseline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "baseline.json")
+	writeTestSource(t, path, `{
+  "version": 1,
+  "counts": {
+    "a_test.go": 2,
+    "b_test.go": 1
+  }
+}`)
+
+	baseline, err := loadBaseline(path)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, baseline.Version)
+	require.Len(t, baseline.Counts, 2)
+	assert.Equal(t, 2, baseline.Counts["a_test.go"])
+	assert.Equal(t, 1, baseline.Counts["b_test.go"])
+}
+
+func TestWriteBaseline_WhenCountsProvided_WritesVersionedJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "baseline.json")
+	counts := map[string]int{"sample_test.go": 2}
+
+	err := writeBaseline(path, counts)
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `{
+  "version": 1,
+  "counts": {
+    "sample_test.go": 2
+  }
+}`, readTestSource(t, path))
+}
+
+func mustParseTestSource(t *testing.T, source string) *ast.File {
+	t.Helper()
+	parsed, err := parser.ParseFile(token.NewFileSet(), "sample_test.go", source, 0)
+	require.NoError(t, err)
+	return parsed
+}
+
+func writeTestSource(t *testing.T, path, source string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(path, []byte(source), 0o644))
+}
+
+func readTestSource(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return string(data)
 }
