@@ -409,6 +409,8 @@ func TestEvalActivationMatrixBinaryCompare(t *testing.T) {
 	}
 	assert.Equal(t, activationMatrixRunnerBinaryComparison, result.RunnerMode,
 		"expected binary comparison runner, got %q", result.RunnerMode)
+	assert.Equal(t, 1, result.Repetitions, "default repetitions = %d", result.Repetitions)
+	assert.True(t, result.SelfComparison)
 	assert.Equal(t, activationIndexStateCold, result.BaselineIndexState, "default binary index states missing: baseline=%q candidate=%q", result.BaselineIndexState, result.CandidateIndexState)
 	assert.Equal(t, activationIndexStateCold, result.CandidateIndexState, "default binary index states missing: baseline=%q candidate=%q", result.BaselineIndexState, result.CandidateIndexState)
 	assert.Equal(t, 3, result.Summary.Total, "unexpected binary compare summary: %#v", result.Summary)
@@ -432,6 +434,142 @@ func TestEvalActivationMatrixBinaryCompare(t *testing.T) {
 
 	}
 	_ = fatRepo
+}
+
+func TestEvalActivationMatrixBinaryCompare_WithEvenRepetitions_ReturnsValidationError(t *testing.T) {
+	repo := setupActivationMatrixRepo(t, "credentials", "feat: credentials rotation context")
+	manifest := writeActivationSingleCommandManifest(t, repo)
+	binary := writeActivationFakeBinary(t)
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{
+		manifest,
+		"--activation-matrix",
+		"--activation-baseline-bin", binary,
+		"--activation-candidate-bin", binary,
+		"--activation-repetitions", "2",
+	})
+
+	err := cmd.Execute()
+
+	require.Error(t, err)
+	assert.Equal(t, "--activation-repetitions must be odd", err.Error())
+}
+
+func TestEvalActivationMatrixBinaryCompare_WithThreeRepetitions_AlternatesOrderAndRecordsSamples(t *testing.T) {
+	repo := setupActivationMatrixRepo(t, "credentials", "feat: credentials rotation context")
+	manifest := writeActivationSingleCommandManifest(t, repo)
+	orderPath := filepath.Join(t.TempDir(), "order.log")
+	baselineBinary := writeActivationLoggingFakeBinary(t, "baseline", orderPath)
+	candidateBinary := writeActivationLoggingFakeBinary(t, "candidate", orderPath)
+	resultDir := filepath.Join(t.TempDir(), "results")
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{
+		manifest,
+		"--activation-matrix",
+		"--activation-baseline-bin", baselineBinary,
+		"--activation-candidate-bin", candidateBinary,
+		"--activation-repetitions", "3",
+		"--activation-result-dir", resultDir,
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var result activationMatrixResult
+	err = json.Unmarshal(buf.Bytes(), &result)
+	require.NoError(t, err)
+	assert.Equal(t, 3, result.Repetitions)
+	assert.False(t, result.SelfComparison)
+	require.Len(t, result.Cases, 1)
+	caseResult := result.Cases[0]
+	assert.Equal(t, "passed", caseResult.Status)
+	require.Len(t, caseResult.Samples, 3)
+	assert.Equal(t, 1, caseResult.Samples[0].Repetition)
+	assert.Equal(t, "baseline", caseResult.Samples[0].FirstRole)
+	assert.Equal(t, 2, caseResult.Samples[1].Repetition)
+	assert.Equal(t, "candidate", caseResult.Samples[1].FirstRole)
+	assert.Equal(t, 3, caseResult.Samples[2].Repetition)
+	assert.Equal(t, "baseline", caseResult.Samples[2].FirstRole)
+	assert.Contains(t, caseResult.Samples[0].Baseline.StdoutPath, "r001")
+	assert.Contains(t, caseResult.Samples[1].Baseline.StdoutPath, "r002")
+	assert.Contains(t, caseResult.Samples[2].Baseline.StdoutPath, "r003")
+	require.NotNil(t, caseResult.ComparisonTiming)
+	assert.Greater(t, caseResult.ComparisonTiming.BaselineMedianMillis, 0)
+	assert.Greater(t, caseResult.ComparisonTiming.CandidateMedianMillis, 0)
+	orderBytes, err := os.ReadFile(orderPath)
+	require.NoError(t, err)
+	order := strings.Fields(string(orderBytes))
+	require.Len(t, order, 6)
+	assert.Equal(t, "baseline", order[0])
+	assert.Equal(t, "candidate", order[1])
+	assert.Equal(t, "candidate", order[2])
+	assert.Equal(t, "baseline", order[3])
+	assert.Equal(t, "baseline", order[4])
+	assert.Equal(t, "candidate", order[5])
+}
+
+func TestSummarizeActivationMatrixBinaryComparison_WhenOneSampleFails_FailsCase(t *testing.T) {
+	out := activationMatrixCaseResult{RepoID: "sample-repo"}
+	samples := []activationMatrixComparisonSample{
+		{
+			Repetition:       1,
+			Status:           "passed",
+			StdoutMatch:      true,
+			Baseline:         activationMatrixCommandRun{DurationMillis: 10},
+			Candidate:        activationMatrixCommandRun{DurationMillis: 11},
+			MapActionQuality: &activationMapActionQualityComparison{Accepted: true, Status: "accepted_non_action_deltas"},
+		},
+		{
+			Repetition:       2,
+			Status:           "failed",
+			Error:            "baseline and candidate stdout differed",
+			Baseline:         activationMatrixCommandRun{DurationMillis: 20},
+			Candidate:        activationMatrixCommandRun{DurationMillis: 21},
+			MapActionQuality: &activationMapActionQualityComparison{Accepted: false, Status: "rejected"},
+		},
+		{
+			Repetition:  3,
+			Status:      "passed",
+			StdoutMatch: true,
+			Baseline:    activationMatrixCommandRun{DurationMillis: 30},
+			Candidate:   activationMatrixCommandRun{DurationMillis: 31},
+		},
+	}
+
+	result := summarizeActivationMatrixBinaryComparison(out, samples)
+
+	assert.Equal(t, "failed", result.Status)
+	assert.Equal(t, "repetition 2 failed: baseline and candidate stdout differed", result.Error)
+	assert.False(t, result.StdoutMatch)
+	require.Len(t, result.Samples, 3)
+	assert.Equal(t, "failed", result.Samples[1].Status)
+	require.NotNil(t, result.MapActionQuality)
+	assert.Equal(t, "rejected", result.MapActionQuality.Status)
+}
+
+func TestActivationComparisonTiming_WithThreeSamples_UsesMedianRunsAndPairDeltas(t *testing.T) {
+	samples := []activationMatrixComparisonSample{
+		{Baseline: activationMatrixCommandRun{DurationMillis: 30}, Candidate: activationMatrixCommandRun{DurationMillis: 38}},
+		{Baseline: activationMatrixCommandRun{DurationMillis: 10}, Candidate: activationMatrixCommandRun{DurationMillis: 50}},
+		{Baseline: activationMatrixCommandRun{DurationMillis: 20}, Candidate: activationMatrixCommandRun{DurationMillis: 21}},
+	}
+
+	baseline := activationMedianComparisonRun(samples, true)
+	candidate := activationMedianComparisonRun(samples, false)
+	timing := activationComparisonTiming(samples, baseline.DurationMillis, candidate.DurationMillis)
+
+	assert.Equal(t, 20, baseline.DurationMillis)
+	assert.Equal(t, 38, candidate.DurationMillis)
+	require.NotNil(t, timing)
+	assert.Equal(t, 20, timing.BaselineMedianMillis)
+	assert.Equal(t, 38, timing.CandidateMedianMillis)
+	assert.Equal(t, 18, timing.CandidateDeltaMillis)
+	assert.Equal(t, 8, timing.MedianPairedDeltaMillis)
+	assert.Equal(t, 8, timing.MedianAbsolutePairDeltaMS)
+	assert.Equal(t, 40, timing.MaximumAbsolutePairDeltaMS)
 }
 
 func TestEvalActivationMatrixBinaryCompareRecordsDifferentIndexStates(t *testing.T) {
@@ -750,6 +888,24 @@ repos:
 	return path
 }
 
+func writeActivationSingleCommandManifest(t *testing.T, repo string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "activation-single-command.yaml")
+	body := fmt.Sprintf(`version: 1
+repos:
+  - id: single-repo
+    path: %q
+    profiles: [skinny]
+    commands:
+      - name: recent
+        args: ["credentials"]
+`, filepath.ToSlash(repo))
+	err := os.WriteFile(path, []byte(body), 0o644)
+	require.NoError(t, err)
+
+	return path
+}
+
 func writeActivationCrossCommandManifest(t *testing.T, repo string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "activation-cross-command.yaml")
@@ -952,6 +1108,25 @@ func writeActivationFakeBinary(t *testing.T) string {
 		err := os.WriteFile(path, []byte(body), 0o755)
 		require.NoError(t, err)
 	}
+
+	return path
+}
+
+func writeActivationLoggingFakeBinary(t *testing.T, marker, orderPath string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		path := filepath.Join(dir, marker+"-ds.cmd")
+		body := fmt.Sprintf("@echo off\r\n>>\"%s\" echo %s\r\necho {\"schema\":\"fake.activation.v1\",\"ok\":true}\r\n", orderPath, marker)
+		err := os.WriteFile(path, []byte(body), 0o755)
+		require.NoError(t, err)
+
+		return path
+	}
+	path := filepath.Join(dir, marker+"-ds")
+	body := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' '%s' >> '%s'\nprintf '%%s\\n' '{\"schema\":\"fake.activation.v1\",\"ok\":true}'\n", marker, orderPath)
+	err := os.WriteFile(path, []byte(body), 0o755)
+	require.NoError(t, err)
 
 	return path
 }
