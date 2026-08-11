@@ -8,6 +8,8 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDiscoverIndexesBoundedSourceFiles(t *testing.T) {
@@ -34,9 +36,8 @@ func TestDiscoverIndexesBoundedSourceFiles(t *testing.T) {
 	mustWrite(t, filepath.Join(root, "node_modules", "pkg", "ignored.ts"), "export const ignored = true\n")
 
 	candidates, err := (&Adapter{}).Discover(context.Background(), root, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	got := candidatePaths(candidates)
 	want := []string{
 		"browser_use/llm/messages.py",
@@ -57,14 +58,24 @@ func TestDiscoverIndexesBoundedSourceFiles(t *testing.T) {
 		"tests/integration/util.rs",
 		"tests/valid_configs/empty_config.toml",
 	}
-	if len(got) != len(want) {
-		t.Fatalf("paths got %#v want %#v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("paths got %#v want %#v", got, want)
-		}
-	}
+	require.Len(t, got, len(want))
+	assert.Equal(t, want[0], got[0])
+	assert.Equal(t, want[1], got[1])
+	assert.Equal(t, want[2], got[2])
+	assert.Equal(t, want[3], got[3])
+	assert.Equal(t, want[4], got[4])
+	assert.Equal(t, want[5], got[5])
+	assert.Equal(t, want[6], got[6])
+	assert.Equal(t, want[7], got[7])
+	assert.Equal(t, want[8], got[8])
+	assert.Equal(t, want[9], got[9])
+	assert.Equal(t, want[10], got[10])
+	assert.Equal(t, want[11], got[11])
+	assert.Equal(t, want[12], got[12])
+	assert.Equal(t, want[13], got[13])
+	assert.Equal(t, want[14], got[14])
+	assert.Equal(t, want[15], got[15])
+	assert.Equal(t, want[16], got[16])
 }
 
 func TestDiscoverHonorsConfiguredSourcePath(t *testing.T) {
@@ -74,13 +85,12 @@ func TestDiscoverHonorsConfiguredSourcePath(t *testing.T) {
 	cfg := &config.RepoConfig{Sources: []config.SourceConfig{{Type: sourceType, Path: "scripts"}}}
 
 	candidates, err := (&Adapter{}).Discover(context.Background(), root, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	got := candidatePaths(candidates)
-	if len(got) != 1 || got[0] != "scripts/tool.ts" {
-		t.Fatalf("paths got %#v", got)
-	}
+	require.Len(t, got, 1)
+	assert.Equal(t, "scripts/tool.ts", got[0])
+
 }
 
 func TestParseSourceContextArtifact(t *testing.T) {
@@ -93,30 +103,26 @@ func TestParseSourceContextArtifact(t *testing.T) {
 		AdapterName: sourceType,
 		Metadata:    map[string]any{"admission_reason": "implementation_root_source_context"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if art.Kind != config.KindSourceContext {
-		t.Fatalf("kind got %q", art.Kind)
-	}
-	if art.Title != "services/api/handler.ts (typescript)" {
-		t.Fatalf("title got %q", art.Title)
-	}
-	if len(sources) != 1 || sources[0].SourceType != sourceType || sources[0].Path != "services/api/handler.ts" {
-		t.Fatalf("sources got %#v", sources)
-	}
-	if art.Body == "" {
-		t.Fatal("expected body")
-	}
-	if art.Extracted["admission_reason"] != "implementation_root_source_context" {
-		t.Fatalf("admission reason got %#v", art.Extracted["admission_reason"])
-	}
+	require.NoError(t, err)
+
+	require.Equal(t, config.KindSourceContext, art.Kind,
+		"kind got %q", art.Kind)
+	require.Equal(t, "services/api/handler.ts (typescript)", art.Title,
+		"title got %q", art.Title)
+	require.Len(t, sources, 1)
+	assert.Equal(t, sourceType, sources[0].SourceType)
+	assert.Equal(t, "services/api/handler.ts", sources[0].Path)
+	assert.NotEmpty(t, art.Body)
+	require.Equal(t, "implementation_root_source_context", art.Extracted["admission_reason"],
+		"admission reason got %#v", art.Extracted["admission_reason"])
+
 }
 
-func TestParseSourceContextExtractsSymbolsAndTestNames(t *testing.T) {
+func TestParseSourceContext_WithTestSource_ExtractsSymbolsAndTestNames(t *testing.T) {
 	root := t.TempDir()
 	testPath := filepath.Join(root, "tests", "test_upload_file.py")
 	mustWrite(t, testPath, "class UploadFileTests:\n    pass\n\ndef test_password_protected_cert_cli_arg():\n    pass\n")
+
 	testArt, _, _, err := (&Adapter{}).Parse(context.Background(), adapters.Candidate{
 		PrimaryPath: testPath,
 		RelPath:     "tests/test_upload_file.py",
@@ -127,21 +133,18 @@ func TestParseSourceContextExtractsSymbolsAndTestNames(t *testing.T) {
 			"source_root":      "tests",
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if testArt.Subtype != "test_case" {
-		t.Fatalf("subtype got %q", testArt.Subtype)
-	}
-	if got := testArt.Extracted["test_name"]; got == nil || got == "" {
-		t.Fatalf("missing test names: %#v", testArt.Extracted)
-	}
-	if got := testArt.Extracted["source_symbols"]; got == nil || got == "" {
-		t.Fatalf("missing source symbols: %#v", testArt.Extracted)
-	}
 
+	require.NoError(t, err)
+	assert.Equal(t, "test_case", testArt.Subtype)
+	assert.NotEmpty(t, testArt.Extracted["test_name"])
+	assert.NotEmpty(t, testArt.Extracted["source_symbols"])
+}
+
+func TestParseSourceContext_WithImplementationSource_ExtractsSymbolsWithoutTestSubtype(t *testing.T) {
+	root := t.TempDir()
 	implPath := filepath.Join(root, "fastapi", "datastructures.py")
 	mustWrite(t, implPath, "class UploadFile:\n    pass\n\ndef create_upload_file():\n    pass\n")
+
 	implArt, _, _, err := (&Adapter{}).Parse(context.Background(), adapters.Candidate{
 		PrimaryPath: implPath,
 		RelPath:     "fastapi/datastructures.py",
@@ -152,15 +155,10 @@ func TestParseSourceContextExtractsSymbolsAndTestNames(t *testing.T) {
 			"source_root":      "fastapi",
 		},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if implArt.Subtype != "" {
-		t.Fatalf("implementation subtype got %q", implArt.Subtype)
-	}
-	if got := implArt.Extracted["source_symbols"]; got == nil || got == "" {
-		t.Fatalf("missing source symbols: %#v", implArt.Extracted)
-	}
+
+	require.NoError(t, err)
+	assert.Empty(t, implArt.Subtype)
+	assert.NotEmpty(t, implArt.Extracted["source_symbols"])
 }
 
 func TestParseSourceContextInfersTestSubtypeFromPathWithoutMetadata(t *testing.T) {
@@ -172,59 +170,184 @@ func TestParseSourceContextInfersTestSubtypeFromPathWithoutMetadata(t *testing.T
 		RelPath:     "tests/tests.rs",
 		AdapterName: sourceType,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if art.Subtype != "test_case" {
-		t.Fatalf("subtype got %q", art.Subtype)
-	}
-	if art.Extracted["source_role"] != "test" {
-		t.Fatalf("source_role got %#v", art.Extracted["source_role"])
-	}
+	require.NoError(t, err)
+
+	require.Equal(t, "test_case", art.Subtype,
+		"subtype got %q", art.Subtype)
+	require.Equal(t, "test", art.Extracted["source_role"],
+		"source_role got %#v", art.Extracted["source_role"])
+
 }
 
-func TestSourceLanguageCoversIntentTreatmentExtensions(t *testing.T) {
-	cases := map[string]string{
-		"src/behavior.py":                       "python",
-		"src/intent_plan.go":                    "go",
-		"src/design_rule.rs":                    "rust",
-		"src/requirement.java":                  "java",
-		"src/App.tsx":                           "typescript-react",
-		"src/component.jsx":                     "javascript-react",
-		"src/tool.cjs":                          "javascript",
-		"src/View.vue":                          "vue",
-		"devspecs.toml":                         "toml",
-		"docker/Dockerfile.intent":              "dockerfile",
-		"internal/costs/parser_minimax.go":      "go",
-		"crates/atuin-daemon/src/daemon.rs":     "rust",
-		"browser_use/llm/messages.py":           "python",
-		"tests/valid_configs/empty_config.toml": "toml",
-		"e2e-tests/docker/Dockerfile.codex":     "dockerfile",
-	}
-	for path, want := range cases {
-		if !isSourceContextFile(path) {
-			t.Fatalf("%s should be admitted as source context", path)
-		}
-		if got := sourceLanguage(path); got != want {
-			t.Fatalf("sourceLanguage(%q) = %q, want %q", path, got, want)
-		}
-	}
-	if isSourceContextFile("services/api/main.go") {
-		t.Fatal("ordinary Go files outside implementation roots should not be admitted as broad generic source context")
-	}
-	if isSourceContextFile("internal/costs/parser_minimax_integration_test.go") {
-		t.Fatal("expanded source context should leave test files to the test-case adapter")
-	}
+func TestIsSourceContextFile_WithBehaviorPythonFile_ReturnsTrue(t *testing.T) {
+	actual := isSourceContextFile("src/behavior.py")
+
+	assert.True(t, actual)
+}
+
+func TestIsSourceContextFile_WithIntentGoFile_ReturnsTrue(t *testing.T) {
+	actual := isSourceContextFile("src/intent_plan.go")
+
+	assert.True(t, actual)
+}
+
+func TestIsSourceContextFile_WithDesignRustFile_ReturnsTrue(t *testing.T) {
+	actual := isSourceContextFile("src/design_rule.rs")
+
+	assert.True(t, actual)
+}
+
+func TestIsSourceContextFile_WithRequirementJavaFile_ReturnsTrue(t *testing.T) {
+	actual := isSourceContextFile("src/requirement.java")
+
+	assert.True(t, actual)
+}
+
+func TestIsSourceContextFile_WithIntentTreatmentTSXFile_ReturnsTrue(t *testing.T) {
+	actual := isSourceContextFile("src/App.tsx")
+
+	assert.True(t, actual)
+}
+
+func TestIsSourceContextFile_WithIntentTreatmentJSXFile_ReturnsTrue(t *testing.T) {
+	actual := isSourceContextFile("src/component.jsx")
+
+	assert.True(t, actual)
+}
+
+func TestIsSourceContextFile_WithIntentTreatmentCommonJSFile_ReturnsTrue(t *testing.T) {
+	actual := isSourceContextFile("src/tool.cjs")
+
+	assert.True(t, actual)
+}
+
+func TestIsSourceContextFile_WithIntentTreatmentVueFile_ReturnsTrue(t *testing.T) {
+	actual := isSourceContextFile("src/View.vue")
+
+	assert.True(t, actual)
+}
+
+func TestIsSourceContextFile_WithDevSpecsConfig_ReturnsTrue(t *testing.T) {
+	actual := isSourceContextFile("devspecs.toml")
+
+	assert.True(t, actual)
+}
+
+func TestIsSourceContextFile_WithIntentDockerfile_ReturnsTrue(t *testing.T) {
+	actual := isSourceContextFile("docker/Dockerfile.intent")
+
+	assert.True(t, actual)
+}
+
+func TestIsSourceContextFile_WithKnownImplementationRoot_ReturnsTrue(t *testing.T) {
+	actual := isSourceContextFile("internal/costs/parser_minimax.go")
+
+	assert.True(t, actual)
+}
+
+func TestIsSourceContextFile_WithRustImplementationRoot_ReturnsTrue(t *testing.T) {
+	actual := isSourceContextFile("crates/atuin-daemon/src/daemon.rs")
+
+	assert.True(t, actual)
+}
+
+func TestIsSourceContextFile_WithPythonImplementationRoot_ReturnsTrue(t *testing.T) {
+	actual := isSourceContextFile("browser_use/llm/messages.py")
+
+	assert.True(t, actual)
+}
+
+func TestIsSourceContextFile_WithConfigFixture_ReturnsTrue(t *testing.T) {
+	actual := isSourceContextFile("tests/valid_configs/empty_config.toml")
+
+	assert.True(t, actual)
+}
+
+func TestIsSourceContextFile_WithDockerFixture_ReturnsTrue(t *testing.T) {
+	actual := isSourceContextFile("e2e-tests/docker/Dockerfile.codex")
+
+	assert.True(t, actual)
+}
+
+func TestIsSourceContextFile_WithOrdinaryGoFile_ReturnsFalse(t *testing.T) {
+	actual := isSourceContextFile("services/api/main.go")
+
+	assert.False(t, actual)
+}
+
+func TestIsSourceContextFile_WithIntegrationTestFile_ReturnsFalse(t *testing.T) {
+	actual := isSourceContextFile("internal/costs/parser_minimax_integration_test.go")
+
+	assert.False(t, actual)
+}
+
+func TestSourceLanguage_WithPythonFile_ReturnsPython(t *testing.T) {
+	actual := sourceLanguage("src/behavior.py")
+
+	assert.Equal(t, "python", actual)
+}
+
+func TestSourceLanguage_WithGoFile_ReturnsGo(t *testing.T) {
+	actual := sourceLanguage("src/intent_plan.go")
+
+	assert.Equal(t, "go", actual)
+}
+
+func TestSourceLanguage_WithRustFile_ReturnsRust(t *testing.T) {
+	actual := sourceLanguage("src/design_rule.rs")
+
+	assert.Equal(t, "rust", actual)
+}
+
+func TestSourceLanguage_WithJavaFile_ReturnsJava(t *testing.T) {
+	actual := sourceLanguage("src/requirement.java")
+
+	assert.Equal(t, "java", actual)
+}
+
+func TestSourceLanguage_WithTSXFile_ReturnsTypeScriptReact(t *testing.T) {
+	actual := sourceLanguage("src/App.tsx")
+
+	assert.Equal(t, "typescript-react", actual)
+}
+
+func TestSourceLanguage_WithJSXFile_ReturnsJavaScriptReact(t *testing.T) {
+	actual := sourceLanguage("src/component.jsx")
+
+	assert.Equal(t, "javascript-react", actual)
+}
+
+func TestSourceLanguage_WithCommonJSFile_ReturnsJavaScript(t *testing.T) {
+	actual := sourceLanguage("src/tool.cjs")
+
+	assert.Equal(t, "javascript", actual)
+}
+
+func TestSourceLanguage_WithVueFile_ReturnsVue(t *testing.T) {
+	actual := sourceLanguage("src/View.vue")
+
+	assert.Equal(t, "vue", actual)
+}
+
+func TestSourceLanguage_WithTomlFile_ReturnsToml(t *testing.T) {
+	actual := sourceLanguage("devspecs.toml")
+
+	assert.Equal(t, "toml", actual)
+}
+
+func TestSourceLanguage_WithNamedDockerfile_ReturnsDockerfile(t *testing.T) {
+	actual := sourceLanguage("docker/Dockerfile.intent")
+
+	assert.Equal(t, "dockerfile", actual)
 }
 
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
 }
 
 func candidatePaths(candidates []adapters.Candidate) []string {

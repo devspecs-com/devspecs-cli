@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAll_containsKnownProfiles(t *testing.T) {
@@ -16,45 +18,48 @@ func TestAll_containsKnownProfiles(t *testing.T) {
 		got[p.ID] = true
 	}
 	for _, id := range want {
-		if !got[id] {
-			t.Errorf("missing profile id %q", id)
-		}
+		assert.True(t, got[id],
+			"missing profile id %q", id)
+
 	}
 }
 
-func TestByID(t *testing.T) {
-	p, ok := ByID("openspec")
-	if !ok || p.SourceType != "openspec" {
-		t.Fatalf("openspec profile: ok=%v %#v", ok, p)
-	}
-	if _, ok := ByID("nope"); ok {
-		t.Fatal("expected ok=false for unknown id")
-	}
+func TestByID_WithKnownProfile_ReturnsProfile(t *testing.T) {
+	profile, ok := ByID("openspec")
+
+	assert.True(t, ok)
+	assert.Equal(t, "openspec", profile.SourceType)
+}
+
+func TestByID_WithUnknownProfile_ReturnsFalse(t *testing.T) {
+	_, ok := ByID("nope")
+
+	assert.False(t, ok)
 }
 
 func TestDetect_findsOpenspecDir(t *testing.T) {
 	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "openspec"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "openspec"), 0o755))
+
 	got := Detect(root, nil)
-	if !slices.Contains(got, "openspec") {
-		t.Fatalf("want openspec in %v", got)
-	}
+	require.True(t, slices.Contains(got, "openspec"),
+		"want openspec in %v", got)
+
 }
 
 func TestCustomProfile(t *testing.T) {
 	cp := CustomProfile()
-	if cp.ID != IDCustom {
-		t.Fatalf("custom id: got %q", cp.ID)
-	}
+	require.Equal(t, IDCustom, cp.ID,
+		"custom id: got %q", cp.ID)
+
 }
 
 func TestBMADProfileHasPRDSubtypeRule(t *testing.T) {
 	p, ok := ByID("bmad")
-	if !ok {
-		t.Fatal("bmad missing")
-	}
+	require.True(t, ok,
+		"bmad missing")
+
 	var saw bool
 	for _, r := range p.Rules {
 		if r.Subtype == config.SubtypePRD && r.Kind == config.KindRequirements {
@@ -62,7 +67,7 @@ func TestBMADProfileHasPRDSubtypeRule(t *testing.T) {
 			break
 		}
 	}
-	if !saw {
-		t.Fatal("expected BMAD rule with requirements/prd subtype")
-	}
+	require.True(t, saw,
+		"expected BMAD rule with requirements/prd subtype")
+
 }

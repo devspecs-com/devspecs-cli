@@ -5,90 +5,93 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClassifyCandidateMatchesSeedGoldens(t *testing.T) {
 	cfg := DefaultPipelineConfig()
-	if err := ValidateConfig(cfg); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, ValidateConfig(cfg))
 
 	fixtureRoot := filepath.Join("..", "..", "fixtures", "agentic-saas-fragmented")
 	goldens, err := LoadGoldenFile(filepath.Join(fixtureRoot, "classifier_cases.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	for _, tc := range goldens.ClassifierCases {
 		t.Run(tc.ID, func(t *testing.T) {
 			candidate := candidateFromGolden(t, fixtureRoot, tc)
 			resolution := ClassifyCandidate(candidate, cfg)
 			winner := resolution.Winner
+			require.Equal(t, tc.Expected.Classifier, winner.Classifier,
+				"winner got %q want %q (confidence %.2f, alternatives %#v)", winner.Classifier, tc.Expected.Classifier, winner.Confidence, resolution.Alternatives)
+			require.Equal(t, tc.Expected.Scope, winner.Scope,
+				"scope got %q want %q", winner.Scope, tc.Expected.Scope)
+			if tc.Expected.Subformat != "" {
+				assert.Equal(t, tc.Expected.Subformat, winner.Subformat)
+			}
+			if tc.Expected.Family != "" {
+				assert.Equal(t, tc.Expected.Family, winner.Family)
+			}
+			if tc.Expected.Kind != "" {
+				assert.Equal(t, tc.Expected.Kind, winner.Kind)
+			}
+			if tc.Expected.Subtype != "" {
+				assert.Equal(t, tc.Expected.Subtype, winner.Subtype)
+			}
+			if tc.Expected.Status != "" {
+				assert.Equal(t, tc.Expected.Status, winner.Status)
+			}
+			if tc.Expected.Authority != "" {
+				assert.Equal(t, tc.Expected.Authority, winner.Authority)
+			}
+			if tc.Expected.FormatProfile != "" {
+				assert.Equal(t, tc.Expected.FormatProfile, winner.FormatProfile)
+			}
 
-			if winner.Classifier != tc.Expected.Classifier {
-				t.Fatalf("winner got %q want %q (confidence %.2f, alternatives %#v)", winner.Classifier, tc.Expected.Classifier, winner.Confidence, resolution.Alternatives)
-			}
-			if winner.Scope != tc.Expected.Scope {
-				t.Fatalf("scope got %q want %q", winner.Scope, tc.Expected.Scope)
-			}
-			if tc.Expected.Subformat != "" && winner.Subformat != tc.Expected.Subformat {
-				t.Fatalf("subformat got %q want %q", winner.Subformat, tc.Expected.Subformat)
-			}
-			if tc.Expected.Family != "" && winner.Family != tc.Expected.Family {
-				t.Fatalf("family got %q want %q", winner.Family, tc.Expected.Family)
-			}
-			if tc.Expected.Kind != "" && winner.Kind != tc.Expected.Kind {
-				t.Fatalf("kind got %q want %q", winner.Kind, tc.Expected.Kind)
-			}
-			if tc.Expected.Subtype != "" && winner.Subtype != tc.Expected.Subtype {
-				t.Fatalf("subtype got %q want %q", winner.Subtype, tc.Expected.Subtype)
-			}
-			if tc.Expected.Status != "" && winner.Status != tc.Expected.Status {
-				t.Fatalf("status got %q want %q", winner.Status, tc.Expected.Status)
-			}
-			if tc.Expected.Authority != "" && winner.Authority != tc.Expected.Authority {
-				t.Fatalf("authority got %q want %q", winner.Authority, tc.Expected.Authority)
-			}
-			if tc.Expected.FormatProfile != "" && winner.FormatProfile != tc.Expected.FormatProfile {
-				t.Fatalf("format profile got %q want %q", winner.FormatProfile, tc.Expected.FormatProfile)
-			}
 			for _, forbidden := range tc.Expected.MustNotClassifyAs {
-				if winner.Classifier == forbidden {
-					t.Fatalf("winner classified as forbidden model %q", forbidden)
-				}
+				require.NotEqual(t, forbidden, winner.Classifier,
+					"winner classified as forbidden model %q", forbidden)
+
 			}
 			for _, reason := range tc.Expected.RequiredReasons {
-				if !hasPositiveReason(winner, reason) {
-					t.Fatalf("missing positive reason %q in %#v", reason, winner.PositiveReasons)
-				}
+				require.True(t, hasPositiveReason(winner, reason),
+					"missing positive reason %q in %#v", reason, winner.PositiveReasons)
+
 			}
-			if len(tc.Expected.ChildCandidates) > 0 && len(winner.ChildCandidates) != len(tc.Expected.ChildCandidates) {
-				t.Fatalf("child candidates got %d want %d", len(winner.ChildCandidates), len(tc.Expected.ChildCandidates))
+			if len(tc.Expected.ChildCandidates) > 0 {
+				require.Len(t, winner.ChildCandidates, len(tc.Expected.ChildCandidates))
 			}
+
 		})
 	}
 }
 
-func TestClassifyCandidateRecognizesADRSubformatsDeclaratively(t *testing.T) {
+func TestClassifyCandidate_WithMADRDocument_ReturnsMADRSubformat(t *testing.T) {
 	cfg := DefaultPipelineConfig()
 
-	madr := ClassifyCandidate(Candidate{
+	resolution := ClassifyCandidate(Candidate{
 		Path:  "docs/adrs/0010-cache-boundary.md",
 		Scope: ScopeDocument,
 		Body:  "# 0010 Cache Boundary\n\n## Context and Problem Statement\n\nDecide the boundary.\n\n## Decision Drivers\n\n- Durable writes\n\n## Considered Options\n\n- Local cache\n\n## Decision Outcome\n\nUse database writes.\n",
 	}, cfg)
-	if madr.Winner.Classifier != ModelADR || madr.Winner.Subformat != SubmodelADRMADR {
-		t.Fatalf("MADR got %s/%s", madr.Winner.Classifier, madr.Winner.Subformat)
-	}
 
-	yStatement := ClassifyCandidate(Candidate{
+	assert.Equal(t, ModelADR, resolution.Winner.Classifier)
+	assert.Equal(t, SubmodelADRMADR, resolution.Winner.Subformat)
+}
+
+func TestClassifyCandidate_WithYStatementDocument_ReturnsYStatementSubformat(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+
+	resolution := ClassifyCandidate(Candidate{
 		Path:  "docs/adr/0011-y-statement.md",
 		Scope: ScopeDocument,
 		Body:  "---\nstatus: accepted\n---\n\n# ADR 0011: Session Boundary\n\nIn the context of auth token rotation, facing replay risk, we decided to bind refresh tokens to sessions, to achieve safer resumes, accepting extra invalidations.\n",
 	}, cfg)
-	if yStatement.Winner.Classifier != ModelADR || yStatement.Winner.Subformat != SubmodelADRYStatement {
-		t.Fatalf("Y-Statement got %s/%s", yStatement.Winner.Classifier, yStatement.Winner.Subformat)
-	}
+
+	assert.Equal(t, ModelADR, resolution.Winner.Classifier)
+	assert.Equal(t, SubmodelADRYStatement, resolution.Winner.Subformat)
 }
 
 func TestClassifyCandidateRecognizesEnhancementProposalAsRFC(t *testing.T) {
@@ -123,9 +126,9 @@ func TestClassifyCandidateRecognizesEnhancementProposalAsRFC(t *testing.T) {
 			"Expose reusable validation rules and report errors consistently.",
 		}, "\n"),
 	}, cfg)
-	if resolution.Winner.Classifier != ModelRFC {
-		t.Fatalf("enhancement proposal got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
-	}
+	require.Equal(t, ModelRFC, resolution.Winner.Classifier,
+		"enhancement proposal got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
+
 }
 
 func TestClassifyCandidateRecognizesProposalFamilyDirectoryIndexAsRFC(t *testing.T) {
@@ -156,9 +159,9 @@ func TestClassifyCandidateRecognizesProposalFamilyDirectoryIndexAsRFC(t *testing
 			"Describe parsing, validation, and rollout details.",
 		}, "\n"),
 	}, cfg)
-	if resolution.Winner.Classifier != ModelRFC {
-		t.Fatalf("proposal-family README got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
-	}
+	require.Equal(t, ModelRFC, resolution.Winner.Classifier,
+		"proposal-family README got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
+
 }
 
 func TestClassifyCandidateRecognizesDesignDirProposalAsRFC(t *testing.T) {
@@ -186,9 +189,9 @@ func TestClassifyCandidateRecognizesDesignDirProposalAsRFC(t *testing.T) {
 			"Use a separate infrastructure tool.",
 		}, "\n"),
 	}, cfg)
-	if resolution.Winner.Classifier != ModelRFC {
-		t.Fatalf("design-dir proposal got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
-	}
+	require.Equal(t, ModelRFC, resolution.Winner.Classifier,
+		"design-dir proposal got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
+
 }
 
 func TestClassifyCandidateRecognizesRootRFCWithTechnicalDesign(t *testing.T) {
@@ -216,9 +219,9 @@ func TestClassifyCandidateRecognizesRootRFCWithTechnicalDesign(t *testing.T) {
 			"Comments are welcome on architecture and edge cases.",
 		}, "\n"),
 	}, cfg)
-	if resolution.Winner.Classifier != ModelRFC {
-		t.Fatalf("root RFC got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
-	}
+	require.Equal(t, ModelRFC, resolution.Winner.Classifier,
+		"root RFC got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
+
 }
 
 func TestClassifyCandidatePrefersRFCForGovernedProposalWithPlanShape(t *testing.T) {
@@ -258,9 +261,9 @@ func TestClassifyCandidatePrefersRFCForGovernedProposalWithPlanShape(t *testing.
 			"Implementation proceeds through build strategy API updates.",
 		}, "\n"),
 	}, cfg)
-	if resolution.Winner.Classifier != ModelRFC {
-		t.Fatalf("governed proposal got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
-	}
+	require.Equal(t, ModelRFC, resolution.Winner.Classifier,
+		"governed proposal got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
+
 }
 
 func TestClassifyCandidateRecognizesADRMetadataStatusBody(t *testing.T) {
@@ -289,9 +292,9 @@ func TestClassifyCandidateRecognizesADRMetadataStatusBody(t *testing.T) {
 			"Adopt a two-tier strategy using a library-first structured scraper plus an AI fallback.",
 		}, "\n"),
 	}, cfg)
-	if resolution.Winner.Classifier != ModelADR {
-		t.Fatalf("ADR metadata status got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelADR, resolution.Winner.Confidence, resolution.Alternatives)
-	}
+	require.Equal(t, ModelADR, resolution.Winner.Classifier,
+		"ADR metadata status got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelADR, resolution.Winner.Confidence, resolution.Alternatives)
+
 }
 
 func TestClassifyCandidatePrefersADROverProtocolStandardLanguage(t *testing.T) {
@@ -317,9 +320,9 @@ func TestClassifyCandidatePrefersADROverProtocolStandardLanguage(t *testing.T) {
 			"Every new plan must comply with the metadata standard.",
 		}, "\n"),
 	}, cfg)
-	if resolution.Winner.Classifier != ModelADR {
-		t.Fatalf("ADR with standard language got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelADR, resolution.Winner.Confidence, resolution.Alternatives)
-	}
+	require.Equal(t, ModelADR, resolution.Winner.Classifier,
+		"ADR with standard language got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelADR, resolution.Winner.Confidence, resolution.Alternatives)
+
 }
 
 func TestClassifyCandidateRecognizesRFCFilenameWithDesignSections(t *testing.T) {
@@ -347,9 +350,9 @@ func TestClassifyCandidateRecognizesRFCFilenameWithDesignSections(t *testing.T) 
 			"Feedback is requested on the proposed design.",
 		}, "\n"),
 	}, cfg)
-	if resolution.Winner.Classifier != ModelRFC {
-		t.Fatalf("RFC filename got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
-	}
+	require.Equal(t, ModelRFC, resolution.Winner.Classifier,
+		"RFC filename got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
+
 }
 
 func TestClassifyCandidateRecognizesEnhancementProposalReadme(t *testing.T) {
@@ -381,9 +384,9 @@ func TestClassifyCandidateRecognizesEnhancementProposalReadme(t *testing.T) {
 			"Use agent skills and deterministic helpers to draft and validate rules.",
 		}, "\n"),
 	}, cfg)
-	if resolution.Winner.Classifier != ModelRFC {
-		t.Fatalf("enhancement README got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
-	}
+	require.Equal(t, ModelRFC, resolution.Winner.Classifier,
+		"enhancement README got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelRFC, resolution.Winner.Confidence, resolution.Alternatives)
+
 }
 
 func TestClassifyCandidateRecognizesPlainPRDFilenameAndBody(t *testing.T) {
@@ -411,9 +414,9 @@ func TestClassifyCandidateRecognizesPlainPRDFilenameAndBody(t *testing.T) {
 			"Fast response time and reliable message persistence.",
 		}, "\n"),
 	}, cfg)
-	if resolution.Winner.Classifier != ModelPRD {
-		t.Fatalf("plain PRD got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelPRD, resolution.Winner.Confidence, resolution.Alternatives)
-	}
+	require.Equal(t, ModelPRD, resolution.Winner.Classifier,
+		"plain PRD got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelPRD, resolution.Winner.Confidence, resolution.Alternatives)
+
 }
 
 func TestClassifyCandidatePrefersPRDTitleRequirementSectionsOverPlanPath(t *testing.T) {
@@ -450,9 +453,9 @@ func TestClassifyCandidatePrefersPRDTitleRequirementSectionsOverPlanPath(t *test
 			"- [ ] Validate output",
 		}, "\n"),
 	}, cfg)
-	if resolution.Winner.Classifier != ModelPRD {
-		t.Fatalf("PRD in plans path got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelPRD, resolution.Winner.Confidence, resolution.Alternatives)
-	}
+	require.Equal(t, ModelPRD, resolution.Winner.Classifier,
+		"PRD in plans path got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelPRD, resolution.Winner.Confidence, resolution.Alternatives)
+
 }
 
 func TestClassifyCandidateRecognizesRoadmapAsPlanFamily(t *testing.T) {
@@ -462,12 +465,11 @@ func TestClassifyCandidateRecognizesRoadmapAsPlanFamily(t *testing.T) {
 		Scope: ScopeDocument,
 		Body:  "# Roadmap\n\nHigh-level product direction.\n\n## Milestones\n\n- [ ] Foundation\n- [ ] GA\n",
 	}, cfg)
-	if resolution.Winner.Classifier != ModelPlan {
-		t.Fatalf("roadmap got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelPlan, resolution.Winner.Confidence, resolution.Alternatives)
-	}
-	if resolution.Winner.Family != SubmodelPlanRoadmap {
-		t.Fatalf("roadmap family got %q want %q", resolution.Winner.Family, SubmodelPlanRoadmap)
-	}
+	require.Equal(t, ModelPlan, resolution.Winner.Classifier,
+		"roadmap got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelPlan, resolution.Winner.Confidence, resolution.Alternatives)
+	require.Equal(t, SubmodelPlanRoadmap, resolution.Winner.Family,
+		"roadmap family got %q want %q", resolution.Winner.Family, SubmodelPlanRoadmap)
+
 }
 
 func TestClassifyCandidateRecognizesBMADLikeStoryAsPlanFamily(t *testing.T) {
@@ -500,12 +502,11 @@ func TestClassifyCandidateRecognizesBMADLikeStoryAsPlanFamily(t *testing.T) {
 			"Use the existing service layer.",
 		}, "\n"),
 	}, cfg)
-	if resolution.Winner.Classifier != ModelPlan {
-		t.Fatalf("story got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelPlan, resolution.Winner.Confidence, resolution.Alternatives)
-	}
-	if resolution.Winner.Family != SubmodelPlanStoryArtifact {
-		t.Fatalf("story family got %q want %q", resolution.Winner.Family, SubmodelPlanStoryArtifact)
-	}
+	require.Equal(t, ModelPlan, resolution.Winner.Classifier,
+		"story got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelPlan, resolution.Winner.Confidence, resolution.Alternatives)
+	require.Equal(t, SubmodelPlanStoryArtifact, resolution.Winner.Family,
+		"story family got %q want %q", resolution.Winner.Family, SubmodelPlanStoryArtifact)
+
 }
 
 func TestClassifyCandidateRecognizesCodexPlanAsAgentNote(t *testing.T) {
@@ -526,97 +527,72 @@ func TestClassifyCandidateRecognizesCodexPlanAsAgentNote(t *testing.T) {
 			"- [ ] Wire command tests",
 		}, "\n"),
 	}, cfg)
-	if resolution.Winner.Classifier != ModelAgentNote {
-		t.Fatalf("codex plan got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelAgentNote, resolution.Winner.Confidence, resolution.Alternatives)
-	}
+	require.Equal(t, ModelAgentNote, resolution.Winner.Classifier,
+		"codex plan got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, ModelAgentNote, resolution.Winner.Confidence, resolution.Alternatives)
+
 }
 
-func TestClassifyCandidateRecognizesSubtypeFirstNonIntentLanes(t *testing.T) {
+func TestClassifyCandidate_WithClaudeInstructions_ReturnsAgentInstructionProtocol(t *testing.T) {
 	cfg := DefaultPipelineConfig()
-	tests := []struct {
-		name       string
-		path       string
-		body       string
-		classifier string
-		family     string
-		mode       string
-	}{
-		{
-			name:       "claude instructions",
-			path:       "CLAUDE.md",
-			body:       "# Project Instructions\n\n## Rules\n\nAlways run tests. Never rewrite unrelated files.\n",
-			classifier: ModelProtocol,
-			family:     SubmodelProtocolAgentInstruction,
-			mode:       "protocol",
-		},
-		{
-			name:       "skill",
-			path:       ".claude/skills/review/SKILL.md",
-			body:       "# Review Skill\n\nUse this procedure when reviewing code.\n",
-			classifier: ModelProtocol,
-			family:     SubmodelProtocolSkill,
-			mode:       "protocol",
-		},
-		{
-			name:       "maintainers",
-			path:       "MAINTAINERS.md",
-			body:       "# Maintainers\n\nThis file lists maintainers and review rules.\n",
-			classifier: ModelProtocol,
-			family:     SubmodelProtocolMaintainerPolicy,
-			mode:       "protocol",
-		},
-		{
-			name:       "pull request template",
-			path:       ".github/PULL_REQUEST_TEMPLATE.md",
-			body:       "# Pull Request\n\n## Summary\n\n{{ summary }}\n",
-			classifier: ModelTemplate,
-			family:     SubmodelTemplatePullRequest,
-			mode:       "template",
-		},
-		{
-			name:       "prd document template",
-			path:       "docs/templates/prd-template.md",
-			body:       "# Product Requirements Template\n\n## Scope\n\n{{ fill in }}\n\n## User Stories\n\n[insert stories]\n",
-			classifier: ModelTemplate,
-			family:     SubmodelTemplateDocument,
-			mode:       "template",
-		},
-		{
-			name:       "api contract",
-			path:       "docs/contracts/openapi.md",
-			body:       "# OpenAPI Contract\n\n```yaml\nopenapi: 3.1.0\npaths: {}\n```\n",
-			classifier: ModelStructuredModel,
-			family:     SubmodelModelAPIContract,
-			mode:       "model",
-		},
-		{
-			name:       "workflow definition",
-			path:       ".github/workflows/ci.md",
-			body:       "# CI Workflow\n\nDocuments the jobs: section for GitHub Actions.\n",
-			classifier: ModelStructuredModel,
-			family:     SubmodelModelWorkflow,
-			mode:       "model",
-		},
-	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			resolution := ClassifyCandidate(Candidate{
-				Path:  tc.path,
-				Scope: ScopeDocument,
-				Body:  tc.body,
-			}, cfg)
-			if resolution.Winner.Classifier != tc.classifier {
-				t.Fatalf("classifier got %q want %q (confidence %.2f, alternatives %#v)", resolution.Winner.Classifier, tc.classifier, resolution.Winner.Confidence, resolution.Alternatives)
-			}
-			if resolution.Winner.Family != tc.family {
-				t.Fatalf("family got %q want %q", resolution.Winner.Family, tc.family)
-			}
-			if resolution.Winner.Mode != tc.mode {
-				t.Fatalf("mode got %q want %q", resolution.Winner.Mode, tc.mode)
-			}
-		})
-	}
+	resolution := ClassifyCandidate(Candidate{Path: "CLAUDE.md", Scope: ScopeDocument, Body: "# Project Instructions\n\n## Rules\n\nAlways run tests. Never rewrite unrelated files.\n"}, cfg)
+
+	assertSubtypeClassification(t, resolution, ModelProtocol, SubmodelProtocolAgentInstruction, "protocol")
+}
+
+func TestClassifyCandidate_WithSkill_ReturnsSkillProtocol(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+
+	resolution := ClassifyCandidate(Candidate{Path: ".claude/skills/review/SKILL.md", Scope: ScopeDocument, Body: "# Review Skill\n\nUse this procedure when reviewing code.\n"}, cfg)
+
+	assertSubtypeClassification(t, resolution, ModelProtocol, SubmodelProtocolSkill, "protocol")
+}
+
+func TestClassifyCandidate_WithMaintainersFile_ReturnsMaintainerProtocol(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+
+	resolution := ClassifyCandidate(Candidate{Path: "MAINTAINERS.md", Scope: ScopeDocument, Body: "# Maintainers\n\nThis file lists maintainers and review rules.\n"}, cfg)
+
+	assertSubtypeClassification(t, resolution, ModelProtocol, SubmodelProtocolMaintainerPolicy, "protocol")
+}
+
+func TestClassifyCandidate_WithPullRequestTemplate_ReturnsPullRequestTemplate(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+
+	resolution := ClassifyCandidate(Candidate{Path: ".github/PULL_REQUEST_TEMPLATE.md", Scope: ScopeDocument, Body: "# Pull Request\n\n## Summary\n\n{{ summary }}\n"}, cfg)
+
+	assertSubtypeClassification(t, resolution, ModelTemplate, SubmodelTemplatePullRequest, "template")
+}
+
+func TestClassifyCandidate_WithPRDTemplate_ReturnsDocumentTemplate(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+
+	resolution := ClassifyCandidate(Candidate{Path: "docs/templates/prd-template.md", Scope: ScopeDocument, Body: "# Product Requirements Template\n\n## Scope\n\n{{ fill in }}\n\n## User Stories\n\n[insert stories]\n"}, cfg)
+
+	assertSubtypeClassification(t, resolution, ModelTemplate, SubmodelTemplateDocument, "template")
+}
+
+func TestClassifyCandidate_WithAPIContract_ReturnsStructuredAPIModel(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+
+	resolution := ClassifyCandidate(Candidate{Path: "docs/contracts/openapi.md", Scope: ScopeDocument, Body: "# OpenAPI Contract\n\n```yaml\nopenapi: 3.1.0\npaths: {}\n```\n"}, cfg)
+
+	assertSubtypeClassification(t, resolution, ModelStructuredModel, SubmodelModelAPIContract, "model")
+}
+
+func TestClassifyCandidate_WithWorkflowDefinition_ReturnsStructuredWorkflowModel(t *testing.T) {
+	cfg := DefaultPipelineConfig()
+
+	resolution := ClassifyCandidate(Candidate{Path: ".github/workflows/ci.md", Scope: ScopeDocument, Body: "# CI Workflow\n\nDocuments the jobs: section for GitHub Actions.\n"}, cfg)
+
+	assertSubtypeClassification(t, resolution, ModelStructuredModel, SubmodelModelWorkflow, "model")
+}
+
+func assertSubtypeClassification(t *testing.T, resolution Resolution, classifier, family, mode string) {
+	t.Helper()
+	assert.Equal(t, classifier, resolution.Winner.Classifier)
+	assert.Equal(t, family, resolution.Winner.Family)
+	assert.Equal(t, mode, resolution.Winner.Mode)
 }
 
 func TestClassifyCandidateFallsBackWhenEvidenceIsWeakOrAmbiguous(t *testing.T) {
@@ -626,12 +602,11 @@ func TestClassifyCandidateFallsBackWhenEvidenceIsWeakOrAmbiguous(t *testing.T) {
 		Scope: ScopeDocument,
 		Body:  "# Billing Notes\n\nA loose note with webhook, customer, auth, and token terms but no durable plan or decision structure.\n",
 	}, cfg)
-	if resolution.Winner.Classifier != ModelGenericMarkdown {
-		t.Fatalf("winner got %q want generic fallback", resolution.Winner.Classifier)
-	}
-	if !resolution.FallbackGeneric {
-		t.Fatal("expected generic fallback flag")
-	}
+	require.Equal(t, ModelGenericMarkdown, resolution.Winner.Classifier,
+		"winner got %q want generic fallback", resolution.Winner.Classifier)
+	require.True(t, resolution.FallbackGeneric,
+		"expected generic fallback flag")
+
 }
 
 func TestClassifyCandidateAppliesNegativeEvidence(t *testing.T) {
@@ -641,9 +616,9 @@ func TestClassifyCandidateAppliesNegativeEvidence(t *testing.T) {
 		Scope: ScopeDocument,
 		Body:  "# Generated Plan\n\nGenerated release notes. Do not edit.\n\n- [ ] Task copied from a changelog.\n",
 	}, cfg)
-	if resolution.Winner.Classifier == ModelPlan {
-		t.Fatalf("generated changelog-like file should not win as plan: %#v", resolution.Winner)
-	}
+	require.NotEqual(t, ModelPlan, resolution.Winner.Classifier,
+		"generated changelog-like file should not win as plan: %#v", resolution.Winner)
+
 	var plan AlternativePlan
 	for _, alternative := range resolution.Alternatives {
 		if alternative.Classifier == ModelPlan {
@@ -651,9 +626,9 @@ func TestClassifyCandidateAppliesNegativeEvidence(t *testing.T) {
 			break
 		}
 	}
-	if len(plan.NegativeReasons) == 0 {
-		t.Fatalf("expected plan negative evidence in alternatives: %#v", resolution.Alternatives)
-	}
+	require.NotEmpty(t, plan.NegativeReasons,
+		"expected plan negative evidence in alternatives: %#v", resolution.Alternatives)
+
 }
 
 func TestClassifyCandidateEvaluatesDeclarativeLocalModels(t *testing.T) {
@@ -679,12 +654,11 @@ func TestClassifyCandidateEvaluatesDeclarativeLocalModels(t *testing.T) {
 		Scope: ScopeDocument,
 		Body:  "# Auth Token Boundary\n\n## Problem\n\nRefresh tokens are ambiguous.\n\n## Proposal\n\nBind tokens to sessions and document the tradeoff.\n",
 	}, cfg)
-	if resolution.Winner.Classifier != "engineering_brief" {
-		t.Fatalf("winner got %q want local model; alternatives %#v", resolution.Winner.Classifier, resolution.Alternatives)
-	}
-	if !hasPositiveReason(resolution.Winner, ReasonLocalOverride) {
-		t.Fatalf("expected local override reason: %#v", resolution.Winner.PositiveReasons)
-	}
+	require.Equal(t, "engineering_brief", resolution.Winner.Classifier,
+		"winner got %q want local model; alternatives %#v", resolution.Winner.Classifier, resolution.Alternatives)
+	require.True(t, hasPositiveReason(resolution.Winner, ReasonLocalOverride),
+		"expected local override reason: %#v", resolution.Winner.PositiveReasons)
+
 }
 
 type AlternativePlan struct {
@@ -699,9 +673,8 @@ func candidateFromGolden(t *testing.T, fixtureRoot string, tc GoldenCase) Candid
 	}
 	if tc.Scope == ScopeDocument {
 		body, err := os.ReadFile(filepath.Join(fixtureRoot, filepath.FromSlash(tc.Path)))
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
+
 		candidate.Body = string(body)
 	}
 	for _, child := range tc.Expected.ChildCandidates {

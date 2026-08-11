@@ -10,140 +10,131 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/format"
 	"github.com/devspecs-com/devspecs-cli/internal/ignore"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestDiscover(t *testing.T) {
-	tmp := t.TempDir()
-	dir := filepath.Join(tmp, "docs", "adr")
-	os.MkdirAll(dir, 0o755)
-	os.WriteFile(filepath.Join(dir, "0001-use-sqlite.md"), []byte("# Use SQLite\n\nStatus: Accepted\n"), 0o644)
+func TestDiscover_WithDefaultADRPath_ReturnsCandidate(t *testing.T) {
+	root := t.TempDir()
+	writeADRFile(t, root, "docs/adr/0001-use-sqlite.md", "# Use SQLite\n\nStatus: Accepted\n")
+	adapter := &Adapter{}
 
-	a := &Adapter{}
-	candidates, err := a.Discover(context.Background(), tmp, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 1 {
-		t.Fatalf("expected 1 candidate, got %d", len(candidates))
-	}
+	candidates, err := adapter.Discover(context.Background(), root, nil)
+
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	assert.Equal(t, "docs/adr/0001-use-sqlite.md", filepath.ToSlash(candidates[0].RelPath))
 }
 
-func TestDiscover_ConfigPaths(t *testing.T) {
-	tmp := t.TempDir()
-	dir := filepath.Join(tmp, "architecture", "decisions")
-	os.MkdirAll(dir, 0o755)
-	os.WriteFile(filepath.Join(dir, "001.md"), []byte("# Test\n"), 0o644)
-
+func TestDiscover_WithConfiguredADRPath_ReturnsCandidate(t *testing.T) {
+	root := t.TempDir()
+	writeADRFile(t, root, "architecture/decisions/001.md", "# Test\n")
 	cfg := &config.RepoConfig{Sources: []config.SourceConfig{{Type: "adr", Paths: []string{"architecture/decisions"}}}}
-	a := &Adapter{}
-	candidates, err := a.Discover(context.Background(), tmp, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 1 {
-		t.Fatalf("expected 1 candidate, got %d", len(candidates))
-	}
+	adapter := &Adapter{}
+
+	candidates, err := adapter.Discover(context.Background(), root, cfg)
+
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	assert.Equal(t, "architecture/decisions/001.md", filepath.ToSlash(candidates[0].RelPath))
 }
 
-func TestDiscover_IgnoredADRDir(t *testing.T) {
-	tmp := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmp, ".gitignore"), []byte("secret-adrs/\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	good := filepath.Join(tmp, "adr")
-	os.MkdirAll(good, 0o755)
-	os.WriteFile(filepath.Join(good, "0001.md"), []byte("# A\n"), 0o644)
-	bad := filepath.Join(tmp, "secret-adrs")
-	os.MkdirAll(bad, 0o755)
-	os.WriteFile(filepath.Join(bad, "0002.md"), []byte("# B\n"), 0o644)
+func TestDiscover_WithIgnoredADRPath_ReturnsOnlyUnignoredCandidate(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".gitignore"), []byte("secret-adrs/\n"), 0o644))
+	writeADRFile(t, root, "adr/0001.md", "# A\n")
+	writeADRFile(t, root, "secret-adrs/0002.md", "# B\n")
+	matcher, err := ignore.NewMatcher(root)
+	require.NoError(t, err)
+	ctx := ignore.WithContext(context.Background(), matcher)
+	adapter := &Adapter{}
 
-	m, err := ignore.NewMatcher(tmp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := ignore.WithContext(context.Background(), m)
-	a := &Adapter{}
-	cands, err := a.Discover(ctx, tmp, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cands) != 1 || cands[0].RelPath != "adr/0001.md" {
-		t.Fatalf("want 1 adr under adr/, got %#v", cands)
-	}
+	candidates, err := adapter.Discover(ctx, root, nil)
+
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	assert.Equal(t, "adr/0001.md", filepath.ToSlash(candidates[0].RelPath))
 }
 
-func TestADR_TitleStatusExtraction(t *testing.T) {
-	tests := []struct {
-		name       string
-		content    string
-		wantTitle  string
-		wantStatus string
-	}{
-		{
-			name:       "status line format",
-			content:    "# Use SQLite for storage\n\nStatus: Accepted\n\n## Context\nWe need local storage.\n",
-			wantTitle:  "Use SQLite for storage",
-			wantStatus: "accepted",
-		},
-		{
-			name:       "status heading format",
-			content:    "# Use Go for CLI\n\n## Status\n\nProposed\n\n## Context\n",
-			wantTitle:  "Use Go for CLI",
-			wantStatus: "proposed",
-		},
-		{
-			name:       "frontmatter format",
-			content:    "---\ntitle: Auth with JWT\nstatus: accepted\n---\n\n# Different Title\n",
-			wantTitle:  "Auth with JWT",
-			wantStatus: "accepted",
-		},
-		{
-			name:       "MADR format with Date and Status lines",
-			content:    "# Use Markdown Architectural Decision Records\n\n* Status: proposed\n* Deciders: team\n* Date: 2023-01-01\n",
-			wantTitle:  "Use Markdown Architectural Decision Records",
-			wantStatus: "proposed",
-		},
-		{
-			name:       "no status defaults to unknown",
-			content:    "# Simple ADR\n\nSome content without status.\n",
-			wantTitle:  "Simple ADR",
-			wantStatus: "unknown",
-		},
-		{
-			name:       "superseded status",
-			content:    "# Old Decision\n\nStatus: Superseded by ADR-0005\n",
-			wantTitle:  "Old Decision",
-			wantStatus: "superseded",
-		},
-	}
+func TestParse_WithStatusLine_ExtractsTitleAndAcceptedStatus(t *testing.T) {
+	candidate := writeADRParseFixture(t, "# Use SQLite for storage\n\nStatus: Accepted\n\n## Context\nWe need local storage.\n")
+	adapter := &Adapter{}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tmp := t.TempDir()
-			path := filepath.Join(tmp, "test.md")
-			os.WriteFile(path, []byte(tt.content), 0o644)
+	artifact, _, _, err := adapter.Parse(context.Background(), candidate)
 
-			a := &Adapter{}
-			art, _, _, err := a.Parse(context.Background(), adapters.Candidate{
-				PrimaryPath: path,
-				RelPath:     "docs/adr/test.md",
-				AdapterName: "adr",
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if art.Title != tt.wantTitle {
-				t.Errorf("title: want %q, got %q", tt.wantTitle, art.Title)
-			}
-			if art.Status != tt.wantStatus {
-				t.Errorf("status: want %q, got %q", tt.wantStatus, art.Status)
-			}
-			if art.Kind != "decision" || art.Subtype != "adr" {
-				t.Errorf("kind/subtype: want decision/adr, got %q/%q", art.Kind, art.Subtype)
-			}
-			if art.FormatProfile != format.ProfileADR {
-				t.Errorf("format_profile: want %q, got %q", format.ProfileADR, art.FormatProfile)
-			}
-		})
-	}
+	require.NoError(t, err)
+	assertADRArtifact(t, artifact, "Use SQLite for storage", "accepted")
+}
+
+func TestParse_WithStatusHeading_ExtractsTitleAndProposedStatus(t *testing.T) {
+	candidate := writeADRParseFixture(t, "# Use Go for CLI\n\n## Status\n\nProposed\n\n## Context\n")
+	adapter := &Adapter{}
+
+	artifact, _, _, err := adapter.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assertADRArtifact(t, artifact, "Use Go for CLI", "proposed")
+}
+
+func TestParse_WithFrontmatter_UsesFrontmatterTitleAndStatus(t *testing.T) {
+	candidate := writeADRParseFixture(t, "---\ntitle: Auth with JWT\nstatus: accepted\n---\n\n# Different Title\n")
+	adapter := &Adapter{}
+
+	artifact, _, _, err := adapter.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assertADRArtifact(t, artifact, "Auth with JWT", "accepted")
+}
+
+func TestParse_WithMADRMetadata_ExtractsProposedStatus(t *testing.T) {
+	candidate := writeADRParseFixture(t, "# Use Markdown Architectural Decision Records\n\n* Status: proposed\n* Deciders: team\n* Date: 2023-01-01\n")
+	adapter := &Adapter{}
+
+	artifact, _, _, err := adapter.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assertADRArtifact(t, artifact, "Use Markdown Architectural Decision Records", "proposed")
+}
+
+func TestParse_WithoutStatus_ReturnsUnknownStatus(t *testing.T) {
+	candidate := writeADRParseFixture(t, "# Simple ADR\n\nSome content without status.\n")
+	adapter := &Adapter{}
+
+	artifact, _, _, err := adapter.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assertADRArtifact(t, artifact, "Simple ADR", "unknown")
+}
+
+func TestParse_WithSupersededStatus_ReturnsSuperseded(t *testing.T) {
+	candidate := writeADRParseFixture(t, "# Old Decision\n\nStatus: Superseded by ADR-0005\n")
+	adapter := &Adapter{}
+
+	artifact, _, _, err := adapter.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assertADRArtifact(t, artifact, "Old Decision", "superseded")
+}
+
+func writeADRFile(t *testing.T, root, relPath, content string) string {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(relPath))
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+	return path
+}
+
+func writeADRParseFixture(t *testing.T, content string) adapters.Candidate {
+	t.Helper()
+	path := writeADRFile(t, t.TempDir(), "docs/adr/test.md", content)
+	return adapters.Candidate{PrimaryPath: path, RelPath: "docs/adr/test.md", AdapterName: "adr"}
+}
+
+func assertADRArtifact(t *testing.T, artifact adapters.Artifact, title, status string) {
+	t.Helper()
+	assert.Equal(t, title, artifact.Title)
+	assert.Equal(t, status, artifact.Status)
+	assert.Equal(t, "decision", artifact.Kind)
+	assert.Equal(t, "adr", artifact.Subtype)
+	assert.Equal(t, format.ProfileADR, artifact.FormatProfile)
 }

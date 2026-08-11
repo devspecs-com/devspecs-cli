@@ -6,179 +6,160 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestExtractUnits_CommonFrameworks(t *testing.T) {
-	tests := []struct {
-		name      string
-		rel       string
-		body      string
-		wantName  string
-		wantLang  string
-		wantFrame string
-	}{
-		{
-			name:      "go",
-			rel:       "service/webhook_test.go",
-			body:      "package service\n\nfunc TestWebhookReplayProtection(t *testing.T) {\n\trequire.NoError(t, err)\n}\n",
-			wantName:  "TestWebhookReplayProtection",
-			wantLang:  "go",
-			wantFrame: "go test",
-		},
-		{
-			name:      "python",
-			rel:       "tests/test_billing_retry.py",
-			body:      "class TestBilling:\n    def test_retry_permission_error(self):\n        assert retry_count == 2\n",
-			wantName:  "test_retry_permission_error",
-			wantLang:  "python",
-			wantFrame: "pytest",
-		},
-		{
-			name:      "typescript",
-			rel:       "__tests__/billing.spec.ts",
-			body:      "describe('billing webhooks', () => {\n  it('rejects replayed stripe events', () => {\n    expect(status).toBe(409)\n  })\n})\n",
-			wantName:  "rejects replayed stripe events",
-			wantLang:  "typescript",
-			wantFrame: "javascript-test",
-		},
-		{
-			name:      "ruby",
-			rel:       "spec/billing_spec.rb",
-			body:      "RSpec.describe 'billing webhooks' do\n  it 'rejects replayed stripe events' do\n    expect(status).to eq(409)\n  end\nend\n",
-			wantName:  "rejects replayed stripe events",
-			wantLang:  "ruby",
-			wantFrame: "rspec",
-		},
-		{
-			name:      "php",
-			rel:       "tests/BillingTest.php",
-			body:      "<?php\nfinal class BillingTest extends TestCase {\n  #[Test]\n  public function rejects_replayed_stripe_events(): void {\n    $this->assertSame(409, $status);\n  }\n}\n",
-			wantName:  "rejects_replayed_stripe_events",
-			wantLang:  "php",
-			wantFrame: "phpunit",
-		},
-		{
-			name:      "java",
-			rel:       "src/test/java/com/example/BillingTest.java",
-			body:      "class BillingTest {\n  @Test\n  public void testRejectsReplayedStripeEvents() {\n    assertEquals(409, status);\n  }\n}\n",
-			wantName:  "testRejectsReplayedStripeEvents",
-			wantLang:  "java",
-			wantFrame: "junit",
-		},
-		{
-			name:      "kotlin",
-			rel:       "src/test/kotlin/com/example/BillingSpec.kt",
-			body:      "class BillingSpec {\n  @Test\n  fun `rejects replayed stripe events`() {\n    assertEquals(409, status)\n  }\n}\n",
-			wantName:  "rejects replayed stripe events",
-			wantLang:  "kotlin",
-			wantFrame: "junit",
-		},
-		{
-			name:      "rust",
-			rel:       "crates/cli/tests/help_test.rs",
-			body:      "#[test]\nfn help_work_invalid_sgconfig() {\n    assert!(output.contains(\"invalid\"));\n}\n",
-			wantName:  "help_work_invalid_sgconfig",
-			wantLang:  "rust",
-			wantFrame: "rust test",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			units := extractUnits(tc.rel, tc.body)
-			if len(units) != 1 {
-				t.Fatalf("extractUnits returned %d units, want 1: %#v", len(units), units)
-			}
-			if units[0].Name != tc.wantName {
-				t.Fatalf("Name = %q, want %q", units[0].Name, tc.wantName)
-			}
-			if units[0].Language != tc.wantLang || units[0].Framework != tc.wantFrame {
-				t.Fatalf("language/framework = %q/%q, want %q/%q", units[0].Language, units[0].Framework, tc.wantLang, tc.wantFrame)
-			}
-			if units[0].StartLine == 0 || units[0].EndLine < units[0].StartLine {
-				t.Fatalf("bad line range: %d-%d", units[0].StartLine, units[0].EndLine)
-			}
-			if len(units[0].Symbols) == 0 {
-				t.Fatalf("expected weak symbol terms")
-			}
-			if len(units[0].Assertions) == 0 {
-				t.Fatalf("expected assertion vocabulary")
-			}
-		})
-	}
+func TestExtractUnits_WithGoTest_ReturnsGoTestUnit(t *testing.T) {
+	body := "package service\n\nfunc TestWebhookReplayProtection(t *testing.T) {\n\trequire.NoError(t, err)\n}\n"
+
+	units := extractUnits("service/webhook_test.go", body)
+
+	assertSingleUnit(t, units, "TestWebhookReplayProtection", "go", "go test")
 }
 
-func TestDiscoverRequiresExperimentAndParsesArtifact(t *testing.T) {
+func TestExtractUnits_WithPytest_ReturnsPythonTestUnit(t *testing.T) {
+	body := "class TestBilling:\n    def test_retry_permission_error(self):\n        assert retry_count == 2\n"
+
+	units := extractUnits("tests/test_billing_retry.py", body)
+
+	assertSingleUnit(t, units, "test_retry_permission_error", "python", "pytest")
+}
+
+func TestExtractUnits_WithTypeScriptTest_ReturnsJavaScriptTestUnit(t *testing.T) {
+	body := "describe('billing webhooks', () => {\n  it('rejects replayed stripe events', () => {\n    expect(status).toBe(409)\n  })\n})\n"
+
+	units := extractUnits("__tests__/billing.spec.ts", body)
+
+	assertSingleUnit(t, units, "rejects replayed stripe events", "typescript", "javascript-test")
+}
+
+func TestExtractUnits_WithRSpecTest_ReturnsRubyTestUnit(t *testing.T) {
+	body := "RSpec.describe 'billing webhooks' do\n  it 'rejects replayed stripe events' do\n    expect(status).to eq(409)\n  end\nend\n"
+
+	units := extractUnits("spec/billing_spec.rb", body)
+
+	assertSingleUnit(t, units, "rejects replayed stripe events", "ruby", "rspec")
+}
+
+func TestExtractUnits_WithPHPUnitTest_ReturnsPHPTestUnit(t *testing.T) {
+	body := "<?php\nfinal class BillingTest extends TestCase {\n  #[Test]\n  public function rejects_replayed_stripe_events(): void {\n    $this->assertSame(409, $status);\n  }\n}\n"
+
+	units := extractUnits("tests/BillingTest.php", body)
+
+	assertSingleUnit(t, units, "rejects_replayed_stripe_events", "php", "phpunit")
+}
+
+func TestExtractUnits_WithJUnitJavaTest_ReturnsJavaTestUnit(t *testing.T) {
+	body := "class BillingTest {\n  @Test\n  public void testRejectsReplayedStripeEvents() {\n    assertEquals(409, status);\n  }\n}\n"
+
+	units := extractUnits("src/test/java/com/example/BillingTest.java", body)
+
+	assertSingleUnit(t, units, "testRejectsReplayedStripeEvents", "java", "junit")
+}
+
+func TestExtractUnits_WithJUnitKotlinTest_ReturnsKotlinTestUnit(t *testing.T) {
+	body := "class BillingSpec {\n  @Test\n  fun `rejects replayed stripe events`() {\n    assertEquals(409, status)\n  }\n}\n"
+
+	units := extractUnits("src/test/kotlin/com/example/BillingSpec.kt", body)
+
+	assertSingleUnit(t, units, "rejects replayed stripe events", "kotlin", "junit")
+}
+
+func TestExtractUnits_WithRustTest_ReturnsRustTestUnit(t *testing.T) {
+	body := "#[test]\nfn help_work_invalid_sgconfig() {\n    assert!(output.contains(\"invalid\"));\n}\n"
+
+	units := extractUnits("crates/cli/tests/help_test.rs", body)
+
+	assertSingleUnit(t, units, "help_work_invalid_sgconfig", "rust", "rust test")
+}
+
+func TestDiscover_WhenTestCaseArtifactsDisabled_ReturnsNoCandidates(t *testing.T) {
+	root, _ := writeGoTestFixture(t)
+	adapter := &Adapter{}
+
+	candidates, err := adapter.Discover(context.Background(), root, config.DefaultRepoConfig())
+
+	require.NoError(t, err)
+	assert.Empty(t, candidates)
+}
+
+func TestDiscover_WhenTestCaseArtifactsEnabled_ReturnsCandidate(t *testing.T) {
+	root, _ := writeGoTestFixture(t)
+	adapter := &Adapter{}
+	cfg := config.WithTestCaseArtifacts(config.DefaultRepoConfig(), true)
+
+	candidates, err := adapter.Discover(context.Background(), root, cfg)
+
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	assert.Equal(t, "tests/webhook_test.go", filepath.ToSlash(candidates[0].RelPath))
+}
+
+func TestParse_WithGoTestCandidate_ReturnsTestCaseArtifact(t *testing.T) {
+	_, path := writeGoTestFixture(t)
+	adapter := &Adapter{}
+	candidate := adapters.Candidate{
+		PrimaryPath:    path,
+		RelPath:        "tests/webhook_test.go",
+		AdapterName:    sourceType,
+		UnitName:       "TestWebhookReplayProtection",
+		UnitBody:       "func TestWebhookReplayProtection(t *testing.T) {\n\trequire.NoError(t, err)\n}",
+		UnitLanguage:   "go",
+		UnitFramework:  "go test",
+		UnitStartLine:  3,
+		UnitEndLine:    5,
+		UnitSymbols:    []string{"webhook", "replay", "protection"},
+		UnitAssertions: []string{"NoError"},
+	}
+
+	artifact, sources, _, err := adapter.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, config.KindSourceContext, artifact.Kind)
+	assert.Equal(t, config.SubtypeTestCase, artifact.Subtype)
+	assert.Equal(t, "3-5", artifact.Extracted["source_line_range"])
+	require.Len(t, sources, 1)
+	assert.Equal(t, sourceType, sources[0].SourceType)
+}
+
+func TestExtractUnits_WithAnnotatedJavaTest_StartsAtAnnotation(t *testing.T) {
+	body := "class BillingTest {\n  @Test\n  public void testRejectsReplay() {}\n}\n"
+
+	units := extractUnits("src/test/java/com/example/BillingTest.java", body)
+
+	require.Len(t, units, 1)
+	assert.Equal(t, 2, units[0].StartLine)
+}
+
+func TestExtractUnits_WithAnnotatedRustTest_StartsAtAnnotation(t *testing.T) {
+	body := "#[test]\nfn help_work_invalid_sgconfig() {}\n"
+
+	units := extractUnits("crates/cli/tests/help_test.rs", body)
+
+	require.Len(t, units, 1)
+	assert.Equal(t, 1, units[0].StartLine)
+}
+
+func assertSingleUnit(t *testing.T, units []testUnit, name, language, framework string) {
+	t.Helper()
+	require.Len(t, units, 1)
+	assert.Equal(t, name, units[0].Name)
+	assert.Equal(t, language, units[0].Language)
+	assert.Equal(t, framework, units[0].Framework)
+	assert.Positive(t, units[0].StartLine)
+	assert.GreaterOrEqual(t, units[0].EndLine, units[0].StartLine)
+	assert.NotEmpty(t, units[0].Symbols)
+	assert.NotEmpty(t, units[0].Assertions)
+}
+
+func writeGoTestFixture(t *testing.T) (string, string) {
+	t.Helper()
 	root := t.TempDir()
 	path := filepath.Join(root, "tests", "webhook_test.go")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte("package tests\n\nfunc TestWebhookReplayProtection(t *testing.T) {\n\trequire.NoError(t, err)\n}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	adapter := &Adapter{}
-	disabled, err := adapter.Discover(context.Background(), root, config.DefaultRepoConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(disabled) != 0 {
-		t.Fatalf("disabled experiment returned %d candidates", len(disabled))
-	}
-
-	cfg := config.WithTestCaseArtifacts(config.DefaultRepoConfig(), true)
-	candidates, err := adapter.Discover(context.Background(), root, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 1 {
-		t.Fatalf("Discover returned %d candidates, want 1: %#v", len(candidates), candidates)
-	}
-	art, sources, _, err := adapter.Parse(context.Background(), candidates[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if art.Kind != config.KindSourceContext || art.Subtype != config.SubtypeTestCase {
-		t.Fatalf("kind/subtype = %q/%q", art.Kind, art.Subtype)
-	}
-	if art.Extracted["source_line_range"] == "" {
-		t.Fatalf("missing source_line_range: %#v", art.Extracted)
-	}
-	if len(sources) != 1 || sources[0].SourceType != "test_case" {
-		t.Fatalf("sources = %#v", sources)
-	}
-}
-
-func TestExtractUnits_AnnotatedLanguagesStartAtAnnotation(t *testing.T) {
-	tests := []struct {
-		name string
-		rel  string
-		body string
-	}{
-		{
-			name: "java",
-			rel:  "src/test/java/com/example/BillingTest.java",
-			body: "class BillingTest {\n  @Test\n  public void testRejectsReplay() {}\n}\n",
-		},
-		{
-			name: "rust",
-			rel:  "crates/cli/tests/help_test.rs",
-			body: "#[test]\nfn help_work_invalid_sgconfig() {}\n",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			units := extractUnits(tc.rel, tc.body)
-			if len(units) != 1 {
-				t.Fatalf("extractUnits returned %d units, want 1", len(units))
-			}
-			if units[0].StartLine != 2 && tc.name == "java" {
-				t.Fatalf("java start line = %d, want annotation line 2", units[0].StartLine)
-			}
-			if units[0].StartLine != 1 && tc.name == "rust" {
-				t.Fatalf("rust start line = %d, want annotation line 1", units[0].StartLine)
-			}
-		})
-	}
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte("package tests\n\nfunc TestWebhookReplayProtection(t *testing.T) {\n\trequire.NoError(t, err)\n}\n"), 0o644))
+	return root, path
 }

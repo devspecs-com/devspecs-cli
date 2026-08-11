@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDetect_GitUser(t *testing.T) {
@@ -19,57 +22,49 @@ func TestDetect_GitUser(t *testing.T) {
 			"GIT_COMMITTER_NAME=TestGitUser",
 			"GIT_COMMITTER_EMAIL=test@example.com",
 		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git %v: %v\n%s", args, err, out)
 	}
 
 	run("init", "-b", "main")
 	run("config", "user.name", "TestGitUser")
 
 	name := Detect(dir)
-	if name != "TestGitUser" {
-		t.Errorf("expected 'TestGitUser', got %q", name)
-	}
+	assert.Equal(t, "TestGitUser", name,
+		"expected 'TestGitUser', got %q", name)
+
 }
 
 func TestDetect_OSUser(t *testing.T) {
 	dir := t.TempDir()
 	name := Detect(dir)
-	if name == "" {
-		t.Error("Detect() returned empty string in non-git dir")
-	}
+	assert.NotEqual(t, "", name,
+		"Detect() returned empty string in non-git dir")
+
 }
 
-func TestDetect_FallbackIdempotent(t *testing.T) {
+func TestGeneratedFallback_WithoutExistingIdentity_CreatesIdentity(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("DEVSPECS_HOME", home)
 
-	dir := t.TempDir()
+	name := generatedFallback()
 
-	name1 := generatedFallback()
-	if name1 == "" {
-		t.Fatal("fallback returned empty")
-	}
-	if len(name1) != 8 {
-		t.Errorf("expected 8-char fallback, got %d: %q", len(name1), name1)
-	}
-
-	name2 := generatedFallback()
-	if name1 != name2 {
-		t.Errorf("fallback not idempotent: %q != %q", name1, name2)
-	}
-
+	require.NotEmpty(t, name)
+	assert.Len(t, name, 8)
 	idFile := filepath.Join(home, "identity")
 	data, err := os.ReadFile(idFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.TrimSpace(string(data)) != name1 {
-		t.Errorf("identity file content mismatch: got %q, want %q", strings.TrimSpace(string(data)), name1)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, name, strings.TrimSpace(string(data)))
+}
 
-	_ = dir
+func TestGeneratedFallback_WithExistingIdentity_ReturnsExistingValue(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "identity"), []byte("existing-id\n"), 0o600))
+
+	name := generatedFallback()
+
+	assert.Equal(t, "existing-id", name)
 }
 
 func TestGitUserName_NoRepo(t *testing.T) {

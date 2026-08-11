@@ -1,42 +1,80 @@
 package telemetry
 
-import "testing"
+import (
+	"testing"
 
-func TestSanitizePropertiesKeepsOnlyAllowedCoarseFields(t *testing.T) {
-	props := sanitizeProperties(map[string]any{
+	"github.com/stretchr/testify/assert"
+)
+
+func TestSanitizeProperties_WithSensitiveFields_KeepsOnlyAllowedCoarseFields(t *testing.T) {
+	input := map[string]any{
 		"command":             "scan",
 		"success":             true,
 		"query":               "do not send me",
 		"repo_path":           "/private/repo",
 		"query_length_bucket": "11-50",
-	})
+	}
 
-	if props["command"] != "scan" || props["success"] != true || props["query_length_bucket"] != "11-50" {
-		t.Fatalf("expected allowed properties to remain: %#v", props)
-	}
-	if _, ok := props["query"]; ok {
-		t.Fatalf("raw query should be dropped: %#v", props)
-	}
-	if _, ok := props["repo_path"]; ok {
-		t.Fatalf("repo path should be dropped: %#v", props)
-	}
+	properties := sanitizeProperties(input)
+
+	assert.Len(t, properties, 3)
+	assert.Equal(t, "scan", properties["command"])
+	assert.Equal(t, true, properties["success"])
+	assert.Equal(t, "11-50", properties["query_length_bucket"])
+	assert.NotContains(t, properties, "query")
+	assert.NotContains(t, properties, "repo_path")
 }
 
-func TestBucketsAreCoarse(t *testing.T) {
-	tests := map[int]string{
-		0:   "0",
-		1:   "1-10",
-		10:  "1-10",
-		11:  "11-50",
-		50:  "11-50",
-		51:  "51-100",
-		100: "51-100",
-		101: "101-500",
-		501: "501+",
-	}
-	for n, want := range tests {
-		if got := CountBucket(n); got != want {
-			t.Fatalf("CountBucket(%d) = %q, want %q", n, got, want)
-		}
-	}
+func TestCountBucket_WithZero_ReturnsZeroBucket(t *testing.T) {
+	actual := CountBucket(0)
+
+	assert.Equal(t, "0", actual)
+}
+
+func TestCountBucket_WithOne_ReturnsOneToTenBucket(t *testing.T) {
+	actual := CountBucket(1)
+
+	assert.Equal(t, "1-10", actual)
+}
+
+func TestCountBucket_WithTen_ReturnsOneToTenBucket(t *testing.T) {
+	actual := CountBucket(10)
+
+	assert.Equal(t, "1-10", actual)
+}
+
+func TestCountBucket_WithEleven_ReturnsElevenToFiftyBucket(t *testing.T) {
+	actual := CountBucket(11)
+
+	assert.Equal(t, "11-50", actual)
+}
+
+func TestCountBucket_WithFifty_ReturnsElevenToFiftyBucket(t *testing.T) {
+	actual := CountBucket(50)
+
+	assert.Equal(t, "11-50", actual)
+}
+
+func TestCountBucket_WithFiftyOne_ReturnsFiftyOneToHundredBucket(t *testing.T) {
+	actual := CountBucket(51)
+
+	assert.Equal(t, "51-100", actual)
+}
+
+func TestCountBucket_WithHundred_ReturnsFiftyOneToHundredBucket(t *testing.T) {
+	actual := CountBucket(100)
+
+	assert.Equal(t, "51-100", actual)
+}
+
+func TestCountBucket_WithHundredOne_ReturnsHundredOneToFiveHundredBucket(t *testing.T) {
+	actual := CountBucket(101)
+
+	assert.Equal(t, "101-500", actual)
+}
+
+func TestCountBucket_WithFiveHundredOne_ReturnsFiveHundredOnePlusBucket(t *testing.T) {
+	actual := CountBucket(501)
+
+	assert.Equal(t, "501+", actual)
 }

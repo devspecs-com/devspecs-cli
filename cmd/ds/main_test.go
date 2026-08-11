@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
@@ -19,20 +21,17 @@ func TestRootCmd_Version(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, cmd.Execute())
 
 	got := buf.String()
-	if !strings.Contains(got, "dev") {
-		t.Errorf("expected version output to contain 'dev', got %q", got)
-	}
-	if !strings.Contains(got, "none") {
-		t.Errorf("expected version output to contain 'none', got %q", got)
-	}
-	if !strings.Contains(got, "unknown") {
-		t.Errorf("expected version output to contain 'unknown', got %q", got)
-	}
+	assert.Contains(t, got, "dev",
+		"expected version output to contain 'dev', got %q", got)
+	assert.Contains(t, got, "none",
+		"expected version output to contain 'none', got %q", got)
+	assert.Contains(t, got, "unknown",
+		"expected version output to contain 'unknown', got %q", got)
+
 }
 
 func TestRootCmd_HelpMentionsTelemetryPrivacy(t *testing.T) {
@@ -41,9 +40,8 @@ func TestRootCmd_HelpMentionsTelemetryPrivacy(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, cmd.Execute())
 
 	got := buf.String()
 	for _, want := range []string{
@@ -53,9 +51,9 @@ func TestRootCmd_HelpMentionsTelemetryPrivacy(t *testing.T) {
 		"raw queries",
 		"DEVSPECS_TELEMETRY=0",
 	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("expected help output to contain %q, got %q", want, got)
-		}
+		assert.Contains(t, got, want,
+			"expected help output to contain %q, got %q", want, got)
+
 	}
 }
 
@@ -65,9 +63,8 @@ func TestRootCmd_HelpCentersTaskWorkflow(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, cmd.Execute())
 
 	got := buf.String()
 	for _, want := range []string{
@@ -89,9 +86,9 @@ func TestRootCmd_HelpCentersTaskWorkflow(t *testing.T) {
 		"Use ds find",
 		"ds map",
 	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("expected help output to contain %q, got %q", want, got)
-		}
+		assert.Contains(t, got, want,
+			"expected help output to contain %q, got %q", want, got)
+
 	}
 }
 
@@ -101,9 +98,8 @@ func TestRootCmd_HelpGroupsCommandsByActor(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, cmd.Execute())
 
 	got := buf.String()
 	for _, want := range []string{
@@ -119,9 +115,9 @@ func TestRootCmd_HelpGroupsCommandsByActor(t *testing.T) {
 		"  scan        Rescan repository intent docs, source, tests, and git evidence",
 		"  prune       Remove stale and redundant data from the local index",
 	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("expected grouped help to contain %q, got:\n%s", want, got)
-		}
+		require.Contains(t, got, want,
+			"expected grouped help to contain %q, got:\n%s", want, got)
+
 	}
 	assertHelpOrder(t, got,
 		"Human orientation",
@@ -137,12 +133,11 @@ func assertHelpOrder(t *testing.T, body string, ordered ...string) {
 	last := -1
 	for _, want := range ordered {
 		idx := strings.Index(body, want)
-		if idx < 0 {
-			t.Fatalf("help output missing %q:\n%s", want, body)
-		}
-		if idx <= last {
-			t.Fatalf("help output order wrong at %q:\n%s", want, body)
-		}
+		require.False(t, idx < 0,
+			"help output missing %q:\n%s", want, body)
+		require.False(t, idx <= last,
+			"help output order wrong at %q:\n%s", want, body)
+
 		last = idx
 	}
 }
@@ -153,14 +148,13 @@ func TestRootCmd_TLDRRegistered(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, cmd.Execute())
 
 	got := buf.String()
-	if !strings.Contains(got, "Hotfix / Small Bug") {
-		t.Fatalf("expected tldr hotfix output, got %q", got)
-	}
+	require.Contains(t, got, "Hotfix / Small Bug",
+		"expected tldr hotfix output, got %q", got)
+
 }
 
 func TestRootCmd_ApplyRegistered(t *testing.T) {
@@ -169,121 +163,128 @@ func TestRootCmd_ApplyRegistered(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, cmd.Execute())
 
 	got := buf.String()
 	for _, want := range []string{
 		"Emit an agent prompt for exactly one DevSpecs task target.",
 		"apply [task-id|target]",
 	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("expected apply help to contain %q, got:\n%s", want, got)
-		}
+		require.Contains(t, got, want,
+			"expected apply help to contain %q, got:\n%s", want, got)
+
 	}
 }
 
-func TestRootCmd_CommandRoleHelpDistinguishesFindStatusAndTrace(t *testing.T) {
-	for _, tc := range []struct {
-		args []string
-		want []string
-	}{
-		{
-			args: []string{"find", "--help"},
-			want: []string{
-				"Build agent-readable packed context for a focused question.",
-				"discovering relevant source, tests, docs, receipts, or",
-				"It does not report task lifecycle state",
-			},
-		},
-		{
-			args: []string{"task", "status", "--help"},
-			want: []string{
-				"Show lifecycle state for an existing DevSpecs task.",
-				"inspect task, slice, follow-up, checkpoint, and decision",
-				"It does not discover new source or docs",
-			},
-		},
-		{
-			args: []string{"workspace", "trace", "--help"},
-			want: []string{
-				"Trace a known workspace change or repo task to linked repo-local slices.",
-				"Use ds workspace trace only when you already know",
-				"status describes change/task",
-				"index_status describes local index capture state",
-			},
-		},
-	} {
-		cmd := newRootCmd()
-		cmd.SetArgs(tc.args)
-		buf := &bytes.Buffer{}
-		cmd.SetOut(buf)
-		if err := cmd.Execute(); err != nil {
-			t.Fatal(err)
-		}
-		got := buf.String()
-		for _, want := range tc.want {
-			if !strings.Contains(got, want) {
-				t.Fatalf("expected %v help to contain %q, got:\n%s", tc.args, want, got)
-			}
-		}
-	}
+func TestRootCmd_FindHelp_DescribesFocusedContextRole(t *testing.T) {
+	help := executeRootHelp(t, "find", "--help")
+
+	assert.Contains(t, help, "Build agent-readable packed context for a focused question.")
+	assert.Contains(t, help, "discovering relevant source, tests, docs, receipts, or")
+	assert.Contains(t, help, "It does not report task lifecycle state")
 }
 
-func TestRootCmd_WorkspaceNamespaceAndCompatibilityCommandsRegistered(t *testing.T) {
-	for _, tc := range []struct {
-		args []string
-		want string
-	}{
-		{args: []string{"workspace", "--help"}, want: "Manage workspace-level DevSpecs artifacts"},
-		{args: []string{"ws", "--help"}, want: "Manage workspace-level DevSpecs artifacts"},
-		{args: []string{"workspace", "change", "--help"}, want: "Manage workspace-level change artifacts"},
-		{args: []string{"workspace", "slice", "--help"}, want: "Create repo-local task slices from workspace changes"},
-		{args: []string{"workspace", "trace", "--help"}, want: "Trace a known workspace change or repo task to linked repo-local slices"},
-		{args: []string{"change", "--help"}, want: "Compatibility alias. Prefer `ds workspace change`"},
-		{args: []string{"slice", "--help"}, want: "Compatibility alias. Prefer `ds workspace slice`"},
-		{args: []string{"trace", "--help"}, want: "Compatibility alias. Prefer `ds workspace trace`"},
-	} {
-		cmd := newRootCmd()
-		cmd.SetArgs(tc.args)
-		buf := &bytes.Buffer{}
-		cmd.SetOut(buf)
-		if err := cmd.Execute(); err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(buf.String(), tc.want) {
-			t.Fatalf("expected %v help to contain %q, got:\n%s", tc.args, tc.want, buf.String())
-		}
-	}
+func TestRootCmd_TaskStatusHelp_DescribesLifecycleRole(t *testing.T) {
+	help := executeRootHelp(t, "task", "status", "--help")
+
+	assert.Contains(t, help, "Show lifecycle state for an existing DevSpecs task.")
+	assert.Contains(t, help, "inspect task, slice, follow-up, checkpoint, and decision")
+	assert.Contains(t, help, "It does not discover new source or docs")
 }
 
-func TestRootCmd_HiddenWorkspaceCompatibilityAliasesDispatch(t *testing.T) {
+func TestRootCmd_WorkspaceTraceHelp_DescribesKnownLinkRole(t *testing.T) {
+	help := executeRootHelp(t, "workspace", "trace", "--help")
+
+	assert.Contains(t, help, "Trace a known workspace change or repo task to linked repo-local slices.")
+	assert.Contains(t, help, "Use ds workspace trace only when you already know")
+	assert.Contains(t, help, "status describes change/task")
+	assert.Contains(t, help, "index_status describes local index capture state")
+}
+
+func TestRootCmd_WorkspaceHelp_RegistersWorkspaceNamespace(t *testing.T) {
+	help := executeRootHelp(t, "workspace", "--help")
+
+	assert.Contains(t, help, "Manage workspace-level DevSpecs artifacts")
+}
+
+func TestRootCmd_WSHelp_RegistersWorkspaceAlias(t *testing.T) {
+	help := executeRootHelp(t, "ws", "--help")
+
+	assert.Contains(t, help, "Manage workspace-level DevSpecs artifacts")
+}
+
+func TestRootCmd_WorkspaceChangeHelp_RegistersChangeNamespace(t *testing.T) {
+	help := executeRootHelp(t, "workspace", "change", "--help")
+
+	assert.Contains(t, help, "Manage workspace-level change artifacts")
+}
+
+func TestRootCmd_WorkspaceSliceHelp_RegistersSliceCommand(t *testing.T) {
+	help := executeRootHelp(t, "workspace", "slice", "--help")
+
+	assert.Contains(t, help, "Create repo-local task slices from workspace changes")
+}
+
+func TestRootCmd_WorkspaceTraceHelp_RegistersTraceCommand(t *testing.T) {
+	help := executeRootHelp(t, "workspace", "trace", "--help")
+
+	assert.Contains(t, help, "Trace a known workspace change or repo task to linked repo-local slices")
+}
+
+func TestRootCmd_ChangeHelp_RegistersCompatibilityAlias(t *testing.T) {
+	help := executeRootHelp(t, "change", "--help")
+
+	assert.Contains(t, help, "Compatibility alias. Prefer `ds workspace change`")
+}
+
+func TestRootCmd_SliceHelp_RegistersCompatibilityAlias(t *testing.T) {
+	help := executeRootHelp(t, "slice", "--help")
+
+	assert.Contains(t, help, "Compatibility alias. Prefer `ds workspace slice`")
+}
+
+func TestRootCmd_TraceHelp_RegistersCompatibilityAlias(t *testing.T) {
+	help := executeRootHelp(t, "trace", "--help")
+
+	assert.Contains(t, help, "Compatibility alias. Prefer `ds workspace trace`")
+}
+
+func TestRootCmd_WSShowCompatibilityAlias_DispatchesToWorkspaceShow(t *testing.T) {
 	root := setupRootWorkspaceFixture(t)
+	executeRootJSON(t, "workspace", "init", root, "--json")
 
-	initOut := executeRootJSON(t, "workspace", "init", root, "--json")
-	if got := stringField(t, initOut, "workspace_root"); got != root {
-		t.Fatalf("workspace init root = %q, want %q", got, root)
-	}
+	output := executeRootJSON(t, "ws", "show", "--workspace", root, "--json")
 
-	wsShowOut := executeRootJSON(t, "ws", "show", "--workspace", root, "--json")
-	if got := stringField(t, wsShowOut, "workspace_root"); got != root {
-		t.Fatalf("ws show root = %q, want %q", got, root)
-	}
+	assert.Equal(t, root, stringField(t, output, "workspace_root"))
+}
 
-	changeOut := executeRootJSON(t,
+func TestRootCmd_ChangeCreateCompatibilityAlias_DispatchesToWorkspaceChangeCreate(t *testing.T) {
+	root := setupRootWorkspaceFixture(t)
+	executeRootJSON(t, "workspace", "init", root, "--json")
+
+	output := executeRootJSON(t,
 		"change", "create", "Customer export",
 		"--workspace", root,
 		"--repos", "backend,frontend",
 		"--json",
 	)
-	changeID := stringField(t, changeOut, "change_id")
-	if changeID != "EAG-C001" {
-		t.Fatalf("change id = %q, want EAG-C001", changeID)
-	}
 
-	sliceOut := executeRootJSON(t,
-		"slice", "create", changeID,
+	assert.Equal(t, "EAG-C001", stringField(t, output, "change_id"))
+}
+
+func TestRootCmd_SliceCreateCompatibilityAlias_DispatchesToWorkspaceSliceCreate(t *testing.T) {
+	root := setupRootWorkspaceFixture(t)
+	executeRootJSON(t, "workspace", "init", root, "--json")
+	executeRootJSON(t,
+		"workspace", "change", "create", "Customer export",
+		"--workspace", root,
+		"--repos", "backend,frontend",
+		"--json",
+	)
+
+	output := executeRootJSON(t,
+		"slice", "create", "EAG-C001",
 		"--workspace", root,
 		"--repo", "backend",
 		"--name", "Backend API",
@@ -291,32 +292,42 @@ func TestRootCmd_HiddenWorkspaceCompatibilityAliasesDispatch(t *testing.T) {
 		"--index=false",
 		"--json",
 	)
-	if got := stringField(t, sliceOut, "task_id"); got != "eag-c001-backend" {
-		t.Fatalf("task id = %q, want eag-c001-backend", got)
-	}
-	if got := stringField(t, sliceOut, "repo_alias"); got != "backend" {
-		t.Fatalf("repo alias = %q, want backend", got)
-	}
-	if got := stringField(t, sliceOut, "target"); got != "A01" {
-		t.Fatalf("target = %q, want A01", got)
-	}
-	taskWorkspace := stringField(t, sliceOut, "task_workspace")
-	wantTaskPrefix := filepath.Join(root, "enalytics-backend", "devspecs", "tasks", "eag-c001-backend")
-	if !strings.HasPrefix(taskWorkspace, wantTaskPrefix) {
-		t.Fatalf("task workspace = %q, want under %q", taskWorkspace, wantTaskPrefix)
-	}
 
-	traceOut := executeRootJSON(t, "trace", changeID, "--workspace", root, "--json")
-	if got := stringField(t, traceOut, "kind"); got != "workspace_change" {
-		t.Fatalf("trace kind = %q, want workspace_change", got)
-	}
-	if got := stringField(t, traceOut, "change_id"); got != changeID {
-		t.Fatalf("trace change id = %q, want %q", got, changeID)
-	}
-	slices, ok := traceOut["slices"].([]any)
-	if !ok || len(slices) != 1 {
-		t.Fatalf("trace slices = %#v, want one linked slice", traceOut["slices"])
-	}
+	assert.Equal(t, "eag-c001-backend", stringField(t, output, "task_id"))
+	assert.Equal(t, "backend", stringField(t, output, "repo_alias"))
+	assert.Equal(t, "A01", stringField(t, output, "target"))
+	taskWorkspace := stringField(t, output, "task_workspace")
+	wantTaskPrefix := filepath.Join(root, "enalytics-backend", "devspecs", "tasks", "eag-c001-backend")
+	assert.True(t, strings.HasPrefix(taskWorkspace, wantTaskPrefix),
+		"task workspace = %q, want under %q", taskWorkspace, wantTaskPrefix)
+}
+
+func TestRootCmd_TraceCompatibilityAlias_DispatchesToWorkspaceTrace(t *testing.T) {
+	root := setupRootWorkspaceFixture(t)
+	executeRootJSON(t, "workspace", "init", root, "--json")
+	executeRootJSON(t,
+		"workspace", "change", "create", "Customer export",
+		"--workspace", root,
+		"--repos", "backend,frontend",
+		"--json",
+	)
+	executeRootJSON(t,
+		"workspace", "slice", "create", "EAG-C001",
+		"--workspace", root,
+		"--repo", "backend",
+		"--name", "Backend API",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+	)
+
+	output := executeRootJSON(t, "trace", "EAG-C001", "--workspace", root, "--json")
+
+	assert.Equal(t, "workspace_change", stringField(t, output, "kind"))
+	assert.Equal(t, "EAG-C001", stringField(t, output, "change_id"))
+	slices, ok := output["slices"].([]any)
+	require.True(t, ok, "trace slices = %#v, want an array", output["slices"])
+	require.Len(t, slices, 1)
 }
 
 func TestRootCmd_PublicHelpHidesInternalCommands(t *testing.T) {
@@ -325,9 +336,8 @@ func TestRootCmd_PublicHelpHidesInternalCommands(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, cmd.Execute())
 
 	got := buf.String()
 	for _, hidden := range []string{
@@ -346,9 +356,9 @@ func TestRootCmd_PublicHelpHidesInternalCommands(t *testing.T) {
 		"  trace       ",
 		"  untag       ",
 	} {
-		if strings.Contains(got, hidden) {
-			t.Fatalf("public help should hide internal command %q, got:\n%s", strings.TrimSpace(hidden), got)
-		}
+		require.NotContains(t, got, hidden,
+			"public help should hide internal command %q, got:\n%s", strings.TrimSpace(hidden), got)
+
 	}
 }
 
@@ -360,16 +370,15 @@ func TestRootCmd_ListNotRegistered(t *testing.T) {
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
 	err := cmd.Execute()
-	if err == nil {
-		t.Fatalf("expected ds list to be unavailable")
-	}
+	require.Error(t, err,
+		"expected ds list to be unavailable")
+
 	got := buf.String()
-	if strings.Contains(got, "List indexed artifacts") {
-		t.Fatalf("ds list should not dispatch to artifact list command, got:\n%s", got)
-	}
-	if !strings.Contains(err.Error(), "unknown command") {
-		t.Fatalf("expected unknown command error, got %v", err)
-	}
+	require.NotContains(t, got, "List indexed artifacts",
+		"ds list should not dispatch to artifact list command, got:\n%s", got)
+	require.Contains(t, err.Error(), "unknown command",
+		"expected unknown command error, got %v", err)
+
 }
 
 func TestRootCmd_LiveSurfaceMatchesCLISurfaceSpec(t *testing.T) {
@@ -396,9 +405,10 @@ func executeRootJSON(t *testing.T, args ...string) map[string]any {
 	t.Helper()
 	out := executeRoot(t, args...)
 	var decoded map[string]any
-	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
-		t.Fatalf("decode json for %v: %v\n%s", args, err, out)
-	}
+
+	require.NoError(t, json.Unmarshal([]byte(out), &decoded),
+		"decode json for %v:\n%s", args, out)
+
 	return decoded
 }
 
@@ -409,9 +419,10 @@ func executeRoot(t *testing.T, args ...string) string {
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("execute ds %v: %v\n%s", args, err, buf.String())
-	}
+
+	require.NoError(t, cmd.Execute(),
+		"execute ds %v:\n%s", args, buf.String())
+
 	return buf.String()
 }
 
@@ -438,13 +449,14 @@ func readCLISurfaceSpec(t *testing.T) cliSurfaceSpec {
 		data, err = os.ReadFile(path)
 		if err == nil {
 			var spec cliSurfaceSpec
-			if err := yaml.Unmarshal(data, &spec); err != nil {
-				t.Fatalf("parse %s: %v", path, err)
-			}
+
+			require.NoError(t, yaml.Unmarshal(data, &spec),
+				"parse %s", path)
+
 			return spec
 		}
 	}
-	t.Fatalf("read specs/cli-surface.yaml: %v", err)
+	require.NoError(t, err, "read specs/cli-surface.yaml")
 	return cliSurfaceSpec{}
 }
 
@@ -466,32 +478,32 @@ func assertCommandSurface(t *testing.T, prefix string, parent *cobra.Command, pu
 		if cmd == nil && node.Status == "cobra_builtin" {
 			continue
 		}
-		if cmd == nil {
-			t.Fatalf("%s missing command %q from cli-surface.yaml", parent.CommandPath(), name)
-		}
+		require.NotNil(t, cmd,
+			"%s missing command %q from cli-surface.yaml", parent.CommandPath(), name)
+
 		if isSurfaceHidden(node.Status) {
-			if !cmd.Hidden {
-				t.Fatalf("%s %s should be hidden per cli-surface.yaml status %q", prefix, name, node.Status)
-			}
+			require.True(t, cmd.Hidden,
+				"%s %s should be hidden per cli-surface.yaml status %q", prefix, name, node.Status)
+
 		} else {
 			visibleExpected[name] = true
-			if cmd.Hidden {
-				t.Fatalf("%s %s should be visible per cli-surface.yaml status %q", prefix, name, node.Status)
-			}
+			require.False(t, cmd.Hidden,
+				"%s %s should be visible per cli-surface.yaml status %q", prefix, name, node.Status)
+
 		}
 		assertAliases(t, prefix+" "+name, cmd, node.Aliases)
 	}
 	for name, node := range hidden {
 		cmd := mustFindCommand(t, parent, name)
-		if !cmd.Hidden {
-			t.Fatalf("%s %s should be hidden per cli-surface.yaml hidden_tree", prefix, name)
-		}
+		require.True(t, cmd.Hidden,
+			"%s %s should be hidden per cli-surface.yaml hidden_tree", prefix, name)
+
 		assertAliases(t, prefix+" "+name, cmd, node.Aliases)
 	}
 	for name := range removed {
-		if cmd := findCommand(parent, name); cmd != nil {
-			t.Fatalf("%s %s is marked removed in cli-surface.yaml but is still registered", prefix, name)
-		}
+		cmd := findCommand(parent, name)
+		require.Nil(t, cmd,
+			"%s %s is marked removed in cli-surface.yaml but is still registered", prefix, name)
 	}
 
 	var unexpected []string
@@ -504,9 +516,9 @@ func assertCommandSurface(t *testing.T, prefix string, parent *cobra.Command, pu
 		}
 	}
 	sort.Strings(unexpected)
-	if len(unexpected) > 0 {
-		t.Fatalf("%s has visible commands not listed as public in cli-surface.yaml: %s", prefix, strings.Join(unexpected, ", "))
-	}
+	require.False(t, len(unexpected) > 0,
+		"%s has visible commands not listed as public in cli-surface.yaml: %s", prefix, strings.Join(unexpected, ", "))
+
 }
 
 func isSurfaceHidden(status string) bool {
@@ -529,18 +541,18 @@ func assertAliases(t *testing.T, commandPath string, cmd *cobra.Command, aliases
 		if alias == "" {
 			continue
 		}
-		if !containsString(cmd.Aliases, alias) {
-			t.Fatalf("%s missing alias %q from cli-surface.yaml; aliases=%v", commandPath, alias, cmd.Aliases)
-		}
+		require.True(t, containsString(cmd.Aliases, alias),
+			"%s missing alias %q from cli-surface.yaml; aliases=%v", commandPath, alias, cmd.Aliases)
+
 	}
 }
 
 func mustFindCommand(t *testing.T, parent *cobra.Command, name string) *cobra.Command {
 	t.Helper()
 	cmd := findCommand(parent, name)
-	if cmd == nil {
-		t.Fatalf("%s missing command %q from cli-surface.yaml", parent.CommandPath(), name)
-	}
+	require.NotNil(t, cmd,
+		"%s missing command %q from cli-surface.yaml", parent.CommandPath(), name)
+
 	return cmd
 }
 
@@ -578,15 +590,13 @@ func setupRootWorkspaceFixture(t *testing.T) string {
 	writeFile(t, filepath.Join(root, "enalytics-frontend", "package.json"), "{\n  \"name\": \"enalytics-frontend\",\n  \"private\": true\n}\n")
 
 	origWD, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(root); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
+	require.NoError(t, os.Chdir(root))
+
 	t.Cleanup(func() {
 		if err := os.Chdir(origWD); err != nil {
-			t.Fatal(err)
+			require.NoError(t, err)
 		}
 	})
 	return root
@@ -594,26 +604,35 @@ func setupRootWorkspaceFixture(t *testing.T) string {
 
 func mkdirAll(t *testing.T, path string) {
 	t.Helper()
-	if err := os.MkdirAll(path, 0o755); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, os.MkdirAll(path, 0o755))
+
 }
 
 func writeFile(t *testing.T, path, body string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o644))
+
+}
+
+func executeRootHelp(t *testing.T, args ...string) string {
+	t.Helper()
+	cmd := newRootCmd()
+	cmd.SetArgs(args)
+	buffer := &bytes.Buffer{}
+	cmd.SetOut(buffer)
+	require.NoError(t, cmd.Execute())
+	return buffer.String()
 }
 
 func stringField(t *testing.T, decoded map[string]any, key string) string {
 	t.Helper()
 	got, ok := decoded[key].(string)
-	if !ok {
-		t.Fatalf("json field %q = %#v, want string in %#v", key, decoded[key], decoded)
-	}
+	require.True(t, ok,
+		"json field %q = %#v, want string in %#v", key, decoded[key], decoded)
+
 	return got
 }
