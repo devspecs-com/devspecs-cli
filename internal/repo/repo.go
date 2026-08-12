@@ -3,6 +3,7 @@ package repo
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"net/url"
@@ -26,16 +27,28 @@ type Info struct {
 // DetectIdentity adds the stable remote-plus-root-commit identity used to
 // recognize one logical repository across Git worktrees.
 func DetectIdentity(dir string) Info {
-	return WithIdentity(Detect(dir))
+	return DetectIdentityContext(context.Background(), dir)
+}
+
+// DetectIdentityContext is DetectIdentity with cancellation for Git metadata
+// subprocesses.
+func DetectIdentityContext(ctx context.Context, dir string) Info {
+	return WithIdentityContext(ctx, DetectContext(ctx, dir))
 }
 
 // WithIdentity enriches already-detected Git metadata without repeating path,
 // remote, and branch discovery.
 func WithIdentity(info Info) Info {
+	return WithIdentityContext(context.Background(), info)
+}
+
+// WithIdentityContext is WithIdentity with cancellation for root-history
+// discovery.
+func WithIdentityContext(ctx context.Context, info Info) Info {
 	if !info.IsGit || strings.TrimSpace(info.RemoteURL) == "" {
 		return info
 	}
-	info.RootCommit = RootCommit(info.RootPath)
+	info.RootCommit = RootCommitContext(ctx, info.RootPath)
 	info.GitIdentity = StableGitIdentity(info.RemoteURL, info.RootCommit)
 	return info
 }
@@ -43,7 +56,12 @@ func WithIdentity(info Info) Info {
 // RootCommit returns all root commits reachable from HEAD in stable order.
 // Multiple roots are possible after merging unrelated histories.
 func RootCommit(repoRoot string) string {
-	cmd := exec.Command("git", "rev-list", "--max-parents=0", "HEAD")
+	return RootCommitContext(context.Background(), repoRoot)
+}
+
+// RootCommitContext is RootCommit with cancellation.
+func RootCommitContext(ctx context.Context, repoRoot string) string {
+	cmd := exec.CommandContext(ctx, "git", "rev-list", "--max-parents=0", "HEAD")
 	cmd.Dir = repoRoot
 	out, err := cmd.Output()
 	if err != nil {
@@ -103,6 +121,11 @@ func CanonicalRemoteURL(remote string) string {
 // Detect attempts to discover git repository info from the given directory.
 // Returns non-git Info if not inside a git repo (no error).
 func Detect(dir string) Info {
+	return DetectContext(context.Background(), dir)
+}
+
+// DetectContext is Detect with cancellation for Git metadata subprocesses.
+func DetectContext(ctx context.Context, dir string) Info {
 	info := Info{RootPath: dir}
 
 	gitDir := findGitDir(dir)
@@ -112,11 +135,11 @@ func Detect(dir string) Info {
 	info.IsGit = true
 	info.RootPath = filepath.Dir(gitDir)
 
-	if remote := gitConfig(info.RootPath, "remote.origin.url"); remote != "" {
+	if remote := gitConfigContext(ctx, info.RootPath, "remote.origin.url"); remote != "" {
 		info.RemoteURL = remote
 	}
 
-	if branch := gitSymbolicRef(info.RootPath); branch != "" {
+	if branch := gitSymbolicRefContext(ctx, info.RootPath); branch != "" {
 		info.CurrentBranch = branch
 	}
 
@@ -137,8 +160,8 @@ func findGitDir(dir string) string {
 	}
 }
 
-func gitConfig(repoRoot, key string) string {
-	cmd := exec.Command("git", "config", "--get", key)
+func gitConfigContext(ctx context.Context, repoRoot, key string) string {
+	cmd := exec.CommandContext(ctx, "git", "config", "--get", key)
 	cmd.Dir = repoRoot
 	out, err := cmd.Output()
 	if err != nil {
@@ -147,8 +170,8 @@ func gitConfig(repoRoot, key string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func gitSymbolicRef(repoRoot string) string {
-	cmd := exec.Command("git", "symbolic-ref", "--short", "HEAD")
+func gitSymbolicRefContext(ctx context.Context, repoRoot string) string {
+	cmd := exec.CommandContext(ctx, "git", "symbolic-ref", "--short", "HEAD")
 	cmd.Dir = repoRoot
 	out, err := cmd.Output()
 	if err != nil {
@@ -159,7 +182,12 @@ func gitSymbolicRef(repoRoot string) string {
 
 // HeadCommit returns the current HEAD commit SHA, or "" if not in a git repo.
 func HeadCommit(repoRoot string) string {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
+	return HeadCommitContext(context.Background(), repoRoot)
+}
+
+// HeadCommitContext is HeadCommit with cancellation.
+func HeadCommitContext(ctx context.Context, repoRoot string) string {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
 	cmd.Dir = repoRoot
 	out, err := cmd.Output()
 	if err != nil {
@@ -171,7 +199,12 @@ func HeadCommit(repoRoot string) string {
 // ChangedFiles returns the list of files changed in the most recent commit.
 // Uses diff-tree which works on initial commits and merge commits correctly.
 func ChangedFiles(repoRoot string) []string {
-	cmd := exec.Command("git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
+	return ChangedFilesContext(context.Background(), repoRoot)
+}
+
+// ChangedFilesContext is ChangedFiles with cancellation.
+func ChangedFilesContext(ctx context.Context, repoRoot string) []string {
+	cmd := exec.CommandContext(ctx, "git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
 	cmd.Dir = repoRoot
 	out, err := cmd.Output()
 	if err != nil {
@@ -188,10 +221,15 @@ func ChangedFiles(repoRoot string) []string {
 // that added path, following renames. Empty string if git is unavailable or
 // the path has no history in the repo.
 func FileFirstCommitDate(repoRoot, relPath string) string {
+	return FileFirstCommitDateContext(context.Background(), repoRoot, relPath)
+}
+
+// FileFirstCommitDateContext is FileFirstCommitDate with cancellation.
+func FileFirstCommitDateContext(ctx context.Context, repoRoot, relPath string) string {
 	if relPath == "" {
 		return ""
 	}
-	cmd := exec.Command("git", "log", "--diff-filter=A", "--follow", "--format=%aI", "--", relPath)
+	cmd := exec.CommandContext(ctx, "git", "log", "--diff-filter=A", "--follow", "--format=%aI", "--", relPath)
 	cmd.Dir = repoRoot
 	out, err := cmd.Output()
 	if err != nil {
@@ -214,6 +252,12 @@ func FileFirstCommitDate(repoRoot, relPath string) string {
 // backwards through name-status records. Paths that cannot be resolved are
 // omitted so callers can fall back to the exact per-file --follow path.
 func FileFirstCommitDates(repoRoot string, relPaths []string) map[string]string {
+	return FileFirstCommitDatesContext(context.Background(), repoRoot, relPaths)
+}
+
+// FileFirstCommitDatesContext is FileFirstCommitDates with cancellation for
+// the potentially expensive full-history git traversal.
+func FileFirstCommitDatesContext(ctx context.Context, repoRoot string, relPaths []string) map[string]string {
 	result := map[string]string{}
 	tracked := map[string][]string{}
 	for _, rel := range relPaths {
@@ -229,7 +273,7 @@ func FileFirstCommitDates(repoRoot string, relPaths []string) map[string]string 
 	if len(tracked) == 0 {
 		return result
 	}
-	cmd := exec.Command("git", "-c", "core.quotePath=false", "log", "--find-renames", "--format=%x00%aI", "--name-status")
+	cmd := exec.CommandContext(ctx, "git", "-c", "core.quotePath=false", "log", "--find-renames", "--format=%x00%aI", "--name-status")
 	cmd.Dir = repoRoot
 	out, err := cmd.StdoutPipe()
 	if err != nil {

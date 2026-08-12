@@ -1,0 +1,33 @@
+name: Concurrent Index Stress
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: concurrent-index-stress
+  cancel-in-progress: false
+
+jobs:
+  stress:
+    name: Repeated shared-index contention
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Run repeated process-level contention gate
+        run: >-
+          go test -race ./cmd/ds
+          -run '^(TestMain_WhenConcurrentCommandsShareIndex_SerializesWritesAndPreservesReads|TestMain_WhenCPUActiveMapRefreshIsTerminated_ReapsGitAndPreservesIndex)$'
+          -count=10
+          -timeout=25m

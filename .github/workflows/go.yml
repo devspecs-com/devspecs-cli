@@ -36,16 +36,16 @@ jobs:
             exit 1
           fi
 
+      - name: Test assertion policy
+        run: go run ./scripts/ci/check-test-assertions
+
       - name: Unit tests
         run: go test -v -race -coverprofile coverage.out ./...
 
-      - name: Coverage floor (aggregate >=70%)
+      - name: Coverage floor (aggregate >=80%)
         env:
-          COVERAGE_FLOOR: '70.0'
-        run: |
-          TOTAL=$(go tool cover -func coverage.out | awk '/^total:/ { gsub(/%/,"",$NF); print $NF }')
-          awk -v t="$TOTAL" -v floor="$COVERAGE_FLOOR" 'BEGIN{ exit !(t+0 >= floor+0) }' || { echo "total coverage ${TOTAL}% is below ${COVERAGE_FLOOR}%"; exit 1; }
-          echo "total coverage ${TOTAL}% (floor ${COVERAGE_FLOOR}%)"
+          COVERAGE_FLOOR: '80.0'
+        run: go run ./scripts/ci/check-coverage --profile coverage.out --floor "$COVERAGE_FLOOR"
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4

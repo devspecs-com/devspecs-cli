@@ -1,6 +1,11 @@
 package retrieval
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
 
 func TestApplyDemotionOnlyNegativeEvidenceMovesUnrequestedPlaygroundRows(t *testing.T) {
 	pack := RoleGroupedPack{
@@ -17,24 +22,19 @@ func TestApplyDemotionOnlyNegativeEvidenceMovesUnrequestedPlaygroundRows(t *test
 	}
 
 	got := ApplyDemotionOnlyNegativeEvidence(pack, "Match import glob common base by path segment correctly")
-	if len(got.Groups) != 1 || len(got.Groups[0].Items) != 1 {
-		t.Fatalf("expected one kept implementation row, got %#v", got.Groups)
-	}
-	if got.Groups[0].Items[0].Path != "packages/vite/src/node/plugins/importMetaGlob.ts" {
-		t.Fatalf("kept wrong row: %#v", got.Groups[0].Items)
-	}
-	if len(got.ExcludedNoise) != 1 {
-		t.Fatalf("expected one demoted row, got %#v", got.ExcludedNoise)
-	}
-	if got.ExcludedNoise[0].Path != "playground/glob-import/root/array-common-base/pattern1/a.js" {
-		t.Fatalf("demoted wrong row: %#v", got.ExcludedNoise)
-	}
-	if got.Metadata[packNegativeEvidenceCountKey] != "1" {
-		t.Fatalf("missing negative evidence metadata: %#v", got.Metadata)
-	}
-	if got.Counts[PackRoleImplementation] != 1 || got.Counts[PackRoleExcludedNoise] != 1 {
-		t.Fatalf("counts not recomputed: %#v", got.Counts)
-	}
+	require.Len(t, got.Groups, 1)
+	require.Len(t, got.Groups[0].Items, 1)
+	require.Equal(t, "packages/vite/src/node/plugins/importMetaGlob.ts", got.Groups[0].Items[0].Path,
+		"kept wrong row: %#v", got.Groups[0].Items)
+	require.Len(t, got.ExcludedNoise, 1,
+		"expected one demoted row, got %#v", got.ExcludedNoise)
+	require.Equal(t, "playground/glob-import/root/array-common-base/pattern1/a.js", got.ExcludedNoise[0].Path,
+		"demoted wrong row: %#v", got.ExcludedNoise)
+	require.Equal(t, "1", got.Metadata[packNegativeEvidenceCountKey],
+		"missing negative evidence metadata: %#v", got.Metadata)
+	assert.Equal(t, 1, got.Counts[PackRoleImplementation])
+	assert.Equal(t, 1, got.Counts[PackRoleExcludedNoise])
+
 }
 
 func TestApplyDemotionOnlyNegativeEvidenceKeepsRequestedPlaygroundRows(t *testing.T) {
@@ -50,12 +50,11 @@ func TestApplyDemotionOnlyNegativeEvidenceKeepsRequestedPlaygroundRows(t *testin
 	}
 
 	got := ApplyDemotionOnlyNegativeEvidence(pack, "Fix glob import playground coverage")
-	if len(got.ExcludedNoise) != 0 {
-		t.Fatalf("playground row should be kept when requested: %#v", got.ExcludedNoise)
-	}
-	if len(got.Groups) != 1 || len(got.Groups[0].Items) != 1 {
-		t.Fatalf("expected playground row to remain: %#v", got.Groups)
-	}
+	require.Empty(t, got.ExcludedNoise,
+		"playground row should be kept when requested: %#v", got.ExcludedNoise)
+	require.Len(t, got.Groups, 1)
+	require.Len(t, got.Groups[0].Items, 1)
+
 }
 
 func TestApplyDemotionOnlyNegativeEvidenceKeepsNormalTests(t *testing.T) {
@@ -71,12 +70,11 @@ func TestApplyDemotionOnlyNegativeEvidenceKeepsNormalTests(t *testing.T) {
 	}
 
 	got := ApplyDemotionOnlyNegativeEvidence(pack, "Use node_modules vite cacheDir when node_modules exists")
-	if len(got.ExcludedNoise) != 0 {
-		t.Fatalf("normal test should not be demoted: %#v", got.ExcludedNoise)
-	}
-	if len(got.Groups) != 1 || len(got.Groups[0].Items) != 1 {
-		t.Fatalf("expected normal test to remain: %#v", got.Groups)
-	}
+	require.Empty(t, got.ExcludedNoise,
+		"normal test should not be demoted: %#v", got.ExcludedNoise)
+	require.Len(t, got.Groups, 1)
+	require.Len(t, got.Groups[0].Items, 1)
+
 }
 
 func TestApplyDemotionOnlyNegativeEvidenceDemotesBlockedIntentWhenCurrentDecisionExists(t *testing.T) {
@@ -110,18 +108,15 @@ func TestApplyDemotionOnlyNegativeEvidenceDemotesBlockedIntentWhenCurrentDecisio
 	}
 
 	got := ApplyDemotionOnlyNegativeEvidence(pack, "epoch 4 external validity bridge")
-	if len(got.Groups) != 1 || len(got.Groups[0].Items) != 1 {
-		t.Fatalf("expected one active item in the working set, got %#v", got.Groups)
-	}
-	if got.Groups[0].Items[0].Path != "docs/notes/next_epoch_decision_memo.md" {
-		t.Fatalf("kept wrong active row: %#v", got.Groups[0].Items)
-	}
-	if len(got.ExcludedNoise) != 1 || got.ExcludedNoise[0].Path != "docs/plans/D4.2-blocked-external-validity-bridge.md" {
-		t.Fatalf("expected blocked plan to be downgraded, got %#v", got.ExcludedNoise)
-	}
-	if got.ExcludedNoise[0].RoleReason == "" {
-		t.Fatalf("expected downgrade reason, got %#v", got.ExcludedNoise[0])
-	}
+	require.Len(t, got.Groups, 1)
+	require.Len(t, got.Groups[0].Items, 1)
+	require.Equal(t, "docs/notes/next_epoch_decision_memo.md", got.Groups[0].Items[0].Path,
+		"kept wrong active row: %#v", got.Groups[0].Items)
+	require.Len(t, got.ExcludedNoise, 1)
+	assert.Equal(t, "docs/plans/D4.2-blocked-external-validity-bridge.md", got.ExcludedNoise[0].Path)
+	require.NotEqual(t, "", got.ExcludedNoise[0].RoleReason,
+		"expected downgrade reason, got %#v", got.ExcludedNoise[0])
+
 }
 
 func TestApplyDemotionOnlyNegativeEvidenceKeepsBlockedIntentWhenCurrentDecisionAbsent(t *testing.T) {
@@ -154,13 +149,11 @@ func TestApplyDemotionOnlyNegativeEvidenceKeepsBlockedIntentWhenCurrentDecisionA
 	}
 
 	got := ApplyDemotionOnlyNegativeEvidence(pack, "epoch 4 external validity bridge")
-	if len(got.ExcludedNoise) != 0 {
-		t.Fatalf("blocked plan should stay visible when no current decision context exists, got %#v", got.ExcludedNoise)
-	}
-	if len(got.Groups) != 1 || len(got.Groups[0].Items) != 2 {
-		t.Fatalf("expected blocked and historical intent to remain visible, got %#v", got.Groups)
-	}
-	if got.Metadata[packNegativeEvidenceCountKey] != "" {
-		t.Fatalf("negative evidence should not fire without active decision context: %#v", got.Metadata)
-	}
+	require.Empty(t, got.ExcludedNoise,
+		"blocked plan should stay visible when no current decision context exists, got %#v", got.ExcludedNoise)
+	require.Len(t, got.Groups, 1)
+	require.Len(t, got.Groups[0].Items, 2)
+	require.Equal(t, "", got.Metadata[packNegativeEvidenceCountKey],
+		"negative evidence should not fire without active decision context: %#v", got.Metadata)
+
 }

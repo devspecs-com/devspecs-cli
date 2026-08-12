@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,7 +30,8 @@ A logical repository is removed only when none of its recorded roots still
 exist. Consecutive capture revisions with identical content are collapsed while
 preserving the current revision and distinct content transitions. Deleted
 SQLite pages are reusable immediately; pass --vacuum to compact the database
-file and return unused space to the filesystem.`,
+file and return unused space to the filesystem. Prune never deletes files from
+a repository, including ADRs, RFCs, PRDs, or DevSpecs task artifacts.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runPrune(cmd, dryRun, vacuum, asJSON)
@@ -53,7 +55,6 @@ func runPrune(cmd *cobra.Command, dryRun, vacuum, asJSON bool) error {
 	}
 	progress := newPruneProgressReporter(cmd.ErrOrStderr(), !asJSON, pruneProgressDelay)
 	defer progress.stop()
-	progress.setPhase("inspect")
 
 	dbPath, err := config.DBPath()
 	if err != nil {
@@ -67,6 +68,21 @@ func runPrune(cmd *cobra.Command, dryRun, vacuum, asJSON bool) error {
 		}
 		return fmt.Errorf("inspect index: %w", err)
 	}
+	var lease *store.IndexWriterLease
+	if !dryRun {
+		waitCtx, cancel := context.WithTimeout(cmd.Context(), autoIndexDeadline)
+		defer cancel()
+		var noticeCmd *cobra.Command
+		if !asJSON {
+			noticeCmd = cmd
+		}
+		lease, err = store.AcquireIndexWriter(waitCtx, dbPath, indexWaitNotice(noticeCmd, "Prune"))
+		if err != nil {
+			return indexOperationError("prune writer wait", autoIndexDeadlineLabel, err)
+		}
+		defer func() { _ = lease.Release() }()
+	}
+	progress.setPhase("inspect")
 	db, err := openDBAtPath(dbPath)
 	if err != nil {
 		return err

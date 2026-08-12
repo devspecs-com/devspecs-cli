@@ -1,67 +1,139 @@
 package format
 
-import "testing"
+import (
+	"testing"
 
-func TestNormalize(t *testing.T) {
-	tests := []struct {
-		in, want string
-	}{
-		{"", ProfileGeneric},
-		{"CURSOR_PLAN", ProfileCursorPlan},
-		{"cursor", ProfileCursorPlan},
-		{"speckit", ProfileSpeckit},
-		{"bmad-method", ProfileBmad},
-		{"openspec", ProfileOpenspec},
-		{"adr", ProfileADR},
-		{"unknown-thing", ProfileGeneric},
-	}
-	for _, tc := range tests {
-		if g := Normalize(tc.in); g != tc.want {
-			t.Errorf("Normalize(%q) = %q, want %q", tc.in, g, tc.want)
-		}
-	}
+	"github.com/stretchr/testify/assert"
+)
+
+func TestNormalize_WithEmptyProfile_ReturnsGeneric(t *testing.T) {
+	actual := Normalize("")
+
+	assert.Equal(t, ProfileGeneric, actual)
 }
 
-func TestFromPath(t *testing.T) {
-	tests := []struct {
-		path, want string
-	}{
-		{"plans/foo.md", ProfileGeneric},
-		{".cursor/plans/x.md", ProfileCursorPlan},
-		{"specs/001-fe/spec.md", ProfileSpeckit},
-		{"specs/001-fe/plan.md", ProfileSpeckit},
-		{"specs/001-fe/tasks.md", ProfileSpeckit},
-		{"_bmad-output/planning-artifacts/prd.md", ProfileBmad},
-		{".claude/notes/handoff.md", ProfileClaude},
-		{".codex/plans/PLAN.md", ProfileCodex},
-	}
-	for _, tc := range tests {
-		if g := FromPath(tc.path); g != tc.want {
-			t.Errorf("FromPath(%q) = %q, want %q", tc.path, g, tc.want)
-		}
-	}
+func TestNormalize_WithUppercaseCursorPlan_ReturnsCursorPlan(t *testing.T) {
+	actual := Normalize("CURSOR_PLAN")
+
+	assert.Equal(t, ProfileCursorPlan, actual)
 }
 
-func TestFromFrontmatterTool(t *testing.T) {
-	if g := FromFrontmatterTool("", "Spec Kit", ""); g != ProfileSpeckit {
-		t.Errorf("got %q", g)
-	}
-	if g := FromFrontmatterTool("cursor desktop"); g != ProfileCursorPlan {
-		t.Errorf("got %q", g)
-	}
+func TestNormalize_WithCursorAlias_ReturnsCursorPlan(t *testing.T) {
+	actual := Normalize("cursor")
+
+	assert.Equal(t, ProfileCursorPlan, actual)
 }
 
-func TestLayoutGroup(t *testing.T) {
-	if g := LayoutGroup("specs/001-synthetic-feature/spec.md"); g != "specs/001-synthetic-feature" {
-		t.Errorf("got %q", g)
-	}
-	if g := LayoutGroup("specs/001-synthetic-feature/plan.md"); g != "specs/001-synthetic-feature" {
-		t.Errorf("got %q", g)
-	}
-	if g := LayoutGroup("specs/001-synthetic-feature/contracts/api.md"); g != "specs/001-synthetic-feature" {
-		t.Errorf("got %q", g)
-	}
-	if g := LayoutGroup("_bmad-output/planning-artifacts/prd.md"); g != "_bmad-output/planning-artifacts" {
-		t.Errorf("got %q", g)
-	}
+func TestNormalize_WithSpecKit_ReturnsSpecKit(t *testing.T) {
+	actual := Normalize("speckit")
+
+	assert.Equal(t, ProfileSpeckit, actual)
+}
+
+func TestNormalize_WithBmadMethod_ReturnsBmad(t *testing.T) {
+	actual := Normalize("bmad-method")
+
+	assert.Equal(t, ProfileBmad, actual)
+}
+
+func TestNormalize_WithOpenSpec_ReturnsOpenSpec(t *testing.T) {
+	actual := Normalize("openspec")
+
+	assert.Equal(t, ProfileOpenspec, actual)
+}
+
+func TestNormalize_WithADR_ReturnsADR(t *testing.T) {
+	actual := Normalize("adr")
+
+	assert.Equal(t, ProfileADR, actual)
+}
+
+func TestNormalize_WithUnknownProfile_ReturnsGeneric(t *testing.T) {
+	actual := Normalize("unknown-thing")
+
+	assert.Equal(t, ProfileGeneric, actual)
+}
+
+func TestFromPath_WithGenericPlan_ReturnsGeneric(t *testing.T) {
+	actual := FromPath("plans/foo.md")
+
+	assert.Equal(t, ProfileGeneric, actual)
+}
+
+func TestFromPath_WithCursorPlan_ReturnsCursorPlan(t *testing.T) {
+	actual := FromPath(".cursor/plans/x.md")
+
+	assert.Equal(t, ProfileCursorPlan, actual)
+}
+
+func TestFromPath_WithSpecKitSpec_ReturnsSpecKit(t *testing.T) {
+	actual := FromPath("specs/001-fe/spec.md")
+
+	assert.Equal(t, ProfileSpeckit, actual)
+}
+
+func TestFromPath_WithSpecKitPlan_ReturnsSpecKit(t *testing.T) {
+	actual := FromPath("specs/001-fe/plan.md")
+
+	assert.Equal(t, ProfileSpeckit, actual)
+}
+
+func TestFromPath_WithSpecKitTasks_ReturnsSpecKit(t *testing.T) {
+	actual := FromPath("specs/001-fe/tasks.md")
+
+	assert.Equal(t, ProfileSpeckit, actual)
+}
+
+func TestFromPath_WithBmadArtifact_ReturnsBmad(t *testing.T) {
+	actual := FromPath("_bmad-output/planning-artifacts/prd.md")
+
+	assert.Equal(t, ProfileBmad, actual)
+}
+
+func TestFromPath_WithClaudeNote_ReturnsClaude(t *testing.T) {
+	actual := FromPath(".claude/notes/handoff.md")
+
+	assert.Equal(t, ProfileClaude, actual)
+}
+
+func TestFromPath_WithCodexPlan_ReturnsCodex(t *testing.T) {
+	actual := FromPath(".codex/plans/PLAN.md")
+
+	assert.Equal(t, ProfileCodex, actual)
+}
+
+func TestFromFrontmatterTool_WithSpecKitGenerator_ReturnsSpecKit(t *testing.T) {
+	actual := FromFrontmatterTool("", "Spec Kit", "")
+
+	assert.Equal(t, ProfileSpeckit, actual)
+}
+
+func TestFromFrontmatterTool_WithCursorTool_ReturnsCursorPlan(t *testing.T) {
+	actual := FromFrontmatterTool("cursor desktop")
+
+	assert.Equal(t, ProfileCursorPlan, actual)
+}
+
+func TestLayoutGroup_WithSpecKitSpec_ReturnsFeatureRoot(t *testing.T) {
+	actual := LayoutGroup("specs/001-synthetic-feature/spec.md")
+
+	assert.Equal(t, "specs/001-synthetic-feature", actual)
+}
+
+func TestLayoutGroup_WithSpecKitPlan_ReturnsFeatureRoot(t *testing.T) {
+	actual := LayoutGroup("specs/001-synthetic-feature/plan.md")
+
+	assert.Equal(t, "specs/001-synthetic-feature", actual)
+}
+
+func TestLayoutGroup_WithNestedContract_ReturnsFeatureRoot(t *testing.T) {
+	actual := LayoutGroup("specs/001-synthetic-feature/contracts/api.md")
+
+	assert.Equal(t, "specs/001-synthetic-feature", actual)
+}
+
+func TestLayoutGroup_WithBmadArtifact_ReturnsPlanningRoot(t *testing.T) {
+	actual := LayoutGroup("_bmad-output/planning-artifacts/prd.md")
+
+	assert.Equal(t, "_bmad-output/planning-artifacts", actual)
 }

@@ -54,6 +54,9 @@ func (a *Adapter) Discover(ctx context.Context, repoRoot string, cfg *config.Rep
 			return
 		}
 		rel = filepath.ToSlash(rel)
+		if isADROwnedPath(rel, cfg) {
+			return
+		}
 		if m := ignore.FromContext(ctx); m != nil && m.ShouldSkip(rel, false) {
 			return
 		}
@@ -1195,6 +1198,31 @@ func isOpenSpecOwnedPath(rel string) bool {
 		return true
 	}
 	return strings.Contains(rel, "/openspec/")
+}
+
+func isADROwnedPath(rel string, cfg *config.RepoConfig) bool {
+	paths := []string{"docs/adr", "docs/adrs", "adr", "adrs", "architecture/decisions"}
+	if cfg != nil {
+		for _, source := range cfg.Sources {
+			if source.Type != "adr" {
+				continue
+			}
+			if len(source.Paths) > 0 {
+				paths = source.Paths
+			} else if source.Path != "" {
+				paths = []string{source.Path}
+			}
+			break
+		}
+	}
+	rel = strings.Trim(filepath.ToSlash(strings.ToLower(rel)), "/")
+	for _, path := range paths {
+		path = strings.Trim(filepath.ToSlash(strings.ToLower(path)), "/")
+		if path != "" && strings.HasPrefix(rel, path+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func sameStrings(a, b []string) bool {

@@ -232,6 +232,57 @@ that target. Use `ds find` when you need to discover source/docs/tests for a
 question. Use `ds workspace trace` only when you already know a workspace change
 or repo task ID and need linked repo slices.
 
+## Split Work Into Named Threads
+
+Most tasks stay linear and need no thread setup. When two slices can proceed
+independently and a later slice must wait for both, keep the task repo-owned and
+define the lanes explicitly:
+
+```bash
+ds thread set task:weekly-digest agent-a A01
+ds thread set task:weekly-digest human-a A02
+ds thread set task:weekly-digest both-a A03 --after agent-a --after human-a
+ds thread task:weekly-digest
+```
+
+If both first lanes are runnable, `ds apply weekly-digest` returns an ambiguity
+error instead of choosing one. Continue with an exact command printed by status:
+
+```bash
+ds apply task:weekly-digest --thread agent-a
+```
+
+No workspace is required. Only tasks created as explicit child slices of a
+workspace change use a `change:<id>` thread owner and cross-repo target aliases.
+The command family remains `ds thread` plus `ds apply --thread` in both cases.
+
+## Close A Full Task Track
+
+After every implementation slice is terminal, a full task exposes one `A00`
+closeout prompt. This is the single track-level check for knowledge that should
+outlive task history; compact `--quick` tasks skip it.
+
+Use `--durable-record none` for local, obvious, reversible implementation
+details. When the track settles a consequential technical choice, create and
+finish a repo-owned document, then record it:
+
+```bash
+ds compose adr "Keep digest scheduling in the notifications service" \
+  --from-task weekly-digest \
+  --target A00
+
+ds task checkpoint weekly-digest \
+  --target A00 \
+  --stage completed \
+  --decision complete \
+  --durable-record recorded \
+  --durable-artifact docs/adr/0001-keep-digest-scheduling-in-notifications.md
+```
+
+`ds compose` writes ordinary repository Markdown outside `devspecs/tasks/`.
+That file is authoritative and remains intact across `ds prune` or index
+rebuilds.
+
 ## What This Shows
 
 - `ds task` creates addressable task and slice artifacts.
@@ -239,6 +290,7 @@ or repo task ID and need linked repo slices.
 - `ds apply` gives an agent a one-slice boundary instead of the whole task track.
 - `ds task checkpoint` records the actual evidence and decision gate.
 - `ds task status` shows the next slice before another agent prompt is emitted.
+- Full task tracks end with one durability disposition; `--quick` tasks do not.
 
 This is a small synthetic example. It is not a broad retrieval benchmark. In a
 real brownfield repo, use `ds recent`, `ds find`, and `ds map` to route to the

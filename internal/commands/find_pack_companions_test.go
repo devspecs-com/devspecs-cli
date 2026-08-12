@@ -5,10 +5,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAddFindPackCompanionCandidatesAddsDirectTestFile(t *testing.T) {
@@ -24,17 +25,15 @@ func TestAddFindPackCompanionCandidatesAddsDirectTestFile(t *testing.T) {
 	})
 
 	got := addFindPackCompanionCandidates(context.Background(), "", "map command output", matches, all, findPackCompanionModeGeneric)
+	assert.True(t, findPackTestHasPath(got, "internal/commands/map_test.go"),
+		"expected direct test companion, got %#v", findPackTestPaths(got))
 
-	if !findPackTestHasPath(got, "internal/commands/map_test.go") {
-		t.Fatalf("expected direct test companion, got %#v", findPackTestPaths(got))
-	}
 	companion := findPackTestCandidate(got, "internal/commands/map_test.go")
-	if companion.Metadata["retrieval_expansion_reason"] != "test_companion" {
-		t.Fatalf("expected test companion reason, got %#v", companion.Metadata)
-	}
-	if companion.Metadata["pack_tier"] != retrieval.PackTierRelated {
-		t.Fatalf("expected related pack tier, got %#v", companion.Metadata)
-	}
+	assert.Equal(t, "test_companion", companion.Metadata["retrieval_expansion_reason"],
+		"expected test companion reason, got %#v", companion.Metadata)
+	assert.Equal(t, retrieval.PackTierRelated, companion.Metadata["pack_tier"],
+		"expected related pack tier, got %#v", companion.Metadata)
+
 }
 
 func TestAddFindPackCompanionCandidatesAddsFilesystemTestCompanion(t *testing.T) {
@@ -47,15 +46,13 @@ func TestAddFindPackCompanionCandidatesAddsFilesystemTestCompanion(t *testing.T)
 	got := addFindPackCompanionCandidates(context.Background(), repoRoot, "map command output", matches, matches, findPackCompanionModeGeneric)
 
 	companion := findPackTestCandidate(got, "internal/commands/map_test.go")
-	if companion.Path == "" {
-		t.Fatalf("expected filesystem test companion, got %#v", findPackTestPaths(got))
-	}
-	if companion.Subtype != "test_case" {
-		t.Fatalf("expected filesystem test companion subtype test_case, got %#v", companion)
-	}
-	if companion.Metadata["admission_reason"] != "query_time_pack_companion" {
-		t.Fatalf("expected query-time companion admission metadata, got %#v", companion.Metadata)
-	}
+	assert.NotEqual(t, "", companion.Path,
+		"expected filesystem test companion, got %#v", findPackTestPaths(got))
+	assert.Equal(t, "test_case", companion.Subtype,
+		"expected filesystem test companion subtype test_case, got %#v", companion)
+	assert.Equal(t, "query_time_pack_companion", companion.Metadata["admission_reason"],
+		"expected query-time companion admission metadata, got %#v", companion.Metadata)
+
 }
 
 func TestAddFindPackCompanionCandidatesAddsCommandFamilyFiles(t *testing.T) {
@@ -63,31 +60,58 @@ func TestAddFindPackCompanionCandidatesAddsCommandFamilyFiles(t *testing.T) {
 		{ID: "map", Path: "internal/commands/map.go", Kind: "source_context", Title: "map command"},
 	}
 	all := append([]retrieval.Candidate{}, matches...)
-	for _, path := range []string{
-		"internal/commands/find.go",
-		"internal/commands/find_test.go",
-		"internal/commands/map_test.go",
-		"internal/commands/read_commands_test.go",
-		"internal/commands/refresh.go",
-		"internal/commands/freshness_test.go",
-	} {
+	{
+		path := "internal/commands/find.go"
+
 		all = append(all, retrieval.Candidate{ID: path, Path: path, Kind: "source_context", Title: path})
+
+	}
+	{
+		path := "internal/commands/find_test.go"
+
+		all = append(all, retrieval.Candidate{ID: path, Path: path, Kind: "source_context", Title: path})
+
+	}
+	{
+		path := "internal/commands/map_test.go"
+
+		all = append(all, retrieval.Candidate{ID: path, Path: path, Kind: "source_context", Title: path})
+
+	}
+	{
+		path := "internal/commands/read_commands_test.go"
+
+		all = append(all, retrieval.Candidate{ID: path, Path: path, Kind: "source_context", Title: path})
+
+	}
+	{
+		path := "internal/commands/refresh.go"
+
+		all = append(all, retrieval.Candidate{ID: path, Path: path, Kind: "source_context", Title: path})
+
+	}
+	{
+		path := "internal/commands/freshness_test.go"
+
+		all = append(all, retrieval.Candidate{ID: path, Path: path, Kind: "source_context", Title: path})
+
 	}
 
 	got := addFindPackCompanionCandidates(context.Background(), "", "auto scan map and find first use output cache", matches, all, findPackCompanionModeAll)
 
-	for _, want := range []string{
-		"internal/commands/map_test.go",
-		"internal/commands/find.go",
-		"internal/commands/find_test.go",
-		"internal/commands/read_commands_test.go",
-		"internal/commands/refresh.go",
-		"internal/commands/freshness_test.go",
-	} {
-		if !findPackTestHasPath(got, want) {
-			t.Fatalf("expected %s in command family companions, got %#v", want, findPackTestPaths(got))
-		}
-	}
+	assert.True(t, findPackTestHasPath(got, "internal/commands/map_test.go"),
+		"expected %s in command family companions, got %#v", "internal/commands/map_test.go", findPackTestPaths(got))
+	assert.True(t, findPackTestHasPath(got, "internal/commands/find.go"),
+		"expected %s in command family companions, got %#v", "internal/commands/find.go", findPackTestPaths(got))
+	assert.True(t, findPackTestHasPath(got, "internal/commands/find_test.go"),
+		"expected %s in command family companions, got %#v", "internal/commands/find_test.go", findPackTestPaths(got))
+	assert.True(t, findPackTestHasPath(got, "internal/commands/read_commands_test.go"),
+		"expected %s in command family companions, got %#v", "internal/commands/read_commands_test.go", findPackTestPaths(got))
+	assert.True(t, findPackTestHasPath(got, "internal/commands/refresh.go"),
+		"expected %s in command family companions, got %#v", "internal/commands/refresh.go", findPackTestPaths(got))
+	assert.True(t, findPackTestHasPath(got, "internal/commands/freshness_test.go"),
+		"expected %s in command family companions, got %#v", "internal/commands/freshness_test.go", findPackTestPaths(got))
+
 }
 
 func TestScoreFindGitReceiptsReturnsRelatedTouchedPaths(t *testing.T) {
@@ -104,18 +128,17 @@ func TestScoreFindGitReceiptsReturnsRelatedTouchedPaths(t *testing.T) {
 			},
 		},
 	}, []string{"internal/commands/map.go"}, "map command output")
+	require.Len(t, receipts, 1,
+		"expected one receipt, got %#v", receipts)
 
-	if len(receipts) != 1 {
-		t.Fatalf("expected one receipt, got %#v", receipts)
-	}
-	for _, want := range []string{"internal/commands/map_test.go", "internal/commands/read_commands_test.go"} {
-		if !findPackStringSliceContains(receipts[0].RelatedPaths, want) {
-			t.Fatalf("expected related path %s, got %#v", want, receipts[0].RelatedPaths)
-		}
-	}
-	if findPackStringSliceContains(receipts[0].RelatedPaths, "docs/map-output.md") {
-		t.Fatalf("did not expect doc path in related pack diagnostics: %#v", receipts[0].RelatedPaths)
-	}
+	assert.True(t, findPackStringSliceContains(receipts[0].RelatedPaths, "internal/commands/map_test.go"),
+		"expected related path %s, got %#v", "internal/commands/map_test.go", receipts[0].RelatedPaths)
+	assert.True(t, findPackStringSliceContains(receipts[0].RelatedPaths, "internal/commands/read_commands_test.go"),
+		"expected related path %s, got %#v", "internal/commands/read_commands_test.go", receipts[0].RelatedPaths)
+
+	assert.False(t, findPackStringSliceContains(receipts[0].RelatedPaths, "docs/map-output.md"),
+		"did not expect doc path in related pack diagnostics: %#v", receipts[0].RelatedPaths)
+
 }
 
 func TestWriteGitTrustTextShowsRelatedTouchedPaths(t *testing.T) {
@@ -133,15 +156,13 @@ func TestWriteGitTrustTextShowsRelatedTouchedPaths(t *testing.T) {
 	})
 
 	output := buf.String()
-	for _, want := range []string{
-		"Related files from matching commits, not admitted to pack:",
-		"- internal/commands/map_test.go",
-		"- internal/commands/read_commands_test.go",
-	} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("git trust text missing %q:\n%s", want, output)
-		}
-	}
+	assert.Contains(t, output, "Related files from matching commits, not admitted to pack:",
+		"git trust text missing %q:\n%s", "Related files from matching commits, not admitted to pack:", output)
+	assert.Contains(t, output, "- internal/commands/map_test.go",
+		"git trust text missing %q:\n%s", "- internal/commands/map_test.go", output)
+	assert.Contains(t, output, "- internal/commands/read_commands_test.go",
+		"git trust text missing %q:\n%s", "- internal/commands/read_commands_test.go", output)
+
 }
 
 func TestAddFindPackCompanionCandidatesAddsParentCommandForHelperFile(t *testing.T) {
@@ -149,25 +170,34 @@ func TestAddFindPackCompanionCandidatesAddsParentCommandForHelperFile(t *testing
 		{ID: "find-pack", Path: "internal/commands/find_pack.go", Kind: "source_context", Title: "find pack"},
 	}
 	all := append([]retrieval.Candidate{}, matches...)
-	for _, path := range []string{
-		"internal/commands/find.go",
-		"internal/commands/find_test.go",
-		"internal/commands/find_pack_test.go",
-	} {
+	{
+		path := "internal/commands/find.go"
+
 		all = append(all, retrieval.Candidate{ID: path, Path: path, Kind: "source_context", Title: path})
+
+	}
+	{
+		path := "internal/commands/find_test.go"
+
+		all = append(all, retrieval.Candidate{ID: path, Path: path, Kind: "source_context", Title: path})
+
+	}
+	{
+		path := "internal/commands/find_pack_test.go"
+
+		all = append(all, retrieval.Candidate{ID: path, Path: path, Kind: "source_context", Title: path})
+
 	}
 
 	got := addFindPackCompanionCandidates(context.Background(), "", "boundary primary packs", matches, all, findPackCompanionModeAll)
 
-	for _, want := range []string{
-		"internal/commands/find.go",
-		"internal/commands/find_test.go",
-		"internal/commands/find_pack_test.go",
-	} {
-		if !findPackTestHasPath(got, want) {
-			t.Fatalf("expected helper command family path %s, got %#v", want, findPackTestPaths(got))
-		}
-	}
+	assert.True(t, findPackTestHasPath(got, "internal/commands/find.go"),
+		"expected helper command family path %s, got %#v", "internal/commands/find.go", findPackTestPaths(got))
+	assert.True(t, findPackTestHasPath(got, "internal/commands/find_test.go"),
+		"expected helper command family path %s, got %#v", "internal/commands/find_test.go", findPackTestPaths(got))
+	assert.True(t, findPackTestHasPath(got, "internal/commands/find_pack_test.go"),
+		"expected helper command family path %s, got %#v", "internal/commands/find_pack_test.go", findPackTestPaths(got))
+
 }
 
 func TestAddFindPackCompanionCandidatesModeOffAddsNothing(t *testing.T) {
@@ -183,10 +213,9 @@ func TestAddFindPackCompanionCandidatesModeOffAddsNothing(t *testing.T) {
 	})
 
 	got := addFindPackCompanionCandidates(context.Background(), "", "map command output", matches, all, findPackCompanionModeOff)
+	require.Len(t, got, len(matches),
+		"expected no companions in off mode, got %#v", findPackTestPaths(got))
 
-	if len(got) != len(matches) {
-		t.Fatalf("expected no companions in off mode, got %#v", findPackTestPaths(got))
-	}
 }
 
 func TestAddFindPackCompanionCandidatesGenericModeSkipsCommandFamily(t *testing.T) {
@@ -194,54 +223,103 @@ func TestAddFindPackCompanionCandidatesGenericModeSkipsCommandFamily(t *testing.
 		{ID: "map", Path: "internal/commands/map.go", Kind: "source_context", Title: "map command"},
 	}
 	all := append([]retrieval.Candidate{}, matches...)
-	for _, path := range []string{
-		"internal/commands/find.go",
-		"internal/commands/map_test.go",
-		"internal/commands/read_commands_test.go",
-	} {
+	{
+		path := "internal/commands/find.go"
+
 		all = append(all, retrieval.Candidate{ID: path, Path: path, Kind: "source_context", Title: path})
+
+	}
+	{
+		path := "internal/commands/map_test.go"
+
+		all = append(all, retrieval.Candidate{ID: path, Path: path, Kind: "source_context", Title: path})
+
+	}
+	{
+		path := "internal/commands/read_commands_test.go"
+
+		all = append(all, retrieval.Candidate{ID: path, Path: path, Kind: "source_context", Title: path})
+
 	}
 
 	got := addFindPackCompanionCandidates(context.Background(), "", "map output cache", matches, all, findPackCompanionModeGeneric)
+	assert.True(t, findPackTestHasPath(got, "internal/commands/map_test.go"),
+		"expected generic direct test companion, got %#v", findPackTestPaths(got))
 
-	if !findPackTestHasPath(got, "internal/commands/map_test.go") {
-		t.Fatalf("expected generic direct test companion, got %#v", findPackTestPaths(got))
-	}
-	for _, notWant := range []string{"internal/commands/find.go", "internal/commands/read_commands_test.go"} {
-		if findPackTestHasPath(got, notWant) {
-			t.Fatalf("generic mode should not include command-family path %s: %#v", notWant, findPackTestPaths(got))
-		}
-	}
+	assert.False(t, findPackTestHasPath(got, "internal/commands/find.go"),
+		"generic mode should not include command-family path %s: %#v", "internal/commands/find.go", findPackTestPaths(got))
+	assert.False(t, findPackTestHasPath(got, "internal/commands/read_commands_test.go"),
+		"generic mode should not include command-family path %s: %#v", "internal/commands/read_commands_test.go", findPackTestPaths(got))
+
 }
 
-func TestNormalizeFindPackCompanionMode(t *testing.T) {
-	tests := map[string]string{
-		"":            findPackCompanionModeAll,
-		"all":         findPackCompanionModeAll,
-		"off":         findPackCompanionModeOff,
-		"none":        findPackCompanionModeOff,
-		"generic":     findPackCompanionModeGeneric,
-		"generic-git": findPackCompanionModeGenericGit,
-		"generic_git": findPackCompanionModeGenericGit,
-		"generic+git": findPackCompanionModeGenericGit,
-		"nonsense":    "",
-	}
-	for input, want := range tests {
-		if got := normalizeFindPackCompanionMode(input); got != want {
-			t.Fatalf("normalizeFindPackCompanionMode(%q) = %q, want %q", input, got, want)
-		}
-	}
+func TestNormalizeFindPackCompanionMode_WithEmptyInput_ReturnsAll(t *testing.T) {
+	got := normalizeFindPackCompanionMode("")
+
+	assert.Equal(t, findPackCompanionModeAll, got)
+}
+
+func TestNormalizeFindPackCompanionMode_WithAll_ReturnsAll(t *testing.T) {
+	got := normalizeFindPackCompanionMode("all")
+
+	assert.Equal(t, findPackCompanionModeAll, got)
+}
+
+func TestNormalizeFindPackCompanionMode_WithOff_ReturnsOff(t *testing.T) {
+	got := normalizeFindPackCompanionMode("off")
+
+	assert.Equal(t, findPackCompanionModeOff, got)
+}
+
+func TestNormalizeFindPackCompanionMode_WithNone_ReturnsOff(t *testing.T) {
+	got := normalizeFindPackCompanionMode("none")
+
+	assert.Equal(t, findPackCompanionModeOff, got)
+}
+
+func TestNormalizeFindPackCompanionMode_WithGeneric_ReturnsGeneric(t *testing.T) {
+	got := normalizeFindPackCompanionMode("generic")
+
+	assert.Equal(t, findPackCompanionModeGeneric, got)
+}
+
+func TestNormalizeFindPackCompanionMode_WithHyphenatedGenericGit_ReturnsGenericGit(t *testing.T) {
+	got := normalizeFindPackCompanionMode("generic-git")
+
+	assert.Equal(t, findPackCompanionModeGenericGit, got)
+}
+
+func TestNormalizeFindPackCompanionMode_WithUnderscoreGenericGit_ReturnsGenericGit(t *testing.T) {
+	got := normalizeFindPackCompanionMode("generic_git")
+
+	assert.Equal(t, findPackCompanionModeGenericGit, got)
+}
+
+func TestNormalizeFindPackCompanionMode_WithPlusGenericGit_ReturnsGenericGit(t *testing.T) {
+	got := normalizeFindPackCompanionMode("generic+git")
+
+	assert.Equal(t, findPackCompanionModeGenericGit, got)
+}
+
+func TestNormalizeFindPackCompanionMode_WithUnknownInput_ReturnsEmpty(t *testing.T) {
+	got := normalizeFindPackCompanionMode("nonsense")
+
+	assert.Empty(t, got)
 }
 
 func writeFindPackTestFile(t *testing.T, root, rel, body string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
+	{
+		err := os.MkdirAll(filepath.Dir(path), 0o755)
+		require.NoError(t, err)
 	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
+	{
+
+		err := os.WriteFile(path, []byte(body), 0o644)
+		require.NoError(t, err)
 	}
+
 }
 
 func findPackTestCandidate(candidates []retrieval.Candidate, path string) retrieval.Candidate {

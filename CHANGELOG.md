@@ -2,8 +2,57 @@
 
 ## Unreleased
 
-## v1.4.0 - 2026-08-09
+## v1.4.0 - 2026-08-12
 
+- Added experimental repo-first named execution threads with `ds thread set`,
+  `ds thread remove`, owner-wide status, dependency joins, and explicit `ds
+  apply <owner> --thread <key>` prompts. Tasks remain repo-owned by default;
+  only tasks explicitly linked to a workspace change join its cross-repo graph.
+- Hid `ds task next` from normal help while retaining callable compatibility
+  for legacy linear tasks and one unambiguous lane. Multi-lane status and apply
+  paths never choose the first runnable lane and instead print exact thread and
+  apply commands.
+- Made immutable checkpoint JSON events the durable lifecycle authority for
+  named-thread scheduling, with YAML graph definitions and a rebuildable SQLite
+  projection that reconstructs equivalent cold status after prune. No JSONL or
+  remote service is required.
+- Serialized thread graph mutations with repo and linked child-task checkpoint
+  publication, preserving every event and preventing a workspace graph edit
+  from overlooking newly started work. Blocked lanes now print an exact
+  follow-up or conflict-resolution command.
+- Preserved repo-owned durability closeout after a cross-repo graph completes:
+  `ds apply <linked-task> --repo <child-repo>` returns that task's `A00`-style
+  closeout, while applying the completed workspace change remains terminal.
+- Added experimental `ds compose adr|rfc|prd` to create indexed, repo-owned
+  durable drafts outside the DevSpecs task corpus while reusing established
+  document directories, numbering, and ADR conventions. Composed files remain
+  authoritative through index rebuild/prune operations, and workspace callers
+  route ownership explicitly with `--repo` rather than a parallel workspace
+  compose command. Conventional ADR paths retain single-adapter ownership after
+  rebuild so retrieval does not return duplicate records for one file.
+- Added ADR templates for all formats compared by adr.zone: Nygard, MADR full
+  and minimal, Y-Statement, Outcome-First, and the ISO 42010 Companion.
+- Added a one-time durability closeout after full task-track implementation
+  slices finish. New full tracks must explicitly record that no durable document
+  is needed, link completed ADR/RFC/PRD artifacts, or defer the record to a
+  named target; compact `--quick` tasks and existing manifests keep their prior
+  lifecycle behavior.
+
+- Changed concurrent index mutations to queue behind one bounded writer lease so
+  overlapping `scan`, `map`, `find`, `recent`, and `task` operations do not fail
+  with transient SQLite lock errors.
+- Added visible 10-minute auto-index and 30-minute explicit-scan deadlines, with
+  signal cancellation that reaps active Git subprocesses instead of leaving
+  long-running workers behind.
+- Changed `ds task` creation to stage and validate complete workspaces before
+  atomic publication. Interrupted preflight no longer leaves an empty final
+  task directory, forced retries safely replace remnants, and failed success
+  output now returns nonzero with the durable task ID and path in the error.
+- Changed indexed task creation, slice addition, checkpoints, and legacy
+  lifecycle mutations to verify local database compatibility before writing
+  repository files. An older CLI against a newer derived index now reports the
+  database, schema, executable, recovery, and that no repository files were
+  written instead of leaving partial task state that retries can duplicate.
 - Added `ds prune`, with `--dry-run`, JSON output, and explicit `--vacuum`
   compaction, to remove index data for repository roots that no longer exist
   and collapse redundant consecutive capture revisions without losing content
@@ -21,6 +70,11 @@
   without appending another revision.
 - Changed `ds update` detection so a manually installed `/usr/local/bin/ds`
   binary is not reported as Homebrew without stronger Homebrew path evidence.
+- Changed top-level command failure rendering to print actionable errors once
+  without an unrelated usage dump.
+- Fixed `ds task refresh` after checkpointed work so lifecycle reconciliation
+  preserves the newer capture timestamp and status does not immediately report
+  the refreshed artifacts as stale again.
 
 ## v1.3.0 - 2026-07-12
 

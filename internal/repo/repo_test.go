@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func gitCmd(args ...string) *exec.Cmd {
@@ -38,12 +41,11 @@ func cleanGitTestEnv() []string {
 func TestDetect_NonGitDir(t *testing.T) {
 	tmp := t.TempDir()
 	info := Detect(tmp)
-	if info.IsGit {
-		t.Error("expected IsGit=false for non-git dir")
-	}
-	if info.RootPath != tmp {
-		t.Errorf("expected RootPath=%q, got %q", tmp, info.RootPath)
-	}
+	assert.False(t, info.IsGit,
+		"expected IsGit=false for non-git dir")
+	assert.Equal(t, tmp, info.RootPath,
+		"expected RootPath=%q, got %q", tmp, info.RootPath)
+
 }
 
 func TestDetect_GitDir(t *testing.T) {
@@ -61,33 +63,30 @@ func TestDetect_GitDir(t *testing.T) {
 	gitCmd("-C", tmp, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "init", "--allow-empty").Run()
 
 	info := Detect(tmp)
-	if !info.IsGit {
-		t.Error("expected IsGit=true for git dir")
-	}
-	if info.CurrentBranch != "testbranch" {
-		t.Errorf("expected branch 'testbranch', got %q", info.CurrentBranch)
-	}
+	assert.True(t, info.IsGit,
+		"expected IsGit=true for git dir")
+	assert.Equal(t, "testbranch", info.CurrentBranch,
+		"expected branch 'testbranch', got %q", info.CurrentBranch)
+
 }
 
 func TestDetect_GitFileRoot(t *testing.T) {
 	tmp := t.TempDir()
 	worktree := filepath.Join(tmp, "worktree")
 	subdir := filepath.Join(worktree, "nested")
-	if err := os.MkdirAll(subdir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, os.MkdirAll(subdir, 0o755))
+
 	gitDir := filepath.Join(tmp, "repo", ".git", "worktrees", "worktree")
-	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: "+gitDir+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: "+gitDir+"\n"), 0o644))
 
 	info := Detect(subdir)
-	if !info.IsGit {
-		t.Error("expected IsGit=true for .git file worktree")
-	}
-	if info.RootPath != worktree {
-		t.Fatalf("expected RootPath=%q, got %q", worktree, info.RootPath)
-	}
+	assert.True(t, info.IsGit,
+		"expected IsGit=true for .git file worktree")
+	require.Equal(t, worktree, info.RootPath,
+		"expected RootPath=%q, got %q", worktree, info.RootPath)
+
 }
 
 func TestDetect_GitWorktree(t *testing.T) {
@@ -98,74 +97,77 @@ func TestDetect_GitWorktree(t *testing.T) {
 	mainRepo := filepath.Join(tmp, "main")
 	worktree := filepath.Join(tmp, "linked")
 
-	if err := gitCmd("init", "-b", "main", mainRepo).Run(); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(mainRepo, "file.txt"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := gitCmd("-C", mainRepo, "add", "file.txt").Run(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gitCmd("-C", mainRepo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "init").Run(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gitCmd("-C", mainRepo, "worktree", "add", "-b", "worktree-branch", worktree).Run(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gitCmd("-C", mainRepo, "remote", "add", "origin", "git@github.com:Acme/Example.git").Run(); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, gitCmd("init", "-b", "main", mainRepo).Run())
+
+	require.NoError(t, os.WriteFile(filepath.Join(mainRepo, "file.txt"), []byte("x"), 0o644))
+
+	require.NoError(t, gitCmd("-C", mainRepo, "add", "file.txt").Run())
+
+	require.NoError(t, gitCmd("-C", mainRepo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "init").Run())
+
+	require.NoError(t, gitCmd("-C", mainRepo, "worktree", "add", "-b", "worktree-branch", worktree).Run())
+
+	require.NoError(t, gitCmd("-C", mainRepo, "remote", "add", "origin", "git@github.com:Acme/Example.git").Run())
+
 	subdir := filepath.Join(worktree, "nested")
-	if err := os.MkdirAll(subdir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, os.MkdirAll(subdir, 0o755))
 
 	info := Detect(subdir)
-	if !info.IsGit {
-		t.Fatal("expected IsGit=true for git worktree")
-	}
-	if info.RootPath != worktree {
-		t.Fatalf("expected RootPath=%q, got %q", worktree, info.RootPath)
-	}
-	if info.CurrentBranch != "worktree-branch" {
-		t.Fatalf("expected worktree branch, got %q", info.CurrentBranch)
-	}
+	require.True(t, info.IsGit,
+		"expected IsGit=true for git worktree")
+	require.Equal(t, worktree, info.RootPath,
+		"expected RootPath=%q, got %q", worktree, info.RootPath)
+	require.Equal(t, "worktree-branch", info.CurrentBranch,
+		"expected worktree branch, got %q", info.CurrentBranch)
+
 	mainIdentity := DetectIdentity(mainRepo)
 	worktreeIdentity := DetectIdentity(worktree)
-	if mainIdentity.GitIdentity == "" || mainIdentity.GitIdentity != worktreeIdentity.GitIdentity {
-		t.Fatalf("worktree identities differ: main=%q linked=%q", mainIdentity.GitIdentity, worktreeIdentity.GitIdentity)
-	}
+	assert.NotEmpty(t, mainIdentity.GitIdentity)
+	assert.Equal(t, mainIdentity.GitIdentity, worktreeIdentity.GitIdentity)
+
 }
 
-func TestCanonicalRemoteURL_EquivalentGitHubSpellings(t *testing.T) {
-	want := "github.com/acme/example"
-	for _, remote := range []string{
-		"git@github.com:Acme/Example.git",
-		"ssh://git@github.com/Acme/Example.git",
-		"https://github.com/acme/example.git",
-	} {
-		if got := CanonicalRemoteURL(remote); got != want {
-			t.Fatalf("CanonicalRemoteURL(%q) = %q, want %q", remote, got, want)
-		}
-	}
-	if got := CanonicalRemoteURL(`C:\repos\example`); got != "" {
-		t.Fatalf("local path should not become a shared identity: %q", got)
-	}
+func TestCanonicalRemoteURL_WithGitSSHRemote_ReturnsCanonicalIdentity(t *testing.T) {
+	actual := CanonicalRemoteURL("git@github.com:Acme/Example.git")
+
+	assert.Equal(t, "github.com/acme/example", actual)
 }
 
-func TestStableGitIdentity_RequiresRemoteAndRoot(t *testing.T) {
-	if got := StableGitIdentity("", "abc"); got != "" {
-		t.Fatalf("identity without remote = %q", got)
-	}
-	if got := StableGitIdentity("https://github.com/acme/example.git", ""); got != "" {
-		t.Fatalf("identity without root = %q", got)
-	}
-	a := StableGitIdentity("git@github.com:Acme/Example.git", "abc")
-	b := StableGitIdentity("https://github.com/acme/example", "abc")
-	if a == "" || a != b {
-		t.Fatalf("equivalent remotes produced different identities: %q != %q", a, b)
-	}
+func TestCanonicalRemoteURL_WithURLSSHRemote_ReturnsCanonicalIdentity(t *testing.T) {
+	actual := CanonicalRemoteURL("ssh://git@github.com/Acme/Example.git")
+
+	assert.Equal(t, "github.com/acme/example", actual)
+}
+
+func TestCanonicalRemoteURL_WithHTTPSRemote_ReturnsCanonicalIdentity(t *testing.T) {
+	actual := CanonicalRemoteURL("https://github.com/acme/example.git")
+
+	assert.Equal(t, "github.com/acme/example", actual)
+}
+
+func TestCanonicalRemoteURL_WithLocalPath_ReturnsEmptyIdentity(t *testing.T) {
+	actual := CanonicalRemoteURL(`C:\repos\example`)
+
+	assert.Empty(t, actual)
+}
+
+func TestStableGitIdentity_WithoutRemote_ReturnsEmptyIdentity(t *testing.T) {
+	actual := StableGitIdentity("", "abc")
+
+	assert.Empty(t, actual)
+}
+
+func TestStableGitIdentity_WithoutRootCommit_ReturnsEmptyIdentity(t *testing.T) {
+	actual := StableGitIdentity("https://github.com/acme/example.git", "")
+
+	assert.Empty(t, actual)
+}
+
+func TestStableGitIdentity_WithCanonicalRemoteAndRootCommit_ReturnsExpectedIdentity(t *testing.T) {
+	actual := StableGitIdentity("git@github.com:Acme/Example.git", "abc")
+
+	assert.Equal(t, "git_0d5d8b1d05ec3ba6c66a4cc05e1ea9aadfe692d716b5dcae32d2fb45abb04b33", actual)
 }
 
 func TestFileFirstCommitDate(t *testing.T) {
@@ -173,17 +175,17 @@ func TestFileFirstCommitDate(t *testing.T) {
 		t.Skip("git not available:", err)
 	}
 	tmp := t.TempDir()
-	if err := gitCmd("init", "-b", "main", tmp).Run(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, gitCmd("init", "-b", "main", tmp).Run())
+
 	p := filepath.Join(tmp, "doc.md")
-	if err := os.WriteFile(p, []byte("v1\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, os.WriteFile(p, []byte("v1\n"), 0o644))
+
 	cmd := gitCmd("-C", tmp, "add", "doc.md")
-	if err := cmd.Run(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, cmd.Run())
+
 	want := "2020-03-15T14:30:00Z"
 	commit := gitCmd("-C", tmp, "-c", "user.name=t", "-c", "user.email=t@t", "commit",
 		"-m", "add doc", "--date", want)
@@ -191,21 +193,21 @@ func TestFileFirstCommitDate(t *testing.T) {
 		"GIT_AUTHOR_DATE="+want,
 		"GIT_COMMITTER_DATE="+want,
 	)
-	if err := commit.Run(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, commit.Run())
+
 	got := FileFirstCommitDate(tmp, "doc.md")
-	if got == "" {
-		t.Fatal("expected non-empty date")
-	}
+	require.NotEqual(t, "", got,
+		"expected non-empty date")
+
 	parsed, err := time.Parse(time.RFC3339, got)
-	if err != nil {
-		t.Fatalf("parse %q: %v", got, err)
-	}
+	require.NoError(t, err,
+		"parse %q: %v", got, err)
+
 	wantT, _ := time.Parse(time.RFC3339, want)
-	if !parsed.Equal(wantT) {
-		t.Fatalf("want %v, got %v", wantT, parsed)
-	}
+	require.True(t, parsed.Equal(wantT),
+		"want %v, got %v", wantT, parsed)
+
 }
 
 func TestFileFirstCommitDates_matchesSinglePathAndFollowsRenames(t *testing.T) {
@@ -213,39 +215,35 @@ func TestFileFirstCommitDates_matchesSinglePathAndFollowsRenames(t *testing.T) {
 		t.Skip("git not available:", err)
 	}
 	tmp := t.TempDir()
-	if err := gitCmd("init", "-b", "main", tmp).Run(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, gitCmd("init", "-b", "main", tmp).Run())
+
 	oldDate := "2020-01-02T03:04:05Z"
-	if err := os.WriteFile(filepath.Join(tmp, "old.md"), []byte("old\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := gitCmd("-C", tmp, "add", "old.md").Run(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, "old.md"), []byte("old\n"), 0o644))
+
+	require.NoError(t, gitCmd("-C", tmp, "add", "old.md").Run())
+
 	commitGitTest(t, tmp, "add old", oldDate)
 
 	plainDate := "2020-02-03T04:05:06Z"
-	if err := os.WriteFile(filepath.Join(tmp, "plain.md"), []byte("plain\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := gitCmd("-C", tmp, "add", "plain.md").Run(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, "plain.md"), []byte("plain\n"), 0o644))
+
+	require.NoError(t, gitCmd("-C", tmp, "add", "plain.md").Run())
+
 	commitGitTest(t, tmp, "add plain", plainDate)
 
 	renameDate := "2021-03-04T05:06:07Z"
-	if err := gitCmd("-C", tmp, "mv", "old.md", "new.md").Run(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, gitCmd("-C", tmp, "mv", "old.md", "new.md").Run())
+
 	commitGitTest(t, tmp, "rename old to new", renameDate)
 
 	got := FileFirstCommitDates(tmp, []string{"new.md", "plain.md", "missing.md", ""})
-	assertSameGitDate(t, got["new.md"], FileFirstCommitDate(tmp, "new.md"))
-	assertSameGitDate(t, got["plain.md"], FileFirstCommitDate(tmp, "plain.md"))
-	if _, ok := got["missing.md"]; ok {
-		t.Fatalf("missing path unexpectedly resolved: %#v", got)
-	}
+
+	_, ok := got["missing.md"]
+	assert.False(t, ok)
 	assertSameGitDate(t, got["new.md"], oldDate)
 	assertSameGitDate(t, got["plain.md"], plainDate)
 }
@@ -255,29 +253,27 @@ func TestHeadCommit_gitRepo(t *testing.T) {
 		t.Skip("git not available:", err)
 	}
 	tmp := t.TempDir()
-	if err := gitCmd("init", "-b", "main", tmp).Run(); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tmp, "f.txt"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := gitCmd("-C", tmp, "add", "f.txt").Run(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, gitCmd("init", "-b", "main", tmp).Run())
+
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, "f.txt"), []byte("x"), 0o644))
+
+	require.NoError(t, gitCmd("-C", tmp, "add", "f.txt").Run())
+
 	c := gitCmd("-C", tmp, "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-m", "init")
-	if err := c.Run(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, c.Run())
+
 	h := HeadCommit(tmp)
-	if len(h) < 8 {
-		t.Fatalf("short hash %q", h)
-	}
+	require.False(t, len(h) < 8,
+		"short hash %q", h)
+
 }
 
 func TestHeadCommit_nonGit(t *testing.T) {
-	if HeadCommit(t.TempDir()) != "" {
-		t.Fatal("expected empty")
-	}
+	require.Equal(t, "", HeadCommit(t.TempDir()),
+		"expected empty")
+
 }
 
 func TestChangedFiles_latestCommit(t *testing.T) {
@@ -285,27 +281,21 @@ func TestChangedFiles_latestCommit(t *testing.T) {
 		t.Skip("git not available:", err)
 	}
 	tmp := t.TempDir()
-	if err := gitCmd("init", "-b", "main", tmp).Run(); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tmp, "a.txt"), []byte("a"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := gitCmd("-C", tmp, "add", "a.txt").Run(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gitCmd("-C", tmp, "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-m", "a").Run(); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tmp, "b.txt"), []byte("b"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := gitCmd("-C", tmp, "add", "b.txt").Run(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gitCmd("-C", tmp, "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-m", "b").Run(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, gitCmd("init", "-b", "main", tmp).Run())
+
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, "a.txt"), []byte("a"), 0o644))
+
+	require.NoError(t, gitCmd("-C", tmp, "add", "a.txt").Run())
+
+	require.NoError(t, gitCmd("-C", tmp, "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-m", "a").Run())
+
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, "b.txt"), []byte("b"), 0o644))
+
+	require.NoError(t, gitCmd("-C", tmp, "add", "b.txt").Run())
+
+	require.NoError(t, gitCmd("-C", tmp, "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-m", "b").Run())
+
 	files := ChangedFiles(tmp)
 	found := false
 	for _, f := range files {
@@ -314,21 +304,19 @@ func TestChangedFiles_latestCommit(t *testing.T) {
 			break
 		}
 	}
-	if !found {
-		t.Fatalf("%v", files)
-	}
+	require.True(t, found,
+		"%v", files)
+
 }
 
 func TestChangedFiles_nonGit(t *testing.T) {
-	if ChangedFiles(t.TempDir()) != nil {
-		t.Fatal()
-	}
+	require.Nil(t, ChangedFiles(t.TempDir()))
+
 }
 
 func TestFileFirstCommitDate_emptyPath(t *testing.T) {
-	if FileFirstCommitDate(t.TempDir(), "") != "" {
-		t.Fatal()
-	}
+	require.Equal(t, "", FileFirstCommitDate(t.TempDir(), ""))
+
 }
 
 func commitGitTest(t *testing.T, repoRoot, message, date string) {
@@ -338,22 +326,21 @@ func commitGitTest(t *testing.T, repoRoot, message, date string) {
 		"GIT_AUTHOR_DATE="+date,
 		"GIT_COMMITTER_DATE="+date,
 	)
-	if err := commit.Run(); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, commit.Run())
+
 }
 
 func assertSameGitDate(t *testing.T, got, want string) {
 	t.Helper()
 	gotT, err := time.Parse(time.RFC3339, got)
-	if err != nil {
-		t.Fatalf("parse got %q: %v", got, err)
-	}
+	require.NoError(t, err,
+		"parse got %q: %v", got, err)
+
 	wantT, err := time.Parse(time.RFC3339, want)
-	if err != nil {
-		t.Fatalf("parse want %q: %v", want, err)
-	}
-	if !gotT.Equal(wantT) {
-		t.Fatalf("date mismatch: got %s want %s", got, want)
-	}
+	require.NoError(t, err,
+		"parse want %q: %v", want, err)
+	require.True(t, gotT.Equal(wantT),
+		"date mismatch: got %s want %s", got, want)
+
 }

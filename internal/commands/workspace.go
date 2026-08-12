@@ -37,6 +37,12 @@ func NewWorkspaceCmd() *cobra.Command {
 		Use:     "workspace",
 		Aliases: []string{"ws"},
 		Short:   "Manage workspace-level DevSpecs artifacts",
+		Long: `Manage workspace-level DevSpecs artifacts for optional umbrella coordination across explicitly linked repositories.
+
+Ordinary tasks, named threads, checkpoints, and composed documents remain
+repo-owned. A workspace change owns a cross-repo thread graph only after child
+tasks explicitly link to that change. Use the root ds thread and ds apply
+commands for both owner scopes; there is no workspace-specific thread family.`,
 	}
 	cmd.AddCommand(newWorkspaceInitCmd())
 	cmd.AddCommand(newWorkspaceShowCmd())

@@ -17,15 +17,27 @@ import (
 var schemaDDL string
 
 // SchemaVersion is the current schema version. Bump when schema.sql changes.
-const SchemaVersion = 15
+const SchemaVersion = 16
 
-// SQLiteBusyTimeoutMS is the local index write-wait window for concurrent CLI
-// commands before SQLite returns a busy/locked error.
-const SQLiteBusyTimeoutMS = 5000
+// SQLiteBusyTimeoutMS is the fallback for short writes that contend outside the
+// process-level index writer queue. Command contexts own longer operation limits.
+const SQLiteBusyTimeoutMS = 60 * 1000
 
 // DB wraps *sql.DB with DevSpecs-specific operations.
 type DB struct {
 	*sql.DB
+	path string
+}
+
+// NewerSchemaError reports that an older CLI cannot safely open an index
+// written by a newer DevSpecs schema.
+type NewerSchemaError struct {
+	DatabaseVersion  int
+	SupportedVersion int
+}
+
+func (err *NewerSchemaError) Error() string {
+	return fmt.Sprintf("database schema v%d is newer than this CLI (v%d)", err.DatabaseVersion, err.SupportedVersion)
 }
 
 // Open opens or creates the SQLite database at the given path.
@@ -42,12 +54,36 @@ func Open(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
 
-	db := &DB{DB: sqlDB}
+	db := &DB{DB: sqlDB, path: dbPath}
+	maxVersion, err := existingSchemaVersion(sqlDB)
+	if err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("inspect schema version: %w", err)
+	}
+	if maxVersion > SchemaVersion {
+		sqlDB.Close()
+		return nil, &NewerSchemaError{DatabaseVersion: maxVersion, SupportedVersion: SchemaVersion}
+	}
 	if err := db.migrate(); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return db, nil
+}
+
+func existingSchemaVersion(db *sql.DB) (int, error) {
+	var tableCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").Scan(&tableCount); err != nil {
+		return 0, err
+	}
+	if tableCount == 0 {
+		return 0, nil
+	}
+	var maxVersion int
+	if err := db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&maxVersion); err != nil {
+		return 0, err
+	}
+	return maxVersion, nil
 }
 
 // IsSQLiteBusyError reports whether err looks like SQLite write contention.
@@ -153,6 +189,11 @@ func (db *DB) migrate() error {
 				return err
 			}
 			maxVersion = 15
+		case 15:
+			if err := db.migrate15To16(now); err != nil {
+				return err
+			}
+			maxVersion = 16
 		default:
 			return fmt.Errorf(
 				"index was created with schema v%d but this CLI requires v%d. Run 'ds scan --rebuild' or delete ~/.devspecs/devspecs.db and run 'ds scan' to rebuild",
@@ -162,7 +203,7 @@ func (db *DB) migrate() error {
 	}
 
 	if maxVersion > SchemaVersion {
-		return fmt.Errorf("database schema v%d is newer than this CLI (v%d)", maxVersion, SchemaVersion)
+		return &NewerSchemaError{DatabaseVersion: maxVersion, SupportedVersion: SchemaVersion}
 	}
 	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_repos_git_identity
 		ON repos(git_identity)
@@ -468,4 +509,86 @@ func (db *DB) migrate14To15(now string) error {
 	}
 	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 15, now)
 	return err
+}
+
+func (db *DB) migrate15To16(now string) error {
+	if err := createThreadProjectionSchema(db.DB); err != nil {
+		return fmt.Errorf("migrate v15->v16 thread projections: %w", err)
+	}
+	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 16, now)
+	return err
+}
+
+func createThreadProjectionSchema(db *sql.DB) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS thread_projections (
+			owner_id            TEXT PRIMARY KEY,
+			owner_kind          TEXT NOT NULL,
+			task_id             TEXT NOT NULL DEFAULT '',
+			workspace_id        TEXT NOT NULL DEFAULT '',
+			change_id           TEXT NOT NULL DEFAULT '',
+			repo_root           TEXT NOT NULL DEFAULT '',
+			workspace_root      TEXT NOT NULL DEFAULT '',
+			definition_path     TEXT NOT NULL,
+			definition_revision INTEGER NOT NULL,
+			definition_json     TEXT NOT NULL,
+			projected_at        TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS thread_projection_links (
+			owner_id       TEXT NOT NULL,
+			position       INTEGER NOT NULL,
+			repo_alias     TEXT NOT NULL DEFAULT '',
+			task_id        TEXT NOT NULL,
+			target         TEXT NOT NULL,
+			name           TEXT NOT NULL DEFAULT '',
+			status         TEXT NOT NULL DEFAULT '',
+			repo_root      TEXT NOT NULL,
+			task_workspace TEXT NOT NULL,
+			PRIMARY KEY (owner_id, position),
+			FOREIGN KEY (owner_id) REFERENCES thread_projections(owner_id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS thread_projection_tasks (
+			owner_id       TEXT NOT NULL,
+			repo_alias     TEXT NOT NULL DEFAULT '',
+			task_id        TEXT NOT NULL,
+			repo_root      TEXT NOT NULL,
+			task_workspace TEXT NOT NULL,
+			manifest_path  TEXT NOT NULL,
+			manifest_json  TEXT NOT NULL,
+			PRIMARY KEY (owner_id, repo_alias, task_id),
+			FOREIGN KEY (owner_id) REFERENCES thread_projections(owner_id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS thread_projection_events (
+			owner_id       TEXT NOT NULL,
+			repo_alias     TEXT NOT NULL DEFAULT '',
+			task_id        TEXT NOT NULL,
+			checkpoint_id  TEXT NOT NULL,
+			target         TEXT NOT NULL,
+			json_path      TEXT NOT NULL,
+			markdown_path  TEXT NOT NULL DEFAULT '',
+			record_json    TEXT NOT NULL,
+			PRIMARY KEY (owner_id, repo_alias, task_id, checkpoint_id),
+			FOREIGN KEY (owner_id) REFERENCES thread_projections(owner_id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS thread_projection_sources (
+			owner_id      TEXT NOT NULL,
+			source_kind   TEXT NOT NULL,
+			source_key    TEXT NOT NULL,
+			path          TEXT NOT NULL,
+			size_bytes    INTEGER NOT NULL,
+			modified_ns   INTEGER NOT NULL,
+			content_hash  TEXT NOT NULL,
+			PRIMARY KEY (owner_id, source_kind, source_key),
+			FOREIGN KEY (owner_id) REFERENCES thread_projections(owner_id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_thread_projection_tasks_owner ON thread_projection_tasks(owner_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_thread_projection_events_owner_target ON thread_projection_events(owner_id, task_id, target)`,
+		`CREATE INDEX IF NOT EXISTS idx_thread_projection_sources_owner_path ON thread_projection_sources(owner_id, path)`,
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return nil
 }

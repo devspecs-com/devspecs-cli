@@ -92,7 +92,9 @@ ds init
 | Create a bounded handoff | `ds task "goal"` | You know the work and want packed repo context plus a stop line. |
 | Coordinate multi-repo work | `ds workspace init .` | You have an umbrella workspace with several child repos. Experimental. |
 | Continue one slice | `ds apply` | A task already exists and the agent needs the current target only. |
+| Coordinate parallel lanes | `ds thread task:<task-id>` | One task has several independently runnable slices or an explicit join. Experimental. |
 | Record the receipt | `ds task checkpoint A01 --decision promote` | You need to capture what changed, what ran, what missed, and what comes next. |
+| Preserve a durable decision | `ds compose adr "title"` | A track settled a consequential technical choice that should outlive task history. Experimental. |
 | Inspect exact context | `ds context <artifact-id>` | You want one indexed artifact as paste-ready agent context. |
 
 ## Why DevSpecs Exists
@@ -187,6 +189,20 @@ What you get:
 - a durable record of what changed, what ran, what missed, and what should
   happen next.
 
+After the implementation slices finish, new full task tracks expose one closeout
+target. Record whether the work needs a durable repo document; this happens once
+per track, not once per slice. Compact `--quick` tasks skip this review:
+
+```bash
+ds compose adr "Keep one writer lease per index" --from-task index-reliability --target A
+ds task checkpoint index-reliability --target A00 --stage completed --decision complete \
+  --durable-record recorded --durable-artifact docs/adr/0007-keep-one-writer-lease-per-index.md
+```
+
+Use `--durable-record none` for local, obvious, reversible implementation
+details. Use `deferred --next-target <target>` only when the durable record has
+a named owner or follow-up.
+
 For a smaller one-off:
 
 ```bash
@@ -195,6 +211,32 @@ ds task "Fix discount rounding in invoice totals" --quick
 
 Use full `ds task` when you want durable slices and handoff receipts. Add
 `--quick` when the ceremony would outweigh the change.
+
+## Named Execution Threads
+
+Named threads are experimental scheduling lanes over existing task slices.
+Ordinary tasks own their threads in the repository; no workspace is required:
+
+```bash
+ds thread set task:checkout-redesign agent-a A01 A02
+ds thread set task:checkout-redesign human-a A03
+ds thread set task:checkout-redesign both-a A04 --after agent-a --after human-a
+ds thread task:checkout-redesign
+ds apply task:checkout-redesign --thread agent-a
+```
+
+Argument-free `ds apply` still works for a legacy linear task or when exactly
+one named lane is runnable. When several lanes are runnable, DevSpecs does not
+pick the first one: `ds thread` shows every lane and prints exact `ds apply
+--thread` commands.
+
+A task escalates to workspace-change ownership only when its manifest explicitly
+links that change. Merely living inside an umbrella directory does not change
+ownership. Cross-repo graphs use the same root `ds thread` and `ds apply`
+commands with `change:<id>` and `--workspace`; there is no `ds workspace thread`.
+After every cross-repo lane completes, the workspace change is terminal. Run
+`ds apply <linked-task> --repo <child-repo>` for each repo that still needs its
+one-time `A00`-style durable-record closeout.
 
 ## Workspace Coordination
 
@@ -215,13 +257,16 @@ ds workspace slice create EAG-C001 --workspace . --repo backend --name "Backend 
 ds task show eag-c001-backend --repo ./enalytics-backend --json
 ds apply eag-c001-backend --repo ./enalytics-backend --json
 ds task checkpoint eag-c001-backend --repo ./enalytics-backend --target A01 --stage validated --decision promote --json
+ds compose adr "Define the export ownership boundary" --repo ./enalytics-backend --from-task eag-c001-backend --target A00 --json
 ds workspace trace EAG-C001 --workspace . --json
 ```
 
 Workspace files are written under the umbrella `devspecs/` directory. Repo-local
 task files are written under the selected child repo. The `--repo` flag is the
 explicit boundary between the current shell directory and the target repo for
-task/apply/checkpoint work.
+task, apply, checkpoint, and compose work. There is no `ds workspace compose`:
+durable documents belong to one versioned repository. Use the umbrella
+repository only when it is itself the canonical owner of a cross-repo document.
 
 `ds workspace trace` is for known workspace change or repo task IDs. Use
 `ds find` when you need to discover relevant source, tests, docs, or prior task
@@ -234,6 +279,35 @@ receipts.
 | Discover evidence | `ds find "topic"` | Pack likely source, tests, docs, receipts, and exclusions for a focused question. |
 | Check task progress | `ds task status/show` + `ds apply` | Read lifecycle state, inspect one target, then emit the bounded prompt. |
 | Follow workspace links | `ds workspace trace <id>` | Trace a known workspace change or repo task to linked repo-local slices. |
+
+## Durable Documents
+
+`ds compose` creates a Markdown draft in the repository, captures it into the
+index, and keeps it separate from prunable task receipts:
+
+```bash
+ds compose adr "Use an append-only event log"
+ds compose rfc "Coordinate concurrent index writers"
+ds compose prd "Reliable cold activation"
+```
+
+Use an ADR after a meaningful technical choice is settled, an RFC while a
+consequential proposal still needs review, and a PRD for a product problem,
+users, outcomes, and requirements spanning one or more tracks. Skip small,
+obvious, reversible choices.
+
+The Markdown document is the source of truth. Its index row is derived state:
+`ds prune` never deletes repository files, and `ds scan --rebuild` rediscovers
+documents in configured or conventional ADR/RFC/PRD paths. From an umbrella
+workspace, pass `--repo <child-repo>` to keep ownership explicit.
+When `--output` selects an unconventional directory, add that directory to
+`.devspecs/config.yaml` for deterministic rebuild discovery.
+
+ADR format defaults to `auto`: DevSpecs reuses a recognized repo convention and
+fails on ambiguous precedent. With no precedent it uses Nygard. Choose explicitly
+with `--format nygard|madr|y-statement|outcome-first|iso-42010`; MADR also accepts
+`--variant full|minimal`. Run `ds compose adr --help` for the compact format
+selection guide.
 
 `ds workspace trace` reports both lifecycle `status` and index-capture
 `index_status`. Keep them separate: `index_missing` means an artifact is not
@@ -285,8 +359,10 @@ instead of indexing every worktree as a new repository.
 | `ds task <query>` | Create a bounded task workspace with slice artifacts. |
 | `ds task <query> --quick` | Create a compact one-off task workspace. |
 | `ds task status/show` | Inspect task lifecycle state and target context. |
-| `ds apply [task-id\|target]` | Emit the next bounded one-slice agent prompt without mutating task state; omit the argument for the unambiguous next slice. |
+| `ds thread [task:<task-id>\|change:<change-id>]` | Inspect named lanes, joins, runnable targets, and exact apply commands. Experimental. |
+| `ds apply [task-id\|change-id\|target] [--thread <key>]` | Emit one bounded prompt without mutating task state; omit lane selection only when the next target is unambiguous. |
 | `ds task checkpoint <task-id\|target>` | Record files, tests, misses, noise, learnings, decision evidence, and next iteration. |
+| `ds compose adr\|rfc\|prd "<title>"` | Create and index a repo-owned durable draft using established repository conventions. Experimental. |
 | `ds task slice add <task-id> "<title>" --after A01 --reason improve` | Add an A01-1-style follow-up slice after an improve/rework gate. |
 | `ds task refresh <task-id>` | Recapture edited task artifacts into the local index without rewriting task docs. |
 | `ds workspace init/show/change/slice/trace` | Coordinate experimental workspace-level changes, repo-local task slices, and known change/task traces. |
@@ -308,8 +384,23 @@ flags. Use the `ds workspace ...` form for workspace coordination.
 | `.devspecs/config.yaml` | Repo discovery configuration. | Usually yes. |
 | `devspecs/tasks/<task-id>/` | Default generated task workspace. | Yes, when durable. |
 | `.devspecs/tasks/<task-id>/` | Legacy or explicitly local task workspace. | No, unless you chose it deliberately. |
+| `devspecs/tasks/<task-id>/threads.yaml` | Repo-owned named thread definition. | Yes. |
+| `devspecs/tasks/<task-id>/checkpoints/*.json` | Immutable task lifecycle events; current thread state is derived from event heads. | Yes, when the task is durable. |
+| Repository ADR/RFC/PRD paths, such as `docs/adr/`, `docs/rfcs/`, and `docs/prd/` | Canonical durable documents created or reused by `ds compose`. | Yes. |
 | `devspecs/workspace.yaml` | Experimental workspace manifest for umbrella repos. | Yes, when used by the team. |
 | `devspecs/changes/<change-id>-*.md` | Experimental workspace-level change records. | Yes, when used by the team. |
+| `devspecs/changes/<change-id>.threads.yaml` | Cross-repo thread definition for one explicitly linked workspace change. | Yes, when used by the team. |
+
+Checkpoint JSON and thread-definition YAML are durable authority. `task.json`
+keeps the task definition plus compatibility lifecycle fields, while SQLite is
+a rebuildable local projection for fast reads. DevSpecs does not currently
+write a JSONL thread stream; a future JSONL export may be generated from the
+immutable events, but would not become authoritative.
+
+The product boundaries are deliberate: tasks hold bounded execution evidence,
+threads schedule existing targets, compose creates durable ADR/RFC/PRD files,
+workspaces optionally coordinate explicitly linked repositories, and prune
+maintains derived index state without deleting those repository artifacts.
 
 The global index records every physical root observed for a logical Git
 repository. This lets temporary agent worktrees reuse the repository's index.
@@ -324,6 +415,8 @@ ds prune --vacuum
 `ds prune` only removes a logical repository when none of its recorded roots
 still exist. It also collapses consecutive capture revisions with identical
 content while preserving the current revision and distinct content transitions.
+It never removes source files, composed documents, task artifacts, or workspace
+records from disk.
 Normal pruning makes freed SQLite pages reusable. `--vacuum` also rewrites the
 database to return unused space to the filesystem, which can take time and
 require temporary free disk space on a large index. Long human-mode maintenance

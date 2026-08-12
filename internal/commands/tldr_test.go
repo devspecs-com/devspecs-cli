@@ -5,55 +5,94 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 	cmd := NewTLDRCmd()
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	out := buf.String()
-	for _, want := range []string{
-		"# DevSpecs TLDR For LLM Agents",
-		"## Launch Setup / Agent Commands (`setup`)",
-		"## Hotfix / Small Bug (`hotfix`)",
-		"## Epic / Multi-Slice Feature (`epic`)",
-		"## Incident / Triage (`incident`)",
-		"## Brownfield Intent Recovery (`brownfield`)",
-		`ds task "fix <bug>" --quick`,
-		"ds task checkpoint <task-id> --target <target>",
-		"Fastest path for known work",
-		"Run ds init once per repo",
-		`/ds-task "goal"`,
-		"/ds-apply [task-id|target]",
-		"Human front door: run ds recent",
-		"Workflow commands refresh the local index by default",
-		"Use ds recent, ds find, ds map, and ds context as diagnostic/evidence tools around a task",
-		"Command roles: ds find discovers and packs evidence",
-		"ds task slice add <task-id>",
-		"--after A01 --reason improve",
-		"Record the completion contract with checkpoint",
-		"ds map",
-		"ds recent",
-		`ds task "implement <bounded target>"`,
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("tldr output missing %q:\n%s", want, out)
-		}
-	}
-	for _, notWant := range []string{"ds list", "ds list --limit"} {
-		if strings.Contains(out, notWant) {
-			t.Fatalf("tldr output should not advertise %q:\n%s", notWant, out)
-		}
-	}
+	assert.Contains(t, out, "# DevSpecs TLDR For LLM Agents",
+		"tldr output missing %q:\n%s", "# DevSpecs TLDR For LLM Agents", out)
+	assert.Contains(t, out, "## Launch Setup / Agent Commands (`setup`)",
+		"tldr output missing %q:\n%s", "## Launch Setup / Agent Commands (`setup`)", out)
+	assert.Contains(t, out, "## Hotfix / Small Bug (`hotfix`)",
+		"tldr output missing %q:\n%s", "## Hotfix / Small Bug (`hotfix`)", out)
+	assert.Contains(t, out, "## Epic / Multi-Slice Feature (`epic`)",
+		"tldr output missing %q:\n%s", "## Epic / Multi-Slice Feature (`epic`)", out)
+	assert.Contains(t, out, "## Incident / Triage (`incident`)",
+		"tldr output missing %q:\n%s", "## Incident / Triage (`incident`)", out)
+	assert.Contains(t, out, "## Brownfield Intent Recovery (`brownfield`)",
+		"tldr output missing %q:\n%s", "## Brownfield Intent Recovery (`brownfield`)", out)
+	assert.Contains(t, out, `ds task "fix <bug>" --quick`,
+		"tldr output missing %q:\n%s", `ds task "fix <bug>" --quick`, out)
+	assert.Contains(t, out, "ds task checkpoint <task-id> --target <target>",
+		"tldr output missing %q:\n%s", "ds task checkpoint <task-id> --target <target>", out)
+	assert.Contains(t, out, "Fastest path for known work",
+		"tldr output missing %q:\n%s", "Fastest path for known work", out)
+	assert.Contains(t, out, "Run ds init once per repo",
+		"tldr output missing %q:\n%s", "Run ds init once per repo", out)
+	assert.Contains(t, out, `/ds-task "goal"`,
+		"tldr output missing %q:\n%s", `/ds-task "goal"`, out)
+	assert.Contains(t, out, "/ds-apply [task-id|change-id|target] [--thread <key>]",
+		"tldr output missing updated apply adapter signature:\n%s", out)
+	assert.Contains(t, out, "Human front door: run ds recent",
+		"tldr output missing %q:\n%s", "Human front door: run ds recent", out)
+	assert.Contains(t, out, "Workflow commands refresh the local index by default",
+		"tldr output missing %q:\n%s", "Workflow commands refresh the local index by default", out)
+	assert.Contains(t, out, "Use ds recent, ds find, ds map, and ds context as diagnostic/evidence tools around a task",
+		"tldr output missing %q:\n%s", "Use ds recent, ds find, ds map, and ds context as diagnostic/evidence tools around a task", out)
+	assert.Contains(t, out, "Command roles: ds find discovers and packs evidence",
+		"tldr output missing %q:\n%s", "Command roles: ds find discovers and packs evidence", out)
+	assert.Contains(t, out, "ds task slice add <task-id>",
+		"tldr output missing %q:\n%s", "ds task slice add <task-id>", out)
+	assert.Contains(t, out, "--after A01 --reason improve",
+		"tldr output missing %q:\n%s", "--after A01 --reason improve", out)
+	assert.Contains(t, out, "Record the completion contract with checkpoint",
+		"tldr output missing %q:\n%s", "Record the completion contract with checkpoint", out)
+	assert.Contains(t, out, "ds map",
+		"tldr output missing %q:\n%s", "ds map", out)
+	assert.Contains(t, out, "ds recent",
+		"tldr output missing %q:\n%s", "ds recent", out)
+	assert.Contains(t, out, `ds task "implement <bounded target>"`,
+		"tldr output missing %q:\n%s", `ds task "implement <bounded target>"`, out)
+
+	assert.NotContains(t, out, "ds list",
+		"tldr output should not advertise %q:\n%s", "ds list", out)
+	assert.NotContains(t, out, "ds list --limit",
+		"tldr output should not advertise %q:\n%s", "ds list --limit", out)
+
 	brownfield := tldrSection(t, out, "## Brownfield Intent Recovery (`brownfield`)", "## Handoff / Resume After Context Loss (`handoff`)")
 	recentIndex := strings.Index(brownfield, "`ds recent`")
 	taskIndex := strings.Index(brownfield, "`ds task \"implement <bounded target>\"`")
-	if recentIndex < 0 || taskIndex < 0 || recentIndex > taskIndex {
-		t.Fatalf("brownfield workflow should put ds recent before bounded execution:\n%s", brownfield)
-	}
+	assert.GreaterOrEqual(t, recentIndex, 0, "brownfield workflow should put ds recent before bounded execution:\n%s", brownfield)
+	assert.GreaterOrEqual(t, taskIndex, 0, "brownfield workflow should put ds recent before bounded execution:\n%s", brownfield)
+	assert.LessOrEqual(t, recentIndex, taskIndex, "brownfield workflow should put ds recent before bounded execution:\n%s", brownfield)
+
+}
+
+func TestTLDR_WhenApplyIsAmbiguous_GuidesOneNamedThread(t *testing.T) {
+	// Arrange
+	cmd := NewTLDRCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "inspect ds thread <owner>")
+	assert.Contains(t, buf.String(), "ds apply <owner> --thread <key>")
+	assert.Contains(t, buf.String(), "repo-owned by default")
 }
 
 func TestTLDR_FilterAndJSON(t *testing.T) {
@@ -61,29 +100,30 @@ func TestTLDR_FilterAndJSON(t *testing.T) {
 	cmd.SetArgs([]string{"incident", "--json"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var out tldrOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("tldr json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoError(t, err,
+			"tldr json: %v\n%s", err, buf.String())
 	}
-	if len(out.Workflows) != 1 || out.Workflows[0].ID != "incident" {
-		t.Fatalf("expected only incident workflow, got %#v", out.Workflows)
-	}
+	require.Len(t, out.Workflows, 1, "expected only incident workflow, got %#v", out.Workflows)
+	assert.Equal(t, "incident", out.Workflows[0].ID, "expected only incident workflow, got %#v", out.Workflows)
+
 	commands := strings.Join(out.Workflows[0].Commands, "\n")
-	if !strings.Contains(commands, "ds recent") {
-		t.Fatalf("incident workflow missing recent orientation command: %#v", out.Workflows[0])
-	}
-	if !strings.Contains(commands, "ds find") {
-		t.Fatalf("incident workflow missing packed find command: %#v", out.Workflows[0])
-	}
-	if strings.Index(commands, "ds recent") > strings.Index(commands, `ds task "triage <incident>" --quick`) {
-		t.Fatalf("incident workflow should orient with recent before task execution: %#v", out.Workflows[0])
-	}
-	if strings.Contains(commands, "ds scan") {
-		t.Fatalf("incident workflow should not require manual scan: %#v", out.Workflows[0])
-	}
+	assert.Contains(t, commands, "ds recent",
+		"incident workflow missing recent orientation command: %#v", out.Workflows[0])
+	assert.Contains(t, commands, "ds find",
+		"incident workflow missing packed find command: %#v", out.Workflows[0])
+	assert.LessOrEqual(t, strings.Index(commands, "ds recent"), strings.Index(commands, `ds task "triage <incident>" --quick`),
+		"incident workflow should orient with recent before task execution: %#v", out.Workflows[0])
+	assert.NotContains(t, commands, "ds scan",
+		"incident workflow should not require manual scan: %#v", out.Workflows[0])
+
 }
 
 func TestTLDR_UnknownWorkflowErrorsWithValidIDs(t *testing.T) {
@@ -91,23 +131,22 @@ func TestTLDR_UnknownWorkflowErrorsWithValidIDs(t *testing.T) {
 	cmd.SetArgs([]string{"migration"})
 	cmd.SetOut(&bytes.Buffer{})
 	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected unknown workflow error")
-	}
-	if !strings.Contains(err.Error(), "valid workflows:") || !strings.Contains(err.Error(), "hotfix") {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.Error(t, err,
+		"expected unknown workflow error")
+	assert.Contains(t, err.Error(), "valid workflows:", "unexpected error: %v", err)
+	assert.Contains(t, err.Error(), "hotfix", "unexpected error: %v", err)
+
 }
 
 func tldrSection(t *testing.T, out, start, end string) string {
 	t.Helper()
 	startIndex := strings.Index(out, start)
-	if startIndex < 0 {
-		t.Fatalf("tldr output missing section %q:\n%s", start, out)
-	}
+	assert.GreaterOrEqual(t, startIndex, 0,
+		"tldr output missing section %q:\n%s", start, out)
+
 	endIndex := strings.Index(out[startIndex:], end)
-	if endIndex < 0 {
-		t.Fatalf("tldr output missing section terminator %q after %q:\n%s", end, start, out)
-	}
+	assert.GreaterOrEqual(t, endIndex, 0,
+		"tldr output missing section terminator %q after %q:\n%s", end, start, out)
+
 	return out[startIndex : startIndex+endIndex]
 }

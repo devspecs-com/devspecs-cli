@@ -368,10 +368,12 @@ func taskAdapterBody(goalPhrase, taskCommand string) string {
 		"1. Treat %s as the bounded work goal.\n"+
 		"2. Prefer `%s \"<bounded-goal>\"` for known work. Add `--quick` only for a tiny one-off.\n"+
 		"3. If a task or slice already exists, run `ds apply`, `ds apply <task-id>`, or `ds apply <target>` instead of creating a duplicate task.\n"+
-		"4. If the target is unclear, run `ds recent` and `ds find \"<topic>\"` as diagnostics, then return to one bounded task.\n"+
-		"5. Work exactly one slice at a time. Do not implement an entire track when the current target is a slice like A01.\n"+
-		"6. End with a DevSpecs decision gate: `promote`, `improve`, `rework`, `rollback`, or `block`.\n"+
-		"7. Record evidence with `ds task checkpoint <task-id|target> --stage validated --decision <gate>` before claiming the slice is done.\n\n"+
+		"4. If apply reports multiple runnable lanes, run `ds thread <owner>` and select exactly one with `ds apply <owner> --thread <key>`.\n"+
+		"5. Keep ownership repo-local unless the task is already explicitly linked to a workspace change.\n"+
+		"6. If the target is unclear, run `ds recent` and `ds find \"<topic>\"` as diagnostics, then return to one bounded task.\n"+
+		"7. Work exactly one slice at a time. Do not implement an entire track when the current target is a slice like A01.\n"+
+		"8. End with a DevSpecs decision gate: `promote`, `improve`, `rework`, `rollback`, or `block`.\n"+
+		"9. Record evidence with `ds task checkpoint <task-id|target> --stage validated --decision <gate>` before claiming the slice is done.\n\n"+
 		"Keep `M00` or `A00` as the index, `M01`/`A01` as planned slices, and `M01-1`/`A01-1` as follow-up slices. Create follow-up slices with `ds task slice add <task-id> \"<title>\" --after A01 --reason improve`.", goalPhrase, taskCommand)
 }
 
@@ -379,9 +381,11 @@ func applyAdapterBody(targetPhrase, applyCommand string) string {
 	return fmt.Sprintf("Use this adapter when the user asks to apply the next DevSpecs slice or a specific task target.\n\n"+
 		"1. Resolve %s. If no target is provided, let `%s` choose the unambiguous next slice.\n"+
 		"2. Run `%s` or `%s <target>`, then follow the emitted DevSpecs prompt exactly.\n"+
-		"3. If the target is unclear, run `ds recent` and `ds find \"<topic>\"` as diagnostics, then rerun `ds apply` with one target.\n"+
-		"4. Implement only the resolved slice. Do not continue into sibling slices unless the decision gate explicitly promotes to them.\n"+
-		"5. Record what changed, files read/edited, tests run, misses, noise, and the next gate using `ds task checkpoint`.\n"+
-		"6. Stop after the decision gate. Recommend `promote`, `improve`, `rework`, `rollback`, or `block`.\n\n"+
+		"3. If several named lanes are runnable, run `ds thread <owner>`, then rerun `ds apply <owner> --thread <key>` for exactly one lane.\n"+
+		"4. Treat tasks as repo-owned unless their manifest explicitly links a workspace change; do not create a workspace just to use threads.\n"+
+		"5. If the target is unclear, run `ds recent` and `ds find \"<topic>\"` as diagnostics, then rerun `ds apply` with one target.\n"+
+		"6. Implement only the resolved slice. Do not continue into sibling slices unless the decision gate explicitly promotes to them.\n"+
+		"7. Record what changed, files read/edited, tests run, misses, noise, and the next gate using `ds task checkpoint`.\n"+
+		"8. Stop after the decision gate. Recommend `promote`, `improve`, `rework`, `rollback`, or `block`.\n\n"+
 		"The adapter is a thin wrapper over the DevSpecs CLI. Do not invent a separate task system.", targetPhrase, applyCommand, applyCommand, applyCommand)
 }

@@ -153,15 +153,22 @@ func readTaskObservedPathsDetailed(workspace string) (taskObservedPaths, taskChe
 }
 
 func readTaskCheckpointRecord(path string) (taskCheckpointRecord, error) {
-	var record taskCheckpointRecord
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return record, err
+		return taskCheckpointRecord{}, err
 	}
+	return decodeTaskCheckpointRecord(data, path)
+}
+
+func decodeTaskCheckpointRecord(data []byte, path string) (taskCheckpointRecord, error) {
+	var record taskCheckpointRecord
 	if err := json.Unmarshal(data, &record); err != nil {
 		return record, fmt.Errorf("parse checkpoint JSON %s: %w", path, err)
 	}
 	normalizeTaskCheckpointRecord(&record)
+	if record.CheckpointID == "" && record.SchemaVersion < taskCheckpointSchemaVersion {
+		record.CheckpointID = checkpointEntryStem(filepath.Base(path))
+	}
 	return record, nil
 }
 

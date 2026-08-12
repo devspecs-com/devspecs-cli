@@ -3,6 +3,8 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +13,9 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func setupTaskCommandRepo(t *testing.T) string {
@@ -22,17 +27,22 @@ func setupTaskCommandRepo(t *testing.T) string {
 	setupTaskCommandRepoFiles(t, repoDir)
 
 	origWd, _ := os.Getwd()
-	if err := os.Chdir(repoDir); err != nil {
-		t.Fatal(err)
+	{
+		err := os.Chdir(repoDir)
+		require.NoError(t, err)
 	}
+
 	t.Cleanup(func() { os.Chdir(origWd) })
 
 	scanCmd := NewScanCmd()
 	scanCmd.SetArgs([]string{"--quiet"})
 	scanCmd.SetOut(&bytes.Buffer{})
-	if err := scanCmd.Execute(); err != nil {
-		t.Fatalf("scan: %v", err)
+	{
+		err := scanCmd.Execute()
+		require.NoErrorf(t, err,
+			"scan: %v", err)
 	}
+
 	return repoDir
 }
 
@@ -60,7 +70,7 @@ func ImproveTestCompanionRecall(query string) string {
 import "testing"
 
 func TestImproveTestCompanionRecall(t *testing.T) {
-	if ImproveTestCompanionRecall("pack") == "" {
+	if ImproveTestCompanionRecall"pack" == "" {
 		t.Fatal("missing recall")
 	}
 }
@@ -88,9 +98,11 @@ func setupTaskCommandUmbrellaRepo(t *testing.T) (string, string) {
 	mustWriteFile(t, filepath.Join(umbrella, "CLAUDE.md"), "# eag-stg\n")
 
 	origWd, _ := os.Getwd()
-	if err := os.Chdir(umbrella); err != nil {
-		t.Fatal(err)
+	{
+		err := os.Chdir(umbrella)
+		require.NoError(t, err)
 	}
+
 	t.Cleanup(func() { os.Chdir(origWd) })
 	return umbrella, child
 }
@@ -106,19 +118,25 @@ func initTaskGitRepo(t *testing.T, repoDir string) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available:", err)
 	}
-	if err := taskGitCmd("init", "-b", "main", repoDir).Run(); err != nil {
-		t.Fatal(err)
+	{
+		err := taskGitCmd("init", "-b", "main", repoDir).Run()
+		require.NoError(t, err)
 	}
+
 }
 
 func commitTaskGitRepo(t *testing.T, repoDir, message string) {
 	t.Helper()
-	if err := taskGitCmd("-C", repoDir, "add", ".").Run(); err != nil {
-		t.Fatal(err)
+	{
+		err := taskGitCmd("-C", repoDir, "add", ".").Run()
+		require.NoError(t, err)
 	}
-	if err := taskGitCmd("-C", repoDir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", message).Run(); err != nil {
-		t.Fatal(err)
+	{
+
+		err := taskGitCmd("-C", repoDir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", message).Run()
+		require.NoError(t, err)
 	}
+
 }
 
 func cleanTaskGitTestEnv() []string {
@@ -148,115 +166,248 @@ func TestTask_StartCreatesUncertaintyAwareWorkspace(t *testing.T) {
 	cmd.SetArgs([]string{"--id", "spike-test", "--no-refresh", "--json", "improve test companion recall"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
 
 	var out taskStartOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("task json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"task json: %v\n%s", err, buf.String())
 	}
-	if out.TaskID != "spike-test" {
-		t.Fatalf("task id = %q", out.TaskID)
+	assert.Equalf(t, "spike-test", out.TaskID,
+		"task id = %q", out.TaskID)
+	assert.Truef(t, strings.HasPrefix(out.Workspace, filepath.Join(repoDir, "devspecs", "tasks", "spike-test")),
+		"workspace = %q", out.Workspace)
+	require.Lenf(t, out.Slices, 1,
+		"expected one default slice, got %#v", out.Slices)
+	assert.Equalf(t, "A01-improve-test-companion-recall-plan.md", filepath.Base(out.FirstSlicePath),
+		"first slice path = %q", out.FirstSlicePath)
+	assert.Equalf(t, "A01-improve-test-companion-recall-result.md", filepath.Base(out.ResultPath),
+		"result path = %q", out.ResultPath)
+	{
+		_, err := os.Stat(out.IndexPath)
+		require.NoErrorf(t,
+			err, "expected %s: %v",
+
+			out.IndexPath, err)
 	}
-	if !strings.HasPrefix(out.Workspace, filepath.Join(repoDir, "devspecs", "tasks", "spike-test")) {
-		t.Fatalf("workspace = %q", out.Workspace)
+	{
+		_, err := os.Stat(out.FirstSlicePath)
+		require.NoErrorf(t, err,
+			"expected %s: %v",
+			out.FirstSlicePath, err)
 	}
-	if len(out.Slices) != 1 {
-		t.Fatalf("expected one default slice, got %#v", out.Slices)
+	{
+		_, err := os.Stat(out.ResultPath)
+		require.NoErrorf(t,
+			err, "expected %s: %v",
+
+			out.ResultPath, err)
 	}
-	if filepath.Base(out.FirstSlicePath) != "A01-improve-test-companion-recall-plan.md" {
-		t.Fatalf("first slice path = %q", out.FirstSlicePath)
-	}
-	if filepath.Base(out.ResultPath) != "A01-improve-test-companion-recall-result.md" {
-		t.Fatalf("result path = %q", out.ResultPath)
-	}
-	for _, path := range []string{out.IndexPath, out.FirstSlicePath, out.ResultPath, out.ManifestPath} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("expected %s: %v", path, err)
-		}
+	{
+		_, err := os.Stat(out.ManifestPath)
+		require.NoErrorf(t, err, "expected %s: %v",
+
+			out.ManifestPath, err)
 	}
 
 	indexBody := mustReadFile(t, out.IndexPath)
-	for _, want := range []string{
-		"## Known Knowns",
-		"## Known Unknowns",
-		"## Confidence Summary",
+	assert.Containsf(t, indexBody,
+		"## Known Knowns", "A00 missing %q:\n%s",
+
+		"## Known Knowns", indexBody)
+	assert.Containsf(t, indexBody,
+		"## Known Unknowns", "A00 missing %q:\n%s",
+
+		"## Known Unknowns", indexBody)
+	assert.Containsf(t, indexBody,
+		"## Confidence Summary", "A00 missing %q:\n%s",
+
+		"## Confidence Summary", indexBody)
+	assert.Containsf(t, indexBody,
 		"## Task Slices",
-		"## Agent Preflight Checklist",
-		"A01-improve-test-companion-recall-plan.md",
-		"Pack completeness",
-	} {
-		if !strings.Contains(indexBody, want) {
-			t.Fatalf("A00 missing %q:\n%s", want, indexBody)
-		}
-	}
+		"A00 missing %q:\n%s",
+
+		"## Task Slices", indexBody)
+	assert.Containsf(t, indexBody,
+		"## Agent Preflight Checklist", "A00 missing %q:\n%s",
+
+		"## Agent Preflight Checklist", indexBody,
+	)
+	assert.Containsf(t, indexBody,
+		"A01-improve-test-companion-recall-plan.md", "A00 missing %q:\n%s", "A01-improve-test-companion-recall-plan.md", indexBody)
+	assert.Containsf(t, indexBody,
+		"Pack completeness", "A00 missing %q:\n%s",
+
+		"Pack completeness", indexBody)
 
 	firstSlice := mustReadFile(t, out.FirstSlicePath)
-	for _, want := range []string{
-		"## Goal",
-		"## Description",
+	assert.Containsf(t, firstSlice,
+
+		"## Goal", "A01 missing %q:\n%s",
+
+		"## Goal", firstSlice)
+	assert.Containsf(t, firstSlice,
+
+		"## Description", "A01 missing %q:\n%s",
+
+		"## Description", firstSlice)
+	assert.Containsf(t, firstSlice,
+
 		"## Resources",
-		"## Success Criteria",
-		"## Tasks",
-		"## Decision Gates",
-		"Block: external input",
-	} {
-		if !strings.Contains(firstSlice, want) {
-			t.Fatalf("A01 missing %q:\n%s", want, firstSlice)
-		}
-	}
+		"A01 missing %q:\n%s",
+
+		"## Resources", firstSlice)
+	assert.Containsf(t, firstSlice,
+
+		"## Success Criteria", "A01 missing %q:\n%s",
+
+		"## Success Criteria", firstSlice)
+	assert.Containsf(t, firstSlice,
+
+		"## Tasks", "A01 missing %q:\n%s",
+
+		"## Tasks", firstSlice)
+	assert.Containsf(t, firstSlice,
+
+		"## Decision Gates", "A01 missing %q:\n%s",
+
+		"## Decision Gates", firstSlice)
+	assert.Containsf(t, firstSlice,
+
+		"Block: external input", "A01 missing %q:\n%s",
+
+		"Block: external input", firstSlice)
 
 	resultTemplate := mustReadFile(t, out.ResultPath)
 	assertNoTrailingWhitespace(t, "A01 result template", resultTemplate)
-	for _, want := range []string{
-		"## Summary",
-		"## Completion Contract",
-		"Attempted slice: `A01`",
-		"Gate tested: promote, improve, rework, rollback, or block",
-		"## Changed Files",
+	assert.Containsf(t, resultTemplate,
+
+		"## Summary", "A01-1 missing %q:\n%s",
+
+		"## Summary", resultTemplate)
+	assert.Containsf(t, resultTemplate,
+
+		"## Completion Contract", "A01-1 missing %q:\n%s",
+
+		"## Completion Contract", resultTemplate,
+	)
+	assert.Containsf(t, resultTemplate,
+
+		"Attempted slice: `A01`", "A01-1 missing %q:\n%s",
+
+		"Attempted slice: `A01`", resultTemplate,
+	)
+	assert.Containsf(t, resultTemplate,
+
+		"Gate tested: promote, improve, rework, rollback, or block", "A01-1 missing %q:\n%s", "Gate tested: promote, improve, rework, rollback, or block",
+		resultTemplate)
+	assert.Containsf(t, resultTemplate,
+
+		"## Changed Files", "A01-1 missing %q:\n%s",
+
+		"## Changed Files", resultTemplate)
+	assert.Containsf(t, resultTemplate,
+
 		"## Tests",
-		"## Decision",
-		"## Follow-up",
-		"## Checkpoints",
-		"ds task checkpoint spike-test --target A01",
-	} {
-		if !strings.Contains(resultTemplate, want) {
-			t.Fatalf("A01-1 missing %q:\n%s", want, resultTemplate)
-		}
-	}
+		"A01-1 missing %q:\n%s",
+
+		"## Tests", resultTemplate)
+	assert.Containsf(t, resultTemplate,
+
+		"## Decision", "A01-1 missing %q:\n%s",
+
+		"## Decision", resultTemplate)
+	assert.Containsf(t, resultTemplate,
+
+		"## Follow-up", "A01-1 missing %q:\n%s",
+
+		"## Follow-up", resultTemplate)
+	assert.Containsf(t, resultTemplate,
+
+		"## Checkpoints", "A01-1 missing %q:\n%s",
+
+		"## Checkpoints", resultTemplate)
+	assert.Containsf(t, resultTemplate,
+
+		"ds task checkpoint spike-test --target A01", "A01-1 missing %q:\n%s", "ds task checkpoint spike-test --target A01", resultTemplate)
 
 	manifest := mustReadFile(t, out.ManifestPath)
-	if !strings.Contains(manifest, `"predicted_context"`) || !strings.Contains(manifest, `"confidence"`) {
-		t.Fatalf("manifest missing predicted context/confidence:\n%s", manifest)
-	}
-	if !strings.Contains(manifest, `"slices"`) || !strings.Contains(manifest, `"A01-improve-test-companion-recall-plan.md"`) {
-		t.Fatalf("manifest missing slice artifacts:\n%s", manifest)
-	}
-	if !containsPath(out.PrimaryFiles, "internal/retrieval/ranking.go") {
-		t.Fatalf("task preflight missing primary source from shared pack assembly: %#v", out.PrimaryFiles)
-	}
-	if !containsPath(out.TestFiles, "internal/retrieval/ranking_test.go") {
-		t.Fatalf("task preflight missing test companion from shared pack assembly: %#v", out.TestFiles)
-	}
+	assert.Contains(t, manifest, `"predicted_context"`)
+	assert.Contains(t, manifest, `"confidence"`)
+	assert.Contains(t, manifest, `"slices"`)
+	assert.Contains(t, manifest, `"A01-improve-test-companion-recall-plan.md"`)
+
+	assert.Truef(t, containsPath(out.PrimaryFiles, "internal/retrieval/ranking.go"),
+		"task preflight missing primary source from shared pack assembly: %#v", out.PrimaryFiles)
+	assert.Truef(t, containsPath(out.TestFiles, "internal/retrieval/ranking_test.go"),
+		"task preflight missing test companion from shared pack assembly: %#v", out.TestFiles)
 
 	db, err := openDB()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 	artifacts, err := db.ListArtifacts(store.FilterParams{RepoRoot: repoDir, SourceType: "capture"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(artifacts) < 2 {
-		t.Fatalf("expected A00/A01 to be captured, got %d", len(artifacts))
-	}
+	require.NoError(t, err)
+	assert.GreaterOrEqualf(t, len(artifacts), 2,
+		"expected A00/A01 to be captured, got %d", len(artifacts))
+
 }
 
-func TestTask_StatusShowsNextTarget(t *testing.T) {
-	setupTaskCommandRepo(t)
+func TestTaskStatusJSONShowsFirstPendingTarget(t *testing.T) {
+	setupTaskWithStatusSlices(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"status", "status-next-test", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
 
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskStatusOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "A01", out.NextTarget)
+	assert.Equal(t, "first status slice", out.NextTitle)
+	assert.Equal(t, "ds apply status-next-test", out.NextCommand)
+}
+
+func TestTaskStatusHumanShowsFirstPendingTarget(t *testing.T) {
+	setupTaskWithStatusSlices(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"status", "status-next-test"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Next: A01 - first status slice")
+	assert.Contains(t, buf.String(), "Run: ds apply status-next-test")
+}
+
+func TestTaskStatusShowsSecondTargetAfterFirstIsPromoted(t *testing.T) {
+	setupTaskWithStatusSlices(t)
+	decideTaskTarget(t, "status-next-test", "A01", "promote")
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"status", "status-next-test", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskStatusOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "A02", out.NextTarget)
+	assert.Equal(t, "second status slice", out.NextTitle)
+}
+
+func setupTaskWithStatusSlices(t *testing.T) {
+	t.Helper()
+	setupTaskCommandRepo(t)
 	cmd := NewTaskCmd()
 	cmd.SetArgs([]string{
 		"--id", "status-next-test",
@@ -268,76 +419,104 @@ func TestTask_StatusShowsNextTarget(t *testing.T) {
 		"status next workflow",
 	})
 	cmd.SetOut(&bytes.Buffer{})
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, cmd.Execute())
+}
 
-	statusCmd := NewTaskCmd()
-	statusCmd.SetArgs([]string{"status", "status-next-test", "--json"})
-	statusBuf := &bytes.Buffer{}
-	statusCmd.SetOut(statusBuf)
-	if err := statusCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var statusOut taskStatusOutput
-	if err := json.Unmarshal(statusBuf.Bytes(), &statusOut); err != nil {
-		t.Fatalf("status json: %v\n%s", err, statusBuf.String())
-	}
-	if statusOut.NextTarget != "A01" || statusOut.NextTitle != "first status slice" || statusOut.NextCommand != "ds apply status-next-test" {
-		t.Fatalf("status next output = %#v", statusOut)
-	}
-
-	humanStatusCmd := NewTaskCmd()
-	humanStatusCmd.SetArgs([]string{"status", "status-next-test"})
-	humanStatusBuf := &bytes.Buffer{}
-	humanStatusCmd.SetOut(humanStatusBuf)
-	if err := humanStatusCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	humanStatus := humanStatusBuf.String()
-	for _, want := range []string{
-		"Next: A01 - first status slice",
-		"Run: ds apply status-next-test",
-	} {
-		if !strings.Contains(humanStatus, want) {
-			t.Fatalf("human status missing %q:\n%s", want, humanStatus)
-		}
-	}
-
-	decideCmd := NewTaskCmd()
-	decideCmd.SetArgs([]string{
-		"decide", "status-next-test",
-		"--target", "A01",
-		"--decision", "promote",
+func decideTaskTarget(t *testing.T, taskID string, target string, decision string) {
+	t.Helper()
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"decide", taskID,
+		"--target", target,
+		"--decision", decision,
 		"--index=false",
 		"--json",
 	})
-	decideCmd.SetOut(&bytes.Buffer{})
-	if err := decideCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-
-	afterStatusCmd := NewTaskCmd()
-	afterStatusCmd.SetArgs([]string{"status", "status-next-test", "--json"})
-	afterStatusBuf := &bytes.Buffer{}
-	afterStatusCmd.SetOut(afterStatusBuf)
-	if err := afterStatusCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var afterStatus taskStatusOutput
-	if err := json.Unmarshal(afterStatusBuf.Bytes(), &afterStatus); err != nil {
-		t.Fatalf("after status json: %v\n%s", err, afterStatusBuf.String())
-	}
-	if afterStatus.NextTarget != "A02" || afterStatus.NextTitle != "second status slice" {
-		t.Fatalf("status did not advance next target after promote: %#v", afterStatus)
-	}
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
 }
 
-func TestTaskRepoFlagRoutesArtifactsToTargetRepoFromUmbrella(t *testing.T) {
-	umbrella, child := setupTaskCommandUmbrellaRepo(t)
+func TestTaskRepoFlagRoutesCreatedArtifactsToChildRepo(t *testing.T) {
+	umbrella, child, childWorkspace, out := setupRepoRoutedTask(t)
 
-	startCmd := NewTaskCmd()
-	startCmd.SetArgs([]string{
+	assert.True(t, strings.HasPrefix(out.Workspace, childWorkspace))
+	require.FileExists(t, filepath.Join(childWorkspace, taskManifestFilename))
+	assert.NoDirExists(t, filepath.Join(umbrella, "devspecs", "tasks", "repo-route-smoke"))
+	var manifest taskManifest
+	require.NoError(t, json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest))
+	assert.Equal(t, canonicalRepoRoot(child), manifest.RepoRoot)
+}
+
+func TestTaskShowRepoFlagResolvesChildTask(t *testing.T) {
+	_, _, childWorkspace, _ := setupRepoRoutedTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"show", "repo-route-smoke", "--repo", "./enalytics-backend", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskTargetOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "repo-route-smoke", out.TaskID)
+	assert.Equal(t, "A01", out.Target)
+	assert.True(t, strings.HasPrefix(out.Workspace, childWorkspace))
+}
+
+func TestTaskPromptRepoFlagIncludesRepoAwareCheckpointCommand(t *testing.T) {
+	setupRepoRoutedTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"prompt", "repo-route-smoke", "--repo", "./enalytics-backend", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskPromptOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Contains(t, out.Prompt, "ds task checkpoint repo-route-smoke --target A01 --repo ./enalytics-backend")
+}
+
+func TestTaskCheckpointRepoFlagWritesCheckpointToChildTask(t *testing.T) {
+	_, _, childWorkspace, _ := setupRepoRoutedTask(t)
+	startRepoRoutedTarget(t)
+	cmd := newRepoRoutedCheckpointCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskCheckpointOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.True(t, strings.HasPrefix(out.CheckpointPath, filepath.Join(childWorkspace, "checkpoints")))
+}
+
+func TestTaskStatusRepoFlagShowsChildCheckpointDecision(t *testing.T) {
+	setupRepoRoutedTask(t)
+	startRepoRoutedTarget(t)
+	checkpointRepoRoutedTarget(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"status", "repo-route-smoke", "--repo", "./enalytics-backend", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskStatusOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	require.Len(t, out.Slices, 1)
+	assert.Equal(t, "promote", out.Slices[0].Decision)
+}
+
+func setupRepoRoutedTask(t *testing.T) (string, string, string, taskStartOutput) {
+	t.Helper()
+	umbrella, child := setupTaskCommandUmbrellaRepo(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
 		"--repo", "./enalytics-backend",
 		"--id", "repo-route-smoke",
 		"--no-refresh",
@@ -346,78 +525,25 @@ func TestTaskRepoFlagRoutesArtifactsToTargetRepoFromUmbrella(t *testing.T) {
 		"--slice", "backend repo slice",
 		"backend workspace change",
 	})
-	startBuf := &bytes.Buffer{}
-	startCmd.SetOut(startBuf)
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var startOut taskStartOutput
-	if err := json.Unmarshal(startBuf.Bytes(), &startOut); err != nil {
-		t.Fatalf("start json: %v\n%s", err, startBuf.String())
-	}
-	childWorkspace := filepath.Join(child, "devspecs", "tasks", "repo-route-smoke")
-	if !strings.HasPrefix(startOut.Workspace, childWorkspace) {
-		t.Fatalf("workspace = %q, want under %q", startOut.Workspace, childWorkspace)
-	}
-	if _, err := os.Stat(filepath.Join(childWorkspace, taskManifestFilename)); err != nil {
-		t.Fatalf("child manifest missing: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(umbrella, "devspecs", "tasks", "repo-route-smoke")); !os.IsNotExist(err) {
-		t.Fatalf("task unexpectedly wrote under umbrella root: %v", err)
-	}
-	var manifest taskManifest
-	if err := json.Unmarshal([]byte(mustReadFile(t, startOut.ManifestPath)), &manifest); err != nil {
-		t.Fatalf("manifest json: %v", err)
-	}
-	if manifest.RepoRoot != canonicalRepoRoot(child) {
-		t.Fatalf("manifest repo root = %q, want %q", manifest.RepoRoot, canonicalRepoRoot(child))
-	}
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	require.NoError(t, cmd.Execute())
+	var out taskStartOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	return umbrella, child, filepath.Join(child, "devspecs", "tasks", "repo-route-smoke"), out
+}
 
-	showCmd := NewTaskCmd()
-	showCmd.SetArgs([]string{"show", "repo-route-smoke", "--repo", "./enalytics-backend", "--json"})
-	showBuf := &bytes.Buffer{}
-	showCmd.SetOut(showBuf)
-	if err := showCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var showOut taskTargetOutput
-	if err := json.Unmarshal(showBuf.Bytes(), &showOut); err != nil {
-		t.Fatalf("show json: %v\n%s", err, showBuf.String())
-	}
-	if showOut.TaskID != "repo-route-smoke" || showOut.Target != "A01" || !strings.HasPrefix(showOut.Workspace, childWorkspace) {
-		t.Fatalf("show resolved wrong target: %#v", showOut)
-	}
+func startRepoRoutedTarget(t *testing.T) {
+	t.Helper()
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"start", "repo-route-smoke", "--target", "A01", "--repo", "./enalytics-backend", "--index=false", "--json"})
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+}
 
-	promptCmd := NewTaskCmd()
-	promptCmd.SetArgs([]string{"prompt", "repo-route-smoke", "--repo", "./enalytics-backend", "--json"})
-	promptBuf := &bytes.Buffer{}
-	promptCmd.SetOut(promptBuf)
-	if err := promptCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var promptOut taskPromptOutput
-	if err := json.Unmarshal(promptBuf.Bytes(), &promptOut); err != nil {
-		t.Fatalf("prompt json: %v\n%s", err, promptBuf.String())
-	}
-	if !strings.Contains(promptOut.Prompt, "ds task checkpoint repo-route-smoke --target A01 --repo ./enalytics-backend") {
-		t.Fatalf("prompt missing repo-aware checkpoint command:\n%s", promptOut.Prompt)
-	}
-
-	startTargetCmd := NewTaskCmd()
-	startTargetCmd.SetArgs([]string{
-		"start", "repo-route-smoke",
-		"--target", "A01",
-		"--repo", "./enalytics-backend",
-		"--index=false",
-		"--json",
-	})
-	startTargetCmd.SetOut(&bytes.Buffer{})
-	if err := startTargetCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-
-	checkpointCmd := NewTaskCmd()
-	checkpointCmd.SetArgs([]string{
+func newRepoRoutedCheckpointCmd() *cobra.Command {
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
 		"checkpoint", "repo-route-smoke",
 		"--target", "A01",
 		"--repo", "./enalytics-backend",
@@ -427,33 +553,14 @@ func TestTaskRepoFlagRoutesArtifactsToTargetRepoFromUmbrella(t *testing.T) {
 		"--index=false",
 		"--json",
 	})
-	checkpointBuf := &bytes.Buffer{}
-	checkpointCmd.SetOut(checkpointBuf)
-	if err := checkpointCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var checkpointOut taskCheckpointOutput
-	if err := json.Unmarshal(checkpointBuf.Bytes(), &checkpointOut); err != nil {
-		t.Fatalf("checkpoint json: %v\n%s", err, checkpointBuf.String())
-	}
-	if !strings.HasPrefix(checkpointOut.CheckpointPath, filepath.Join(childWorkspace, "checkpoints")) {
-		t.Fatalf("checkpoint path = %q, want under child workspace", checkpointOut.CheckpointPath)
-	}
+	return cmd
+}
 
-	statusCmd := NewTaskCmd()
-	statusCmd.SetArgs([]string{"status", "repo-route-smoke", "--repo", "./enalytics-backend", "--json"})
-	statusBuf := &bytes.Buffer{}
-	statusCmd.SetOut(statusBuf)
-	if err := statusCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var statusOut taskStatusOutput
-	if err := json.Unmarshal(statusBuf.Bytes(), &statusOut); err != nil {
-		t.Fatalf("status json: %v\n%s", err, statusBuf.String())
-	}
-	if len(statusOut.Slices) != 1 || statusOut.Slices[0].Decision != "promote" {
-		t.Fatalf("status did not read child task state: %#v", statusOut)
-	}
+func checkpointRepoRoutedTarget(t *testing.T) {
+	t.Helper()
+	cmd := newRepoRoutedCheckpointCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
 }
 
 func TestTaskWithoutRepoFromUmbrellaUsesCurrentRoot(t *testing.T) {
@@ -469,22 +576,32 @@ func TestTaskWithoutRepoFromUmbrellaUsesCurrentRoot(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var out taskStartOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("task json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"task json: %v\n%s", err, buf.String())
 	}
-	if !strings.HasPrefix(out.Workspace, filepath.Join(umbrella, "devspecs", "tasks", "umbrella-local-task")) {
-		t.Fatalf("workspace = %q, want under umbrella root %q", out.Workspace, umbrella)
+	assert.Truef(t, strings.HasPrefix(out.Workspace, filepath.Join(umbrella, "devspecs", "tasks", "umbrella-local-task")),
+		"workspace = %q, want under umbrella root %q", out.Workspace, umbrella)
+	{
+
+		_, err := os.Stat(filepath.Join(umbrella, "devspecs", "tasks", "umbrella-local-task", taskManifestFilename))
+		require.NoErrorf(t, err,
+			"umbrella manifest missing: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(umbrella, "devspecs", "tasks", "umbrella-local-task", taskManifestFilename)); err != nil {
-		t.Fatalf("umbrella manifest missing: %v", err)
+	{
+
+		_, err := os.Stat(filepath.Join(child, "devspecs", "tasks", "umbrella-local-task"))
+		assert.Truef(t, os.IsNotExist(err),
+			"task unexpectedly wrote under child without --repo: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(child, "devspecs", "tasks", "umbrella-local-task")); !os.IsNotExist(err) {
-		t.Fatalf("task unexpectedly wrote under child without --repo: %v", err)
-	}
+
 }
 
 func TestTaskRepoFlagDirRouting(t *testing.T) {
@@ -501,11 +618,15 @@ func TestTaskRepoFlagDirRouting(t *testing.T) {
 		"relative dir task",
 	})
 	relativeCmd.SetOut(&bytes.Buffer{})
-	if err := relativeCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := relativeCmd.Execute()
+		require.NoError(t, err)
 	}
-	if _, err := os.Stat(filepath.Join(child, "custom", "tasks", "relative-dir-task", taskManifestFilename)); err != nil {
-		t.Fatalf("relative dir manifest missing under child: %v", err)
+	{
+
+		_, err := os.Stat(filepath.Join(child, "custom", "tasks", "relative-dir-task", taskManifestFilename))
+		require.NoErrorf(t, err,
+			"relative dir manifest missing under child: %v", err)
 	}
 
 	absoluteParent := filepath.Join(t.TempDir(), "absolute-task-parent")
@@ -520,15 +641,23 @@ func TestTaskRepoFlagDirRouting(t *testing.T) {
 		"absolute dir task",
 	})
 	absoluteCmd.SetOut(&bytes.Buffer{})
-	if err := absoluteCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := absoluteCmd.Execute()
+		require.NoError(t, err)
 	}
-	if _, err := os.Stat(filepath.Join(absoluteParent, "absolute-dir-task", taskManifestFilename)); err != nil {
-		t.Fatalf("absolute dir manifest missing: %v", err)
+	{
+
+		_, err := os.Stat(filepath.Join(absoluteParent, "absolute-dir-task", taskManifestFilename))
+		require.NoErrorf(t, err,
+			"absolute dir manifest missing: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(child, "devspecs", "tasks", "absolute-dir-task")); !os.IsNotExist(err) {
-		t.Fatalf("absolute dir task unexpectedly wrote under child default dir: %v", err)
+	{
+
+		_, err := os.Stat(filepath.Join(child, "devspecs", "tasks", "absolute-dir-task"))
+		assert.Truef(t, os.IsNotExist(err),
+			"absolute dir task unexpectedly wrote under child default dir: %v", err)
 	}
+
 }
 
 func TestTask_QuickCreatesOneOffWorkspaceWithCompactOutput(t *testing.T) {
@@ -538,140 +667,212 @@ func TestTask_QuickCreatesOneOffWorkspaceWithCompactOutput(t *testing.T) {
 	cmd.SetArgs([]string{"--quick", "--id", "quick-fix", "--no-refresh", "--index=false", "fix small billing typo"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	output := buf.String()
-	for _, want := range []string{
-		"Created one-off task: quick-fix",
-		"Target: A01",
-		"Next:",
-		"ds apply quick-fix --target A01",
-		"ds task checkpoint quick-fix --target A01",
-	} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("quick output missing %q:\n%s", want, output)
-		}
-	}
+	assert.Containsf(t, output,
+		"Created one-off task: quick-fix", "quick output missing %q:\n%s",
+
+		"Created one-off task: quick-fix", output)
+	assert.Containsf(t, output,
+		"Target: A01", "quick output missing %q:\n%s",
+
+		"Target: A01", output)
+	assert.Containsf(t, output,
+		"Next:", "quick output missing %q:\n%s",
+
+		"Next:", output)
+	assert.Containsf(t, output,
+		"ds apply quick-fix --target A01", "quick output missing %q:\n%s",
+
+		"ds apply quick-fix --target A01", output)
+	assert.Containsf(t, output,
+		"ds task checkpoint quick-fix --target A01", "quick output missing %q:\n%s", "ds task checkpoint quick-fix --target A01", output)
+
 	workspace := filepath.Join(repoDir, "devspecs", "tasks", "quick-fix")
-	if _, err := os.Stat(filepath.Join(workspace, taskManifestFilename)); err != nil {
-		t.Fatalf("quick task manifest missing: %v", err)
+	{
+		_, err := os.Stat(filepath.Join(workspace, taskManifestFilename))
+		require.NoErrorf(t, err,
+			"quick task manifest missing: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(workspace, "A01-fix-small-billing-typo-result.md")); err != nil {
-		t.Fatalf("quick result missing: %v", err)
+	{
+
+		_, err := os.Stat(filepath.Join(workspace, "A01-fix-small-billing-typo-result.md"))
+		require.NoErrorf(t, err,
+			"quick result missing: %v", err)
 	}
+
 }
 
-func TestTask_QuickSubcommandHiddenButStillWorks(t *testing.T) {
+func TestTaskQuickManifest_DoesNotRequireDurabilityCloseout(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"--quick", "--id", "quick-no-closeout", "--no-refresh", "--index=false", "fix small billing typo"})
+	cmd.SetOut(&bytes.Buffer{})
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	manifest, err := readTaskManifest(filepath.Join(repoDir, "devspecs", "tasks", "quick-no-closeout", taskManifestFilename))
+	require.NoError(t, err)
+	assert.False(t, manifest.Durability.Required)
+}
+
+func TestTaskHelpHidesQuickSubcommandAndTeachesQuickFlag(t *testing.T) {
 	setupTaskCommandRepo(t)
-
-	helpCmd := NewTaskCmd()
-	helpCmd.SetArgs([]string{"--help"})
-	helpBuf := &bytes.Buffer{}
-	helpCmd.SetOut(helpBuf)
-	if err := helpCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(helpBuf.String(), "\n  quick       ") {
-		t.Fatalf("task quick should be hidden from normal help:\n%s", helpBuf.String())
-	}
-	if !strings.Contains(helpBuf.String(), "--quick") {
-		t.Fatalf("task help should teach --quick:\n%s", helpBuf.String())
-	}
-
-	compatCmd := NewTaskCmd()
-	compatCmd.SetArgs([]string{"quick", "--id", "quick-compat", "--no-refresh", "--index=false", "fix small billing typo"})
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"--help"})
 	buf := &bytes.Buffer{}
-	compatCmd.SetOut(buf)
-	if err := compatCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(buf.String(), "Created one-off task: quick-compat") {
-		t.Fatalf("quick compatibility output missing one-off marker:\n%s", buf.String())
-	}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	assert.NotContains(t, buf.String(), "\n  quick       ")
+	assert.Contains(t, buf.String(), "--quick")
 }
 
-func TestTask_LegacyLifecycleSubcommandsHiddenButStillWork(t *testing.T) {
+func TestTaskQuickCompatibilitySubcommandCreatesOneOffTask(t *testing.T) {
 	setupTaskCommandRepo(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"quick", "--id", "quick-compat", "--no-refresh", "--index=false", "fix small billing typo"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
 
-	helpCmd := NewTaskCmd()
-	helpCmd.SetArgs([]string{"--help"})
-	helpBuf := &bytes.Buffer{}
-	helpCmd.SetOut(helpBuf)
-	if err := helpCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	help := helpBuf.String()
-	for _, hiddenLine := range []string{
-		"\n  decide      ",
-		"\n  finish      ",
-		"\n  prompt      ",
-		"\n  start       ",
-		"\n  sync        ",
-	} {
-		if strings.Contains(help, hiddenLine) {
-			t.Fatalf("legacy lifecycle command %q should be hidden from normal help:\n%s", hiddenLine, help)
-		}
-	}
-	for _, visibleLine := range []string{
-		"\n  checkpoint  ",
-		"\n  refresh     ",
-		"\n  status      ",
-		"\n  next        ",
-	} {
-		if !strings.Contains(help, visibleLine) {
-			t.Fatalf("expected visible task command %q in help:\n%s", visibleLine, help)
-		}
-	}
+	err := cmd.Execute()
 
-	cases := []struct {
-		args []string
-		want string
-	}{
-		{[]string{"prompt", "--help"}, "Prefer `ds apply <task-id>`"},
-		{[]string{"finish", "--help"}, "Prefer `ds task checkpoint <task-id>"},
-		{[]string{"decide", "--help"}, "Prefer `ds task checkpoint <task-id>"},
-		{[]string{"start", "--help"}, "Prefer `ds task checkpoint <task-id>"},
-		{[]string{"sync", "--help"}, "Prefer `ds task refresh <task-id>`"},
-	}
-	for _, tc := range cases {
-		cmd := NewTaskCmd()
-		cmd.SetArgs(tc.args)
-		buf := &bytes.Buffer{}
-		cmd.SetOut(buf)
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("%v: %v", tc.args, err)
-		}
-		if !strings.Contains(buf.String(), tc.want) {
-			t.Fatalf("%v help missing %q:\n%s", tc.args, tc.want, buf.String())
-		}
-	}
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Created one-off task: quick-compat")
 }
 
-func TestTask_IterationSubcommandHiddenButStillWorks(t *testing.T) {
+func TestTaskHelpHidesLegacyLifecycleCommandsAndShowsSupportedCommands(t *testing.T) {
 	setupTaskCommandRepo(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"--help"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
 
-	helpCmd := NewTaskCmd()
-	helpCmd.SetArgs([]string{"--help"})
-	helpBuf := &bytes.Buffer{}
-	helpCmd.SetOut(helpBuf)
-	if err := helpCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(helpBuf.String(), "\n  iteration   ") {
-		t.Fatalf("task iteration should be hidden from normal help:\n%s", helpBuf.String())
-	}
-	iterationHelpCmd := NewTaskCmd()
-	iterationHelpCmd.SetArgs([]string{"iteration", "add", "--help"})
-	iterationHelpBuf := &bytes.Buffer{}
-	iterationHelpCmd.SetOut(iterationHelpBuf)
-	if err := iterationHelpCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(iterationHelpBuf.String(), "Prefer `ds task slice add") {
-		t.Fatalf("iteration compatibility help should point to slice add --after:\n%s", iterationHelpBuf.String())
-	}
+	err := cmd.Execute()
 
+	require.NoError(t, err)
+	assert.NotContains(t, buf.String(), "\n  decide      ")
+	assert.NotContains(t, buf.String(), "\n  finish      ")
+	assert.NotContains(t, buf.String(), "\n  prompt      ")
+	assert.NotContains(t, buf.String(), "\n  start       ")
+	assert.NotContains(t, buf.String(), "\n  sync        ")
+	assert.Contains(t, buf.String(), "\n  checkpoint  ")
+	assert.Contains(t, buf.String(), "\n  refresh     ")
+	assert.Contains(t, buf.String(), "\n  status      ")
+	assert.NotContains(t, buf.String(), "\n  next        ")
+}
+
+func TestTaskNextCompatibilityHelpPointsToApplyAndThread(t *testing.T) {
+	// Arrange
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"next", "--help"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Prefer `ds apply <task-id>`")
+	assert.Contains(t, buf.String(), "`ds thread task:<task-id>`")
+	assert.Contains(t, buf.String(), "never chooses among multiple runnable threads")
+}
+
+func TestTaskPromptCompatibilityHelpPointsToApply(t *testing.T) {
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"prompt", "--help"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Prefer `ds apply <task-id>`")
+}
+
+func TestTaskFinishCompatibilityHelpPointsToCheckpoint(t *testing.T) {
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"finish", "--help"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Prefer `ds task checkpoint <task-id> --target")
+}
+
+func TestTaskDecideCompatibilityHelpPointsToCheckpoint(t *testing.T) {
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"decide", "--help"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Prefer `ds task checkpoint <task-id> --target")
+}
+
+func TestTaskStartCompatibilityHelpPointsToCheckpoint(t *testing.T) {
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"start", "--help"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Prefer `ds task checkpoint <task-id> --target")
+}
+
+func TestTaskSyncCompatibilityHelpPointsToRefresh(t *testing.T) {
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"sync", "--help"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Prefer `ds task refresh <task-id>`")
+}
+
+func TestTaskHelpHidesIterationCompatibilitySubcommand(t *testing.T) {
+	setupTaskCommandRepo(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"--help"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	assert.NotContains(t, buf.String(), "\n  iteration   ")
+}
+
+func TestTaskIterationAddCompatibilityHelpPointsToSliceAdd(t *testing.T) {
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"iteration", "add", "--help"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Prefer `ds task slice add")
+}
+
+func TestTaskIterationAddCompatibilityCreatesIteration(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
 	startCmd := NewTaskCmd()
 	startCmd.SetArgs([]string{
 		"--id", "iteration-compat",
@@ -682,9 +883,7 @@ func TestTask_IterationSubcommandHiddenButStillWorks(t *testing.T) {
 		"iteration compatibility",
 	})
 	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, startCmd.Execute())
 
 	compatCmd := NewTaskCmd()
 	compatCmd.SetArgs([]string{
@@ -696,16 +895,21 @@ func TestTask_IterationSubcommandHiddenButStillWorks(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	compatCmd.SetOut(buf)
-	if err := compatCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+
+	err := compatCmd.Execute()
+
+	require.NoError(t, err)
 	var out taskArtifactAddOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("iteration compat json: %v\n%s", err, buf.String())
-	}
-	if out.Slice.ID != "A01-1" {
-		t.Fatalf("iteration compat output = %#v", out)
-	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "A01-1", out.Slice.ID)
+	var manifest taskManifest
+	manifestPath := filepath.Join(repoDir, "devspecs", "tasks", "iteration-compat", taskManifestFilename)
+	require.NoError(t, json.Unmarshal([]byte(mustReadFile(t, manifestPath)), &manifest))
+	require.Len(t, manifest.Artifacts.Slices, 2)
+	assert.Equal(t, "A01-1", manifest.Artifacts.Slices[1].ID)
+	assert.Equal(t, "iteration", manifest.Artifacts.Slices[1].Kind)
+	assert.Equal(t, "A01", manifest.Artifacts.Slices[1].ParentID)
+	assert.Equal(t, "improve", manifest.Artifacts.Slices[1].Reason)
 }
 
 func TestTask_StartGreenfieldProfileUsesPlanningTemplate(t *testing.T) {
@@ -722,70 +926,170 @@ func TestTask_StartGreenfieldProfileUsesPlanningTemplate(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
 
 	var out taskStartOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("task json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"task json: %v\n%s", err, buf.String())
 	}
-	if out.Profile != taskProfileGreenfield {
-		t.Fatalf("profile = %q", out.Profile)
-	}
+	assert.Equalf(t, taskProfileGreenfield, out.Profile,
+		"profile = %q", out.Profile)
 
 	var manifest taskManifest
-	if err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest); err != nil {
-		t.Fatalf("manifest json: %v", err)
+	{
+		err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest)
+		require.NoErrorf(t, err,
+			"manifest json: %v", err)
 	}
-	if manifest.Profile != taskProfileGreenfield {
-		t.Fatalf("manifest profile = %q", manifest.Profile)
-	}
+	assert.Equalf(t, taskProfileGreenfield, manifest.Profile,
+		"manifest profile = %q", manifest.Profile)
 
 	indexBody := mustReadFile(t, out.IndexPath)
-	for _, want := range []string{
-		"## Profile",
-		"greenfield",
-		"Treat predicted files as evidence, not required edit targets.",
+	assert.Containsf(t, indexBody,
+		"## Profile", "greenfield index missing %q:\n%s",
+
+		"## Profile", indexBody)
+	assert.Containsf(t, indexBody,
+		"greenfield", "greenfield index missing %q:\n%s",
+
+		"greenfield", indexBody)
+	assert.Containsf(t, indexBody,
+		"Treat predicted files as evidence, not required edit targets.", "greenfield index missing %q:\n%s",
+		"Treat predicted files as evidence, not required edit targets.", indexBody)
+	assert.Containsf(t, indexBody,
 		"before implementation scope expands",
-	} {
-		if !strings.Contains(indexBody, want) {
-			t.Fatalf("greenfield index missing %q:\n%s", want, indexBody)
-		}
-	}
+
+		"greenfield index missing %q:\n%s", "before implementation scope expands", indexBody)
 
 	planBody := mustReadFile(t, out.FirstSlicePath)
-	for _, want := range []string{
-		"bounded planning slice",
+	assert.Containsf(t, planBody,
+		"bounded planning slice", "greenfield plan missing %q:\n%s",
+
+		"bounded planning slice", planBody)
+	assert.Containsf(t, planBody,
 		"Test or Evaluation Signals",
-		"Planning artifacts, acceptance checks, interface notes, eval cards, or test design.",
-		"Draft the smallest useful planning artifact",
-	} {
-		if !strings.Contains(planBody, want) {
-			t.Fatalf("greenfield plan missing %q:\n%s", want, planBody)
-		}
-	}
-	for _, unwanted := range []string{
-		"Inspect the predicted primary files.",
-		"Implement the smallest useful change.",
-		"Primary implementation surface is verified before edits.",
-	} {
-		if strings.Contains(planBody, unwanted) {
-			t.Fatalf("greenfield plan contains code-change boilerplate %q:\n%s", unwanted, planBody)
-		}
-	}
+		"greenfield plan missing %q:\n%s",
+
+		"Test or Evaluation Signals", planBody,
+	)
+	assert.Containsf(t, planBody,
+		"Planning artifacts, acceptance checks, interface notes, eval cards, or test design.", "greenfield plan missing %q:\n%s",
+		"Planning artifacts, acceptance checks, interface notes, eval cards, or test design.", planBody)
+	assert.Containsf(t, planBody,
+		"Draft the smallest useful planning artifact", "greenfield plan missing %q:\n%s", "Draft the smallest useful planning artifact", planBody)
+	assert.NotContainsf(t,
+		planBody,
+		"Inspect the predicted primary files.", "greenfield plan contains code-change boilerplate %q:\n%s",
+		"Inspect the predicted primary files.", planBody)
+	assert.NotContainsf(t,
+		planBody,
+		"Implement the smallest useful change.", "greenfield plan contains code-change boilerplate %q:\n%s",
+		"Implement the smallest useful change.", planBody,
+	)
+	assert.NotContainsf(t,
+		planBody,
+		"Primary implementation surface is verified before edits.", "greenfield plan contains code-change boilerplate %q:\n%s",
+		"Primary implementation surface is verified before edits.", planBody,
+	)
+
 }
 
 func TestTask_StartSurfacesCheckpointFactRiskCards(t *testing.T) {
+	seedRiskCardCheckpointFact(t)
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"--id", "risk-card-test", "--no-refresh", "--index=false", "--json", "improve test companion recall"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
+	}
+
+	var out taskStartOutput
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"task json: %v\n%s", err, buf.String())
+	}
+	require.NotNilf(t, taskRiskCardByID(out.RiskCards,
+		"prior-test-miss"),
+
+		"missing risk card %q: %#v", "prior-test-miss", out.RiskCards,
+	)
+	require.NotNilf(t, taskRiskCardByID(out.RiskCards,
+		"prior-noise"), "missing risk card %q: %#v",
+
+		"prior-noise", out.RiskCards)
+	require.NotNilf(t, taskRiskCardByID(out.RiskCards,
+		"validation-gap"),
+
+		"missing risk card %q: %#v", "validation-gap", out.RiskCards,
+	)
+
+	testMiss := taskRiskCardByID(out.RiskCards, "prior-test-miss")
+	require.NotNil(t, testMiss)
+	assert.Contains(t, strings.Join(testMiss.Evidence, "\n"), "internal/retrieval/ranking_test.go")
+
+	var manifest taskManifest
+	{
+		err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest)
+		require.NoErrorf(t, err,
+			"manifest json: %v", err)
+	}
+	require.NotNilf(t, taskRiskCardByID(manifest.RiskCards, "prior-test-miss"),
+		"manifest missing risk cards: %#v", manifest.RiskCards)
+
+	indexBody := mustReadFile(t, out.IndexPath)
+	assert.Containsf(t, indexBody,
+		"## Risk Cards",
+		"index missing risk card %q:\n%s",
+
+		"## Risk Cards", indexBody)
+	assert.Containsf(t, indexBody,
+		"Prior checkpoint missed a related test", "index missing risk card %q:\n%s", "Prior checkpoint missed a related test", indexBody)
+	assert.Containsf(t, indexBody,
+		"Search same-package and same-stem tests before editing.", "index missing risk card %q:\n%s", "Search same-package and same-stem tests before editing.",
+		indexBody)
+
+	planBody := mustReadFile(t, out.FirstSlicePath)
+	assert.Containsf(t, planBody, "Prior checkpoint missed a related test",
+		"plan missing risk card:\n%s", planBody)
+
+}
+
+func TestTaskPromptSurfacesCheckpointFactRiskCardsBeforeTargetPlan(t *testing.T) {
+	seedRiskCardCheckpointFact(t)
+	startTaskForRiskCards(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"prompt", "risk-card-test", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskPromptOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Contains(t, out.Prompt, "Risk cards:")
+	assert.Contains(t, out.Prompt, "Treat these as evidence-backed checks, not required edit targets.")
+	assert.Contains(t, out.Prompt, "Prior checkpoint missed a related test")
+	assert.LessOrEqual(t, strings.Index(out.Prompt, "Risk cards:"), strings.Index(out.Prompt, "Target plan:"))
+}
+
+func seedRiskCardCheckpointFact(t *testing.T) {
+	t.Helper()
 	repoDir := setupTaskCommandRepo(t)
 	db, err := openDB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	require.NoError(t, err)
 	repoID := taskTestRepoID(t, db, repoDir)
 	now := "2026-06-07T00:00:00Z"
-	if err := db.UpsertTaskCheckpointFact(store.TaskCheckpointFact{
+	require.NoError(t, db.UpsertTaskCheckpointFact(store.TaskCheckpointFact{
 		RepoID:             repoID,
 		TaskID:             "prior-risk-task",
 		CheckpointID:       "cp_prior",
@@ -802,88 +1106,113 @@ func TestTask_StartSurfacesCheckpointFactRiskCards(t *testing.T) {
 		LearningsJSON:      `[{"learning_type":"validation_gap","summary":"focused retrieval validation was missing","evidence_refs":["internal/retrieval/ranking_test.go"],"applies_to":"internal/retrieval","confidence":"high"}]`,
 		NextJSON:           `{}`,
 		IndexedAt:          now,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	}))
+	require.NoError(t, db.Close())
+}
 
+func startTaskForRiskCards(t *testing.T) {
+	t.Helper()
 	cmd := NewTaskCmd()
 	cmd.SetArgs([]string{"--id", "risk-card-test", "--no-refresh", "--index=false", "--json", "improve test companion recall"})
-	buf := &bytes.Buffer{}
-	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var out taskStartOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("task json: %v\n%s", err, buf.String())
-	}
-	for _, id := range []string{"prior-test-miss", "prior-noise", "validation-gap"} {
-		if taskRiskCardByID(out.RiskCards, id) == nil {
-			t.Fatalf("missing risk card %q: %#v", id, out.RiskCards)
-		}
-	}
-	testMiss := taskRiskCardByID(out.RiskCards, "prior-test-miss")
-	if testMiss == nil || !strings.Contains(strings.Join(testMiss.Evidence, "\n"), "internal/retrieval/ranking_test.go") {
-		t.Fatalf("prior test miss evidence = %#v", testMiss)
-	}
-
-	var manifest taskManifest
-	if err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest); err != nil {
-		t.Fatalf("manifest json: %v", err)
-	}
-	if taskRiskCardByID(manifest.RiskCards, "prior-test-miss") == nil {
-		t.Fatalf("manifest missing risk cards: %#v", manifest.RiskCards)
-	}
-	indexBody := mustReadFile(t, out.IndexPath)
-	for _, want := range []string{
-		"## Risk Cards",
-		"Prior checkpoint missed a related test",
-		"Search same-package and same-stem tests before editing.",
-	} {
-		if !strings.Contains(indexBody, want) {
-			t.Fatalf("index missing risk card %q:\n%s", want, indexBody)
-		}
-	}
-	planBody := mustReadFile(t, out.FirstSlicePath)
-	if !strings.Contains(planBody, "Prior checkpoint missed a related test") {
-		t.Fatalf("plan missing risk card:\n%s", planBody)
-	}
-
-	promptCmd := NewTaskCmd()
-	promptCmd.SetArgs([]string{"prompt", "risk-card-test", "--json"})
-	promptBuf := &bytes.Buffer{}
-	promptCmd.SetOut(promptBuf)
-	if err := promptCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var promptOut taskPromptOutput
-	if err := json.Unmarshal(promptBuf.Bytes(), &promptOut); err != nil {
-		t.Fatalf("prompt json: %v\n%s", err, promptBuf.String())
-	}
-	for _, want := range []string{
-		"Risk cards:",
-		"Treat these as evidence-backed checks, not required edit targets.",
-		"Prior checkpoint missed a related test",
-	} {
-		if !strings.Contains(promptOut.Prompt, want) {
-			t.Fatalf("prompt missing risk card text %q:\n%s", want, promptOut.Prompt)
-		}
-	}
-	if strings.Index(promptOut.Prompt, "Risk cards:") > strings.Index(promptOut.Prompt, "Target plan:") {
-		t.Fatalf("risk cards should appear before target plan:\n%s", promptOut.Prompt)
-	}
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
 }
 
 func TestTask_StartSurfacesAdvisoryFilesFromCheckpointFacts(t *testing.T) {
+	seedAdvisoryCheckpointFact(t)
+
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"--id", "advisory-file-test", "--no-refresh", "--index=false", "--json", "fix discount rounding"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
+	}
+
+	var out taskStartOutput
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"task json: %v\n%s", err, buf.String())
+	}
+	require.NotNilf(t, taskAdvisoryFileByPath(out.AdvisoryFiles,
+
+		"internal/invoice/pricing.go"), "missing advisory file %q: %#v", "internal/invoice/pricing.go", out.AdvisoryFiles)
+	require.NotNilf(t, taskAdvisoryFileByPath(out.AdvisoryFiles,
+
+		"internal/invoice/pricing_test.go"), "missing advisory file %q: %#v",
+		"internal/invoice/pricing_test.go", out.AdvisoryFiles,
+	)
+	require.NotNilf(t, taskAdvisoryFileByPath(out.AdvisoryFiles,
+
+		"docs/legacy/discount-rounding-notes.md"), "missing advisory file %q: %#v",
+		"docs/legacy/discount-rounding-notes.md", out.AdvisoryFiles)
+
+	{
+		file := taskAdvisoryFileByPath(out.AdvisoryFiles, "internal/invoice/pricing_test.go")
+		require.NotNil(t, file)
+		assert.Equal(t, "prior-missed-test", file.Kind)
+
+	}
+
+	var manifest taskManifest
+	{
+		err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest)
+		require.NoErrorf(t, err,
+			"manifest json: %v", err)
+	}
+	require.NotNilf(t, taskAdvisoryFileByPath(manifest.AdvisoryFiles, "internal/invoice/pricing.go"),
+		"manifest missing advisory files: %#v", manifest.AdvisoryFiles)
+
+	planBody := mustReadFile(t, out.FirstSlicePath)
+	assert.Containsf(t, planBody,
+		"Checkpoint Leads", "plan missing advisory text %q:\n%s",
+
+		"Checkpoint Leads", planBody)
+	assert.Containsf(t, planBody,
+		"not files the initial pack ranked as primary", "plan missing advisory text %q:\n%s", "not files the initial pack ranked as primary", planBody)
+	assert.Containsf(t, planBody,
+		"No pack-ranked primary file. Verify these checkpoint leads", "plan missing advisory text %q:\n%s",
+		"No pack-ranked primary file. Verify these checkpoint leads", planBody)
+	assert.Containsf(t, planBody,
+		"internal/invoice/pricing.go", "plan missing advisory text %q:\n%s",
+
+		"internal/invoice/pricing.go", planBody)
+	assert.Containsf(t, planBody,
+		"internal/invoice/pricing_test.go", "plan missing advisory text %q:\n%s",
+
+		"internal/invoice/pricing_test.go", planBody)
+
+}
+
+func TestTaskPromptSurfacesAdvisoryFilesAsVerificationLeads(t *testing.T) {
+	seedAdvisoryCheckpointFact(t)
+	startTaskForAdvisoryFiles(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"prompt", "advisory-file-test", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskPromptOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Contains(t, out.Prompt, "Checkpoint leads:")
+	assert.Contains(t, out.Prompt, "verification leads only")
+	assert.Contains(t, out.Prompt, "internal/invoice/pricing.go")
+	assert.Contains(t, out.Prompt, "internal/invoice/pricing_test.go")
+}
+
+func seedAdvisoryCheckpointFact(t *testing.T) {
+	t.Helper()
 	repoDir := setupTaskCommandRepo(t)
 	db, err := openDB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	require.NoError(t, err)
 	repoID := taskTestRepoID(t, db, repoDir)
 	now := "2026-06-07T00:00:00Z"
-	if err := db.UpsertTaskCheckpointFact(store.TaskCheckpointFact{
+	require.NoError(t, db.UpsertTaskCheckpointFact(store.TaskCheckpointFact{
 		RepoID:             repoID,
 		TaskID:             "prior-discount-task",
 		CheckpointID:       "cp_discount",
@@ -900,75 +1229,16 @@ func TestTask_StartSurfacesAdvisoryFilesFromCheckpointFacts(t *testing.T) {
 		LearningsJSON:      `[{"learning_type":"validation_gap","summary":"discount rounding needed an explicit package test","evidence_refs":["internal/invoice/pricing_test.go"],"applies_to":"internal/invoice","confidence":"high"}]`,
 		NextJSON:           `{}`,
 		IndexedAt:          now,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	}))
+	require.NoError(t, db.Close())
+}
 
+func startTaskForAdvisoryFiles(t *testing.T) {
+	t.Helper()
 	cmd := NewTaskCmd()
 	cmd.SetArgs([]string{"--id", "advisory-file-test", "--no-refresh", "--index=false", "--json", "fix discount rounding"})
-	buf := &bytes.Buffer{}
-	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var out taskStartOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("task json: %v\n%s", err, buf.String())
-	}
-	for _, path := range []string{
-		"internal/invoice/pricing.go",
-		"internal/invoice/pricing_test.go",
-		"docs/legacy/discount-rounding-notes.md",
-	} {
-		if taskAdvisoryFileByPath(out.AdvisoryFiles, path) == nil {
-			t.Fatalf("missing advisory file %q: %#v", path, out.AdvisoryFiles)
-		}
-	}
-	if file := taskAdvisoryFileByPath(out.AdvisoryFiles, "internal/invoice/pricing_test.go"); file == nil || file.Kind != "prior-missed-test" {
-		t.Fatalf("missed test advisory = %#v", file)
-	}
-
-	var manifest taskManifest
-	if err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest); err != nil {
-		t.Fatalf("manifest json: %v", err)
-	}
-	if taskAdvisoryFileByPath(manifest.AdvisoryFiles, "internal/invoice/pricing.go") == nil {
-		t.Fatalf("manifest missing advisory files: %#v", manifest.AdvisoryFiles)
-	}
-	planBody := mustReadFile(t, out.FirstSlicePath)
-	for _, want := range []string{
-		"Checkpoint Leads",
-		"not files the initial pack ranked as primary",
-		"No pack-ranked primary file. Verify these checkpoint leads",
-		"internal/invoice/pricing.go",
-		"internal/invoice/pricing_test.go",
-	} {
-		if !strings.Contains(planBody, want) {
-			t.Fatalf("plan missing advisory text %q:\n%s", want, planBody)
-		}
-	}
-
-	promptCmd := NewTaskCmd()
-	promptCmd.SetArgs([]string{"prompt", "advisory-file-test", "--json"})
-	promptBuf := &bytes.Buffer{}
-	promptCmd.SetOut(promptBuf)
-	if err := promptCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var promptOut taskPromptOutput
-	if err := json.Unmarshal(promptBuf.Bytes(), &promptOut); err != nil {
-		t.Fatalf("prompt json: %v\n%s", err, promptBuf.String())
-	}
-	for _, want := range []string{
-		"Checkpoint leads:",
-		"verification leads only",
-		"internal/invoice/pricing.go",
-		"internal/invoice/pricing_test.go",
-	} {
-		if !strings.Contains(promptOut.Prompt, want) {
-			t.Fatalf("prompt missing advisory text %q:\n%s", want, promptOut.Prompt)
-		}
-	}
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
 }
 
 func TestTask_AdvisoryFilesAreCappedAndPrioritized(t *testing.T) {
@@ -980,26 +1250,32 @@ func TestTask_AdvisoryFilesAreCappedAndPrioritized(t *testing.T) {
 		LearningsJSON:     `[{"learning_type":"validation_gap","summary":"discount rounding needed package tests","evidence_refs":["src/learned_test.go","src/learned.go"],"applies_to":"src","confidence":"high"}]`,
 	}}
 	files := taskAdvisoryFilesFromCheckpointFacts("fix discount rounding", taskPredictedContext{}, facts)
-	if len(files) > taskAdvisoryFileLimit {
-		t.Fatalf("advisory files exceed cap: %d > %d: %#v", len(files), taskAdvisoryFileLimit, files)
-	}
-	wantKinds := []string{"prior-source", "prior-missed-test", "prior-noise", "prior-missed-file", "prior-test-evidence"}
-	if len(files) != len(wantKinds) {
-		t.Fatalf("advisory files len = %d, want %d: %#v", len(files), len(wantKinds), files)
-	}
-	for i, want := range wantKinds {
-		if files[i].Kind != want {
-			t.Fatalf("advisory kind[%d] = %q, want %q: %#v", i, files[i].Kind, want, files)
-		}
-	}
+	assert.LessOrEqualf(t, len(files), taskAdvisoryFileLimit,
+		"advisory files exceed cap: %d > %d: %#v", len(files), taskAdvisoryFileLimit, files)
 
+	require.Len(t, files, 5)
+	assert.Equal(t, "prior-source", files[0].Kind)
+	assert.Equal(t, "prior-missed-test", files[1].Kind)
+	assert.Equal(t, "prior-noise", files[2].Kind)
+	assert.Equal(t, "prior-missed-file", files[3].Kind)
+	assert.Equal(t, "prior-test-evidence", files[4].Kind)
+}
+
+func TestTaskAdvisoryFilesAreSuppressedByStrongPredictedContext(t *testing.T) {
+	facts := []store.TaskCheckpointFact{{
+		TaskID:            "prior-wide-task",
+		CheckpointID:      "cp_wide",
+		ActualContextJSON: `{"files_read":["src/a.go"],"files_edited":["src/c.go"]}`,
+		FeedbackJSON:      `{"critical_missed":["src/missed_test.go"]}`,
+	}}
 	strongPredicted := taskPredictedContext{
 		PrimaryFiles: []taskPredictedFile{{Path: "src/main.go"}},
 		Tests:        []taskPredictedFile{{Path: "src/main_test.go"}},
 	}
-	if got := taskAdvisoryFilesFromCheckpointFacts("fix discount rounding", strongPredicted, facts); len(got) != 0 {
-		t.Fatalf("strong predicted context should suppress checkpoint leads, got %#v", got)
-	}
+
+	actual := taskAdvisoryFilesFromCheckpointFacts("fix discount rounding", strongPredicted, facts)
+
+	assert.Empty(t, actual)
 }
 
 func TestTask_PromptCarriesPriorSliceCheckpointEvidence(t *testing.T) {
@@ -1014,8 +1290,9 @@ func TestTask_PromptCarriesPriorSliceCheckpointEvidence(t *testing.T) {
 		"improve test companion recall",
 	})
 	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := startCmd.Execute()
+		require.NoError(t, err)
 	}
 
 	checkpointCmd := NewTaskCmd()
@@ -1032,37 +1309,45 @@ func TestTask_PromptCarriesPriorSliceCheckpointEvidence(t *testing.T) {
 		"--json",
 	})
 	checkpointCmd.SetOut(&bytes.Buffer{})
-	if err := checkpointCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := checkpointCmd.Execute()
+		require.NoError(t, err)
 	}
 
 	promptCmd := NewTaskCmd()
 	promptCmd.SetArgs([]string{"prompt", "prior-slice-evidence-test", "--target", "A02", "--json"})
 	promptBuf := &bytes.Buffer{}
 	promptCmd.SetOut(promptBuf)
-	if err := promptCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := promptCmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var promptOut taskPromptOutput
-	if err := json.Unmarshal(promptBuf.Bytes(), &promptOut); err != nil {
-		t.Fatalf("prompt json: %v\n%s", err, promptBuf.String())
+	{
+		err := json.Unmarshal(promptBuf.Bytes(), &promptOut)
+		require.NoErrorf(t, err,
+			"prompt json: %v\n%s", err, promptBuf.String())
 	}
-	for _, want := range []string{
+	assert.Containsf(t, promptOut.Prompt,
+		"Prior slice evidence:", "prompt missing prior evidence %q:\n%s",
+
 		"Prior slice evidence:",
-		"checkpointed by earlier targets",
+		promptOut.Prompt)
+	assert.Containsf(t, promptOut.Prompt,
+		"checkpointed by earlier targets", "prompt missing prior evidence %q:\n%s", "checkpointed by earlier targets", promptOut.Prompt)
+	assert.Containsf(t, promptOut.Prompt,
 		"internal/retrieval/ranking.go",
-		"internal/retrieval/ranking_test.go",
-	} {
-		if !strings.Contains(promptOut.Prompt, want) {
-			t.Fatalf("prompt missing prior evidence %q:\n%s", want, promptOut.Prompt)
-		}
-	}
-	if taskAdvisoryFileByPath(promptOut.PriorSliceEvidence, "internal/retrieval/ranking_test.go") == nil {
-		t.Fatalf("prompt json missing prior test evidence: %#v", promptOut.PriorSliceEvidence)
-	}
-	if taskAdvisoryFileByPath(promptOut.PriorSliceEvidence, ".devspecs/tasks/prior-slice-evidence-test/A00-index.md") != nil {
-		t.Fatalf("prompt evidence should filter task workspace paths: %#v", promptOut.PriorSliceEvidence)
-	}
+
+		"prompt missing prior evidence %q:\n%s", "internal/retrieval/ranking.go", promptOut.Prompt)
+	assert.Containsf(t, promptOut.Prompt,
+		"internal/retrieval/ranking_test.go", "prompt missing prior evidence %q:\n%s", "internal/retrieval/ranking_test.go", promptOut.Prompt)
+
+	require.NotNilf(t, taskAdvisoryFileByPath(promptOut.PriorSliceEvidence, "internal/retrieval/ranking_test.go"),
+		"prompt json missing prior test evidence: %#v", promptOut.PriorSliceEvidence)
+	assert.Nilf(t, taskAdvisoryFileByPath(promptOut.PriorSliceEvidence, ".devspecs/tasks/prior-slice-evidence-test/A00-index.md"),
+		"prompt evidence should filter task workspace paths: %#v", promptOut.PriorSliceEvidence)
+
 }
 
 func TestTask_PreflightFiltersTaskWorkspaceCandidates(t *testing.T) {
@@ -1073,16 +1358,80 @@ func TestTask_PreflightFiltersTaskWorkspaceCandidates(t *testing.T) {
 		{Path: "C:/repo/.devspecs/tasks/task-one/A01-plan.md"},
 		{Path: "C:/repo/devspecs/tasks/task-one/A01-plan.md"},
 	})
-	if len(got) != 1 || got[0].Path != "internal/retrieval/ranking.go" {
-		t.Fatalf("filtered candidates = %#v", got)
-	}
+	require.Len(t, got, 1)
+	assert.Equal(t, "internal/retrieval/ranking.go", got[0].Path)
+
 }
 
-func TestTask_LifecycleAutoDetectsLegacyWorkspace(t *testing.T) {
-	repoDir := setupTaskCommandRepo(t)
+func TestTaskStatusAutoDetectsLegacyWorkspace(t *testing.T) {
+	setupLegacyTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"status", "legacy-compat", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
 
-	startCmd := NewTaskCmd()
-	startCmd.SetArgs([]string{
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskStatusOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "legacy-compat", out.TaskID)
+	require.Len(t, out.Slices, 1)
+}
+
+func TestTaskShowAutoDetectsLegacyWorkspaceByTarget(t *testing.T) {
+	setupLegacyTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"show", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskTargetOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "legacy-compat", out.TaskID)
+	assert.Equal(t, "A01", out.Target)
+	assert.Contains(t, filepath.ToSlash(out.Workspace), ".devspecs/tasks/legacy-compat")
+}
+
+func TestTaskCheckpointAutoDetectsLegacyWorkspace(t *testing.T) {
+	setupLegacyTask(t)
+	cmd := newLegacyCheckpointCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskCheckpointOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Contains(t, filepath.ToSlash(out.CheckpointPath), ".devspecs/tasks/legacy-compat")
+}
+
+func TestTaskEvaluateAutoDetectsLegacyWorkspace(t *testing.T) {
+	repoDir := setupLegacyTask(t)
+	checkpointLegacyTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"evaluate", "legacy-compat", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskEvaluationOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "legacy-compat", out.TaskID)
+	require.FileExists(t, filepath.Join(repoDir, ".devspecs", "tasks", "legacy-compat", taskManifestFilename))
+}
+
+func setupLegacyTask(t *testing.T) string {
+	t.Helper()
+	repoDir := setupTaskCommandRepo(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
 		"--dir", ".devspecs/tasks",
 		"--id", "legacy-compat",
 		"--no-refresh",
@@ -1091,46 +1440,14 @@ func TestTask_LifecycleAutoDetectsLegacyWorkspace(t *testing.T) {
 		"--slice", "legacy first slice",
 		"legacy task compatibility",
 	})
-	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+	return repoDir
+}
 
-	statusCmd := NewTaskCmd()
-	statusCmd.SetArgs([]string{"status", "legacy-compat", "--json"})
-	statusBuf := &bytes.Buffer{}
-	statusCmd.SetOut(statusBuf)
-	if err := statusCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var statusOut taskStatusOutput
-	if err := json.Unmarshal(statusBuf.Bytes(), &statusOut); err != nil {
-		t.Fatalf("status json: %v\n%s", err, statusBuf.String())
-	}
-	if statusOut.TaskID != "legacy-compat" || len(statusOut.Slices) != 1 {
-		t.Fatalf("legacy status output = %#v", statusOut)
-	}
-
-	showCmd := NewTaskCmd()
-	showCmd.SetArgs([]string{"show", "A01", "--json"})
-	showBuf := &bytes.Buffer{}
-	showCmd.SetOut(showBuf)
-	if err := showCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var showOut taskTargetOutput
-	if err := json.Unmarshal(showBuf.Bytes(), &showOut); err != nil {
-		t.Fatalf("show json: %v\n%s", err, showBuf.String())
-	}
-	if showOut.TaskID != "legacy-compat" || showOut.Target != "A01" {
-		t.Fatalf("legacy show target output = %#v", showOut)
-	}
-	if !strings.Contains(filepath.ToSlash(showOut.Workspace), ".devspecs/tasks/legacy-compat") {
-		t.Fatalf("legacy workspace was not resolved: %q", showOut.Workspace)
-	}
-
-	checkpointCmd := NewTaskCmd()
-	checkpointCmd.SetArgs([]string{
+func newLegacyCheckpointCmd() *cobra.Command {
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
 		"checkpoint", "legacy-compat",
 		"--slice", "A01",
 		"--stage", "validated",
@@ -1139,83 +1456,64 @@ func TestTask_LifecycleAutoDetectsLegacyWorkspace(t *testing.T) {
 		"--index=false",
 		"--json",
 	})
-	checkpointBuf := &bytes.Buffer{}
-	checkpointCmd.SetOut(checkpointBuf)
-	if err := checkpointCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var checkpointOut taskCheckpointOutput
-	if err := json.Unmarshal(checkpointBuf.Bytes(), &checkpointOut); err != nil {
-		t.Fatalf("checkpoint json: %v\n%s", err, checkpointBuf.String())
-	}
-	if !strings.Contains(filepath.ToSlash(checkpointOut.CheckpointPath), ".devspecs/tasks/legacy-compat") {
-		t.Fatalf("legacy checkpoint path was not resolved: %#v", checkpointOut)
-	}
+	return cmd
+}
 
-	evaluateCmd := NewTaskCmd()
-	evaluateCmd.SetArgs([]string{"evaluate", "legacy-compat", "--json"})
-	evaluateBuf := &bytes.Buffer{}
-	evaluateCmd.SetOut(evaluateBuf)
-	if err := evaluateCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var evaluateOut taskEvaluationOutput
-	if err := json.Unmarshal(evaluateBuf.Bytes(), &evaluateOut); err != nil {
-		t.Fatalf("evaluate json: %v\n%s", err, evaluateBuf.String())
-	}
-	if evaluateOut.TaskID != "legacy-compat" {
-		t.Fatalf("legacy evaluate output = %#v", evaluateOut)
-	}
-
-	if _, err := os.Stat(filepath.Join(repoDir, ".devspecs", "tasks", "legacy-compat", taskManifestFilename)); err != nil {
-		t.Fatalf("legacy manifest missing: %v", err)
-	}
+func checkpointLegacyTask(t *testing.T) {
+	t.Helper()
+	cmd := newLegacyCheckpointCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
 }
 
 func TestTask_StartSkipsUnrelatedCheckpointFactRiskCards(t *testing.T) {
 	repoDir := setupTaskCommandRepo(t)
 	db, err := openDB()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 	repoID := taskTestRepoID(t, db, repoDir)
 	now := "2026-06-07T00:00:00Z"
-	if err := db.UpsertTaskCheckpointFact(store.TaskCheckpointFact{
-		RepoID:             repoID,
-		TaskID:             "prior-unrelated-task",
-		CheckpointID:       "cp_unrelated",
-		Target:             "A01",
-		Series:             "A",
-		Stage:              "implemented",
-		Decision:           "improve",
-		CheckpointPath:     "checkpoints/unrelated.md",
-		CheckpointJSONPath: "checkpoints/unrelated.json",
-		CreatedAt:          now,
-		ActualContextJSON:  `{}`,
-		FeedbackJSON:       `{"critical_missed":["services/billing/webhook_test.go"]}`,
-		EvidenceJSON:       `{}`,
-		LearningsJSON:      `[]`,
-		NextJSON:           `{}`,
-		IndexedAt:          now,
-	}); err != nil {
-		t.Fatal(err)
+	{
+		err := db.UpsertTaskCheckpointFact(store.TaskCheckpointFact{
+			RepoID:             repoID,
+			TaskID:             "prior-unrelated-task",
+			CheckpointID:       "cp_unrelated",
+			Target:             "A01",
+			Series:             "A",
+			Stage:              "implemented",
+			Decision:           "improve",
+			CheckpointPath:     "checkpoints/unrelated.md",
+			CheckpointJSONPath: "checkpoints/unrelated.json",
+			CreatedAt:          now,
+			ActualContextJSON:  `{}`,
+			FeedbackJSON:       `{"critical_missed":["services/billing/webhook_test.go"]}`,
+			EvidenceJSON:       `{}`,
+			LearningsJSON:      `[]`,
+			NextJSON:           `{}`,
+			IndexedAt:          now,
+		})
+		require.NoError(t, err)
 	}
 
 	cmd := NewTaskCmd()
 	cmd.SetArgs([]string{"--id", "unrelated-risk-card-test", "--no-refresh", "--index=false", "--json", "improve test companion recall"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var out taskStartOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("task json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"task json: %v\n%s", err, buf.String())
 	}
-	if taskRiskCardByID(out.RiskCards, "prior-test-miss") != nil || taskRiskCardByID(out.RiskCards, "prior-critical-miss") != nil {
-		t.Fatalf("unrelated fact should not create miss risk cards: %#v", out.RiskCards)
-	}
+	assert.Nil(t, taskRiskCardByID(out.RiskCards, "prior-test-miss"))
+	assert.Nil(t, taskRiskCardByID(out.RiskCards, "prior-critical-miss"))
+
 }
 
 func TestTask_RiskCardsUseQueryMatchedLearningWhenPredictedContextWeak(t *testing.T) {
@@ -1225,12 +1523,10 @@ func TestTask_RiskCardsUseQueryMatchedLearningWhenPredictedContextWeak(t *testin
 		FeedbackJSON:  `{"critical_missed":["internal/invoice/pricing_test.go"]}`,
 		LearningsJSON: `[{"learning_type":"validation_gap","summary":"discount rounding needed an explicit package test","evidence_refs":["internal/invoice/pricing_test.go"],"applies_to":"internal/invoice","confidence":"high"}]`,
 	}})
-	if taskRiskCardByID(cards, "prior-test-miss") == nil {
-		t.Fatalf("expected query-matched prior-test-miss card, got %#v", cards)
-	}
-	if taskRiskCardByID(cards, "validation-gap") == nil {
-		t.Fatalf("expected validation-gap card, got %#v", cards)
-	}
+	require.NotNilf(t, taskRiskCardByID(cards, "prior-test-miss"),
+		"expected query-matched prior-test-miss card, got %#v", cards)
+	require.NotNilf(t, taskRiskCardByID(cards, "validation-gap"),
+		"expected validation-gap card, got %#v", cards)
 
 	unrelated := taskRiskCardsFromCheckpointFacts("fix discount rounding", taskPredictedContext{}, []store.TaskCheckpointFact{{
 		TaskID:        "prior-billing-task",
@@ -1238,9 +1534,9 @@ func TestTask_RiskCardsUseQueryMatchedLearningWhenPredictedContextWeak(t *testin
 		FeedbackJSON:  `{"critical_missed":["services/billing/webhook_test.go"]}`,
 		LearningsJSON: `[{"learning_type":"validation_gap","summary":"webhook retries needed a package test","evidence_refs":["services/billing/webhook_test.go"],"applies_to":"services/billing","confidence":"high"}]`,
 	}})
-	if taskRiskCardByID(unrelated, "prior-test-miss") != nil {
-		t.Fatalf("unrelated query learning should not create prior-test-miss: %#v", unrelated)
-	}
+	assert.Nilf(t, taskRiskCardByID(unrelated, "prior-test-miss"),
+		"unrelated query learning should not create prior-test-miss: %#v", unrelated)
+
 }
 
 func TestTask_StartBootstrapsRepeatedSlices(t *testing.T) {
@@ -1257,72 +1553,376 @@ func TestTask_StartBootstrapsRepeatedSlices(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
 
 	var out taskStartOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("task json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"task json: %v\n%s", err, buf.String())
 	}
-	if len(out.Slices) != 2 {
-		t.Fatalf("expected two slices, got %#v", out.Slices)
-	}
-	wantPlans := []string{
-		"A01-scout-current-workflow-plan.md",
-		"A02-tighten-checkpoint-evidence-plan.md",
-	}
-	wantResults := []string{
-		"A01-scout-current-workflow-result.md",
-		"A02-tighten-checkpoint-evidence-result.md",
-	}
-	for i, slice := range out.Slices {
-		if filepath.Base(slice.PlanPath) != wantPlans[i] {
-			t.Fatalf("slice %d plan = %q", i, slice.PlanPath)
-		}
-		if filepath.Base(slice.ResultPath) != wantResults[i] {
-			t.Fatalf("slice %d result = %q", i, slice.ResultPath)
-		}
-		for _, path := range []string{slice.PlanPath, slice.ResultPath} {
-			if _, err := os.Stat(path); err != nil {
-				t.Fatalf("expected %s: %v", path, err)
-			}
-		}
-	}
-	if filepath.Base(out.FirstSlicePath) != wantPlans[0] || filepath.Base(out.ResultPath) != wantResults[0] {
-		t.Fatalf("first slice aliases did not point at A01: %#v", out)
-	}
+	require.Lenf(t, out.Slices, 2,
+		"expected two slices, got %#v", out.Slices)
+
+	assert.Equal(t, "A01-scout-current-workflow-plan.md", filepath.Base(out.Slices[0].PlanPath))
+	assert.Equal(t, "A01-scout-current-workflow-result.md", filepath.Base(out.Slices[0].ResultPath))
+	assert.Equal(t, "A02-tighten-checkpoint-evidence-plan.md", filepath.Base(out.Slices[1].PlanPath))
+	assert.Equal(t, "A02-tighten-checkpoint-evidence-result.md", filepath.Base(out.Slices[1].ResultPath))
+
+	_, err := os.Stat(out.Slices[0].PlanPath)
+	require.NoError(t, err)
+	_, err = os.Stat(out.Slices[0].ResultPath)
+	require.NoError(t, err)
+	_, err = os.Stat(out.Slices[1].PlanPath)
+	require.NoError(t, err)
+	_, err = os.Stat(out.Slices[1].ResultPath)
+	require.NoError(t, err)
+
+	assert.Equal(t, "A01-scout-current-workflow-plan.md", filepath.Base(out.FirstSlicePath))
+	assert.Equal(t, "A01-scout-current-workflow-result.md", filepath.Base(out.ResultPath))
 
 	var manifest taskManifest
-	if err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest); err != nil {
-		t.Fatalf("manifest json: %v", err)
+	{
+		err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest)
+		require.NoErrorf(t, err,
+			"manifest json: %v", err)
 	}
-	if len(manifest.Artifacts.Slices) != 2 {
-		t.Fatalf("manifest slices = %#v", manifest.Artifacts.Slices)
-	}
-	if manifest.Artifacts.FirstSlice != wantPlans[0] || manifest.Artifacts.Result != wantResults[0] {
-		t.Fatalf("manifest first aliases = %#v", manifest.Artifacts)
-	}
+	require.Lenf(t, manifest.Artifacts.Slices, 2,
+		"manifest slices = %#v", manifest.Artifacts.Slices)
+	assert.Equal(t, "A01-scout-current-workflow-plan.md", manifest.Artifacts.FirstSlice)
+	assert.Equal(t, "A01-scout-current-workflow-result.md", manifest.Artifacts.Result)
+
 	indexBody := mustReadFile(t, out.IndexPath)
-	for _, want := range []string{
+	assert.Containsf(t, indexBody,
 		"## Task Slices",
-		"A01: scout current workflow",
+		"index missing %q:\n%s",
+
+		"## Task Slices", indexBody)
+	assert.Containsf(t, indexBody,
+		"A01: scout current workflow", "index missing %q:\n%s",
+
+		"A01: scout current workflow", indexBody,
+	)
+	assert.Containsf(t, indexBody,
+		"A02: tighten checkpoint evidence", "index missing %q:\n%s",
+
 		"A02: tighten checkpoint evidence",
-	} {
-		if !strings.Contains(indexBody, want) {
-			t.Fatalf("index missing %q:\n%s", want, indexBody)
-		}
-	}
-	if !strings.HasPrefix(out.Workspace, filepath.Join(repoDir, "devspecs", "tasks", "multi-slice-test")) {
-		t.Fatalf("workspace = %q", out.Workspace)
-	}
+		indexBody)
+
+	assert.Truef(t, strings.HasPrefix(out.Workspace, filepath.Join(repoDir, "devspecs", "tasks", "multi-slice-test")),
+		"workspace = %q", out.Workspace)
+
 }
 
-func TestTask_BoundaryPrimitivesResolveOneTarget(t *testing.T) {
+func TestTask_StartWhenPreflightFails_DoesNotCreateWorkspace(t *testing.T) {
 	repoDir := setupTaskCommandRepo(t)
+	workspace := filepath.Join(repoDir, "devspecs", "tasks", "preflight-failure")
+	t.Setenv("DEVSPECS_TASK_PACK_SCOUT_MODE", "invalid")
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "preflight-failure",
+		"--no-refresh",
+		"--index=false",
+		"fail before publishing artifacts",
+	})
+	cmd.SetOut(&bytes.Buffer{})
 
-	startCmd := NewTaskCmd()
-	startCmd.SetArgs([]string{
+	err := cmd.Execute()
+	_, statErr := os.Stat(workspace)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unknown task pack scout mode")
+	assert.True(t, os.IsNotExist(statErr), "workspace should not exist after preflight failure: %v", statErr)
+}
+
+func TestTask_StartWithSixSlices_PublishesEveryArtifactAndReportsIdentity(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	workspace := filepath.Join(repoDir, "devspecs", "tasks", "six-slice-task")
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "six-slice-task",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"--slice", "first boundary",
+		"--slice", "second boundary",
+		"--slice", "third boundary",
+		"--slice", "fourth boundary",
+		"--slice", "fifth boundary",
+		"--slice", "sixth boundary",
+		"publish a durable six-slice task",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+	var out taskStartOutput
+	unmarshalErr := json.Unmarshal(buf.Bytes(), &out)
+	entries, readErr := os.ReadDir(workspace)
+
+	require.NoError(t, err)
+	require.NoError(t, unmarshalErr)
+	require.NoError(t, readErr)
+	assert.Equal(t, "six-slice-task", out.TaskID)
+	assert.Equal(t, workspace, out.Workspace)
+	require.Len(t, out.Slices, 6)
+	assert.Equal(t, "A01", out.Slices[0].ID)
+	assert.Equal(t, "A02", out.Slices[1].ID)
+	assert.Equal(t, "A03", out.Slices[2].ID)
+	assert.Equal(t, "A04", out.Slices[3].ID)
+	assert.Equal(t, "A05", out.Slices[4].ID)
+	assert.Equal(t, "A06", out.Slices[5].ID)
+	require.Len(t, entries, 14)
+	assertTaskArtifactExists(t, out.IndexPath)
+	assertTaskArtifactExists(t, out.ManifestPath)
+	assertTaskArtifactExists(t, out.Slices[0].PlanPath)
+	assertTaskArtifactExists(t, out.Slices[0].ResultPath)
+	assertTaskArtifactExists(t, out.Slices[1].PlanPath)
+	assertTaskArtifactExists(t, out.Slices[1].ResultPath)
+	assertTaskArtifactExists(t, out.Slices[2].PlanPath)
+	assertTaskArtifactExists(t, out.Slices[2].ResultPath)
+	assertTaskArtifactExists(t, out.Slices[3].PlanPath)
+	assertTaskArtifactExists(t, out.Slices[3].ResultPath)
+	assertTaskArtifactExists(t, out.Slices[4].PlanPath)
+	assertTaskArtifactExists(t, out.Slices[4].ResultPath)
+	assertTaskArtifactExists(t, out.Slices[5].PlanPath)
+	assertTaskArtifactExists(t, out.Slices[5].ResultPath)
+}
+
+func TestTask_StartWithForce_ReplacesEmptyWorkspaceWithCompleteArtifacts(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	workspace := filepath.Join(repoDir, "devspecs", "tasks", "empty-workspace")
+	mustMkdirAll(t, workspace)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "empty-workspace",
+		"--force",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"replace an empty workspace",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+	var out taskStartOutput
+	unmarshalErr := json.Unmarshal(buf.Bytes(), &out)
+	entries, readErr := os.ReadDir(workspace)
+
+	require.NoError(t, err)
+	require.NoError(t, unmarshalErr)
+	require.NoError(t, readErr)
+	assert.Equal(t, "empty-workspace", out.TaskID)
+	assert.Equal(t, workspace, out.Workspace)
+	require.Len(t, entries, 4)
+	assertTaskArtifactExists(t, out.IndexPath)
+	assertTaskArtifactExists(t, out.FirstSlicePath)
+	assertTaskArtifactExists(t, out.ResultPath)
+	assertTaskArtifactExists(t, out.ManifestPath)
+}
+
+func TestTask_StartWhenHumanOutputFails_ReturnsErrorWithDurableWorkspaceIdentity(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	workspace := filepath.Join(repoDir, "devspecs", "tasks", "output-failure")
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "output-failure",
+		"--no-refresh",
+		"--index=false",
+		"create before reporting success",
+	})
+	cmd.SetOut(taskFailingWriter{})
+
+	err := cmd.Execute()
+	entries, readErr := os.ReadDir(workspace)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "task output-failure was created")
+	assert.ErrorContains(t, err, workspace)
+	assert.ErrorIs(t, err, errTaskOutputClosed)
+	require.NoError(t, readErr)
+	require.Len(t, entries, 4)
+}
+
+func TestTask_StartWhenJSONOutputIsShort_ReturnsErrorWithDurableWorkspaceIdentity(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	workspace := filepath.Join(repoDir, "devspecs", "tasks", "short-json-output")
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "short-json-output",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"create before reporting JSON success",
+	})
+	cmd.SetOut(taskShortWriter{})
+
+	err := cmd.Execute()
+	entries, readErr := os.ReadDir(workspace)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "task short-json-output was created")
+	assert.ErrorContains(t, err, workspace)
+	assert.ErrorIs(t, err, io.ErrShortWrite)
+	require.NoError(t, readErr)
+	require.Len(t, entries, 4)
+}
+
+func TestPublishTaskWorkspace_WhenArtifactPathEscapesStaging_ReturnsErrorWithoutFinalWorkspace(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "tasks", "invalid-artifact")
+	files := map[string][]byte{
+		"../outside.md": []byte("must not escape"),
+	}
+
+	err := publishTaskWorkspace(t.Context(), workspace, false, files)
+	_, statErr := os.Stat(workspace)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "invalid task artifact path")
+	assert.True(t, os.IsNotExist(statErr), "workspace should not exist after staged write failure: %v", statErr)
+}
+
+var errTaskOutputClosed = errors.New("task output is closed")
+
+type taskFailingWriter struct{}
+
+func (taskFailingWriter) Write([]byte) (int, error) {
+	return 0, errTaskOutputClosed
+}
+
+type taskShortWriter struct{}
+
+func (taskShortWriter) Write(p []byte) (int, error) {
+	return len(p) - 1, nil
+}
+
+func assertTaskArtifactExists(t *testing.T, path string) {
+	t.Helper()
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.True(t, info.Mode().IsRegular())
+	assert.Positive(t, info.Size())
+}
+
+func TestTaskNextResolvesFirstPendingBoundary(t *testing.T) {
+	setupBoundaryTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"next", "boundary-test", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskTargetOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "A01", out.Target)
+	assert.True(t, containsString(out.SiblingTargets, "A02"))
+}
+
+func TestTaskPromptBoundsWorkToResolvedTarget(t *testing.T) {
+	setupBoundaryTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"prompt", "boundary-test", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskPromptOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Contains(t, out.Prompt, "target A01 only")
+	assert.Contains(t, out.Prompt, "must_not_implement")
+	assert.Contains(t, out.Prompt, "- A02")
+	assert.Contains(t, out.Prompt, "Do not implement sibling slices")
+	assert.Contains(t, out.Prompt, "Checklist edits are useful notes")
+	assert.Contains(t, out.Prompt, "Completion contract:")
+	assert.Contains(t, out.Prompt, "Evidence for decision")
+	assert.Contains(t, out.Prompt, "Next iteration")
+}
+
+func TestTaskStartDefaultsToFirstPendingBoundary(t *testing.T) {
+	setupBoundaryTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"start", "boundary-test", "--index=false", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskDecideOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "A01", out.Target)
+	assert.Equal(t, "started", out.Stage)
+	assert.Equal(t, "continue", out.Decision)
+}
+
+func TestTaskFinishCompletesFirstBoundaryWithoutRewritingIndex(t *testing.T) {
+	repoDir := setupBoundaryTask(t)
+	startBoundaryTarget(t)
+	indexPath := filepath.Join(repoDir, "devspecs", "tasks", "boundary-test", "A00-index.md")
+	authoredIndexBody := mustReadFile(t, indexPath) + "\n## Human Master Notes\n\nKeep this richer A00 content intact.\n"
+	mustWriteFile(t, indexPath, authoredIndexBody)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"finish", "boundary-test", "--decision", "promote", "--index=false", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskDecideOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "A01", out.Target)
+	assert.Equal(t, "completed", out.Stage)
+	assert.Equal(t, "promote", out.Decision)
+	assert.Equal(t, authoredIndexBody, mustReadFile(t, indexPath))
+}
+
+func TestTaskNextAdvancesAfterFirstBoundaryFinishes(t *testing.T) {
+	setupBoundaryTask(t)
+	startBoundaryTarget(t)
+	finishBoundaryTarget(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"next", "boundary-test", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskTargetOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "A02", out.Target)
+}
+
+func TestTaskShowResolvesExplicitBoundary(t *testing.T) {
+	setupBoundaryTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"show", "boundary-test", "--target", "A02", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskTargetOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "A02", out.Target)
+	assert.Contains(t, out.PlanBody, "second bounded slice")
+}
+
+func setupBoundaryTask(t *testing.T) string {
+	t.Helper()
+	repoDir := setupTaskCommandRepo(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
 		"--id", "boundary-test",
 		"--no-refresh",
 		"--index=false",
@@ -1331,125 +1931,101 @@ func TestTask_BoundaryPrimitivesResolveOneTarget(t *testing.T) {
 		"--slice", "second bounded slice",
 		"task boundary primitives",
 	})
-	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-
-	nextCmd := NewTaskCmd()
-	nextCmd.SetArgs([]string{"next", "boundary-test", "--json"})
-	nextBuf := &bytes.Buffer{}
-	nextCmd.SetOut(nextBuf)
-	if err := nextCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var nextOut taskTargetOutput
-	if err := json.Unmarshal(nextBuf.Bytes(), &nextOut); err != nil {
-		t.Fatalf("next json: %v\n%s", err, nextBuf.String())
-	}
-	if nextOut.Target != "A01" || !containsString(nextOut.SiblingTargets, "A02") {
-		t.Fatalf("next output = %#v", nextOut)
-	}
-
-	promptCmd := NewTaskCmd()
-	promptCmd.SetArgs([]string{"prompt", "boundary-test", "--json"})
-	promptBuf := &bytes.Buffer{}
-	promptCmd.SetOut(promptBuf)
-	if err := promptCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var promptOut taskPromptOutput
-	if err := json.Unmarshal(promptBuf.Bytes(), &promptOut); err != nil {
-		t.Fatalf("prompt json: %v\n%s", err, promptBuf.String())
-	}
-	for _, want := range []string{
-		"target A01 only",
-		"must_not_implement",
-		"- A02",
-		"Do not implement sibling slices",
-		"Checklist edits are useful notes",
-		"Completion contract:",
-		"Evidence for decision",
-		"Next iteration",
-	} {
-		if !strings.Contains(promptOut.Prompt, want) {
-			t.Fatalf("prompt missing %q:\n%s", want, promptOut.Prompt)
-		}
-	}
-
-	startTargetCmd := NewTaskCmd()
-	startTargetCmd.SetArgs([]string{"start", "boundary-test", "--index=false", "--json"})
-	startTargetBuf := &bytes.Buffer{}
-	startTargetCmd.SetOut(startTargetBuf)
-	if err := startTargetCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var startTargetOut taskDecideOutput
-	if err := json.Unmarshal(startTargetBuf.Bytes(), &startTargetOut); err != nil {
-		t.Fatalf("start target json: %v\n%s", err, startTargetBuf.String())
-	}
-	if startTargetOut.Target != "A01" || startTargetOut.Stage != "started" || startTargetOut.Decision != "continue" {
-		t.Fatalf("start target output = %#v", startTargetOut)
-	}
-
-	indexPath := filepath.Join(repoDir, "devspecs", "tasks", "boundary-test", "A00-index.md")
-	authoredIndexBody := mustReadFile(t, indexPath) + "\n## Human Master Notes\n\nKeep this richer A00 content intact.\n"
-	mustWriteFile(t, indexPath, authoredIndexBody)
-
-	finishCmd := NewTaskCmd()
-	finishCmd.SetArgs([]string{"finish", "boundary-test", "--decision", "promote", "--index=false", "--json"})
-	finishBuf := &bytes.Buffer{}
-	finishCmd.SetOut(finishBuf)
-	if err := finishCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var finishOut taskDecideOutput
-	if err := json.Unmarshal(finishBuf.Bytes(), &finishOut); err != nil {
-		t.Fatalf("finish json: %v\n%s", err, finishBuf.String())
-	}
-	if finishOut.Target != "A01" || finishOut.Stage != "completed" || finishOut.Decision != "promote" {
-		t.Fatalf("finish output = %#v", finishOut)
-	}
-	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
-		t.Fatalf("finish rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
-	}
-
-	nextAfterCmd := NewTaskCmd()
-	nextAfterCmd.SetArgs([]string{"next", "boundary-test", "--json"})
-	nextAfterBuf := &bytes.Buffer{}
-	nextAfterCmd.SetOut(nextAfterBuf)
-	if err := nextAfterCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var nextAfter taskTargetOutput
-	if err := json.Unmarshal(nextAfterBuf.Bytes(), &nextAfter); err != nil {
-		t.Fatalf("next after json: %v\n%s", err, nextAfterBuf.String())
-	}
-	if nextAfter.Target != "A02" {
-		t.Fatalf("next after finish = %#v", nextAfter)
-	}
-
-	showCmd := NewTaskCmd()
-	showCmd.SetArgs([]string{"show", "boundary-test", "--target", "A02", "--json"})
-	showBuf := &bytes.Buffer{}
-	showCmd.SetOut(showBuf)
-	if err := showCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var showOut taskTargetOutput
-	if err := json.Unmarshal(showBuf.Bytes(), &showOut); err != nil {
-		t.Fatalf("show json: %v\n%s", err, showBuf.String())
-	}
-	if showOut.Target != "A02" || !strings.Contains(showOut.PlanBody, "second bounded slice") {
-		t.Fatalf("show output = %#v", showOut)
-	}
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+	return repoDir
 }
 
-func TestTask_TargetAddressingResolvesUniqueSlice(t *testing.T) {
-	setupTaskCommandRepo(t)
+func startBoundaryTarget(t *testing.T) {
+	t.Helper()
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"start", "boundary-test", "--index=false", "--json"})
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+}
 
-	startCmd := NewTaskCmd()
-	startCmd.SetArgs([]string{
+func finishBoundaryTarget(t *testing.T) {
+	t.Helper()
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"finish", "boundary-test", "--decision", "promote", "--index=false", "--json"})
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+}
+
+func TestTaskShowResolvesUniqueSliceTarget(t *testing.T) {
+	setupTargetAddressTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"show", "A02", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskTargetOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "target-address-test", out.TaskID)
+	assert.Equal(t, "A02", out.Target)
+	assert.True(t, containsString(out.SiblingTargets, "A01"))
+}
+
+func TestTaskPromptResolvesUniqueSliceTarget(t *testing.T) {
+	setupTargetAddressTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"prompt", "A02", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskPromptOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Contains(t, out.Prompt, "task target-address-test target A02 only")
+	assert.Contains(t, out.Prompt, "Checklist edits are useful notes")
+	assert.Contains(t, out.Prompt, "Completion contract:")
+}
+
+func TestTaskStartResolvesUniqueSliceTarget(t *testing.T) {
+	setupTargetAddressTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"start", "A02", "--index=false", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskDecideOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "target-address-test", out.TaskID)
+	assert.Equal(t, "A02", out.Target)
+	assert.Equal(t, "started", out.Stage)
+}
+
+func TestTaskFinishResolvesUniqueSliceTarget(t *testing.T) {
+	setupTargetAddressTask(t)
+	startTargetAddressSlice(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"finish", "A02", "--decision", "promote", "--index=false", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskDecideOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "target-address-test", out.TaskID)
+	assert.Equal(t, "A02", out.Target)
+	assert.Equal(t, "promote", out.Decision)
+}
+
+func setupTargetAddressTask(t *testing.T) {
+	t.Helper()
+	setupTaskCommandRepo(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
 		"--id", "target-address-test",
 		"--no-refresh",
 		"--index=false",
@@ -1458,99 +2034,39 @@ func TestTask_TargetAddressingResolvesUniqueSlice(t *testing.T) {
 		"--slice", "second target slice",
 		"task target addressing",
 	})
-	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+}
 
-	showCmd := NewTaskCmd()
-	showCmd.SetArgs([]string{"show", "A02", "--json"})
-	showBuf := &bytes.Buffer{}
-	showCmd.SetOut(showBuf)
-	if err := showCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var showOut taskTargetOutput
-	if err := json.Unmarshal(showBuf.Bytes(), &showOut); err != nil {
-		t.Fatalf("show json: %v\n%s", err, showBuf.String())
-	}
-	if showOut.TaskID != "target-address-test" || showOut.Target != "A02" {
-		t.Fatalf("show resolved wrong target: %#v", showOut)
-	}
-	if !containsString(showOut.SiblingTargets, "A01") {
-		t.Fatalf("show sibling targets = %#v", showOut.SiblingTargets)
-	}
-
-	promptCmd := NewTaskCmd()
-	promptCmd.SetArgs([]string{"prompt", "A02", "--json"})
-	promptBuf := &bytes.Buffer{}
-	promptCmd.SetOut(promptBuf)
-	if err := promptCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var promptOut taskPromptOutput
-	if err := json.Unmarshal(promptBuf.Bytes(), &promptOut); err != nil {
-		t.Fatalf("prompt json: %v\n%s", err, promptBuf.String())
-	}
-	for _, want := range []string{
-		"task target-address-test target A02 only",
-		"Checklist edits are useful notes",
-		"Completion contract:",
-	} {
-		if !strings.Contains(promptOut.Prompt, want) {
-			t.Fatalf("prompt missing %q:\n%s", want, promptOut.Prompt)
-		}
-	}
-
-	startTargetCmd := NewTaskCmd()
-	startTargetCmd.SetArgs([]string{"start", "A02", "--index=false", "--json"})
-	startTargetBuf := &bytes.Buffer{}
-	startTargetCmd.SetOut(startTargetBuf)
-	if err := startTargetCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var startTargetOut taskDecideOutput
-	if err := json.Unmarshal(startTargetBuf.Bytes(), &startTargetOut); err != nil {
-		t.Fatalf("start json: %v\n%s", err, startTargetBuf.String())
-	}
-	if startTargetOut.TaskID != "target-address-test" || startTargetOut.Target != "A02" || startTargetOut.Stage != "started" {
-		t.Fatalf("start resolved wrong target: %#v", startTargetOut)
-	}
-
-	finishCmd := NewTaskCmd()
-	finishCmd.SetArgs([]string{"finish", "A02", "--decision", "promote", "--index=false", "--json"})
-	finishBuf := &bytes.Buffer{}
-	finishCmd.SetOut(finishBuf)
-	if err := finishCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var finishOut taskDecideOutput
-	if err := json.Unmarshal(finishBuf.Bytes(), &finishOut); err != nil {
-		t.Fatalf("finish json: %v\n%s", err, finishBuf.String())
-	}
-	if finishOut.TaskID != "target-address-test" || finishOut.Target != "A02" || finishOut.Decision != "promote" {
-		t.Fatalf("finish resolved wrong target: %#v", finishOut)
-	}
+func startTargetAddressSlice(t *testing.T) {
+	t.Helper()
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"start", "A02", "--index=false", "--json"})
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
 }
 
 func TestTask_TargetAddressingRequiresUnambiguousSlice(t *testing.T) {
 	setupTaskCommandRepo(t)
-
-	for _, taskID := range []string{"ambiguous-target-a", "ambiguous-target-b"} {
-		startCmd := NewTaskCmd()
-		startCmd.SetArgs([]string{
-			"--id", taskID,
-			"--series", "A",
-			"--no-refresh",
-			"--index=false",
-			"--json",
-			"--slice", "shared first slice",
-			"task target ambiguity",
-		})
-		startCmd.SetOut(&bytes.Buffer{})
-		if err := startCmd.Execute(); err != nil {
-			t.Fatal(err)
-		}
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{"--id",
+		"ambiguous-target-a", "--series", "A", "--no-refresh", "--index=false",
+		"--json", "--slice", "shared first slice", "task target ambiguity",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	{
+		err := startCmd.Execute()
+		require.NoError(t, err)
+	}
+	secondStartCmd := NewTaskCmd()
+	secondStartCmd.SetArgs([]string{"--id",
+		"ambiguous-target-b", "--series", "A", "--no-refresh", "--index=false",
+		"--json", "--slice", "shared first slice", "task target ambiguity",
+	})
+	secondStartCmd.SetOut(&bytes.Buffer{})
+	{
+		err := secondStartCmd.Execute()
+		require.NoError(t, err)
 	}
 
 	showCmd := NewTaskCmd()
@@ -1558,40 +2074,77 @@ func TestTask_TargetAddressingRequiresUnambiguousSlice(t *testing.T) {
 	showCmd.SetOut(&bytes.Buffer{})
 	showCmd.SetErr(&bytes.Buffer{})
 	err := showCmd.Execute()
-	if err == nil {
-		t.Fatal("expected ambiguous target error")
-	}
-	for _, want := range []string{
+	require.Error(t, err,
+		"expected ambiguous target error")
+	assert.Containsf(t, err.Error(),
 		"ambiguous task target",
+		"ambiguous error missing %q: %v",
+
+		"ambiguous task target", err)
+	assert.Containsf(t, err.Error(),
 		"ambiguous-target-a:A01",
+		"ambiguous error missing %q: %v",
+
+		"ambiguous-target-a:A01", err)
+	assert.Containsf(t, err.Error(),
 		"ambiguous-target-b:A01",
+		"ambiguous error missing %q: %v",
+
+		"ambiguous-target-b:A01", err)
+	assert.Containsf(t, err.Error(),
+		"use a task id with --target", "ambiguous error missing %q: %v",
+
 		"use a task id with --target",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("ambiguous error missing %q: %v", want, err)
-		}
-	}
+		err)
+
 }
 
-func TestTask_NextTaskAlphaSeriesRollovers(t *testing.T) {
-	tests := []struct {
-		in   string
-		want string
-	}{
-		{in: "", want: "A"},
-		{in: "A", want: "B"},
-		{in: "Y", want: "Z"},
-		{in: "Z", want: "AA"},
-		{in: "AA", want: "AB"},
-		{in: "AZ", want: "BA"},
-		{in: "ZZ", want: "AAA"},
-		{in: "AAA", want: "AAB"},
-	}
-	for _, tt := range tests {
-		if got := nextTaskAlphaSeries(tt.in); got != tt.want {
-			t.Fatalf("nextTaskAlphaSeries(%q) = %q, want %q", tt.in, got, tt.want)
-		}
-	}
+func TestNextTaskAlphaSeriesFromEmptyReturnsA(t *testing.T) {
+	actual := nextTaskAlphaSeries("")
+
+	assert.Equal(t, "A", actual)
+}
+
+func TestNextTaskAlphaSeriesFromAReturnsB(t *testing.T) {
+	actual := nextTaskAlphaSeries("A")
+
+	assert.Equal(t, "B", actual)
+}
+
+func TestNextTaskAlphaSeriesFromYReturnsZ(t *testing.T) {
+	actual := nextTaskAlphaSeries("Y")
+
+	assert.Equal(t, "Z", actual)
+}
+
+func TestNextTaskAlphaSeriesFromZReturnsAA(t *testing.T) {
+	actual := nextTaskAlphaSeries("Z")
+
+	assert.Equal(t, "AA", actual)
+}
+
+func TestNextTaskAlphaSeriesFromAAReturnsAB(t *testing.T) {
+	actual := nextTaskAlphaSeries("AA")
+
+	assert.Equal(t, "AB", actual)
+}
+
+func TestNextTaskAlphaSeriesFromAZReturnsBA(t *testing.T) {
+	actual := nextTaskAlphaSeries("AZ")
+
+	assert.Equal(t, "BA", actual)
+}
+
+func TestNextTaskAlphaSeriesFromZZReturnsAAA(t *testing.T) {
+	actual := nextTaskAlphaSeries("ZZ")
+
+	assert.Equal(t, "AAA", actual)
+}
+
+func TestNextTaskAlphaSeriesFromAAAReturnsAAB(t *testing.T) {
+	actual := nextTaskAlphaSeries("AAA")
+
+	assert.Equal(t, "AAB", actual)
 }
 
 func TestTask_StartAutoIncrementsDefaultSeries(t *testing.T) {
@@ -1609,23 +2162,24 @@ func TestTask_StartAutoIncrementsDefaultSeries(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
 
 	var out taskStartOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("task json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"task json: %v\n%s", err, buf.String())
 	}
-	if out.Series != "B" {
-		t.Fatalf("series = %q", out.Series)
-	}
-	if filepath.Base(out.IndexPath) != "B00-index.md" {
-		t.Fatalf("index path = %q", out.IndexPath)
-	}
-	if len(out.Slices) != 1 || out.Slices[0].ID != "B01" {
-		t.Fatalf("slices = %#v", out.Slices)
-	}
+	assert.Equalf(t, "B", out.Series,
+		"series = %q", out.Series)
+	assert.Equalf(t, "B00-index.md", filepath.Base(out.IndexPath),
+		"index path = %q", out.IndexPath)
+	require.Len(t, out.Slices, 1)
+	assert.Equal(t, "B01", out.Slices[0].ID)
+
 }
 
 func TestTask_StartAutoSeriesSeesLegacyWorkspace(t *testing.T) {
@@ -1641,8 +2195,9 @@ func TestTask_StartAutoSeriesSeesLegacyWorkspace(t *testing.T) {
 		"legacy series a",
 	})
 	legacyCmd.SetOut(&bytes.Buffer{})
-	if err := legacyCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := legacyCmd.Execute()
+		require.NoError(t, err)
 	}
 
 	cmd := NewTaskCmd()
@@ -1655,78 +2210,70 @@ func TestTask_StartAutoSeriesSeesLegacyWorkspace(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var out taskStartOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("task json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"task json: %v\n%s", err, buf.String())
 	}
-	if out.Series != "B" || filepath.Base(out.IndexPath) != "B00-index.md" {
-		t.Fatalf("expected B after legacy A, got %#v", out)
-	}
+	assert.Equal(t, "B", out.Series)
+	assert.Equal(t, "B00-index.md", filepath.Base(out.IndexPath))
+
 }
 
-func TestTask_StartAutoSeriesRollsPastZAndZZ(t *testing.T) {
-	t.Run("Z to AA", func(t *testing.T) {
-		repoDir := setupTaskCommandRepo(t)
-		writeExistingTaskSeriesRange(t, repoDir, "Z")
-
-		cmd := NewTaskCmd()
-		cmd.SetArgs([]string{
-			"--id", "auto-series-aa",
-			"--no-refresh",
-			"--index=false",
-			"--json",
-			"auto series rolls past z",
-		})
-		buf := &bytes.Buffer{}
-		cmd.SetOut(buf)
-		if err := cmd.Execute(); err != nil {
-			t.Fatal(err)
-		}
-
-		var out taskStartOutput
-		if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-			t.Fatalf("task json: %v\n%s", err, buf.String())
-		}
-		if out.Series != "AA" || filepath.Base(out.IndexPath) != "AA00-index.md" {
-			t.Fatalf("expected AA rollover, got %#v", out)
-		}
-		if len(out.Slices) != 1 || out.Slices[0].ID != "AA01" {
-			t.Fatalf("slices = %#v", out.Slices)
-		}
+func TestTaskStartAutoSeriesRollsFromZToAA(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	writeExistingTaskSeriesRange(t, repoDir, "Z")
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "auto-series-aa",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"auto series rolls past z",
 	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
 
-	t.Run("ZZ to AAA", func(t *testing.T) {
-		repoDir := setupTaskCommandRepo(t)
-		writeExistingTaskSeriesRange(t, repoDir, "ZZ")
+	err := cmd.Execute()
 
-		cmd := NewTaskCmd()
-		cmd.SetArgs([]string{
-			"--id", "auto-series-aaa",
-			"--no-refresh",
-			"--index=false",
-			"--json",
-			"auto series rolls past zz",
-		})
-		buf := &bytes.Buffer{}
-		cmd.SetOut(buf)
-		if err := cmd.Execute(); err != nil {
-			t.Fatal(err)
-		}
+	require.NoError(t, err)
+	var out taskStartOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "AA", out.Series)
+	assert.Equal(t, "AA00-index.md", filepath.Base(out.IndexPath))
+	require.Len(t, out.Slices, 1)
+	assert.Equal(t, "AA01", out.Slices[0].ID)
+}
 
-		var out taskStartOutput
-		if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-			t.Fatalf("task json: %v\n%s", err, buf.String())
-		}
-		if out.Series != "AAA" || filepath.Base(out.IndexPath) != "AAA00-index.md" {
-			t.Fatalf("expected AAA rollover, got %#v", out)
-		}
-		if len(out.Slices) != 1 || out.Slices[0].ID != "AAA01" {
-			t.Fatalf("slices = %#v", out.Slices)
-		}
+func TestTaskStartAutoSeriesRollsFromZZToAAA(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	writeExistingTaskSeriesRange(t, repoDir, "ZZ")
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "auto-series-aaa",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"auto series rolls past zz",
 	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskStartOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "AAA", out.Series)
+	assert.Equal(t, "AAA00-index.md", filepath.Base(out.IndexPath))
+	require.Len(t, out.Slices, 1)
+	assert.Equal(t, "AAA01", out.Slices[0].ID)
 }
 
 func TestTask_StartAutoRefreshesTaskSubstrate(t *testing.T) {
@@ -1738,30 +2285,29 @@ func TestTask_StartAutoRefreshesTaskSubstrate(t *testing.T) {
 	errBuf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	cmd.SetErr(errBuf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
 
 	db, err := openDB()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 	repoID := taskTestRepoID(t, db, repoDir)
 	counts, err := db.CountSourceManifest(repoID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if counts.Files == 0 {
-		t.Fatalf("expected task auto-refresh to populate source manifest, got %#v", counts)
-	}
+	require.NoError(t, err)
+	assert.NotEqualf(t, 0, counts.Files,
+		"expected task auto-refresh to populate source manifest, got %#v", counts)
+
 	var testCases int
-	if err := db.QueryRow("SELECT COUNT(DISTINCT artifact_id) FROM sources WHERE repo_id = ? AND source_type = 'test_case'", repoID).Scan(&testCases); err != nil {
-		t.Fatal(err)
+	{
+		err := db.QueryRow("SELECT COUNT(DISTINCT artifact_id) FROM sources WHERE repo_id = ? AND source_type = 'test_case'", repoID).Scan(&testCases)
+		require.NoError(t, err)
 	}
-	if testCases == 0 {
-		t.Fatal("expected task auto-refresh to index test cases")
-	}
+	assert.NotEqual(t, 0, testCases,
+		"expected task auto-refresh to index test cases")
+
 }
 
 func TestTask_StartGeneratesRequestedSeriesArtifacts(t *testing.T) {
@@ -1780,61 +2326,68 @@ func TestTask_StartGeneratesRequestedSeriesArtifacts(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	startCmd.SetOut(buf)
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := startCmd.Execute()
+		require.NoError(t, err)
 	}
 
 	var out taskStartOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("task json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"task json: %v\n%s", err, buf.String())
 	}
-	if out.Series != "B" {
-		t.Fatalf("series = %q", out.Series)
-	}
-	if filepath.Base(out.IndexPath) != "B00-index.md" {
-		t.Fatalf("index path = %q", out.IndexPath)
-	}
-	wantPlans := []string{
-		"B01-define-lifecycle-model-plan.md",
-		"B02-repair-checkpoint-state-plan.md",
-	}
-	for i, slice := range out.Slices {
-		if slice.ID != strings.TrimSuffix(wantPlans[i], "-"+sanitizeTaskFilename(slice.Title)+"-plan.md") {
-			t.Fatalf("slice %d id = %q", i, slice.ID)
-		}
-		if filepath.Base(slice.PlanPath) != wantPlans[i] {
-			t.Fatalf("slice %d plan = %q", i, slice.PlanPath)
-		}
-	}
+	assert.Equalf(t, "B", out.Series,
+		"series = %q", out.Series)
+	assert.Equalf(t, "B00-index.md", filepath.Base(out.IndexPath),
+		"index path = %q", out.IndexPath)
+
+	require.Len(t, out.Slices, 2)
+	assert.Equal(t, "B01", out.Slices[0].ID)
+	assert.Equal(t, "B01-define-lifecycle-model-plan.md", filepath.Base(out.Slices[0].PlanPath))
+	assert.Equal(t, "B02", out.Slices[1].ID)
+	assert.Equal(t, "B02-repair-checkpoint-state-plan.md", filepath.Base(out.Slices[1].PlanPath))
 
 	var manifest taskManifest
-	if err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest); err != nil {
-		t.Fatalf("manifest json: %v", err)
+	{
+		err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest)
+		require.NoErrorf(t, err,
+			"manifest json: %v", err)
 	}
-	if manifest.Series != "B" || manifest.Artifacts.Series != "B" {
-		t.Fatalf("manifest series fields = %#v", manifest)
-	}
-	if manifest.Artifacts.Index != "B00-index.md" || manifest.Artifacts.FirstSlice != wantPlans[0] {
-		t.Fatalf("manifest artifacts = %#v", manifest.Artifacts)
-	}
-	indexBody := mustReadFile(t, out.IndexPath)
-	for _, want := range []string{
-		"## Series",
-		"B",
-		"B01: define lifecycle model",
-		"B02: repair checkpoint state",
-	} {
-		if !strings.Contains(indexBody, want) {
-			t.Fatalf("B00 missing %q:\n%s", want, indexBody)
-		}
-	}
-	planBody := mustReadFile(t, out.Slices[0].PlanPath)
-	if !strings.Contains(planBody, "`B00-index.md`") {
-		t.Fatalf("B01 plan should reference B00 index:\n%s", planBody)
-	}
+	assert.Equal(t, "B", manifest.Series)
+	assert.Equal(t, "B", manifest.Artifacts.Series)
+	assert.Equal(t, "B00-index.md", manifest.Artifacts.Index)
+	assert.Equal(t, "B01-define-lifecycle-model-plan.md", manifest.Artifacts.FirstSlice)
 
-	checkpointCmd := NewTaskCmd()
-	checkpointCmd.SetArgs([]string{
+	indexBody := mustReadFile(t, out.IndexPath)
+	assert.Containsf(t, indexBody,
+		"## Series", "B00 missing %q:\n%s",
+
+		"## Series", indexBody)
+	assert.Containsf(t, indexBody,
+		"B", "B00 missing %q:\n%s",
+
+		"B", indexBody,
+	)
+	assert.Containsf(t, indexBody,
+		"B01: define lifecycle model", "B00 missing %q:\n%s",
+
+		"B01: define lifecycle model", indexBody)
+	assert.Containsf(t, indexBody,
+		"B02: repair checkpoint state", "B00 missing %q:\n%s",
+
+		"B02: repair checkpoint state", indexBody,
+	)
+
+	planBody := mustReadFile(t, out.Slices[0].PlanPath)
+	assert.Containsf(t, planBody, "`B00-index.md`",
+		"B01 plan should reference B00 index:\n%s", planBody)
+}
+
+func TestTaskCheckpointPreservesRequestedSeriesMetadata(t *testing.T) {
+	setupBSeriesTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
 		"checkpoint", "b-series-test",
 		"--slice", "B02",
 		"--stage", "validated",
@@ -1843,43 +2396,298 @@ func TestTask_StartGeneratesRequestedSeriesArtifacts(t *testing.T) {
 		"--index=false",
 		"--json",
 	})
-	checkpointBuf := &bytes.Buffer{}
-	checkpointCmd.SetOut(checkpointBuf)
-	if err := checkpointCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var checkpointOut taskCheckpointOutput
-	if err := json.Unmarshal(checkpointBuf.Bytes(), &checkpointOut); err != nil {
-		t.Fatalf("checkpoint json: %v\n%s", err, checkpointBuf.String())
-	}
-	if checkpointOut.Series != "B" || checkpointOut.Slice != "B02" {
-		t.Fatalf("checkpoint output = %#v", checkpointOut)
-	}
-	checkpointBody := mustReadFile(t, checkpointOut.CheckpointPath)
-	for _, want := range []string{
-		"series: B",
-		"slice: B02",
-		"`../B00-index.md`",
-		"`../B02-repair-checkpoint-state-plan.md`",
-	} {
-		if !strings.Contains(checkpointBody, want) {
-			t.Fatalf("checkpoint missing %q:\n%s", want, checkpointBody)
-		}
-	}
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskCheckpointOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "B", out.Series)
+	assert.Equal(t, "B02", out.Slice)
+
+	checkpointBody := mustReadFile(t, out.CheckpointPath)
+	assert.Contains(t, checkpointBody, "series: B")
+	assert.Contains(t, checkpointBody, "slice: B02")
+	assert.Contains(t, checkpointBody, "`../B00-index.md`")
+	assert.Contains(t, checkpointBody, "`../B02-repair-checkpoint-state-plan.md`")
+
 	var record taskCheckpointRecord
-	if err := json.Unmarshal([]byte(mustReadFile(t, checkpointOut.CheckpointJSONPath)), &record); err != nil {
-		t.Fatalf("checkpoint record json: %v", err)
-	}
-	if record.Series != "B" || record.Slice != "B02" || record.Stage != "validated" || record.Decision != "complete" {
-		t.Fatalf("checkpoint record = %#v", record)
-	}
+	require.NoError(t, json.Unmarshal([]byte(mustReadFile(t, out.CheckpointJSONPath)), &record))
+	assert.Equal(t, "B", record.Series)
+	assert.Equal(t, "B02", record.Slice)
+	assert.Equal(t, "validated", record.Stage)
+	assert.Equal(t, "complete", record.Decision)
 }
 
-func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
-	repoDir := setupTaskCommandRepo(t)
+func setupBSeriesTask(t *testing.T) {
+	t.Helper()
+	setupTaskCommandRepo(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", "b-series-test",
+		"--series", "b",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"--slice", "define lifecycle model",
+		"--slice", "repair checkpoint state",
+		"task workflow ux",
+	})
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+}
 
-	startCmd := NewTaskCmd()
-	startCmd.SetArgs([]string{
+type lifecycleTaskFixture struct {
+	Workspace         string
+	IndexPath         string
+	AuthoredIndexBody string
+}
+
+func TestTaskSliceAddCreatesNextSeriesSliceWithoutRewritingIndex(t *testing.T) {
+	fixture := setupLifecycleTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"slice", "add", "lifecycle-add-test", "second lifecycle slice",
+		"--index=false",
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskArtifactAddOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "B", out.Series)
+	assert.Equal(t, "B02", out.Slice.ID)
+	assert.Equal(t, "B02-second-lifecycle-slice-plan.md", filepath.Base(out.Slice.PlanPath))
+	assert.Equal(t, fixture.AuthoredIndexBody, mustReadFile(t, fixture.IndexPath))
+}
+
+func TestTaskSliceAddAfterCreatesIterationMetadataWithoutRewritingIndex(t *testing.T) {
+	fixture := setupLifecycleTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"slice", "add", "lifecycle-add-test", "repair lifecycle status",
+		"--after", "B01",
+		"--reason", "improve",
+		"--index=false",
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskArtifactAddOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "B", out.Series)
+	assert.Equal(t, "B01-1", out.Slice.ID)
+	assert.Equal(t, "B01-1-repair-lifecycle-status-plan.md", filepath.Base(out.Slice.PlanPath))
+	var manifest taskManifest
+	require.NoError(t, json.Unmarshal([]byte(mustReadFile(t, filepath.Join(fixture.Workspace, taskManifestFilename))), &manifest))
+	require.Len(t, manifest.Artifacts.Slices, 2)
+	assert.Equal(t, "B01-1", manifest.Artifacts.Slices[1].ID)
+	assert.Equal(t, "iteration", manifest.Artifacts.Slices[1].Kind)
+	assert.Equal(t, "B01", manifest.Artifacts.Slices[1].ParentID)
+	assert.Equal(t, "improve", manifest.Artifacts.Slices[1].Reason)
+	assert.Equal(t, fixture.AuthoredIndexBody, mustReadFile(t, fixture.IndexPath))
+}
+
+func TestTaskCheckpointUpdatesIterationStateWithoutRewritingIndex(t *testing.T) {
+	fixture := setupLifecycleTask(t)
+	addLifecycleIteration(t)
+	cmd := newLifecycleIterationCheckpointCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskCheckpointOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "B01-1", out.Slice)
+	assert.Equal(t, "B01-1-repair-lifecycle-status-result.md", filepath.Base(out.ResultPath))
+	var manifest taskManifest
+	require.NoError(t, json.Unmarshal([]byte(mustReadFile(t, filepath.Join(fixture.Workspace, taskManifestFilename))), &manifest))
+	require.Len(t, manifest.Artifacts.Slices, 2)
+	assert.Equal(t, "implemented", manifest.Artifacts.Slices[1].Stage)
+	assert.Equal(t, "promote", manifest.Artifacts.Slices[1].Decision)
+	assert.NotEmpty(t, manifest.Artifacts.Slices[1].UpdatedAt)
+	assert.True(t, strings.HasPrefix(manifest.Artifacts.Slices[1].LatestCheckpoint, "checkpoints/"))
+	assert.True(t, strings.HasSuffix(manifest.Artifacts.Slices[1].LatestCheckpoint, "-implemented.md"))
+	assert.True(t, strings.HasPrefix(manifest.Artifacts.Slices[1].LatestCheckpointJSON, "checkpoints/"))
+	assert.True(t, strings.HasSuffix(manifest.Artifacts.Slices[1].LatestCheckpointJSON, "-implemented.json"))
+	assert.Equal(t, fixture.AuthoredIndexBody, mustReadFile(t, fixture.IndexPath))
+}
+
+func TestTaskStatusReflectsPromotedIteration(t *testing.T) {
+	setupLifecycleTask(t)
+	addLifecycleIteration(t)
+	checkpointLifecycleIteration(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"status", "lifecycle-add-test", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskStatusOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "B", out.Series)
+	assert.Equal(t, "packed", out.Status)
+	promoted := taskStatusSliceByID(out.Slices, "B01-1")
+	require.NotNil(t, promoted)
+	assert.Equal(t, "implemented", promoted.Stage)
+	assert.Equal(t, "promote", promoted.Decision)
+	assert.NotEmpty(t, promoted.UpdatedAt)
+	assert.True(t, strings.HasPrefix(promoted.LatestCheckpoint, "checkpoints/"))
+	assert.True(t, strings.HasSuffix(promoted.LatestCheckpoint, "-implemented.md"))
+	assert.True(t, strings.HasPrefix(promoted.LatestCheckpointJSON, "checkpoints/"))
+	assert.True(t, strings.HasSuffix(promoted.LatestCheckpointJSON, "-implemented.json"))
+}
+
+func TestTaskDecideCompletesSliceWithoutRewritingIndex(t *testing.T) {
+	fixture := setupLifecycleTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"decide", "lifecycle-add-test",
+		"--target", "B01",
+		"--decision", "complete",
+		"--index=false",
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskDecideOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "B01", out.Target)
+	assert.Equal(t, "completed", out.Stage)
+	assert.Equal(t, "complete", out.Decision)
+	assert.Equal(t, fixture.AuthoredIndexBody, mustReadFile(t, fixture.IndexPath))
+	events, err := readTaskCheckpointEvents(fixture.Workspace, "lifecycle-add-test")
+	require.NoError(t, err)
+	assert.Len(t, events, 1)
+	assert.Equal(t, taskCheckpointEventKind, events[0].Record.EventKind)
+	assert.Equal(t, "B01", events[0].Record.Target)
+}
+
+func TestTaskDecideSeriesRequiresCheckpointDurabilityReview(t *testing.T) {
+	fixture := setupLifecycleTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"decide", "lifecycle-add-test",
+		"--target", "B00",
+		"--decision", "complete",
+		"--index=false",
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "task-series closeout requires `ds task checkpoint")
+	assert.Equal(t, fixture.AuthoredIndexBody, mustReadFile(t, fixture.IndexPath))
+}
+
+func TestTaskStatusReflectsCompletedSeriesAndSlice(t *testing.T) {
+	setupLifecycleTask(t)
+	decideTaskTarget(t, "lifecycle-add-test", "B01", "complete")
+	checkpoint := NewTaskCmd()
+	checkpoint.SetArgs([]string{
+		"checkpoint", "lifecycle-add-test",
+		"--target", "B00",
+		"--stage", "completed",
+		"--decision", "complete",
+		"--durable-record", "none",
+		"--index=false",
+		"--json",
+	})
+	checkpoint.SetOut(&bytes.Buffer{})
+	require.NoError(t, checkpoint.Execute())
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"status", "lifecycle-add-test", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskStatusOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "completed", out.Status)
+	assert.Equal(t, "complete", out.Decision)
+	require.NotNil(t, out.Durability)
+	assert.Equal(t, "none", out.Durability.Disposition)
+	completed := taskStatusSliceByID(out.Slices, "B01")
+	require.NotNil(t, completed)
+	assert.Equal(t, "completed", completed.Stage)
+	assert.Equal(t, "complete", completed.Decision)
+}
+
+func TestTaskFinishPromotesExplicitSliceWithoutRewritingIndex(t *testing.T) {
+	fixture := setupLifecycleTask(t)
+	addLifecycleNextSlice(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"finish", "lifecycle-add-test",
+		"--target", "B02",
+		"--decision", "promote",
+		"--index=false",
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskDecideOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "B02", out.Target)
+	assert.Equal(t, "promote", out.Decision)
+	assert.Equal(t, fixture.AuthoredIndexBody, mustReadFile(t, fixture.IndexPath))
+}
+
+func TestTaskRefreshRecapturesEditedIndexWithoutRewritingIt(t *testing.T) {
+	fixture := setupLifecycleTask(t)
+	refreshedIndexBody := fixture.AuthoredIndexBody + "\n## Human Refresh Notes\n\nRefresh should recapture this without rewriting it.\n"
+	mustWriteFile(t, fixture.IndexPath, refreshedIndexBody)
+	manifestPath := filepath.Join(fixture.Workspace, taskManifestFilename)
+	manifest, err := readTaskManifest(manifestPath)
+	require.NoError(t, err)
+	manifest.UpdatedAt = "2026-01-01T00:00:00Z"
+	require.NoError(t, writeTaskManifest(manifestPath, manifest))
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"refresh", "lifecycle-add-test", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err = cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskSyncOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.True(t, taskArtifactRefreshContainsPath(out.RefreshedArtifacts, "B00-index.md"))
+	assert.Equal(t, refreshedIndexBody, mustReadFile(t, fixture.IndexPath))
+}
+
+func setupLifecycleTask(t *testing.T) lifecycleTaskFixture {
+	t.Helper()
+	repoDir := setupTaskCommandRepo(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
 		"--id", "lifecycle-add-test",
 		"--series", "B",
 		"--no-refresh",
@@ -1887,110 +2695,48 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 		"--slice", "first lifecycle slice",
 		"task lifecycle flow",
 	})
-	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
 	workspace := filepath.Join(repoDir, "devspecs", "tasks", "lifecycle-add-test")
 	indexPath := filepath.Join(workspace, "B00-index.md")
 	authoredIndexBody := mustReadFile(t, indexPath) + "\n## Human Master Notes\n\nKeep lifecycle state in task.json and result artifacts.\n"
 	mustWriteFile(t, indexPath, authoredIndexBody)
+	return lifecycleTaskFixture{
+		Workspace:         workspace,
+		IndexPath:         indexPath,
+		AuthoredIndexBody: authoredIndexBody,
+	}
+}
 
-	sliceCmd := NewTaskCmd()
-	sliceCmd.SetArgs([]string{
+func addLifecycleNextSlice(t *testing.T) {
+	t.Helper()
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
 		"slice", "add", "lifecycle-add-test", "second lifecycle slice",
 		"--index=false",
 		"--json",
 	})
-	sliceBuf := &bytes.Buffer{}
-	sliceCmd.SetOut(sliceBuf)
-	if err := sliceCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var sliceOut taskArtifactAddOutput
-	if err := json.Unmarshal(sliceBuf.Bytes(), &sliceOut); err != nil {
-		t.Fatalf("slice add json: %v\n%s", err, sliceBuf.String())
-	}
-	if sliceOut.Series != "B" || sliceOut.Slice.ID != "B02" {
-		t.Fatalf("slice add output = %#v", sliceOut)
-	}
-	if filepath.Base(sliceOut.Slice.PlanPath) != "B02-second-lifecycle-slice-plan.md" {
-		t.Fatalf("slice plan = %q", sliceOut.Slice.PlanPath)
-	}
-	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
-		t.Fatalf("slice add rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
-	}
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+}
 
-	followupCmd := NewTaskCmd()
-	followupCmd.SetArgs([]string{
+func addLifecycleIteration(t *testing.T) {
+	t.Helper()
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
 		"slice", "add", "lifecycle-add-test", "repair lifecycle status",
 		"--after", "B01",
 		"--reason", "improve",
 		"--index=false",
 		"--json",
 	})
-	followupBuf := &bytes.Buffer{}
-	followupCmd.SetOut(followupBuf)
-	if err := followupCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var followupOut taskArtifactAddOutput
-	if err := json.Unmarshal(followupBuf.Bytes(), &followupOut); err != nil {
-		t.Fatalf("slice add --after json: %v\n%s", err, followupBuf.String())
-	}
-	if followupOut.Series != "B" || followupOut.Slice.ID != "B01-1" {
-		t.Fatalf("slice add --after output = %#v", followupOut)
-	}
-	if filepath.Base(followupOut.Slice.PlanPath) != "B01-1-repair-lifecycle-status-plan.md" {
-		t.Fatalf("follow-up slice plan = %q", followupOut.Slice.PlanPath)
-	}
-	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
-		t.Fatalf("slice add --after rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
-	}
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+}
 
-	iterationCmd := NewTaskCmd()
-	iterationCmd.SetArgs([]string{
-		"iteration", "add", "lifecycle-add-test", "rework lifecycle status",
-		"--slice", "B01",
-		"--reason", "rework",
-		"--index=false",
-		"--json",
-	})
-	iterationBuf := &bytes.Buffer{}
-	iterationCmd.SetOut(iterationBuf)
-	if err := iterationCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var iterationOut taskArtifactAddOutput
-	if err := json.Unmarshal(iterationBuf.Bytes(), &iterationOut); err != nil {
-		t.Fatalf("hidden iteration add json: %v\n%s", err, iterationBuf.String())
-	}
-	if iterationOut.Series != "B" || iterationOut.Slice.ID != "B01-2" {
-		t.Fatalf("hidden iteration add output = %#v", iterationOut)
-	}
-	if filepath.Base(iterationOut.Slice.PlanPath) != "B01-2-rework-lifecycle-status-plan.md" {
-		t.Fatalf("hidden iteration plan = %q", iterationOut.Slice.PlanPath)
-	}
-
-	var manifest taskManifest
-	if err := json.Unmarshal([]byte(mustReadFile(t, filepath.Join(workspace, taskManifestFilename))), &manifest); err != nil {
-		t.Fatalf("manifest json: %v", err)
-	}
-	if len(manifest.Artifacts.Slices) != 4 {
-		t.Fatalf("manifest slices = %#v", manifest.Artifacts.Slices)
-	}
-	iteration := manifest.Artifacts.Slices[2]
-	if iteration.ID != "B01-1" || iteration.Kind != "iteration" || iteration.ParentID != "B01" || iteration.Reason != "improve" {
-		t.Fatalf("iteration manifest entry = %#v", iteration)
-	}
-	compatIteration := manifest.Artifacts.Slices[3]
-	if compatIteration.ID != "B01-2" || compatIteration.Kind != "iteration" || compatIteration.ParentID != "B01" || compatIteration.Reason != "rework" {
-		t.Fatalf("hidden iteration manifest entry = %#v", compatIteration)
-	}
-
-	checkpointCmd := NewTaskCmd()
-	checkpointCmd.SetArgs([]string{
+func newLifecycleIterationCheckpointCmd() *cobra.Command {
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
 		"checkpoint", "lifecycle-add-test",
 		"--slice", "B01-1",
 		"--stage", "implemented",
@@ -1998,208 +2744,24 @@ func TestTask_SliceAndIterationAddGenerateLifecycleArtifacts(t *testing.T) {
 		"--index=false",
 		"--json",
 	})
-	checkpointBuf := &bytes.Buffer{}
-	checkpointCmd.SetOut(checkpointBuf)
-	if err := checkpointCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var checkpointOut taskCheckpointOutput
-	if err := json.Unmarshal(checkpointBuf.Bytes(), &checkpointOut); err != nil {
-		t.Fatalf("checkpoint json: %v\n%s", err, checkpointBuf.String())
-	}
-	if checkpointOut.Slice != "B01-1" {
-		t.Fatalf("checkpoint output = %#v", checkpointOut)
-	}
-	if filepath.Base(checkpointOut.ResultPath) != "B01-1-repair-lifecycle-status-result.md" {
-		t.Fatalf("checkpoint result path = %q", checkpointOut.ResultPath)
-	}
-
-	statusCmd := NewTaskCmd()
-	statusCmd.SetArgs([]string{
-		"status", "lifecycle-add-test",
-		"--json",
-	})
-	statusBuf := &bytes.Buffer{}
-	statusCmd.SetOut(statusBuf)
-	if err := statusCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var statusOut taskStatusOutput
-	if err := json.Unmarshal(statusBuf.Bytes(), &statusOut); err != nil {
-		t.Fatalf("status json: %v\n%s", err, statusBuf.String())
-	}
-	if statusOut.Series != "B" || statusOut.Status != "packed" {
-		t.Fatalf("status output = %#v", statusOut)
-	}
-	var promoted taskStatusSliceOutput
-	for _, slice := range statusOut.Slices {
-		if slice.ID == "B01-1" {
-			promoted = slice
-			break
-		}
-	}
-	if promoted.ID == "" || promoted.Stage != "implemented" || promoted.Decision != "promote" || promoted.UpdatedAt == "" {
-		t.Fatalf("promoted iteration status = %#v", promoted)
-	}
-	if !strings.HasPrefix(promoted.LatestCheckpoint, "checkpoints/") || !strings.HasSuffix(promoted.LatestCheckpoint, "-implemented.md") {
-		t.Fatalf("promoted iteration checkpoint = %#v", promoted)
-	}
-	if !strings.HasPrefix(promoted.LatestCheckpointJSON, "checkpoints/") || !strings.HasSuffix(promoted.LatestCheckpointJSON, "-implemented.json") {
-		t.Fatalf("promoted iteration checkpoint json = %#v", promoted)
-	}
-
-	var updatedManifest taskManifest
-	if err := json.Unmarshal([]byte(mustReadFile(t, filepath.Join(workspace, taskManifestFilename))), &updatedManifest); err != nil {
-		t.Fatalf("updated manifest json: %v", err)
-	}
-	if updatedManifest.UpdatedAt == "" {
-		t.Fatalf("manifest updated_at was empty: %#v", updatedManifest)
-	}
-	var manifestIteration taskSliceArtifact
-	for _, slice := range updatedManifest.Artifacts.Slices {
-		if slice.ID == "B01-1" {
-			manifestIteration = slice
-			break
-		}
-	}
-	if manifestIteration.Stage != "implemented" || manifestIteration.Decision != "promote" || manifestIteration.UpdatedAt == "" {
-		t.Fatalf("manifest iteration state = %#v", manifestIteration)
-	}
-	if manifestIteration.LatestCheckpoint != promoted.LatestCheckpoint || manifestIteration.LatestCheckpointJSON != promoted.LatestCheckpointJSON {
-		t.Fatalf("manifest iteration checkpoint refs = %#v", manifestIteration)
-	}
-
-	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
-		t.Fatalf("checkpoint rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
-	}
-
-	decideSliceCmd := NewTaskCmd()
-	decideSliceCmd.SetArgs([]string{
-		"decide", "lifecycle-add-test",
-		"--target", "B01",
-		"--decision", "complete",
-		"--index=false",
-		"--json",
-	})
-	decideSliceBuf := &bytes.Buffer{}
-	decideSliceCmd.SetOut(decideSliceBuf)
-	if err := decideSliceCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var decideSliceOut taskDecideOutput
-	if err := json.Unmarshal(decideSliceBuf.Bytes(), &decideSliceOut); err != nil {
-		t.Fatalf("slice decide json: %v\n%s", err, decideSliceBuf.String())
-	}
-	if decideSliceOut.Target != "B01" || decideSliceOut.Stage != "completed" || decideSliceOut.Decision != "complete" {
-		t.Fatalf("slice decide output = %#v", decideSliceOut)
-	}
-
-	decideSeriesCmd := NewTaskCmd()
-	decideSeriesCmd.SetArgs([]string{
-		"decide", "lifecycle-add-test",
-		"--target", "B00",
-		"--decision", "complete",
-		"--index=false",
-		"--json",
-	})
-	decideSeriesBuf := &bytes.Buffer{}
-	decideSeriesCmd.SetOut(decideSeriesBuf)
-	if err := decideSeriesCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var decideSeriesOut taskDecideOutput
-	if err := json.Unmarshal(decideSeriesBuf.Bytes(), &decideSeriesOut); err != nil {
-		t.Fatalf("series decide json: %v\n%s", err, decideSeriesBuf.String())
-	}
-	if decideSeriesOut.Target != "B00" || decideSeriesOut.Stage != "completed" || decideSeriesOut.Decision != "complete" {
-		t.Fatalf("series decide output = %#v", decideSeriesOut)
-	}
-
-	decidedStatusCmd := NewTaskCmd()
-	decidedStatusCmd.SetArgs([]string{
-		"status", "lifecycle-add-test",
-		"--json",
-	})
-	decidedStatusBuf := &bytes.Buffer{}
-	decidedStatusCmd.SetOut(decidedStatusBuf)
-	if err := decidedStatusCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var decidedStatus taskStatusOutput
-	if err := json.Unmarshal(decidedStatusBuf.Bytes(), &decidedStatus); err != nil {
-		t.Fatalf("decided status json: %v\n%s", err, decidedStatusBuf.String())
-	}
-	if decidedStatus.Status != "completed" || decidedStatus.Decision != "complete" {
-		t.Fatalf("decided series status = %#v", decidedStatus)
-	}
-	var completedSlice taskStatusSliceOutput
-	for _, slice := range decidedStatus.Slices {
-		if slice.ID == "B01" {
-			completedSlice = slice
-			break
-		}
-	}
-	if completedSlice.Stage != "completed" || completedSlice.Decision != "complete" {
-		t.Fatalf("completed slice status = %#v", completedSlice)
-	}
-
-	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
-		t.Fatalf("decide rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
-	}
-
-	finishCmd := NewTaskCmd()
-	finishCmd.SetArgs([]string{
-		"finish", "lifecycle-add-test",
-		"--target", "B02",
-		"--decision", "promote",
-		"--index=false",
-		"--json",
-	})
-	finishBuf := &bytes.Buffer{}
-	finishCmd.SetOut(finishBuf)
-	if err := finishCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var finishOut taskDecideOutput
-	if err := json.Unmarshal(finishBuf.Bytes(), &finishOut); err != nil {
-		t.Fatalf("finish json: %v\n%s", err, finishBuf.String())
-	}
-	if finishOut.Target != "B02" || finishOut.Decision != "promote" {
-		t.Fatalf("finish output = %#v", finishOut)
-	}
-	if got := mustReadFile(t, indexPath); got != authoredIndexBody {
-		t.Fatalf("finish rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, authoredIndexBody)
-	}
-
-	refreshedIndexBody := authoredIndexBody + "\n## Human Refresh Notes\n\nRefresh should recapture this without rewriting it.\n"
-	mustWriteFile(t, indexPath, refreshedIndexBody)
-	refreshManifest, err := readTaskManifest(filepath.Join(workspace, taskManifestFilename))
-	if err != nil {
-		t.Fatal(err)
-	}
-	refreshManifest.UpdatedAt = "2026-01-01T00:00:00Z"
-	if err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), refreshManifest); err != nil {
-		t.Fatal(err)
-	}
-	refreshCmd := NewTaskCmd()
-	refreshCmd.SetArgs([]string{"refresh", "lifecycle-add-test", "--json"})
-	refreshBuf := &bytes.Buffer{}
-	refreshCmd.SetOut(refreshBuf)
-	if err := refreshCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var refreshOut taskSyncOutput
-	if err := json.Unmarshal(refreshBuf.Bytes(), &refreshOut); err != nil {
-		t.Fatalf("refresh json: %v\n%s", err, refreshBuf.String())
-	}
-	if !taskArtifactRefreshContainsPath(refreshOut.RefreshedArtifacts, "B00-index.md") {
-		t.Fatalf("refresh did not report edited index artifact: %#v", refreshOut.RefreshedArtifacts)
-	}
-	if got := mustReadFile(t, indexPath); got != refreshedIndexBody {
-		t.Fatalf("refresh rewrote authored task index.\nGot:\n%s\nWant:\n%s", got, refreshedIndexBody)
-	}
+	return cmd
 }
 
+func checkpointLifecycleIteration(t *testing.T) {
+	t.Helper()
+	cmd := newLifecycleIterationCheckpointCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+}
+
+func taskStatusSliceByID(slices []taskStatusSliceOutput, id string) *taskStatusSliceOutput {
+	for i := range slices {
+		if slices[i].ID == id {
+			return &slices[i]
+		}
+	}
+	return nil
+}
 func TestTaskSliceAddRefusesExistingArtifactFile(t *testing.T) {
 	repoDir := setupTaskCommandRepo(t)
 
@@ -2213,8 +2775,9 @@ func TestTaskSliceAddRefusesExistingArtifactFile(t *testing.T) {
 		"task lifecycle flow",
 	})
 	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := startCmd.Execute()
+		require.NoError(t, err)
 	}
 
 	workspace := filepath.Join(repoDir, "devspecs", "tasks", "slice-overwrite-test")
@@ -2228,12 +2791,16 @@ func TestTaskSliceAddRefusesExistingArtifactFile(t *testing.T) {
 	})
 	sliceCmd.SetOut(&bytes.Buffer{})
 	err := sliceCmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "refusing to overwrite existing task artifact") {
-		t.Fatalf("expected overwrite refusal, got %v", err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "refusing to overwrite existing task artifact")
+
+	{
+
+		got := mustReadFile(t, existingPlan)
+		assert.Containsf(t, got, "Do not replace this file",
+			"existing plan was overwritten:\n%s", got)
 	}
-	if got := mustReadFile(t, existingPlan); !strings.Contains(got, "Do not replace this file") {
-		t.Fatalf("existing plan was overwritten:\n%s", got)
-	}
+
 }
 
 func TestTaskSliceAddReasonRequiresAfter(t *testing.T) {
@@ -2248,8 +2815,9 @@ func TestTaskSliceAddReasonRequiresAfter(t *testing.T) {
 		"task lifecycle flow",
 	})
 	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := startCmd.Execute()
+		require.NoError(t, err)
 	}
 
 	sliceCmd := NewTaskCmd()
@@ -2260,14 +2828,26 @@ func TestTaskSliceAddReasonRequiresAfter(t *testing.T) {
 	})
 	sliceCmd.SetOut(&bytes.Buffer{})
 	err := sliceCmd.Execute()
-	if err == nil {
-		t.Fatal("expected --reason without --after to fail")
-	}
-	for _, want := range []string{"--reason requires --after", "ds task slice add", "--after <slice>", "--reason improve"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("slice reason error missing %q: %v", want, err)
-		}
-	}
+	require.Error(t, err,
+		"expected --reason without --after to fail")
+	assert.Containsf(t, err.Error(),
+		"--reason requires --after", "slice reason error missing %q: %v",
+
+		"--reason requires --after",
+		err)
+	assert.Containsf(t, err.Error(),
+		"ds task slice add", "slice reason error missing %q: %v",
+
+		"ds task slice add", err)
+	assert.Containsf(t, err.Error(),
+		"--after <slice>", "slice reason error missing %q: %v",
+
+		"--after <slice>", err)
+	assert.Containsf(t, err.Error(),
+		"--reason improve", "slice reason error missing %q: %v",
+
+		"--reason improve", err)
+
 }
 
 func TestTask_StartWarnsAboutOnDiskAnchorMissingFromIndex(t *testing.T) {
@@ -2282,277 +2862,275 @@ func ImproveCompanionRecallNew() {}
 	cmd.SetArgs([]string{"--id", "freshness-warning-test", "--no-refresh", "--json", "improve companion recall"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
 
 	var out taskStartOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("task json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"task json: %v\n%s", err, buf.String())
 	}
-	if !taskWarningsContainPath(out.FreshnessWarnings, "internal/retrieval/companion_recall_new.go") {
-		t.Fatalf("expected freshness warning for stale on-disk anchor, got %#v", out.FreshnessWarnings)
-	}
-	if len(out.FreshnessWarnings) > taskFreshnessMaxWarnings {
-		t.Fatalf("freshness warnings were not capped: %#v", out.FreshnessWarnings)
-	}
+	assert.Truef(t, taskWarningsContainPath(out.FreshnessWarnings, "internal/retrieval/companion_recall_new.go"),
+		"expected freshness warning for stale on-disk anchor, got %#v", out.FreshnessWarnings)
+	assert.LessOrEqualf(t, len(out.FreshnessWarnings), taskFreshnessMaxWarnings,
+		"freshness warnings were not capped: %#v", out.FreshnessWarnings)
+
 	staleCard := taskRiskCardByID(out.RiskCards, "stale-index")
-	if staleCard == nil || !strings.Contains(strings.Join(staleCard.Evidence, "\n"), "internal/retrieval/companion_recall_new.go") {
-		t.Fatalf("expected stale-index risk card, got %#v", out.RiskCards)
-	}
-	if staleCard.Title != "On-disk paths matched the task but were not indexed" {
-		t.Fatalf("stale-index title = %q", staleCard.Title)
-	}
+	require.NotNil(t, staleCard)
+	assert.Contains(t, strings.Join(staleCard.Evidence, "\n"), "internal/retrieval/companion_recall_new.go")
+
+	assert.Equalf(t, "On-disk paths matched the task but were not indexed", staleCard.Title,
+		"stale-index title = %q", staleCard.Title)
 
 	indexBody := mustReadFile(t, out.IndexPath)
-	for _, want := range []string{
-		"## Freshness Warnings",
+	assert.Containsf(t, indexBody,
+		"## Freshness Warnings", "A00 missing freshness warning %q:\n%s",
+
+		"## Freshness Warnings", indexBody,
+	)
+	assert.Containsf(t, indexBody,
 		"## Risk Cards",
-		"internal/retrieval/companion_recall_new.go",
-		"On-disk paths matched the task but were not indexed",
-	} {
-		if !strings.Contains(indexBody, want) {
-			t.Fatalf("A00 missing freshness warning %q:\n%s", want, indexBody)
-		}
-	}
+		"A00 missing freshness warning %q:\n%s",
+
+		"## Risk Cards", indexBody)
+	assert.Containsf(t, indexBody,
+		"internal/retrieval/companion_recall_new.go", "A00 missing freshness warning %q:\n%s", "internal/retrieval/companion_recall_new.go", indexBody)
+	assert.Containsf(t, indexBody,
+		"On-disk paths matched the task but were not indexed", "A00 missing freshness warning %q:\n%s", "On-disk paths matched the task but were not indexed",
+		indexBody)
 
 	var manifest taskManifest
-	if err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest); err != nil {
-		t.Fatalf("manifest json: %v", err)
+	{
+		err := json.Unmarshal([]byte(mustReadFile(t, out.ManifestPath)), &manifest)
+		require.NoErrorf(t, err,
+			"manifest json: %v", err)
 	}
-	if !taskWarningsContainPath(manifest.FreshnessWarnings, "internal/retrieval/companion_recall_new.go") {
-		t.Fatalf("manifest missing freshness warning: %#v", manifest.FreshnessWarnings)
-	}
+	assert.Truef(t, taskWarningsContainPath(manifest.FreshnessWarnings, "internal/retrieval/companion_recall_new.go"),
+		"manifest missing freshness warning: %#v", manifest.FreshnessWarnings)
+
 }
 
-func TestTask_StatusWarnsAndSyncRecapturesEditedArtifacts(t *testing.T) {
+type staleTaskFixture struct {
+	RepoDir      string
+	ManifestPath string
+	PlanPath     string
+	EditedPlan   string
+}
+
+func TestTaskStatusJSONReportsEditedArtifactCapture(t *testing.T) {
+	setupStaleTask(t, "sync-freshness-test", "edited after task creation")
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"status", "sync-freshness-test", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskStatusOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	freshness := taskArtifactFreshnessByPath(out.ArtifactFreshness, "A01-improve-test-companion-recall-plan.md")
+	require.NotNil(t, freshness)
+	assert.Equal(t, "current", freshness.TaskJSONState)
+	assert.Equal(t, "needs_refresh", freshness.ArtifactCaptureState)
+	assert.Equal(t, "ds task refresh sync-freshness-test", freshness.NextCommand)
+}
+
+func TestTaskStatusHumanReportsEditedArtifactCapture(t *testing.T) {
+	setupStaleTask(t, "sync-freshness-test", "edited after task creation")
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"status", "sync-freshness-test"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Task artifact capture refresh needed:")
+	assert.Contains(t, buf.String(), "checkpoint events remain lifecycle authority")
+	assert.Contains(t, buf.String(), "ds task refresh sync-freshness-test")
+	assert.NotContains(t, buf.String(), "changed after task state")
+}
+
+func TestTaskSyncRecapturesEditedArtifacts(t *testing.T) {
+	fixture := setupStaleTask(t, "sync-freshness-test", "edited after task creation")
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"sync", "sync-freshness-test", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskSyncOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "sync-freshness-test", out.TaskID)
+	assert.NotEmpty(t, out.ManifestPath)
+	assert.True(t, containsPath(out.IndexedPaths, "devspecs/tasks/sync-freshness-test/A00-index.md"))
+	assert.True(t, containsPath(out.IndexedPaths, "devspecs/tasks/sync-freshness-test/A01-improve-test-companion-recall-plan.md"))
+	assert.True(t, containsPath(out.IndexedPaths, "devspecs/tasks/sync-freshness-test/A01-improve-test-companion-recall-result.md"))
+	assert.True(t, taskArtifactFreshnessContainsPath(out.ArtifactFreshness, "A01-improve-test-companion-recall-plan.md"))
+	afterManifest, readErr := readTaskManifest(fixture.ManifestPath)
+	require.NoError(t, readErr)
+	assert.NotEmpty(t, afterManifest.UpdatedAt)
+	assert.NotEqual(t, "2026-01-01T00:00:00Z", afterManifest.UpdatedAt)
+	db, openErr := openDB()
+	require.NoError(t, openErr)
+	artifacts, listErr := db.ListArtifacts(store.FilterParams{RepoRoot: fixture.RepoDir, SourceType: "capture"})
+	require.NoError(t, listErr)
+	require.NoError(t, db.Close())
+	assert.True(t, taskArtifactTitleContains(artifacts, "sync-freshness-test A01 result"))
+}
+
+func TestTaskStatusIsFreshAfterSync(t *testing.T) {
+	setupStaleTask(t, "sync-freshness-test", "edited after task creation")
+	syncTaskArtifacts(t, "sync-freshness-test")
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"status", "sync-freshness-test", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskStatusOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Empty(t, out.ArtifactFreshness)
+}
+
+func TestTaskRefreshRecapturesEditedArtifactsWithClearOutput(t *testing.T) {
+	fixture := setupStaleTask(t, "refresh-freshness-test", "manual readability patch to preserve")
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"refresh", "refresh-freshness-test", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskSyncOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "refresh-freshness-test", out.TaskID)
+	assert.NotEmpty(t, out.ManifestPath)
+	assert.Empty(t, out.ArtifactFreshness)
+	assert.True(t, taskArtifactRefreshContainsPath(out.RefreshedArtifacts, "A01-improve-test-companion-recall-plan.md"))
+	for _, artifact := range out.RefreshedArtifacts {
+		assert.NotContains(t, artifact.Reason, "run ds task sync")
+	}
+	assert.Equal(t, fixture.EditedPlan, mustReadFile(t, fixture.PlanPath))
+}
+
+func TestTaskStatusIsFreshAfterRefresh(t *testing.T) {
+	setupStaleTask(t, "refresh-freshness-test", "manual readability patch to preserve")
+	refreshTaskArtifacts(t, "refresh-freshness-test")
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"status", "refresh-freshness-test", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskStatusOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Empty(t, out.ArtifactFreshness)
+}
+
+func setupStaleTask(t *testing.T, taskID string, note string) staleTaskFixture {
+	t.Helper()
 	repoDir := setupTaskCommandRepo(t)
-
-	startCmd := NewTaskCmd()
-	startCmd.SetArgs([]string{
-		"--id", "sync-freshness-test",
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"--id", taskID,
 		"--no-refresh",
 		"--index=false",
 		"--json",
 		"improve test companion recall",
 	})
-	startBuf := &bytes.Buffer{}
-	startCmd.SetOut(startBuf)
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var startOut taskStartOutput
-	if err := json.Unmarshal(startBuf.Bytes(), &startOut); err != nil {
-		t.Fatalf("start json: %v\n%s", err, startBuf.String())
-	}
-
-	manifest, err := readTaskManifest(startOut.ManifestPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+	require.NoError(t, cmd.Execute())
+	var out taskStartOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	manifest, err := readTaskManifest(out.ManifestPath)
+	require.NoError(t, err)
 	manifest.UpdatedAt = "2026-01-01T00:00:00Z"
-	if err := writeTaskManifest(startOut.ManifestPath, manifest); err != nil {
-		t.Fatal(err)
-	}
-	mustWriteFile(t, startOut.FirstSlicePath, mustReadFile(t, startOut.FirstSlicePath)+"\n\n## Dogfood Notes\n- edited after task creation\n")
-
-	statusCmd := NewTaskCmd()
-	statusCmd.SetArgs([]string{"status", "sync-freshness-test", "--json"})
-	statusBuf := &bytes.Buffer{}
-	statusCmd.SetOut(statusBuf)
-	if err := statusCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var statusOut taskStatusOutput
-	if err := json.Unmarshal(statusBuf.Bytes(), &statusOut); err != nil {
-		t.Fatalf("status json: %v\n%s", err, statusBuf.String())
-	}
-	if !taskArtifactFreshnessContainsPath(statusOut.ArtifactFreshness, "A01-improve-test-companion-recall-plan.md") {
-		t.Fatalf("expected stale plan warning, got %#v", statusOut.ArtifactFreshness)
-	}
-	freshness := taskArtifactFreshnessByPath(statusOut.ArtifactFreshness, "A01-improve-test-companion-recall-plan.md")
-	if freshness == nil {
-		t.Fatalf("expected freshness warning, got %#v", statusOut.ArtifactFreshness)
-	}
-	if freshness.TaskJSONState != "current" || freshness.ArtifactCaptureState != "needs_refresh" {
-		t.Fatalf("freshness states did not distinguish lifecycle and capture freshness: %#v", freshness)
-	}
-	if freshness.NextCommand != "ds task refresh sync-freshness-test" {
-		t.Fatalf("freshness next command = %q", freshness.NextCommand)
-	}
-
-	humanStatusCmd := NewTaskCmd()
-	humanStatusCmd.SetArgs([]string{"status", "sync-freshness-test"})
-	humanStatusBuf := &bytes.Buffer{}
-	humanStatusCmd.SetOut(humanStatusBuf)
-	if err := humanStatusCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	humanStatus := humanStatusBuf.String()
-	for _, want := range []string{
-		"Task artifact capture refresh needed:",
-		"task.json lifecycle state is still usable",
-		"ds task refresh sync-freshness-test",
-	} {
-		if !strings.Contains(humanStatus, want) {
-			t.Fatalf("human status missing %q:\n%s", want, humanStatus)
-		}
-	}
-	if strings.Contains(humanStatus, "changed after task state") {
-		t.Fatalf("human status should separate lifecycle state from capture freshness:\n%s", humanStatus)
-	}
-
-	syncCmd := NewTaskCmd()
-	syncCmd.SetArgs([]string{"sync", "sync-freshness-test", "--json"})
-	syncBuf := &bytes.Buffer{}
-	syncCmd.SetOut(syncBuf)
-	if err := syncCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var syncOut taskSyncOutput
-	if err := json.Unmarshal(syncBuf.Bytes(), &syncOut); err != nil {
-		t.Fatalf("sync json: %v\n%s", err, syncBuf.String())
-	}
-	if syncOut.TaskID != "sync-freshness-test" || syncOut.ManifestPath == "" {
-		t.Fatalf("sync output = %#v", syncOut)
-	}
-	for _, want := range []string{
-		"devspecs/tasks/sync-freshness-test/A00-index.md",
-		"devspecs/tasks/sync-freshness-test/A01-improve-test-companion-recall-plan.md",
-		"devspecs/tasks/sync-freshness-test/A01-improve-test-companion-recall-result.md",
-	} {
-		if !containsPath(syncOut.IndexedPaths, want) {
-			t.Fatalf("sync indexed paths missing %q: %#v", want, syncOut.IndexedPaths)
-		}
-	}
-	if !taskArtifactFreshnessContainsPath(syncOut.ArtifactFreshness, "A01-improve-test-companion-recall-plan.md") {
-		t.Fatalf("sync should report what it freshened, got %#v", syncOut.ArtifactFreshness)
-	}
-
-	afterManifest, err := readTaskManifest(startOut.ManifestPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if afterManifest.UpdatedAt == "" || afterManifest.UpdatedAt == "2026-01-01T00:00:00Z" {
-		t.Fatalf("sync did not update manifest timestamp: %#v", afterManifest)
-	}
-
-	afterStatusCmd := NewTaskCmd()
-	afterStatusCmd.SetArgs([]string{"status", "sync-freshness-test", "--json"})
-	afterStatusBuf := &bytes.Buffer{}
-	afterStatusCmd.SetOut(afterStatusBuf)
-	if err := afterStatusCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var afterStatus taskStatusOutput
-	if err := json.Unmarshal(afterStatusBuf.Bytes(), &afterStatus); err != nil {
-		t.Fatalf("after status json: %v\n%s", err, afterStatusBuf.String())
-	}
-	if len(afterStatus.ArtifactFreshness) != 0 {
-		t.Fatalf("expected sync to clear stale warnings, got %#v", afterStatus.ArtifactFreshness)
-	}
-
-	db, err := openDB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	artifacts, err := db.ListArtifacts(store.FilterParams{RepoRoot: repoDir, SourceType: "capture"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	foundResult := false
-	for _, art := range artifacts {
-		if strings.Contains(art.Title, "sync-freshness-test A01 result") {
-			foundResult = true
-			break
-		}
-	}
-	if !foundResult {
-		t.Fatalf("sync did not capture result artifact: %#v", artifacts)
+	require.NoError(t, writeTaskManifest(out.ManifestPath, manifest))
+	editedPlan := mustReadFile(t, out.FirstSlicePath) + "\n\n## Dogfood Notes\n- " + note + "\n"
+	mustWriteFile(t, out.FirstSlicePath, editedPlan)
+	return staleTaskFixture{
+		RepoDir:      repoDir,
+		ManifestPath: out.ManifestPath,
+		PlanPath:     out.FirstSlicePath,
+		EditedPlan:   editedPlan,
 	}
 }
 
-func TestTask_RefreshRecapturesEditedArtifactsWithClearOutput(t *testing.T) {
-	setupTaskCommandRepo(t)
-
-	startCmd := NewTaskCmd()
-	startCmd.SetArgs([]string{
-		"--id", "refresh-freshness-test",
-		"--no-refresh",
-		"--index=false",
-		"--json",
-		"improve test companion recall",
-	})
-	startBuf := &bytes.Buffer{}
-	startCmd.SetOut(startBuf)
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var startOut taskStartOutput
-	if err := json.Unmarshal(startBuf.Bytes(), &startOut); err != nil {
-		t.Fatalf("start json: %v\n%s", err, startBuf.String())
-	}
-
-	manifest, err := readTaskManifest(startOut.ManifestPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	manifest.UpdatedAt = "2026-01-01T00:00:00Z"
-	if err := writeTaskManifest(startOut.ManifestPath, manifest); err != nil {
-		t.Fatal(err)
-	}
-	editedPlan := mustReadFile(t, startOut.FirstSlicePath) + "\n\n## Dogfood Notes\n- manual readability patch to preserve\n"
-	mustWriteFile(t, startOut.FirstSlicePath, editedPlan)
-
-	refreshCmd := NewTaskCmd()
-	refreshCmd.SetArgs([]string{"refresh", "refresh-freshness-test", "--json"})
-	refreshBuf := &bytes.Buffer{}
-	refreshCmd.SetOut(refreshBuf)
-	if err := refreshCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var refreshOut taskSyncOutput
-	if err := json.Unmarshal(refreshBuf.Bytes(), &refreshOut); err != nil {
-		t.Fatalf("refresh json: %v\n%s", err, refreshBuf.String())
-	}
-	if refreshOut.TaskID != "refresh-freshness-test" || refreshOut.ManifestPath == "" {
-		t.Fatalf("refresh output = %#v", refreshOut)
-	}
-	if len(refreshOut.ArtifactFreshness) != 0 {
-		t.Fatalf("refresh should not return stale warnings as artifact_freshness: %#v", refreshOut.ArtifactFreshness)
-	}
-	if !taskArtifactRefreshContainsPath(refreshOut.RefreshedArtifacts, "A01-improve-test-companion-recall-plan.md") {
-		t.Fatalf("refresh should report refreshed plan artifact, got %#v", refreshOut.RefreshedArtifacts)
-	}
-	for _, artifact := range refreshOut.RefreshedArtifacts {
-		if strings.Contains(artifact.Reason, "run ds task sync") {
-			t.Fatalf("refresh receipt should not ask user to run sync: %#v", artifact)
-		}
-	}
-	if got := mustReadFile(t, startOut.FirstSlicePath); got != editedPlan {
-		t.Fatalf("refresh rewrote authored plan:\nwant:\n%s\n\ngot:\n%s", editedPlan, got)
-	}
-
-	statusCmd := NewTaskCmd()
-	statusCmd.SetArgs([]string{"status", "refresh-freshness-test", "--json"})
-	statusBuf := &bytes.Buffer{}
-	statusCmd.SetOut(statusBuf)
-	if err := statusCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var statusOut taskStatusOutput
-	if err := json.Unmarshal(statusBuf.Bytes(), &statusOut); err != nil {
-		t.Fatalf("status json: %v\n%s", err, statusBuf.String())
-	}
-	if len(statusOut.ArtifactFreshness) != 0 {
-		t.Fatalf("expected refresh to clear stale warnings, got %#v", statusOut.ArtifactFreshness)
-	}
+func syncTaskArtifacts(t *testing.T, taskID string) {
+	t.Helper()
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"sync", taskID, "--json"})
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
 }
 
-func TestTask_AuditReportsPassAndDrift(t *testing.T) {
-	setupTaskCommandRepo(t)
+func refreshTaskArtifacts(t *testing.T, taskID string) {
+	t.Helper()
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"refresh", taskID, "--json"})
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+}
 
+func taskArtifactTitleContains(artifacts []store.ArtifactRow, title string) bool {
+	for _, artifact := range artifacts {
+		if strings.Contains(artifact.Title, title) {
+			return true
+		}
+	}
+	return false
+}
+func TestTaskAuditReportsPassForInScopeCheckpointFiles(t *testing.T) {
+	setupPassingAuditTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "pass", out.Recommendation)
+	assert.Empty(t, out.OutOfScopePaths)
+	assert.True(t, containsPath(out.InScopePaths, "internal/retrieval/ranking.go"))
+	assert.True(t, containsPath(out.InScopePaths, "internal/retrieval/ranking_test.go"))
+}
+
+func TestTaskAuditReportsDriftForOutOfScopeCheckpointFile(t *testing.T) {
+	setupPassingAuditTask(t)
+	addDriftAuditCheckpoint(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "drift", out.Recommendation)
+	assert.True(t, containsPath(out.OutOfScopePaths, "internal/other/unrelated.go"))
+}
+
+func setupPassingAuditTask(t *testing.T) {
+	t.Helper()
+	setupTaskCommandRepo(t)
 	startCmd := NewTaskCmd()
 	startCmd.SetArgs([]string{
 		"--id", "audit-test",
@@ -2562,12 +3140,9 @@ func TestTask_AuditReportsPassAndDrift(t *testing.T) {
 		"improve test companion recall",
 	})
 	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-
-	passCheckpointCmd := NewTaskCmd()
-	passCheckpointCmd.SetArgs([]string{
+	require.NoError(t, startCmd.Execute())
+	checkpointCmd := NewTaskCmd()
+	checkpointCmd.SetArgs([]string{
 		"checkpoint", "audit-test",
 		"--stage", "implemented",
 		"--decision", "continue",
@@ -2576,34 +3151,14 @@ func TestTask_AuditReportsPassAndDrift(t *testing.T) {
 		"--index=false",
 		"--json",
 	})
-	passCheckpointCmd.SetOut(&bytes.Buffer{})
-	if err := passCheckpointCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+	checkpointCmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, checkpointCmd.Execute())
+}
 
-	auditCmd := NewTaskCmd()
-	auditCmd.SetArgs([]string{"audit", "audit-test", "--target", "A01", "--json"})
-	auditBuf := &bytes.Buffer{}
-	auditCmd.SetOut(auditBuf)
-	if err := auditCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var auditOut taskAuditOutput
-	if err := json.Unmarshal(auditBuf.Bytes(), &auditOut); err != nil {
-		t.Fatalf("audit json: %v\n%s", err, auditBuf.String())
-	}
-	if auditOut.Recommendation != "pass" || len(auditOut.OutOfScopePaths) != 0 {
-		t.Fatalf("expected pass audit, got %#v", auditOut)
-	}
-	if !containsPath(auditOut.InScopePaths, "internal/retrieval/ranking.go") {
-		t.Fatalf("audit missing in-scope source: %#v", auditOut.InScopePaths)
-	}
-	if !containsPath(auditOut.InScopePaths, "internal/retrieval/ranking_test.go") {
-		t.Fatalf("audit missing in-scope test: %#v", auditOut.InScopePaths)
-	}
-
-	driftCheckpointCmd := NewTaskCmd()
-	driftCheckpointCmd.SetArgs([]string{
+func addDriftAuditCheckpoint(t *testing.T) {
+	t.Helper()
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
 		"checkpoint", "audit-test",
 		"--stage", "implemented",
 		"--decision", "continue",
@@ -2611,27 +3166,9 @@ func TestTask_AuditReportsPassAndDrift(t *testing.T) {
 		"--index=false",
 		"--json",
 	})
-	driftCheckpointCmd.SetOut(&bytes.Buffer{})
-	if err := driftCheckpointCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-
-	driftAuditCmd := NewTaskCmd()
-	driftAuditCmd.SetArgs([]string{"audit", "audit-test", "--target", "A01", "--json"})
-	driftAuditBuf := &bytes.Buffer{}
-	driftAuditCmd.SetOut(driftAuditBuf)
-	if err := driftAuditCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var driftOut taskAuditOutput
-	if err := json.Unmarshal(driftAuditBuf.Bytes(), &driftOut); err != nil {
-		t.Fatalf("drift audit json: %v\n%s", err, driftAuditBuf.String())
-	}
-	if driftOut.Recommendation != "drift" || !containsPath(driftOut.OutOfScopePaths, "internal/other/unrelated.go") {
-		t.Fatalf("expected drift audit, got %#v", driftOut)
-	}
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
 }
-
 func TestTask_StartUsesGitWorktreeRoot(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available:", err)
@@ -2640,10 +3177,12 @@ func TestTask_StartUsesGitWorktreeRoot(t *testing.T) {
 	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
 	mainRepo := filepath.Join(tmp, "main")
 	worktree := filepath.Join(tmp, "linked")
+	{
 
-	if err := taskGitCmd("init", "-b", "main", mainRepo).Run(); err != nil {
-		t.Fatal(err)
+		err := taskGitCmd("init", "-b", "main", mainRepo).Run()
+		require.NoError(t, err)
 	}
+
 	mustMkdirAll(t, filepath.Join(mainRepo, ".devspecs"))
 	mustWriteFile(t, filepath.Join(mainRepo, ".devspecs", "config.yaml"), `version: 1
 sources:
@@ -2655,47 +3194,60 @@ sources:
 
 func RootTask() {}
 `)
-	if err := taskGitCmd("-C", mainRepo, "add", ".").Run(); err != nil {
-		t.Fatal(err)
+	{
+		err := taskGitCmd("-C", mainRepo, "add", ".").Run()
+		require.NoError(t, err)
 	}
-	if err := taskGitCmd("-C", mainRepo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "init").Run(); err != nil {
-		t.Fatal(err)
+	{
+
+		err := taskGitCmd("-C", mainRepo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-m", "init").Run()
+		require.NoError(t, err)
 	}
-	if err := taskGitCmd("-C", mainRepo, "worktree", "add", "-b", "linked-branch", worktree).Run(); err != nil {
-		t.Fatal(err)
+	{
+
+		err := taskGitCmd("-C", mainRepo, "worktree", "add", "-b", "linked-branch", worktree).Run()
+		require.NoError(t, err)
 	}
+
 	subdir := filepath.Join(worktree, "internal", "taskroot")
 	origWd, _ := os.Getwd()
-	if err := os.Chdir(subdir); err != nil {
-		t.Fatal(err)
+	{
+		err := os.Chdir(subdir)
+		require.NoError(t, err)
 	}
+
 	t.Cleanup(func() { os.Chdir(origWd) })
 
 	scanCmd := NewScanCmd()
 	scanCmd.SetArgs([]string{"--quiet"})
 	scanCmd.SetOut(&bytes.Buffer{})
-	if err := scanCmd.Execute(); err != nil {
-		t.Fatalf("scan: %v", err)
+	{
+		err := scanCmd.Execute()
+		require.NoErrorf(t, err,
+			"scan: %v", err)
 	}
 
 	cmd := NewTaskCmd()
 	cmd.SetArgs([]string{"--id", "worktree-root-test", "--no-refresh", "--json", "taskroot"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var out taskStartOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("task json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"task json: %v\n%s", err, buf.String())
 	}
+
 	wantPrefix := filepath.Join(worktree, "devspecs", "tasks", "worktree-root-test")
-	if !strings.HasPrefix(out.Workspace, wantPrefix) {
-		t.Fatalf("workspace = %q, want prefix %q", out.Workspace, wantPrefix)
-	}
-	if strings.HasPrefix(out.Workspace, filepath.Join(mainRepo, "devspecs")) {
-		t.Fatalf("workspace used main repo instead of worktree: %q", out.Workspace)
-	}
+	assert.Truef(t, strings.HasPrefix(out.Workspace, wantPrefix),
+		"workspace = %q, want prefix %q", out.Workspace, wantPrefix)
+	assert.False(t, strings.HasPrefix(out.Workspace, filepath.Join(mainRepo, "devspecs")))
+
 }
 
 func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
@@ -2704,8 +3256,9 @@ func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
 	startCmd := NewTaskCmd()
 	startCmd.SetArgs([]string{"--id", "checkpoint-test", "--no-refresh", "improve test companion recall"})
 	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := startCmd.Execute()
+		require.NoError(t, err)
 	}
 
 	checkpointCmd := NewTaskCmd()
@@ -2727,201 +3280,356 @@ func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	checkpointCmd.SetOut(buf)
-	if err := checkpointCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var out taskCheckpointOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("checkpoint json: %v\n%s", err, buf.String())
-	}
-	if out.Stage != "implemented" || out.Decision != "improve" {
-		t.Fatalf("unexpected checkpoint output: %#v", out)
-	}
-	if out.Slice != "A01" {
-		t.Fatalf("checkpoint output slice = %q", out.Slice)
-	}
-	if out.CheckpointJSONPath == "" {
-		t.Fatalf("expected structured checkpoint path in output: %#v", out)
-	}
-	if out.CheckpointID == "" || out.LearningCount != 1 || !out.FactIndexed {
-		t.Fatalf("expected checkpoint id, learning count, and indexed fact in output: %#v", out)
-	}
-	checkpointBody := mustReadFile(t, out.CheckpointPath)
-	assertNoTrailingWhitespace(t, "checkpoint markdown", checkpointBody)
-	for _, want := range []string{
-		"---",
-		"schema_version: 2",
-		"checkpoint_id:",
-		"target: A01",
-		"slice: A01",
-		"parent_slice: A01",
-		"stage: implemented",
-		"decision: improve",
-		"created_at:",
-		"checkpoint_json:",
-		"## Structured Evidence",
-		"Checkpoint ID:",
-		"## Files Actually Read",
-		"`internal/retrieval/ranking.go`",
-		"## Critical Files DevSpecs Missed",
-		"`internal/retrieval/ranking_test.go`",
-		"## Distracting Files DevSpecs Included",
-		"`fixtures/noisy-plan.md`",
-		"## Completion Contract",
-		"Attempted slice: `A01`",
-		"Gate tested: improve",
-		"found a missing same-package test",
-		"Evidence for decision: 1 file(s) read; 1 file(s) edited; 1 test command(s); 1 missed file(s); 1 noise file(s)",
-		"Next iteration: A01-1 with decision improve",
-		"- Block",
-	} {
-		if !strings.Contains(checkpointBody, want) {
-			t.Fatalf("checkpoint missing %q:\n%s", want, checkpointBody)
-		}
-	}
-	for _, unwanted := range []string{"\n## Stage\n", "\n## Decision\n", "\n## Created At\n"} {
-		if strings.Contains(checkpointBody, unwanted) {
-			t.Fatalf("checkpoint should keep metadata heading %q in frontmatter, not body:\n%s", unwanted, checkpointBody)
-		}
-	}
-	var record taskCheckpointRecord
-	if err := json.Unmarshal([]byte(mustReadFile(t, out.CheckpointJSONPath)), &record); err != nil {
-		t.Fatalf("checkpoint record json: %v", err)
-	}
-	if record.TaskID != "checkpoint-test" || record.Stage != "implemented" || record.Decision != "improve" {
-		t.Fatalf("unexpected checkpoint record: %#v", record)
-	}
-	if record.Slice != "A01" {
-		t.Fatalf("checkpoint record slice = %q", record.Slice)
-	}
-	if record.SchemaVersion != 2 {
-		t.Fatalf("checkpoint record schema version = %d", record.SchemaVersion)
-	}
-	if record.CheckpointID != out.CheckpointID || record.Target != "A01" || record.ParentSlice != "A01" {
-		t.Fatalf("checkpoint record identity = %#v", record)
-	}
-	if !containsPath(record.FilesEdited, "internal/retrieval/ranking.go") {
-		t.Fatalf("checkpoint record missing edited file: %#v", record.FilesEdited)
-	}
-	if !containsPath(record.ActualContext.FilesEdited, "internal/retrieval/ranking.go") {
-		t.Fatalf("checkpoint record missing actual context edited file: %#v", record.ActualContext)
-	}
-	if !containsPath(record.MissedFiles, "internal/retrieval/ranking_test.go") {
-		t.Fatalf("checkpoint record missing missed file: %#v", record.MissedFiles)
-	}
-	if !containsPath(record.PredictedContextFeedback.CriticalMissed, "internal/retrieval/ranking_test.go") {
-		t.Fatalf("checkpoint record missing predicted feedback: %#v", record.PredictedContextFeedback)
-	}
-	if len(record.Learnings) != 1 || !strings.Contains(record.Learnings[0].Summary, "same-package tests") {
-		t.Fatalf("checkpoint record learnings = %#v", record.Learnings)
-	}
-	if record.Next.RecommendedTarget != "A01-1" || record.Next.RecommendedDecision != "improve" {
-		t.Fatalf("checkpoint next recommendation = %#v", record.Next)
-	}
-	resultBody := mustReadFile(t, out.ResultPath)
-	assertNoTrailingWhitespace(t, "checkpoint result", resultBody)
-	for _, want := range []string{
-		"## Checkpoint History",
-		"### Checkpoint",
-		"Stage: implemented",
-		"Decision: improve",
-		"Structured Evidence:",
-		"What changed: found a missing same-package test",
-		"Evidence for decision: 1 file(s) read; 1 file(s) edited; 1 test command(s); 1 missed file(s); 1 noise file(s)",
-		"What remains: next target A01-1; next decision improve; resolve missed files",
-		"Next iteration: A01-1 with decision improve",
-		"Missed files:",
-		"`internal/retrieval/ranking_test.go`",
-	} {
-		if !strings.Contains(resultBody, want) {
-			t.Fatalf("result missing %q:\n%s", want, resultBody)
-		}
-	}
-	for _, unwanted := range []string{
-		"## Checkpoints",
-		"Use `ds task checkpoint checkpoint-test --target A01`",
-	} {
-		if strings.Contains(resultBody, unwanted) {
-			t.Fatalf("result should convert checkpoint template before append, still has %q:\n%s", unwanted, resultBody)
-		}
+	{
+		err := checkpointCmd.Execute()
+		require.NoError(t, err)
 	}
 
-	db, err := openDB()
-	if err != nil {
-		t.Fatal(err)
+	var out taskCheckpointOutput
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"checkpoint json: %v\n%s", err, buf.String())
 	}
+	assert.Equal(t, "implemented", out.Stage)
+	assert.Equal(t, "improve", out.Decision)
+
+	assert.Equalf(t, "A01", out.Slice,
+		"checkpoint output slice = %q", out.Slice)
+	assert.NotEqualf(t, "", out.CheckpointJSONPath,
+		"expected structured checkpoint path in output: %#v", out)
+	assert.NotEmpty(t, out.CheckpointID)
+	assert.Equal(t, 1, out.LearningCount)
+	assert.True(t, out.FactIndexed)
+
+	checkpointBody := mustReadFile(t, out.CheckpointPath)
+	assertNoTrailingWhitespace(t, "checkpoint markdown", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"---", "checkpoint missing %q:\n%s",
+
+		"---", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"schema_version: 2", "checkpoint missing %q:\n%s",
+
+		"schema_version: 2", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"checkpoint_id:", "checkpoint missing %q:\n%s",
+
+		"checkpoint_id:", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"target: A01", "checkpoint missing %q:\n%s",
+
+		"target: A01", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"slice: A01", "checkpoint missing %q:\n%s",
+
+		"slice: A01", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"parent_slice: A01", "checkpoint missing %q:\n%s",
+
+		"parent_slice: A01", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"stage: implemented",
+		"checkpoint missing %q:\n%s",
+
+		"stage: implemented", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"decision: improve", "checkpoint missing %q:\n%s",
+
+		"decision: improve", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"created_at:", "checkpoint missing %q:\n%s",
+
+		"created_at:", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"checkpoint_json:", "checkpoint missing %q:\n%s",
+
+		"checkpoint_json:", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"## Structured Evidence", "checkpoint missing %q:\n%s",
+
+		"## Structured Evidence", checkpointBody,
+	)
+	assert.Containsf(t, checkpointBody,
+
+		"Checkpoint ID:", "checkpoint missing %q:\n%s",
+
+		"Checkpoint ID:", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"## Files Actually Read", "checkpoint missing %q:\n%s",
+
+		"## Files Actually Read", checkpointBody,
+	)
+	assert.Containsf(t, checkpointBody,
+
+		"`internal/retrieval/ranking.go`",
+
+		"checkpoint missing %q:\n%s", "`internal/retrieval/ranking.go`", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"## Critical Files DevSpecs Missed", "checkpoint missing %q:\n%s", "## Critical Files DevSpecs Missed", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"`internal/retrieval/ranking_test.go`", "checkpoint missing %q:\n%s", "`internal/retrieval/ranking_test.go`", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"## Distracting Files DevSpecs Included", "checkpoint missing %q:\n%s", "## Distracting Files DevSpecs Included", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"`fixtures/noisy-plan.md`", "checkpoint missing %q:\n%s",
+
+		"`fixtures/noisy-plan.md`", checkpointBody,
+	)
+	assert.Containsf(t, checkpointBody,
+
+		"## Completion Contract", "checkpoint missing %q:\n%s",
+
+		"## Completion Contract", checkpointBody,
+	)
+	assert.Containsf(t, checkpointBody,
+
+		"Attempted slice: `A01`", "checkpoint missing %q:\n%s",
+
+		"Attempted slice: `A01`", checkpointBody,
+	)
+	assert.Containsf(t, checkpointBody,
+
+		"Gate tested: improve",
+		"checkpoint missing %q:\n%s",
+
+		"Gate tested: improve", checkpointBody,
+	)
+	assert.Containsf(t, checkpointBody,
+
+		"found a missing same-package test", "checkpoint missing %q:\n%s", "found a missing same-package test", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"Evidence for decision: 1 file(s) read; 1 file(s) edited; 1 test command(s); 1 missed file(s); 1 noise file(s)", "checkpoint missing %q:\n%s", "Evidence for decision: 1 file(s) read; 1 file(s) edited; 1 test command(s); 1 missed file(s); 1 noise file(s)", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"Next iteration: A01-1 with decision improve", "checkpoint missing %q:\n%s", "Next iteration: A01-1 with decision improve", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"- Block",
+		"checkpoint missing %q:\n%s",
+
+		"- Block", checkpointBody)
+	assert.NotContainsf(t,
+		checkpointBody,
+		"\n## Stage\n", "checkpoint should keep metadata heading %q in frontmatter, not body:\n%s",
+
+		"\n## Stage\n", checkpointBody)
+	assert.NotContainsf(t,
+		checkpointBody,
+		"\n## Decision\n",
+		"checkpoint should keep metadata heading %q in frontmatter, not body:\n%s",
+
+		"\n## Decision\n", checkpointBody)
+	assert.NotContainsf(t,
+		checkpointBody,
+		"\n## Created At\n",
+		"checkpoint should keep metadata heading %q in frontmatter, not body:\n%s",
+
+		"\n## Created At\n", checkpointBody)
+
+	var record taskCheckpointRecord
+	{
+		err := json.Unmarshal([]byte(mustReadFile(t, out.CheckpointJSONPath)), &record)
+		require.NoErrorf(t, err,
+			"checkpoint record json: %v", err)
+	}
+	assert.Equal(t, "checkpoint-test", record.TaskID)
+	assert.Equal(t, "implemented", record.Stage)
+	assert.Equal(t, "improve", record.Decision)
+
+	assert.Equalf(t, "A01", record.Slice,
+		"checkpoint record slice = %q", record.Slice)
+	assert.Equalf(t, 3, record.SchemaVersion,
+		"checkpoint record schema version = %d", record.SchemaVersion)
+	assert.Equal(t, taskCheckpointEventKind, record.EventKind)
+	assert.Empty(t, record.SupersedesCheckpointIDs)
+	assert.Equal(t, out.CheckpointID, record.CheckpointID)
+	assert.Equal(t, "A01", record.Target)
+	assert.Equal(t, "A01", record.ParentSlice)
+
+	assert.Truef(t, containsPath(record.FilesEdited, "internal/retrieval/ranking.go"),
+		"checkpoint record missing edited file: %#v", record.FilesEdited)
+	assert.Truef(t, containsPath(record.ActualContext.FilesEdited, "internal/retrieval/ranking.go"),
+		"checkpoint record missing actual context edited file: %#v", record.ActualContext)
+	assert.Truef(t, containsPath(record.MissedFiles, "internal/retrieval/ranking_test.go"),
+		"checkpoint record missing missed file: %#v", record.MissedFiles)
+	assert.Truef(t, containsPath(record.PredictedContextFeedback.CriticalMissed, "internal/retrieval/ranking_test.go"),
+		"checkpoint record missing predicted feedback: %#v", record.PredictedContextFeedback)
+	require.Len(t, record.Learnings, 1)
+	assert.Contains(t, record.Learnings[0].Summary, "same-package tests")
+	assert.Equal(t, "A01-1", record.Next.RecommendedTarget)
+	assert.Equal(t, "improve", record.Next.RecommendedDecision)
+
+	resultBody := mustReadFile(t, out.ResultPath)
+	assertNoTrailingWhitespace(t, "checkpoint result", resultBody)
+	assert.Containsf(t, resultBody,
+
+		"## Checkpoint History", "result missing %q:\n%s",
+
+		"## Checkpoint History", resultBody)
+	assert.Containsf(t, resultBody,
+
+		"### Checkpoint", "result missing %q:\n%s",
+
+		"### Checkpoint", resultBody)
+	assert.Containsf(t, resultBody,
+
+		"Stage: implemented", "result missing %q:\n%s",
+
+		"Stage: implemented", resultBody)
+	assert.Containsf(t, resultBody,
+
+		"Decision: improve", "result missing %q:\n%s",
+
+		"Decision: improve", resultBody)
+	assert.Containsf(t, resultBody,
+
+		"Structured Evidence:", "result missing %q:\n%s",
+
+		"Structured Evidence:", resultBody)
+	assert.Containsf(t, resultBody,
+
+		"What changed: found a missing same-package test", "result missing %q:\n%s", "What changed: found a missing same-package test", resultBody)
+	assert.Containsf(t, resultBody,
+
+		"Evidence for decision: 1 file(s) read; 1 file(s) edited; 1 test command(s); 1 missed file(s); 1 noise file(s)", "result missing %q:\n%s", "Evidence for decision: 1 file(s) read; 1 file(s) edited; 1 test command(s); 1 missed file(s); 1 noise file(s)", resultBody)
+	assert.Containsf(t, resultBody,
+
+		"What remains: next target A01-1; next decision improve; resolve missed files", "result missing %q:\n%s",
+		"What remains: next target A01-1; next decision improve; resolve missed files", resultBody,
+	)
+	assert.Containsf(t, resultBody,
+
+		"Next iteration: A01-1 with decision improve", "result missing %q:\n%s", "Next iteration: A01-1 with decision improve", resultBody)
+	assert.Containsf(t, resultBody,
+
+		"Missed files:",
+		"result missing %q:\n%s",
+
+		"Missed files:", resultBody)
+	assert.Containsf(t, resultBody,
+
+		"`internal/retrieval/ranking_test.go`",
+		"result missing %q:\n%s", "`internal/retrieval/ranking_test.go`", resultBody)
+	assert.NotContainsf(t,
+		resultBody,
+		"## Checkpoints", "result should convert checkpoint template before append, still has %q:\n%s",
+
+		"## Checkpoints", resultBody)
+	assert.NotContainsf(t,
+		resultBody,
+		"Use `ds task checkpoint checkpoint-test --target A01`", "result should convert checkpoint template before append, still has %q:\n%s",
+		"Use `ds task checkpoint checkpoint-test --target A01`", resultBody)
+
+	db, err := openDB()
+	require.NoError(t, err)
+
 	defer db.Close()
 	artifacts, err := db.ListArtifacts(store.FilterParams{RepoRoot: repoDir, SourceType: "capture"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	foundCheckpoint := false
 	for _, art := range artifacts {
 		if strings.Contains(art.Title, "checkpoint-test checkpoint implemented") {
 			foundCheckpoint = true
-			if art.Status != "implemented" {
-				t.Fatalf("checkpoint status = %q", art.Status)
-			}
+			assert.Equalf(t, "implemented", art.Status,
+				"checkpoint status = %q", art.Status)
+
 		}
 	}
-	if !foundCheckpoint {
-		t.Fatalf("checkpoint capture artifact not found in %#v", artifacts)
-	}
+	assert.Truef(t, foundCheckpoint,
+		"checkpoint capture artifact not found in %#v", artifacts)
+
 	var repoID string
-	if err := db.QueryRow("SELECT id FROM repos WHERE root_path = ?", repoDir).Scan(&repoID); err != nil {
-		t.Fatal(err)
-	}
-	facts, err := db.ListTaskCheckpointFacts(repoID, "checkpoint-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(facts) != 1 {
-		t.Fatalf("checkpoint facts = %#v", facts)
-	}
-	if facts[0].CheckpointID != out.CheckpointID || facts[0].Target != "A01" || facts[0].Stage != "implemented" {
-		t.Fatalf("checkpoint fact identity = %#v", facts[0])
-	}
-	if !strings.Contains(facts[0].ActualContextJSON, "internal/retrieval/ranking.go") {
-		t.Fatalf("checkpoint fact actual context = %s", facts[0].ActualContextJSON)
-	}
-	if !strings.Contains(facts[0].LearningsJSON, "same-package tests") {
-		t.Fatalf("checkpoint fact learnings = %s", facts[0].LearningsJSON)
+	{
+		err := db.QueryRow("SELECT id FROM repos WHERE root_path = ?", repoDir).Scan(&repoID)
+		require.NoError(t, err)
 	}
 
-	if err := os.WriteFile(out.CheckpointPath, []byte("# scrubbed markdown checkpoint\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	evalCmd := NewTaskCmd()
-	evalCmd.SetArgs([]string{"evaluate", "checkpoint-test", "--json"})
-	evalBuf := &bytes.Buffer{}
-	evalCmd.SetOut(evalBuf)
-	if err := evalCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var evalOut taskEvaluationOutput
-	if err := json.Unmarshal(evalBuf.Bytes(), &evalOut); err != nil {
-		t.Fatalf("evaluate json: %v\n%s", err, evalBuf.String())
-	}
-	if evalOut.TaskID != "checkpoint-test" {
-		t.Fatalf("evaluation task id = %q", evalOut.TaskID)
-	}
-	if !containsPath(evalOut.Hits, "internal/retrieval/ranking_test.go") {
-		t.Fatalf("expected shared pack assembly to count test as a hit, got %#v", evalOut)
-	}
-	if containsPath(evalOut.Misses, "internal/retrieval/ranking_test.go") {
-		t.Fatalf("predicted test should not remain an evaluation miss, got %#v", evalOut.Misses)
-	}
-	if evalOut.Metrics.TestCompanionRecall != "1/1" {
-		t.Fatalf("test companion recall = %q", evalOut.Metrics.TestCompanionRecall)
-	}
-	if !containsPath(evalOut.Noise, "fixtures/noisy-plan.md") {
-		t.Fatalf("expected noise file in evaluation, got %#v", evalOut.Noise)
-	}
-	if evalOut.CheckpointSummary.JSONRecords != 1 || evalOut.CheckpointSummary.MarkdownFallbacks != 0 {
-		t.Fatalf("expected JSON checkpoint read summary, got %#v", evalOut.CheckpointSummary)
-	}
+	facts, err := db.ListTaskCheckpointFacts(repoID, "checkpoint-test")
+	require.NoError(t, err)
+	require.Lenf(t, facts, 1,
+		"checkpoint facts = %#v", facts)
+	assert.Equal(t, out.CheckpointID, facts[0].CheckpointID)
+	assert.Equal(t, "A01", facts[0].Target)
+	assert.Equal(t, "implemented", facts[0].Stage)
+
+	assert.Containsf(t, facts[0].ActualContextJSON, "internal/retrieval/ranking.go",
+		"checkpoint fact actual context = %s", facts[0].ActualContextJSON)
+	assert.Containsf(t, facts[0].LearningsJSON, "same-package tests",
+		"checkpoint fact learnings = %s", facts[0].LearningsJSON)
 }
 
+func TestTaskEvaluateUsesStructuredCheckpointWhenMarkdownIsUnavailable(t *testing.T) {
+	checkpoint := setupCheckpointEvidenceTask(t)
+	require.NoError(t, os.WriteFile(checkpoint.CheckpointPath, []byte("# scrubbed markdown checkpoint\n"), 0o644))
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"evaluate", "checkpoint-test", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskEvaluationOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "checkpoint-test", out.TaskID)
+	assert.True(t, containsPath(out.Hits, "internal/retrieval/ranking_test.go"))
+	assert.False(t, containsPath(out.Misses, "internal/retrieval/ranking_test.go"))
+	assert.Equal(t, "1/1", out.Metrics.TestCompanionRecall)
+	assert.True(t, containsPath(out.Noise, "fixtures/noisy-plan.md"))
+	assert.Equal(t, 1, out.CheckpointSummary.JSONRecords)
+	assert.Equal(t, 0, out.CheckpointSummary.MarkdownFallbacks)
+}
+
+func setupCheckpointEvidenceTask(t *testing.T) taskCheckpointOutput {
+	t.Helper()
+	setupTaskCommandRepo(t)
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{"--id", "checkpoint-test", "--no-refresh", "improve test companion recall"})
+	startCmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, startCmd.Execute())
+	checkpointCmd := NewTaskCmd()
+	checkpointCmd.SetArgs([]string{
+		"checkpoint", "checkpoint-test",
+		"--stage", "implemented",
+		"--decision", "improve",
+		"--note", "found a missing same-package test",
+		"--file-read", "internal/retrieval/ranking.go",
+		"--file-edited", "internal/retrieval/ranking.go",
+		"--test-read", "internal/retrieval/ranking_test.go",
+		"--test-run", "go test ./internal/retrieval",
+		"--missed-file", "internal/retrieval/ranking_test.go",
+		"--noise-file", "fixtures/noisy-plan.md",
+		"--learning", "retrieval|same-package tests are important rescue evidence|high|A01|internal/retrieval/ranking_test.go",
+		"--next-target", "A01-1",
+		"--next-decision", "improve",
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	checkpointCmd.SetOut(buf)
+	require.NoError(t, checkpointCmd.Execute())
+	var out taskCheckpointOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	return out
+}
 func TestTask_CheckpointResultHistoryAppendsWithoutDuplicatingTemplate(t *testing.T) {
 	setupTaskCommandRepo(t)
 
@@ -2935,12 +3643,16 @@ func TestTask_CheckpointResultHistoryAppendsWithoutDuplicatingTemplate(t *testin
 	})
 	startBuf := &bytes.Buffer{}
 	startCmd.SetOut(startBuf)
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := startCmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var startOut taskStartOutput
-	if err := json.Unmarshal(startBuf.Bytes(), &startOut); err != nil {
-		t.Fatalf("task json: %v\n%s", err, startBuf.String())
+	{
+		err := json.Unmarshal(startBuf.Bytes(), &startOut)
+		require.NoErrorf(t, err,
+			"task json: %v\n%s", err, startBuf.String())
 	}
 
 	firstCmd := NewTaskCmd()
@@ -2955,8 +3667,9 @@ func TestTask_CheckpointResultHistoryAppendsWithoutDuplicatingTemplate(t *testin
 		"--json",
 	})
 	firstCmd.SetOut(&bytes.Buffer{})
-	if err := firstCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := firstCmd.Execute()
+		require.NoError(t, err)
 	}
 
 	secondCmd := NewTaskCmd()
@@ -2971,36 +3684,53 @@ func TestTask_CheckpointResultHistoryAppendsWithoutDuplicatingTemplate(t *testin
 		"--json",
 	})
 	secondCmd.SetOut(&bytes.Buffer{})
-	if err := secondCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := secondCmd.Execute()
+		require.NoError(t, err)
 	}
 
 	resultBody := mustReadFile(t, startOut.ResultPath)
 	assertNoTrailingWhitespace(t, "checkpoint history result", resultBody)
-	if got := strings.Count(resultBody, "## Checkpoint History"); got != 1 {
-		t.Fatalf("checkpoint history heading count = %d:\n%s", got, resultBody)
+	{
+		got := strings.Count(resultBody, "## Checkpoint History")
+		assert.Equalf(t, 1, got,
+			"checkpoint history heading count = %d:\n%s", got, resultBody)
 	}
-	if got := strings.Count(resultBody, "### Checkpoint"); got != 2 {
-		t.Fatalf("checkpoint entry count = %d:\n%s", got, resultBody)
+	{
+
+		got := strings.Count(resultBody, "### Checkpoint")
+		assert.Equalf(t, 2, got,
+			"checkpoint entry count = %d:\n%s", got, resultBody)
 	}
-	for _, want := range []string{
-		"first checkpoint rewrites result template",
+	assert.Containsf(t, resultBody,
+
+		"first checkpoint rewrites result template", "result history missing %q:\n%s", "first checkpoint rewrites result template", resultBody)
+	assert.Containsf(t, resultBody,
+
 		"second checkpoint stays in history",
-		"Stage: implemented",
-		"Stage: validated",
-	} {
-		if !strings.Contains(resultBody, want) {
-			t.Fatalf("result history missing %q:\n%s", want, resultBody)
-		}
-	}
-	for _, unwanted := range []string{
+
+		"result history missing %q:\n%s", "second checkpoint stays in history", resultBody)
+	assert.Containsf(t, resultBody,
+
+		"Stage: implemented", "result history missing %q:\n%s",
+
+		"Stage: implemented", resultBody)
+	assert.Containsf(t, resultBody,
+
+		"Stage: validated", "result history missing %q:\n%s",
+
+		"Stage: validated", resultBody)
+	assert.NotContainsf(t,
+		resultBody,
+		"## Checkpoints", "result history should not keep template prompt %q:\n%s",
+
 		"## Checkpoints",
-		"Use `ds task checkpoint checkpoint-history-test --target A01`",
-	} {
-		if strings.Contains(resultBody, unwanted) {
-			t.Fatalf("result history should not keep template prompt %q:\n%s", unwanted, resultBody)
-		}
-	}
+		resultBody)
+	assert.NotContainsf(t,
+		resultBody,
+		"Use `ds task checkpoint checkpoint-history-test --target A01`", "result history should not keep template prompt %q:\n%s",
+		"Use `ds task checkpoint checkpoint-history-test --target A01`", resultBody)
+
 }
 
 func TestTask_CheckpointDraftPreviewsWithoutMutation(t *testing.T) {
@@ -3016,19 +3746,22 @@ func TestTask_CheckpointDraftPreviewsWithoutMutation(t *testing.T) {
 	})
 	startBuf := &bytes.Buffer{}
 	startCmd.SetOut(startBuf)
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := startCmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var startOut taskStartOutput
-	if err := json.Unmarshal(startBuf.Bytes(), &startOut); err != nil {
-		t.Fatalf("task json: %v\n%s", err, startBuf.String())
+	{
+		err := json.Unmarshal(startBuf.Bytes(), &startOut)
+		require.NoErrorf(t, err,
+			"task json: %v\n%s", err, startBuf.String())
 	}
+
 	manifestBefore := mustReadFile(t, startOut.ManifestPath)
 	resultBefore := mustReadFile(t, startOut.ResultPath)
 	checkpointDir := filepath.Join(startOut.Workspace, "checkpoints")
-	if _, err := os.Stat(checkpointDir); !os.IsNotExist(err) {
-		t.Fatalf("checkpoint dir should not exist before draft, stat err = %v", err)
-	}
+	require.NoDirExists(t, checkpointDir)
 
 	checkpointCmd := NewTaskCmd()
 	checkpointCmd.SetArgs([]string{
@@ -3046,67 +3779,88 @@ func TestTask_CheckpointDraftPreviewsWithoutMutation(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	checkpointCmd.SetOut(buf)
-	if err := checkpointCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := checkpointCmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var draft taskCheckpointDraftOutput
-	if err := json.Unmarshal(buf.Bytes(), &draft); err != nil {
-		t.Fatalf("draft json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &draft)
+		require.NoErrorf(t, err,
+			"draft json: %v\n%s", err, buf.String())
 	}
-	if !draft.Draft || draft.Mutates {
-		t.Fatalf("draft mutation flags = %#v", draft)
+	assert.True(t, draft.Draft)
+	assert.False(t, draft.Mutates)
+	assert.Equal(t, "draft_a01_validated", draft.CheckpointID)
+	assert.Equal(t, "A01", draft.Slice)
+	assert.Equal(t, "checkpoints/<timestamp>-validated.md", draft.CheckpointPathHint)
+	assert.Equal(t, "checkpoints/<timestamp>-validated.json", draft.CheckpointJSONHint)
+
+	assert.Equalf(t, startOut.ResultPath, draft.ResultPath,
+		"draft result path = %q, want %q", draft.ResultPath, startOut.ResultPath)
+	assert.Containsf(t, draft.CheckpointMarkdown,
+		"checkpoint_id: draft_a01_validated", "draft markdown missing %q:\n%s", "checkpoint_id: draft_a01_validated", draft.CheckpointMarkdown)
+	assert.Containsf(t, draft.CheckpointMarkdown,
+		"created_at: <generated-at-checkpoint>", "draft markdown missing %q:\n%s", "created_at: <generated-at-checkpoint>", draft.CheckpointMarkdown,
+	)
+	assert.Containsf(t, draft.CheckpointMarkdown,
+		"checkpoint_json: checkpoints/<timestamp>-validated.json", "draft markdown missing %q:\n%s",
+		"checkpoint_json: checkpoints/<timestamp>-validated.json", draft.CheckpointMarkdown,
+	)
+	assert.Containsf(t, draft.CheckpointMarkdown,
+		"wired a checkpoint draft preview", "draft markdown missing %q:\n%s", "wired a checkpoint draft preview", draft.CheckpointMarkdown)
+	assert.Containsf(t, draft.CheckpointMarkdown,
+		"## Files Actually Edited", "draft markdown missing %q:\n%s", "## Files Actually Edited", draft.CheckpointMarkdown)
+	assert.Containsf(t, draft.CheckpointMarkdown,
+		"`internal/commands/task.go`", "draft markdown missing %q:\n%s", "`internal/commands/task.go`", draft.CheckpointMarkdown)
+	assert.Containsf(t, draft.CheckpointMarkdown,
+		"Next iteration: B02 with decision -", "draft markdown missing %q:\n%s", "Next iteration: B02 with decision -", draft.CheckpointMarkdown,
+	)
+	assert.Containsf(t, draft.ResultAppendMarkdown,
+		"### Checkpoint", "draft result append missing %q:\n%s",
+
+		"### Checkpoint", draft.ResultAppendMarkdown)
+	assert.Containsf(t, draft.ResultAppendMarkdown,
+		"Created At: <generated-at-checkpoint>", "draft result append missing %q:\n%s", "Created At: <generated-at-checkpoint>", draft.ResultAppendMarkdown,
+	)
+	assert.Containsf(t, draft.ResultAppendMarkdown,
+		"Source: `checkpoints/<timestamp>-validated.md`", "draft result append missing %q:\n%s",
+		"Source: `checkpoints/<timestamp>-validated.md`", draft.ResultAppendMarkdown)
+	assert.Containsf(t, draft.ResultAppendMarkdown,
+		"Structured Evidence: `checkpoints/<timestamp>-validated.json`", "draft result append missing %q:\n%s",
+		"Structured Evidence: `checkpoints/<timestamp>-validated.json`", draft.ResultAppendMarkdown)
+	assert.Containsf(t, draft.ResultAppendMarkdown,
+		"Evidence for decision: 1 file(s) read; 1 file(s) edited; 1 test command(s)", "draft result append missing %q:\n%s",
+		"Evidence for decision: 1 file(s) read; 1 file(s) edited; 1 test command(s)", draft.ResultAppendMarkdown,
+	)
+
+	assert.Equal(t, "<generated-at-checkpoint>", draft.CheckpointRecord.CreatedAt)
+	assert.Equal(t, draft.CheckpointID, draft.CheckpointRecord.CheckpointID)
+
+	assert.Truef(t, containsPath(draft.CheckpointRecord.FilesEdited, "internal/commands/task.go"),
+		"draft record files edited = %#v", draft.CheckpointRecord.FilesEdited)
+	assert.Equalf(t, "B02", draft.CheckpointRecord.Next.RecommendedTarget,
+		"draft record next = %#v", draft.CheckpointRecord.Next)
+	{
+
+		got := mustReadFile(t, startOut.ManifestPath)
+		assert.Equalf(t, manifestBefore, got,
+			"draft mutated manifest.\nBefore:\n%s\nAfter:\n%s", manifestBefore, got)
 	}
-	if draft.CheckpointID != "draft_a01_validated" || draft.Slice != "A01" {
-		t.Fatalf("draft identity = %#v", draft)
+	{
+
+		got := mustReadFile(t, startOut.ResultPath)
+		assert.Equalf(t, resultBefore, got,
+			"draft mutated result.\nBefore:\n%s\nAfter:\n%s", resultBefore, got)
 	}
-	if draft.CheckpointPathHint != "checkpoints/<timestamp>-validated.md" || draft.CheckpointJSONHint != "checkpoints/<timestamp>-validated.json" {
-		t.Fatalf("draft path hints = %#v", draft)
+	{
+
+		_, err := os.Stat(checkpointDir)
+		assert.Truef(t, os.IsNotExist(err),
+			"draft created checkpoint dir, stat err = %v", err)
 	}
-	if draft.ResultPath != startOut.ResultPath {
-		t.Fatalf("draft result path = %q, want %q", draft.ResultPath, startOut.ResultPath)
-	}
-	for _, want := range []string{
-		"checkpoint_id: draft_a01_validated",
-		"created_at: <generated-at-checkpoint>",
-		"checkpoint_json: checkpoints/<timestamp>-validated.json",
-		"wired a checkpoint draft preview",
-		"## Files Actually Edited",
-		"`internal/commands/task.go`",
-		"Next iteration: B02 with decision -",
-	} {
-		if !strings.Contains(draft.CheckpointMarkdown, want) {
-			t.Fatalf("draft markdown missing %q:\n%s", want, draft.CheckpointMarkdown)
-		}
-	}
-	for _, want := range []string{
-		"### Checkpoint",
-		"Created At: <generated-at-checkpoint>",
-		"Source: `checkpoints/<timestamp>-validated.md`",
-		"Structured Evidence: `checkpoints/<timestamp>-validated.json`",
-		"Evidence for decision: 1 file(s) read; 1 file(s) edited; 1 test command(s)",
-	} {
-		if !strings.Contains(draft.ResultAppendMarkdown, want) {
-			t.Fatalf("draft result append missing %q:\n%s", want, draft.ResultAppendMarkdown)
-		}
-	}
-	if draft.CheckpointRecord.CreatedAt != "<generated-at-checkpoint>" || draft.CheckpointRecord.CheckpointID != draft.CheckpointID {
-		t.Fatalf("draft record identity = %#v", draft.CheckpointRecord)
-	}
-	if !containsPath(draft.CheckpointRecord.FilesEdited, "internal/commands/task.go") {
-		t.Fatalf("draft record files edited = %#v", draft.CheckpointRecord.FilesEdited)
-	}
-	if draft.CheckpointRecord.Next.RecommendedTarget != "B02" {
-		t.Fatalf("draft record next = %#v", draft.CheckpointRecord.Next)
-	}
-	if got := mustReadFile(t, startOut.ManifestPath); got != manifestBefore {
-		t.Fatalf("draft mutated manifest.\nBefore:\n%s\nAfter:\n%s", manifestBefore, got)
-	}
-	if got := mustReadFile(t, startOut.ResultPath); got != resultBefore {
-		t.Fatalf("draft mutated result.\nBefore:\n%s\nAfter:\n%s", resultBefore, got)
-	}
-	if _, err := os.Stat(checkpointDir); !os.IsNotExist(err) {
-		t.Fatalf("draft created checkpoint dir, stat err = %v", err)
-	}
+
 }
 
 func TestTask_CheckpointDraftHumanOutput(t *testing.T) {
@@ -3120,8 +3874,9 @@ func TestTask_CheckpointDraftHumanOutput(t *testing.T) {
 		"improve test companion recall",
 	})
 	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := startCmd.Execute()
+		require.NoError(t, err)
 	}
 
 	checkpointCmd := NewTaskCmd()
@@ -3135,22 +3890,33 @@ func TestTask_CheckpointDraftHumanOutput(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	checkpointCmd.SetOut(buf)
-	if err := checkpointCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := checkpointCmd.Execute()
+		require.NoError(t, err)
 	}
+
 	got := buf.String()
-	for _, want := range []string{
-		"Draft checkpoint for checkpoint-draft-human-test A01",
-		"No files were written. Lifecycle state, result files, and index state are unchanged.",
-		"Would write checkpoint: checkpoints/<timestamp>-implemented.md",
+	assert.Containsf(t, got,
+		"Draft checkpoint for checkpoint-draft-human-test A01", "draft human output missing %q:\n%s", "Draft checkpoint for checkpoint-draft-human-test A01", got)
+	assert.Containsf(t, got,
+		"No files were written. Lifecycle state, result files, and index state are unchanged.", "draft human output missing %q:\n%s",
+		"No files were written. Lifecycle state, result files, and index state are unchanged.", got)
+	assert.Containsf(t, got,
+		"Would write checkpoint: checkpoints/<timestamp>-implemented.md", "draft human output missing %q:\n%s",
+		"Would write checkpoint: checkpoints/<timestamp>-implemented.md", got)
+	assert.Containsf(t, got,
 		"Checkpoint preview:",
-		"Result append preview:",
-		"Draft checkpoint generated by `ds task checkpoint --draft`; no files were written.",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("draft human output missing %q:\n%s", want, got)
-		}
-	}
+		"draft human output missing %q:\n%s",
+
+		"Checkpoint preview:", got)
+	assert.Containsf(t, got,
+		"Result append preview:", "draft human output missing %q:\n%s",
+
+		"Result append preview:", got)
+	assert.Containsf(t, got,
+		"Draft checkpoint generated by `ds task checkpoint --draft`; no files were written.", "draft human output missing %q:\n%s",
+		"Draft checkpoint generated by `ds task checkpoint --draft`; no files were written.", got)
+
 }
 
 func TestTask_CheckpointFromGitCapturesEditedFiles(t *testing.T) {
@@ -3167,20 +3933,27 @@ func TestTask_CheckpointFromGitCapturesEditedFiles(t *testing.T) {
 	})
 	startBuf := &bytes.Buffer{}
 	startCmd.SetOut(startBuf)
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := startCmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var startOut taskStartOutput
-	if err := json.Unmarshal(startBuf.Bytes(), &startOut); err != nil {
-		t.Fatalf("task json: %v\n%s", err, startBuf.String())
+	{
+		err := json.Unmarshal(startBuf.Bytes(), &startOut)
+		require.NoErrorf(t, err,
+			"task json: %v\n%s", err, startBuf.String())
 	}
+
 	commitTaskGitRepo(t, repoDir, "baseline")
 
 	mustWriteFile(t, filepath.Join(repoDir, "internal", "retrieval", "ranking.go"), mustReadFile(t, filepath.Join(repoDir, "internal", "retrieval", "ranking.go"))+"\nfunc FromGitUnstaged() {}\n")
 	mustWriteFile(t, filepath.Join(repoDir, "docs", "plans", "test-companion-recall.md"), mustReadFile(t, filepath.Join(repoDir, "docs", "plans", "test-companion-recall.md"))+"\n- staged from-git note\n")
-	if err := taskGitCmd("-C", repoDir, "add", "docs/plans/test-companion-recall.md").Run(); err != nil {
-		t.Fatal(err)
+	{
+		err := taskGitCmd("-C", repoDir, "add", "docs/plans/test-companion-recall.md").Run()
+		require.NoError(t, err)
 	}
+
 	mustWriteFile(t, filepath.Join(repoDir, "internal", "retrieval", "new_helper.go"), "package retrieval\n\nfunc FromGitUntracked() {}\n")
 
 	checkpointCmd := NewTaskCmd()
@@ -3195,63 +3968,99 @@ func TestTask_CheckpointFromGitCapturesEditedFiles(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	checkpointCmd.SetOut(buf)
-	if err := checkpointCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var out taskCheckpointOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("checkpoint json: %v\n%s", err, buf.String())
-	}
-	for _, want := range []string{
-		"internal/retrieval/ranking.go",
-		"docs/plans/test-companion-recall.md",
-		"internal/retrieval/new_helper.go",
-	} {
-		if !containsPath(out.GitDiffFiles, want) {
-			t.Fatalf("checkpoint output git diff files missing %q: %#v", want, out.GitDiffFiles)
-		}
+	{
+		err := checkpointCmd.Execute()
+		require.NoError(t, err)
 	}
 
+	var out taskCheckpointOutput
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"checkpoint json: %v\n%s", err, buf.String())
+	}
+	assert.Truef(t,
+		containsPath(out.GitDiffFiles, "internal/retrieval/ranking.go"), "checkpoint output git diff files missing %q: %#v",
+		"internal/retrieval/ranking.go", out.GitDiffFiles,
+	)
+	assert.Truef(t,
+		containsPath(out.GitDiffFiles, "docs/plans/test-companion-recall.md"), "checkpoint output git diff files missing %q: %#v",
+		"docs/plans/test-companion-recall.md", out.GitDiffFiles)
+	assert.Truef(t,
+		containsPath(out.GitDiffFiles, "internal/retrieval/new_helper.go"), "checkpoint output git diff files missing %q: %#v",
+		"internal/retrieval/new_helper.go", out.GitDiffFiles,
+	)
+
 	var record taskCheckpointRecord
-	if err := json.Unmarshal([]byte(mustReadFile(t, out.CheckpointJSONPath)), &record); err != nil {
-		t.Fatalf("checkpoint record json: %v", err)
+	{
+		err := json.Unmarshal([]byte(mustReadFile(t, out.CheckpointJSONPath)), &record)
+		require.NoErrorf(t, err,
+			"checkpoint record json: %v", err)
 	}
-	for _, want := range []string{
-		"internal/retrieval/ranking.go",
-		"docs/plans/test-companion-recall.md",
-		"internal/retrieval/new_helper.go",
-	} {
-		if !containsPath(record.FilesEdited, want) {
-			t.Fatalf("record files edited missing %q: %#v", want, record.FilesEdited)
-		}
-		if !containsPath(record.ActualContext.FilesEdited, want) {
-			t.Fatalf("actual context files edited missing %q: %#v", want, record.ActualContext.FilesEdited)
-		}
-		if !containsPath(record.Evidence.GitDiff.ChangedFiles, want) {
-			t.Fatalf("git evidence changed files missing %q: %#v", want, record.Evidence.GitDiff)
-		}
-	}
-	if record.Evidence.GitDiff == nil || !strings.Contains(record.Evidence.GitDiff.Status, "internal/retrieval/ranking.go") {
-		t.Fatalf("expected git status evidence, got %#v", record.Evidence.GitDiff)
-	}
-	if containsPath(record.FilesEdited, filepath.ToSlash(taskRelativePath(repoDir, out.CheckpointPath))) {
-		t.Fatalf("from-git should collect before checkpoint writes, got %#v", record.FilesEdited)
-	}
+	assert.Truef(t,
+		containsPath(record.FilesEdited,
+			"internal/retrieval/ranking.go"), "record files edited missing %q: %#v", "internal/retrieval/ranking.go", record.FilesEdited)
+	assert.Truef(t, containsPath(record.ActualContext.FilesEdited, "internal/retrieval/ranking.go"), "actual context files edited missing %q: %#v",
+		"internal/retrieval/ranking.go", record.ActualContext.FilesEdited)
+	assert.Truef(t, containsPath(record.Evidence.GitDiff.
+		ChangedFiles, "internal/retrieval/ranking.go"), "git evidence changed files missing %q: %#v",
+
+		"internal/retrieval/ranking.go", record.Evidence.GitDiff)
+	assert.Truef(t,
+		containsPath(record.FilesEdited,
+			"docs/plans/test-companion-recall.md"), "record files edited missing %q: %#v", "docs/plans/test-companion-recall.md", record.FilesEdited,
+	)
+	assert.Truef(t, containsPath(record.ActualContext.FilesEdited, "docs/plans/test-companion-recall.md"), "actual context files edited missing %q: %#v",
+
+		"docs/plans/test-companion-recall.md", record.ActualContext.FilesEdited)
+	assert.Truef(t, containsPath(record.Evidence.GitDiff.ChangedFiles,
+
+		"docs/plans/test-companion-recall.md"), "git evidence changed files missing %q: %#v",
+
+		"docs/plans/test-companion-recall.md", record.Evidence.GitDiff,
+	)
+	assert.Truef(t,
+		containsPath(record.FilesEdited,
+			"internal/retrieval/new_helper.go"), "record files edited missing %q: %#v", "internal/retrieval/new_helper.go", record.FilesEdited)
+	assert.Truef(t, containsPath(record.ActualContext.FilesEdited, "internal/retrieval/new_helper.go"), "actual context files edited missing %q: %#v",
+
+		"internal/retrieval/new_helper.go", record.ActualContext.FilesEdited,
+	)
+	assert.Truef(t, containsPath(record.Evidence.GitDiff.ChangedFiles, "internal/retrieval/new_helper.go"), "git evidence changed files missing %q: %#v",
+		"internal/retrieval/new_helper.go", record.Evidence.GitDiff)
+
+	require.NotNil(t, record.Evidence.GitDiff)
+	assert.Contains(t, record.Evidence.GitDiff.Status, "internal/retrieval/ranking.go")
+	assert.False(t, containsPath(record.FilesEdited, filepath.ToSlash(taskRelativePath(repoDir, out.CheckpointPath))))
+
 	resultBody := mustReadFile(t, out.ResultPath)
-	for _, want := range []string{
-		"Evidence for decision: 3 file(s) edited",
+	assert.Containsf(t, resultBody,
+
+		"Evidence for decision: 3 file(s) edited", "result missing %q:\n%s", "Evidence for decision: 3 file(s) edited", resultBody)
+	assert.Containsf(t, resultBody,
+
 		"Files edited:",
+		"result missing %q:\n%s",
+
+		"Files edited:", resultBody)
+	assert.Containsf(t, resultBody,
+
+		"`internal/retrieval/ranking.go`", "result missing %q:\n%s",
+
 		"`internal/retrieval/ranking.go`",
-		"`docs/plans/test-companion-recall.md`",
+		resultBody)
+	assert.Containsf(t, resultBody,
+
+		"`docs/plans/test-companion-recall.md`", "result missing %q:\n%s", "`docs/plans/test-companion-recall.md`", resultBody)
+	assert.Containsf(t, resultBody,
+
 		"`internal/retrieval/new_helper.go`",
-	} {
-		if !strings.Contains(resultBody, want) {
-			t.Fatalf("result missing %q:\n%s", want, resultBody)
-		}
-	}
-	if !strings.Contains(mustReadFile(t, out.CheckpointPath), "## Files Actually Edited") {
-		t.Fatalf("checkpoint markdown missing edited-files section")
-	}
+
+		"result missing %q:\n%s", "`internal/retrieval/new_helper.go`", resultBody)
+
+	assert.Containsf(t, mustReadFile(t, out.CheckpointPath), "## Files Actually Edited",
+		"checkpoint markdown missing edited-files section")
+
 }
 
 func TestTask_CheckpointGitDiffWithoutFromGitStaysEvidenceOnly(t *testing.T) {
@@ -3267,9 +4076,11 @@ func TestTask_CheckpointGitDiffWithoutFromGitStaysEvidenceOnly(t *testing.T) {
 		"improve test companion recall",
 	})
 	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := startCmd.Execute()
+		require.NoError(t, err)
 	}
+
 	commitTaskGitRepo(t, repoDir, "baseline")
 	mustWriteFile(t, filepath.Join(repoDir, "internal", "retrieval", "ranking.go"), mustReadFile(t, filepath.Join(repoDir, "internal", "retrieval", "ranking.go"))+"\nfunc GitDiffOnly() {}\n")
 
@@ -3285,22 +4096,24 @@ func TestTask_CheckpointGitDiffWithoutFromGitStaysEvidenceOnly(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	checkpointCmd.SetOut(buf)
-	if err := checkpointCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := checkpointCmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var draft taskCheckpointDraftOutput
-	if err := json.Unmarshal(buf.Bytes(), &draft); err != nil {
-		t.Fatalf("draft json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &draft)
+		require.NoErrorf(t, err,
+			"draft json: %v\n%s", err, buf.String())
 	}
-	if !containsPath(draft.GitDiffFiles, "internal/retrieval/ranking.go") {
-		t.Fatalf("draft git diff files missing changed file: %#v", draft.GitDiffFiles)
-	}
-	if containsPath(draft.CheckpointRecord.FilesEdited, "internal/retrieval/ranking.go") {
-		t.Fatalf("--git-diff without --from-git should not populate edited actual context: %#v", draft.CheckpointRecord.FilesEdited)
-	}
-	if !strings.Contains(draft.CheckpointMarkdown, "## Files Actually Edited\n-\n") {
-		t.Fatalf("draft markdown should keep edited files empty without --from-git:\n%s", draft.CheckpointMarkdown)
-	}
+	assert.Truef(t, containsPath(draft.GitDiffFiles, "internal/retrieval/ranking.go"),
+		"draft git diff files missing changed file: %#v", draft.GitDiffFiles)
+	assert.False(t, containsPath(draft.CheckpointRecord.FilesEdited, "internal/retrieval/ranking.go"))
+
+	assert.Containsf(t, draft.CheckpointMarkdown, "## Files Actually Edited\n-\n",
+		"draft markdown should keep edited files empty without --from-git:\n%s", draft.CheckpointMarkdown)
+
 }
 
 func TestTask_CheckpointRunLogsIngestExplicitEvidence(t *testing.T) {
@@ -3315,8 +4128,9 @@ func TestTask_CheckpointRunLogsIngestExplicitEvidence(t *testing.T) {
 		"improve test companion recall",
 	})
 	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := startCmd.Execute()
+		require.NoError(t, err)
 	}
 
 	typecheckLog := filepath.Join(".devspecs", "run-logs", "typecheck.log")
@@ -3338,51 +4152,67 @@ func TestTask_CheckpointRunLogsIngestExplicitEvidence(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	checkpointCmd.SetOut(buf)
-	if err := checkpointCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := checkpointCmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var draft taskCheckpointDraftOutput
-	if err := json.Unmarshal(buf.Bytes(), &draft); err != nil {
-		t.Fatalf("draft json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &draft)
+		require.NoErrorf(t, err,
+			"draft json: %v\n%s", err, buf.String())
 	}
-	if draft.TestEvidenceCount != 2 {
-		t.Fatalf("test evidence count = %d, want 2: %#v", draft.TestEvidenceCount, draft)
-	}
-	for _, command := range []string{"npm run typecheck", "npm run build"} {
-		if !containsString(draft.CheckpointRecord.TestsRun, command) {
-			t.Fatalf("draft tests_run missing %q: %#v", command, draft.CheckpointRecord.TestsRun)
-		}
-		if !containsString(draft.CheckpointRecord.ActualContext.TestsRun, command) {
-			t.Fatalf("draft actual tests_run missing %q: %#v", command, draft.CheckpointRecord.ActualContext.TestsRun)
-		}
-	}
-	if len(draft.CheckpointRecord.Evidence.TestCommands) != 2 {
-		t.Fatalf("run log evidence = %#v", draft.CheckpointRecord.Evidence.TestCommands)
-	}
+	assert.Equalf(t, 2, draft.TestEvidenceCount,
+		"test evidence count = %d, want 2: %#v", draft.TestEvidenceCount, draft)
+	assert.Truef(t,
+		containsString(draft.CheckpointRecord.
+			TestsRun,
+			"npm run typecheck"), "draft tests_run missing %q: %#v", "npm run typecheck", draft.CheckpointRecord.TestsRun)
+	assert.Truef(t, containsString(draft.CheckpointRecord.ActualContext.TestsRun, "npm run typecheck"), "draft actual tests_run missing %q: %#v",
+		"npm run typecheck",
+		draft.CheckpointRecord.ActualContext.TestsRun)
+	assert.Truef(t,
+		containsString(draft.CheckpointRecord.
+			TestsRun,
+			"npm run build"), "draft tests_run missing %q: %#v", "npm run build", draft.CheckpointRecord.TestsRun)
+	assert.Truef(t,
+		containsString(draft.CheckpointRecord.ActualContext.TestsRun, "npm run build"), "draft actual tests_run missing %q: %#v", "npm run build", draft.CheckpointRecord.ActualContext.TestsRun)
+
+	require.Lenf(t, draft.CheckpointRecord.Evidence.TestCommands, 2,
+		"run log evidence = %#v", draft.CheckpointRecord.Evidence.TestCommands)
+
 	typecheck := draft.CheckpointRecord.Evidence.TestCommands[0]
-	if typecheck.Command != "npm run typecheck" || typecheck.ExitCode != 0 || typecheck.Source != filepath.ToSlash(typecheckLog) {
-		t.Fatalf("typecheck evidence = %#v", typecheck)
-	}
-	if !strings.Contains(typecheck.Output, "src/index.ts ok") {
-		t.Fatalf("typecheck output missing log body: %#v", typecheck)
-	}
+	assert.Equal(t, "npm run typecheck", typecheck.Command)
+	assert.Equal(t, 0, typecheck.ExitCode)
+	assert.Equal(t, filepath.ToSlash(typecheckLog), typecheck.Source)
+
+	assert.Containsf(t, typecheck.Output, "src/index.ts ok",
+		"typecheck output missing log body: %#v", typecheck)
+
 	build := draft.CheckpointRecord.Evidence.TestCommands[1]
-	if build.Command != "npm run build" || !strings.Contains(build.Output, "building app") {
-		t.Fatalf("build evidence = %#v", build)
-	}
-	for _, want := range []string{
+	assert.Equal(t, "npm run build", build.Command)
+	assert.Contains(t, build.Output, "building app")
+	assert.Containsf(t, draft.CheckpointMarkdown,
 		"## Tests Actually Run",
+
+		"draft markdown missing %q:\n%s", "## Tests Actually Run", draft.CheckpointMarkdown)
+	assert.Containsf(t, draft.CheckpointMarkdown,
 		"`npm run typecheck`",
-		"`npm run build`",
-		"Evidence for decision: 2 test command(s)",
-	} {
-		if !strings.Contains(draft.CheckpointMarkdown, want) {
-			t.Fatalf("draft markdown missing %q:\n%s", want, draft.CheckpointMarkdown)
-		}
-		if !strings.Contains(draft.ResultAppendMarkdown, want) && want != "## Tests Actually Run" {
-			t.Fatalf("draft result append missing %q:\n%s", want, draft.ResultAppendMarkdown)
-		}
-	}
+		"draft markdown missing %q:\n%s",
+		"`npm run typecheck`", draft.CheckpointMarkdown)
+	assert.Contains(t, draft.ResultAppendMarkdown, "`npm run typecheck`")
+	assert.Containsf(t, draft.CheckpointMarkdown,
+		"`npm run build`", "draft markdown missing %q:\n%s",
+
+		"`npm run build`", draft.CheckpointMarkdown,
+	)
+	assert.Contains(t, draft.ResultAppendMarkdown, "`npm run build`")
+	assert.Containsf(t, draft.CheckpointMarkdown,
+		"Evidence for decision: 2 test command(s)", "draft markdown missing %q:\n%s", "Evidence for decision: 2 test command(s)", draft.CheckpointMarkdown,
+	)
+	assert.Contains(t, draft.ResultAppendMarkdown, "Evidence for decision: 2 test command(s)")
+
 }
 
 func TestTask_EvaluateRunLogCommandsAreActualRuns(t *testing.T) {
@@ -3397,9 +4227,11 @@ func TestTask_EvaluateRunLogCommandsAreActualRuns(t *testing.T) {
 		"improve test companion recall",
 	})
 	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := startCmd.Execute()
+		require.NoError(t, err)
 	}
+
 	runLog := filepath.Join(".devspecs", "run-logs", "test.log")
 	mustMkdirAll(t, filepath.Join(repoDir, ".devspecs", "run-logs"))
 	mustWriteFile(t, filepath.Join(repoDir, runLog), "$ go test ./internal/retrieval\nok example.com/repo/internal/retrieval\nexit_code: 0\n")
@@ -3415,30 +4247,32 @@ func TestTask_EvaluateRunLogCommandsAreActualRuns(t *testing.T) {
 		"--json",
 	})
 	checkpointCmd.SetOut(&bytes.Buffer{})
-	if err := checkpointCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := checkpointCmd.Execute()
+		require.NoError(t, err)
 	}
 
 	evalCmd := NewTaskCmd()
 	evalCmd.SetArgs([]string{"evaluate", "checkpoint-run-log-eval-test", "--json"})
 	evalBuf := &bytes.Buffer{}
 	evalCmd.SetOut(evalBuf)
-	if err := evalCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := evalCmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var evalOut taskEvaluationOutput
-	if err := json.Unmarshal(evalBuf.Bytes(), &evalOut); err != nil {
-		t.Fatalf("evaluate json: %v\n%s", err, evalBuf.String())
+	{
+		err := json.Unmarshal(evalBuf.Bytes(), &evalOut)
+		require.NoErrorf(t, err,
+			"evaluate json: %v\n%s", err, evalBuf.String())
 	}
-	if !containsString(evalOut.Observed.TestsRun, "go test ./internal/retrieval") {
-		t.Fatalf("run log command should be actual tests_run, got %#v", evalOut.Observed.TestsRun)
-	}
-	if !containsString(evalOut.Observed.TestCommands, "go test ./internal/retrieval") {
-		t.Fatalf("run log command should retain structured evidence, got %#v", evalOut.Observed.TestCommands)
-	}
-	if containsString(evalOut.CheckpointSummary.EvidenceOnlyTestCommands, "go test ./internal/retrieval") {
-		t.Fatalf("run log command should not be evidence-only, got %#v", evalOut.CheckpointSummary)
-	}
+	assert.Truef(t, containsString(evalOut.Observed.TestsRun, "go test ./internal/retrieval"),
+		"run log command should be actual tests_run, got %#v", evalOut.Observed.TestsRun)
+	assert.Truef(t, containsString(evalOut.Observed.TestCommands, "go test ./internal/retrieval"),
+		"run log command should retain structured evidence, got %#v", evalOut.Observed.TestCommands)
+	assert.False(t, containsString(evalOut.CheckpointSummary.EvidenceOnlyTestCommands, "go test ./internal/retrieval"))
+
 }
 
 func TestTask_CheckpointTargetsSelectedSlice(t *testing.T) {
@@ -3454,9 +4288,11 @@ func TestTask_CheckpointTargetsSelectedSlice(t *testing.T) {
 		"improve test companion recall",
 	})
 	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := startCmd.Execute()
+		require.NoError(t, err)
 	}
+
 	workspace := filepath.Join(repoDir, "devspecs", "tasks", "slice-target-test")
 	firstResult := filepath.Join(workspace, "A01-first-pass-result.md")
 	secondResult := filepath.Join(workspace, "A02-second-pass-result.md")
@@ -3474,51 +4310,75 @@ func TestTask_CheckpointTargetsSelectedSlice(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	checkpointCmd.SetOut(buf)
-	if err := checkpointCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := checkpointCmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var out taskCheckpointOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("checkpoint json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoErrorf(t, err,
+			"checkpoint json: %v\n%s", err, buf.String())
 	}
-	if out.Slice != "A02" {
-		t.Fatalf("checkpoint output slice = %q", out.Slice)
-	}
-	if filepath.Base(out.ResultPath) != "A02-second-pass-result.md" {
-		t.Fatalf("checkpoint result path = %q", out.ResultPath)
-	}
+	assert.Equalf(t, "A02", out.Slice,
+		"checkpoint output slice = %q", out.Slice)
+	assert.Equalf(t, "A02-second-pass-result.md", filepath.Base(out.ResultPath),
+		"checkpoint result path = %q", out.ResultPath)
+
 	firstBody := mustReadFile(t, firstResult)
-	if strings.Contains(firstBody, "targeted checkpoint") {
-		t.Fatalf("first slice result should not receive A02 checkpoint:\n%s", firstBody)
-	}
+	assert.NotContainsf(t, firstBody, "targeted checkpoint",
+		"first slice result should not receive A02 checkpoint:\n%s", firstBody)
+
 	secondBody := mustReadFile(t, secondResult)
-	for _, want := range []string{
-		"targeted checkpoint",
-		"Stage: implemented",
-		"Decision: promote",
-		"`internal/retrieval/ranking.go`",
-	} {
-		if !strings.Contains(secondBody, want) {
-			t.Fatalf("second slice result missing %q:\n%s", want, secondBody)
-		}
-	}
+	assert.Containsf(t, secondBody,
+
+		"targeted checkpoint", "second slice result missing %q:\n%s",
+
+		"targeted checkpoint", secondBody,
+	)
+	assert.Containsf(t, secondBody,
+
+		"Stage: implemented", "second slice result missing %q:\n%s",
+
+		"Stage: implemented", secondBody)
+	assert.Containsf(t, secondBody,
+
+		"Decision: promote", "second slice result missing %q:\n%s",
+
+		"Decision: promote", secondBody)
+	assert.Containsf(t, secondBody,
+
+		"`internal/retrieval/ranking.go`", "second slice result missing %q:\n%s",
+
+		"`internal/retrieval/ranking.go`", secondBody)
+
 	checkpointBody := mustReadFile(t, out.CheckpointPath)
-	for _, want := range []string{
-		"slice: A02",
-		"`../A02-second-pass-plan.md`",
+	assert.Containsf(t, checkpointBody,
+
+		"slice: A02", "checkpoint body missing %q:\n%s",
+
+		"slice: A02", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
+		"`../A02-second-pass-plan.md`", "checkpoint body missing %q:\n%s",
+
+		"`../A02-second-pass-plan.md`", checkpointBody)
+	assert.Containsf(t, checkpointBody,
+
 		"`../A02-second-pass-result.md`",
-	} {
-		if !strings.Contains(checkpointBody, want) {
-			t.Fatalf("checkpoint body missing %q:\n%s", want, checkpointBody)
-		}
-	}
+
+		"checkpoint body missing %q:\n%s", "`../A02-second-pass-result.md`", checkpointBody)
+
 	var record taskCheckpointRecord
-	if err := json.Unmarshal([]byte(mustReadFile(t, out.CheckpointJSONPath)), &record); err != nil {
-		t.Fatalf("checkpoint record json: %v", err)
+	{
+		err := json.Unmarshal([]byte(mustReadFile(t, out.CheckpointJSONPath)), &record)
+		require.NoErrorf(t, err,
+			"checkpoint record json: %v", err)
 	}
-	if record.Slice != "A02" || record.SliceTitle != "second pass" {
-		t.Fatalf("unexpected checkpoint record slice fields: %#v", record)
-	}
+	assert.Equal(t, "A02", record.Slice)
+	assert.Equal(t, "second pass", record.SliceTitle)
+
 }
 
 func TestTask_EvaluateReportsStructuredEvidenceWithoutInflatingActualContext(t *testing.T) {
@@ -3551,9 +4411,11 @@ func TestTask_EvaluateReportsStructuredEvidenceWithoutInflatingActualContext(t *
 			PackCompleteness:       "medium",
 		},
 	}
-	if err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), manifest); err != nil {
-		t.Fatal(err)
+	{
+		err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), manifest)
+		require.NoError(t, err)
 	}
+
 	record := taskCheckpointRecord{
 		SchemaVersion: 1,
 		TaskID:        taskID,
@@ -3579,51 +4441,47 @@ func TestTask_EvaluateReportsStructuredEvidenceWithoutInflatingActualContext(t *
 			}},
 		},
 	}
-	if err := writeTaskCheckpointRecord(filepath.Join(workspace, "checkpoints", "20260604-000001-implemented.json"), record); err != nil {
-		t.Fatal(err)
+	{
+		err := writeTaskCheckpointRecord(filepath.Join(workspace, "checkpoints", "20260604-000001-implemented.json"), record)
+		require.NoError(t, err)
 	}
 
 	evalCmd := NewTaskCmd()
 	evalCmd.SetArgs([]string{"evaluate", taskID, "--json"})
 	evalBuf := &bytes.Buffer{}
 	evalCmd.SetOut(evalBuf)
-	if err := evalCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := evalCmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var evalOut taskEvaluationOutput
-	if err := json.Unmarshal(evalBuf.Bytes(), &evalOut); err != nil {
-		t.Fatalf("evaluate json: %v\n%s", err, evalBuf.String())
+	{
+		err := json.Unmarshal(evalBuf.Bytes(), &evalOut)
+		require.NoErrorf(t, err,
+			"evaluate json: %v\n%s", err, evalBuf.String())
 	}
-	if !containsPath(evalOut.Hits, "internal/retrieval/ranking.go") {
-		t.Fatalf("expected predicted source hit, got %#v", evalOut.Hits)
-	}
-	if containsPath(evalOut.Misses, "internal/commands/task.go") {
-		t.Fatalf("git diff evidence should not inflate actual misses, got %#v", evalOut.Misses)
-	}
-	if !containsPath(evalOut.Observed.GitDiffFiles, "internal/commands/task.go") {
-		t.Fatalf("expected git diff evidence in observed context, got %#v", evalOut.Observed.GitDiffFiles)
-	}
-	if !containsPath(evalOut.Misses, "internal/commands/task_evaluate.go") {
-		t.Fatalf("expected explicit JSON missed file, got %#v", evalOut.Misses)
-	}
-	if !containsPath(evalOut.Noise, "fixtures/noisy-plan.md") {
-		t.Fatalf("expected explicit JSON noise file, got %#v", evalOut.Noise)
-	}
-	if !containsString(evalOut.Observed.TestCommands, "go test ./internal/retrieval -run TestImproveTestCompanionRecall -count=1") {
-		t.Fatalf("expected structured test command evidence, got %#v", evalOut.Observed.TestCommands)
-	}
-	if containsString(evalOut.Observed.TestsRun, "go test ./internal/retrieval -run TestImproveTestCompanionRecall -count=1") {
-		t.Fatalf("test command receipt should stay evidence-only unless recorded as actual context, got %#v", evalOut.Observed.TestsRun)
-	}
-	if !containsPath(evalOut.CheckpointSummary.EvidenceOnlyGitDiffFiles, "internal/commands/task.go") {
-		t.Fatalf("expected evidence-only git diff summary, got %#v", evalOut.CheckpointSummary)
-	}
-	if !containsString(evalOut.CheckpointSummary.EvidenceOnlyTestCommands, "go test ./internal/retrieval -run TestImproveTestCompanionRecall -count=1") {
-		t.Fatalf("expected evidence-only test command summary, got %#v", evalOut.CheckpointSummary)
-	}
-	if evalOut.CheckpointSummary.JSONRecords != 1 || evalOut.CheckpointSummary.MarkdownFallbacks != 0 {
-		t.Fatalf("expected structured checkpoint summary, got %#v", evalOut.CheckpointSummary)
-	}
+	assert.Truef(t, containsPath(evalOut.Hits, "internal/retrieval/ranking.go"),
+		"expected predicted source hit, got %#v", evalOut.Hits)
+	assert.False(t, containsPath(evalOut.Misses, "internal/commands/task.go"))
+
+	assert.Truef(t, containsPath(evalOut.Observed.GitDiffFiles, "internal/commands/task.go"),
+		"expected git diff evidence in observed context, got %#v", evalOut.Observed.GitDiffFiles)
+	assert.Truef(t, containsPath(evalOut.Misses, "internal/commands/task_evaluate.go"),
+		"expected explicit JSON missed file, got %#v", evalOut.Misses)
+	assert.Truef(t, containsPath(evalOut.Noise, "fixtures/noisy-plan.md"),
+		"expected explicit JSON noise file, got %#v", evalOut.Noise)
+	assert.Truef(t, containsString(evalOut.Observed.TestCommands, "go test ./internal/retrieval -run TestImproveTestCompanionRecall -count=1"),
+		"expected structured test command evidence, got %#v", evalOut.Observed.TestCommands)
+	assert.False(t, containsString(evalOut.Observed.TestsRun, "go test ./internal/retrieval -run TestImproveTestCompanionRecall -count=1"))
+
+	assert.Truef(t, containsPath(evalOut.CheckpointSummary.EvidenceOnlyGitDiffFiles, "internal/commands/task.go"),
+		"expected evidence-only git diff summary, got %#v", evalOut.CheckpointSummary)
+	assert.Truef(t, containsString(evalOut.CheckpointSummary.EvidenceOnlyTestCommands, "go test ./internal/retrieval -run TestImproveTestCompanionRecall -count=1"),
+		"expected evidence-only test command summary, got %#v", evalOut.CheckpointSummary)
+	assert.Equal(t, 1, evalOut.CheckpointSummary.JSONRecords)
+	assert.Equal(t, 0, evalOut.CheckpointSummary.MarkdownFallbacks)
+
 }
 
 func TestTask_GitChangedFileParserIgnoresWarnings(t *testing.T) {
@@ -3633,15 +4491,13 @@ func TestTask_GitChangedFileParserIgnoresWarnings(t *testing.T) {
 		"",
 		".devspecs/tasks/p02/P00-index.md",
 	}, "\n"))
-	if containsPath(files, "warning: in the working copy of 'internal/retrieval/ranking.go', LF will be replaced by CRLF the next time Git touches it") {
-		t.Fatalf("warning line should not be parsed as changed file: %#v", files)
-	}
-	if !containsPath(files, "internal/retrieval/ranking.go") {
-		t.Fatalf("expected real changed file, got %#v", files)
-	}
-	if !containsPath(files, ".devspecs/tasks/p02/P00-index.md") {
-		t.Fatalf("expected task artifact changed file, got %#v", files)
-	}
+	assert.False(t, containsPath(files, "warning: in the working copy of 'internal/retrieval/ranking.go', LF will be replaced by CRLF the next time Git touches it"))
+
+	assert.Truef(t, containsPath(files, "internal/retrieval/ranking.go"),
+		"expected real changed file, got %#v", files)
+	assert.Truef(t, containsPath(files, ".devspecs/tasks/p02/P00-index.md"),
+		"expected task artifact changed file, got %#v", files)
+
 }
 
 func TestTask_EvaluateExcludesTaskWorkspaceReadsFromMissMetrics(t *testing.T) {
@@ -3679,9 +4535,11 @@ func TestTask_EvaluateExcludesTaskWorkspaceReadsFromMissMetrics(t *testing.T) {
 			PackCompleteness:       "high",
 		},
 	}
-	if err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), manifest); err != nil {
-		t.Fatal(err)
+	{
+		err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), manifest)
+		require.NoError(t, err)
 	}
+
 	workspaceIndex := filepath.ToSlash(filepath.Join(".devspecs", "tasks", taskID, "A00-index.md"))
 	workspacePlan := filepath.Join(workspace, "A01-workspace-filter-plan.md")
 	workspaceJSON := filepath.Join(workspace, taskManifestFilename)
@@ -3706,77 +4564,78 @@ func TestTask_EvaluateExcludesTaskWorkspaceReadsFromMissMetrics(t *testing.T) {
 			"internal/commands/task_evaluate.go",
 		},
 	}
-	if err := writeTaskCheckpointRecord(filepath.Join(workspace, "checkpoints", "20260604-000001-implemented.json"), record); err != nil {
-		t.Fatal(err)
+	{
+		err := writeTaskCheckpointRecord(filepath.Join(workspace, "checkpoints", "20260604-000001-implemented.json"), record)
+		require.NoError(t, err)
 	}
 
 	evalCmd := NewTaskCmd()
 	evalCmd.SetArgs([]string{"evaluate", taskID, "--dir", ".devspecs/tasks", "--json"})
 	evalBuf := &bytes.Buffer{}
 	evalCmd.SetOut(evalBuf)
-	if err := evalCmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := evalCmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var evalOut taskEvaluationOutput
-	if err := json.Unmarshal(evalBuf.Bytes(), &evalOut); err != nil {
-		t.Fatalf("evaluate json: %v\n%s", err, evalBuf.String())
+	{
+		err := json.Unmarshal(evalBuf.Bytes(), &evalOut)
+		require.NoErrorf(t, err,
+			"evaluate json: %v\n%s", err, evalBuf.String())
 	}
-	if !containsPath(evalOut.Observed.FilesRead, workspaceIndex) {
-		t.Fatalf("raw observed context should keep task workspace read, got %#v", evalOut.Observed.FilesRead)
-	}
-	if !containsPath(evalOut.Observed.FilesRead, workspaceJSON) {
-		t.Fatalf("raw observed context should keep absolute task workspace read, got %#v", evalOut.Observed.FilesRead)
-	}
-	if containsPath(evalOut.Misses, workspaceIndex) {
-		t.Fatalf("task workspace read should not become a miss: %#v", evalOut.Misses)
-	}
-	if containsPath(evalOut.Misses, workspacePlan) || containsPath(evalOut.Misses, "A01-workspace-filter-plan.md") {
-		t.Fatalf("task workspace plan should not become a miss: %#v", evalOut.Misses)
-	}
-	if !containsPath(evalOut.Hits, "internal/commands/task.go") {
-		t.Fatalf("normal implementation file should still count as hit, got %#v", evalOut.Hits)
-	}
-	if !containsPath(evalOut.Misses, "internal/commands/task_evaluate.go") {
-		t.Fatalf("normal explicit missed file should still count, got %#v", evalOut.Misses)
-	}
-	if evalOut.Metrics.CriticalPathRecall != "1/1" {
-		t.Fatalf("critical path recall should ignore task workspace reads, got %q", evalOut.Metrics.CriticalPathRecall)
-	}
-	if !evalOut.ConfidenceMismatch {
-		t.Fatalf("normal miss should still drive confidence mismatch when initial completeness is high")
-	}
+	assert.Truef(t, containsPath(evalOut.Observed.FilesRead, workspaceIndex),
+		"raw observed context should keep task workspace read, got %#v", evalOut.Observed.FilesRead)
+	assert.Truef(t, containsPath(evalOut.Observed.FilesRead, workspaceJSON),
+		"raw observed context should keep absolute task workspace read, got %#v", evalOut.Observed.FilesRead)
+	assert.False(t, containsPath(evalOut.Misses, workspaceIndex))
+	assert.False(t, containsPath(evalOut.Misses, workspacePlan))
+	assert.False(t, containsPath(evalOut.Misses, "A01-workspace-filter-plan.md"))
+
+	assert.Truef(t, containsPath(evalOut.Hits, "internal/commands/task.go"),
+		"normal implementation file should still count as hit, got %#v", evalOut.Hits)
+	assert.Truef(t, containsPath(evalOut.Misses, "internal/commands/task_evaluate.go"),
+		"normal explicit missed file should still count, got %#v", evalOut.Misses)
+	assert.Equalf(t, "1/1", evalOut.Metrics.CriticalPathRecall,
+		"critical path recall should ignore task workspace reads, got %q", evalOut.Metrics.CriticalPathRecall)
+	assert.Truef(t, evalOut.ConfidenceMismatch,
+		"normal miss should still drive confidence mismatch when initial completeness is high")
+
 }
 
 func mustMkdirAll(t *testing.T, path string) {
 	t.Helper()
-	if err := os.MkdirAll(path, 0o755); err != nil {
-		t.Fatal(err)
+	{
+		err := os.MkdirAll(path, 0o755)
+		require.NoError(t, err)
 	}
+
 }
 
 func mustWriteFile(t *testing.T, path, body string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
+	{
+		err := os.WriteFile(path, []byte(body), 0o644)
+		require.NoError(t, err)
 	}
+
 }
 
 func mustReadFile(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	return string(data)
 }
 
 func assertNoTrailingWhitespace(t *testing.T, label, body string) {
 	t.Helper()
-	for i, line := range strings.Split(body, "\n") {
+	for _, line := range strings.Split(body, "\n") {
 		line = strings.TrimSuffix(line, "\r")
-		if strings.HasSuffix(line, " ") || strings.HasSuffix(line, "\t") {
-			t.Fatalf("%s line %d has trailing whitespace: %q", label, i+1, line)
-		}
+		assert.False(t, strings.HasSuffix(line, " "))
+		assert.False(t, strings.HasSuffix(line, "\t"))
+
 	}
 }
 
@@ -3787,9 +4646,9 @@ func writeExistingTaskSeriesRange(t *testing.T, repoDir, last string) {
 		if series == last {
 			return
 		}
-		if series == "" || len(series) > 4 {
-			t.Fatalf("series range did not reach %q", last)
-		}
+		assert.NotEmpty(t, series)
+		assert.LessOrEqual(t, len(series), 4)
+
 	}
 }
 
@@ -3813,9 +4672,11 @@ func writeExistingTaskSeries(t *testing.T, repoDir, taskID, series string) {
 			},
 		},
 	}
-	if err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), manifest); err != nil {
-		t.Fatal(err)
+	{
+		err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), manifest)
+		require.NoError(t, err)
 	}
+
 }
 
 func containsString(values []string, want string) bool {
@@ -3849,9 +4710,11 @@ func taskAdvisoryFileByPath(files []taskAdvisoryFile, path string) *taskAdvisory
 func taskTestRepoID(t *testing.T, db *store.DB, repoDir string) string {
 	t.Helper()
 	var repoID string
-	if err := db.QueryRow("SELECT id FROM repos WHERE root_path = ?", repoDir).Scan(&repoID); err != nil {
-		t.Fatal(err)
+	{
+		err := db.QueryRow("SELECT id FROM repos WHERE root_path = ?", repoDir).Scan(&repoID)
+		require.NoError(t, err)
 	}
+
 	return repoID
 }
 

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuildRecentGitSourceContextCandidates(t *testing.T) {
@@ -19,24 +21,18 @@ func TestBuildRecentGitSourceContextCandidates(t *testing.T) {
 	runGitCommand(t, root, "commit", "-m", "add router behavior")
 
 	got := buildRecentGitSourceContextCandidates(context.Background(), root, nil, RunOptions{GitMaxCommits: 20, GitMaxFilesPerCommit: 20})
-	if len(got) != 1 {
-		t.Fatalf("got %d candidates: %#v", len(got), got)
-	}
-	if got[0].RelPath != "server/router/api.go" {
-		t.Fatalf("candidate path = %q", got[0].RelPath)
-	}
-	if got[0].Metadata["admission_reason"] != recentSourceAdmissionReason {
-		t.Fatalf("metadata = %#v", got[0].Metadata)
-	}
+	require.Len(t, got, 1,
+		"got %d candidates: %#v", len(got), got)
+	require.Equal(t, "server/router/api.go", got[0].RelPath,
+		"candidate path = %q", got[0].RelPath)
+	require.Equal(t, recentSourceAdmissionReason, got[0].Metadata["admission_reason"],
+		"metadata = %#v", got[0].Metadata)
+
 }
 
 func writeRecentSourceTestFile(t *testing.T, root, rel, body string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o644))
 }

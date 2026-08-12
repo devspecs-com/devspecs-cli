@@ -40,8 +40,8 @@ type Scanner struct {
 }
 
 var (
-	fileFirstCommitDate  = repo.FileFirstCommitDate
-	fileFirstCommitDates = repo.FileFirstCommitDates
+	fileFirstCommitDate  = repo.FileFirstCommitDateContext
+	fileFirstCommitDates = repo.FileFirstCommitDatesContext
 )
 
 type RunOptions struct {
@@ -77,6 +77,9 @@ func (s *Scanner) Run(ctx context.Context, repoRoot string, cfg *config.RepoConf
 
 // RunWithOptions scans the repo with optional eval/runtime controls.
 func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *config.RepoConfig, opts RunOptions) (*Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if cfg != nil {
 		if err := config.ValidateRepoConfig(cfg); err != nil {
 			return nil, fmt.Errorf("repo config: %w", err)
@@ -98,7 +101,7 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 
 	repoInfo := opts.RepositoryInfo
 	if repoInfo == nil {
-		detected := repo.DetectIdentity(repoRoot)
+		detected := repo.DetectIdentityContext(ctx, repoRoot)
 		if !sameRepositoryRoot(detected.RootPath, repoRoot) {
 			// A caller may intentionally scan a fixture/subtree inside a larger Git
 			// repository. Keep that target path-scoped instead of rebinding it to
@@ -106,6 +109,9 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 			detected = repo.Info{RootPath: repoRoot}
 		}
 		repoInfo = &detected
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(repoInfo.RootPath) == "" {
 		repoInfo.RootPath = repoRoot
@@ -116,11 +122,14 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 	if err != nil {
 		return nil, fmt.Errorf("ensure repo: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	inTx := false
 	if opts.UseTransaction {
 		phase := timing.start("begin_transaction", "")
-		if _, err := s.db.Exec("BEGIN IMMEDIATE"); err != nil {
+		if _, err := s.db.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 			phase.finish(nil, statusTimingDetails(err))
 			return nil, fmt.Errorf("begin scan transaction: %w", err)
 		}
@@ -133,7 +142,7 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 		}()
 	}
 
-	state := &scanRunState{}
+	state := &scanRunState{ctx: ctx}
 	if opts.FreshIndex {
 		phase := timing.start("fresh_index_prepare", "")
 		state.shortIDs, err = s.seedExistingShortIDClaims()
@@ -191,6 +200,9 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 	parsedByAdapter := map[string]int{}
 	upsertedByAdapter := map[string]int{}
 	for _, adapter := range s.adapters {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		adapterPhase := timing.start("adapter_parse_persist", adapter.Name())
 		var candidates []adapters.Candidate
 		if _, ok := adapter.(adapters.FileDiscoveryAdapter); ok {
@@ -200,6 +212,9 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 			candidates, err = adapter.Discover(ctx, repoRoot, cfg)
 			if err != nil {
 				adapterPhase.finish(map[string]int{"candidates": len(candidates)}, map[string]string{"status": "discover_error"})
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return nil, ctxErr
+				}
 				continue
 			}
 		}
@@ -217,6 +232,10 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 			prefetchedAuthoredAt = state.prefetchAuthoredAt(ctx, repoRoot, candidates, now, opts)
 		}
 		authoredAtPhase.finish(map[string]int{"paths": prefetchedAuthoredAt}, nil)
+		if err := ctx.Err(); err != nil {
+			adapterPhase.finish(map[string]int{"candidates": len(candidates)}, statusTimingDetails(err))
+			return nil, err
+		}
 
 		if opts.FreshIndex {
 			parsed, parsedCount, err := parseCandidatesForFreshIndex(ctx, repoRoot, adapter, candidates, opts, progress)
@@ -224,9 +243,17 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 				adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedCount}, statusTimingDetails(err))
 				return nil, err
 			}
+			if err := ctx.Err(); err != nil {
+				adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedCount}, statusTimingDetails(err))
+				return nil, err
+			}
 			parsedByAdapter[adapter.Name()] += parsedCount
 			var writerDurationMS int64
 			for i, parsedArtifact := range parsed {
+				if err := ctx.Err(); err != nil {
+					adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()]}, statusTimingDetails(err))
+					return nil, err
+				}
 				if !parsedArtifact.ok {
 					continue
 				}
@@ -270,6 +297,10 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 			adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedCount}, statusTimingDetails(err))
 			return nil, err
 		}
+		if err := ctx.Err(); err != nil {
+			adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedCount}, statusTimingDetails(err))
+			return nil, err
+		}
 		parsedByAdapter[adapter.Name()] += parsedCount
 		sourceIdentityCounts := parsedSourceIdentityCounts(parsed)
 		ownershipRepair := store.LegacyOwnershipRepairReport{}
@@ -289,6 +320,10 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 		batchNewCount := 0
 		var writerDurationMS int64
 		for i, parsedArtifact := range parsed {
+			if err := ctx.Err(); err != nil {
+				adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()]}, statusTimingDetails(err))
+				return nil, err
+			}
 			if !parsedArtifact.ok {
 				continue
 			}
@@ -345,6 +380,9 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 			WriterDurationMS:    writerDurationMS,
 		})
 		adapterPhase.finish(map[string]int{"candidates": len(candidates), "parsed": parsedByAdapter[adapter.Name()], "upserted": upsertedByAdapter[adapter.Name()], "existing": existingCount, "batch_new": batchNewCount, "ownership_repaired": ownershipRepair.RepairedArtifacts, "ownership_ambiguous": ownershipRepair.AmbiguousIdentities}, nil)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	if state != nil && state.batchNew != nil {
@@ -487,7 +525,10 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 	}
 
 	phase = timing.start("record_scan_meta", "")
-	s.recordScanMeta(repoID, repoRoot, now)
+	if err := s.recordScanMeta(ctx, repoID, repoRoot, now); err != nil {
+		phase.finish(nil, statusTimingDetails(err))
+		return nil, err
+	}
 	phase.finish(nil, nil)
 	phase = timing.start("sources_breakdown", "")
 	result.finalizeSourcesBreakdown()
@@ -539,8 +580,11 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 		})
 	}
 	if inTx {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		phase := timing.start("commit_transaction", "")
-		if _, err := s.db.Exec("COMMIT"); err != nil {
+		if _, err := s.db.ExecContext(ctx, "COMMIT"); err != nil {
 			phase.finish(nil, statusTimingDetails(err))
 			return nil, fmt.Errorf("commit scan transaction: %w", err)
 		}
@@ -573,10 +617,17 @@ func sameRepositoryRoot(a, b string) bool {
 	return a == b
 }
 
-func (s *Scanner) recordScanMeta(repoID, repoRoot, now string) {
-	commit := repo.HeadCommit(repoRoot)
-	user := userident.Detect(repoRoot)
+func (s *Scanner) recordScanMeta(ctx context.Context, repoID, repoRoot, now string) error {
+	commit := repo.HeadCommitContext(ctx, repoRoot)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	user := userident.DetectContext(ctx, repoRoot)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.db.UpdateScanMeta(repoID, commit, user, now)
+	return nil
 }
 
 type fileInventoryEntry struct {
@@ -1248,6 +1299,7 @@ func (s *Scanner) ensureRepo(info repo.Info, now string) (string, error) {
 }
 
 type scanRunState struct {
+	ctx          context.Context
 	fresh        *freshInserter
 	batchNew     *freshInserter
 	shortIDs     map[string]int
@@ -1740,7 +1792,7 @@ func (s *scanRunState) prefetchAuthoredAt(ctx context.Context, repoRoot string, 
 	}
 	sort.Strings(rels)
 	if len(rels) >= minBulkAuthoredAtPaths {
-		for rel, authoredAt := range fileFirstCommitDates(repoRoot, rels) {
+		for rel, authoredAt := range fileFirstCommitDates(ctx, repoRoot, rels) {
 			if authoredAt == "" {
 				continue
 			}
@@ -1769,7 +1821,7 @@ func (s *scanRunState) prefetchAuthoredAt(ctx context.Context, repoRoot string, 
 			if ctx.Err() != nil {
 				break
 			}
-			s.storeAuthoredAt(rel, firstCommitDateOrNow(repoRoot, rel, now))
+			s.storeAuthoredAt(rel, firstCommitDateOrNow(ctx, repoRoot, rel, now))
 		}
 		return len(rels)
 	}
@@ -1784,7 +1836,7 @@ func (s *scanRunState) prefetchAuthoredAt(ctx context.Context, repoRoot string, 
 				if ctx.Err() != nil {
 					continue
 				}
-				s.storeAuthoredAt(rel, firstCommitDateOrNow(repoRoot, rel, now))
+				s.storeAuthoredAt(rel, firstCommitDateOrNow(ctx, repoRoot, rel, now))
 			}
 		}()
 	}
@@ -2290,26 +2342,25 @@ func (s *Scanner) insertArtifact(id, repoRoot, repoID string, art adapters.Artif
 
 func (s *scanRunState) resolveAuthoredAt(repoRoot string, art adapters.Artifact, sources []adapters.Source, now string) string {
 	rel := authoredAtRelPath(repoRoot, art, sources)
-	if rel == "" {
+	if rel == "" || s == nil {
 		return now
 	}
-	if s != nil {
-		s.authoredAtMu.Lock()
-		if authoredAt, ok := s.authoredAt[rel]; ok {
-			s.authoredAtMu.Unlock()
-			return authoredAt
-		}
+	s.authoredAtMu.Lock()
+	if authoredAt, ok := s.authoredAt[rel]; ok {
 		s.authoredAtMu.Unlock()
+		return authoredAt
 	}
-	authoredAt := firstCommitDateOrNow(repoRoot, rel, now)
-	if s != nil {
-		s.storeAuthoredAt(rel, authoredAt)
+	s.authoredAtMu.Unlock()
+	if s.ctx == nil {
+		return now
 	}
+	authoredAt := firstCommitDateOrNow(s.ctx, repoRoot, rel, now)
+	s.storeAuthoredAt(rel, authoredAt)
 	return authoredAt
 }
 
-func firstCommitDateOrNow(repoRoot, rel, now string) string {
-	if d := fileFirstCommitDate(repoRoot, rel); d != "" {
+func firstCommitDateOrNow(ctx context.Context, repoRoot, rel, now string) string {
+	if d := fileFirstCommitDate(ctx, repoRoot, rel); d != "" {
 		return d
 	}
 	return now

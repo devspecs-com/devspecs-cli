@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/devspecs-com/devspecs-cli/internal/commands"
 	"github.com/devspecs-com/devspecs-cli/internal/version"
@@ -18,8 +21,10 @@ const (
 )
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	rootCmd := newRootCmd()
-	if err := rootCmd.Execute(); err != nil {
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -27,8 +32,10 @@ func main() {
 
 func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "ds",
-		Short: "DevSpecs - start bounded AI coding tasks from repo intent",
+		Use:           "ds",
+		Short:         "DevSpecs - start bounded AI coding tasks from repo intent",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Long: `DevSpecs indexes planning and specification artifacts in your repository,
 assigns stable IDs, and makes them easy to reference from agents, PRs,
 issues, and future workflows.
@@ -42,11 +49,14 @@ Human orientation: start with ds recent to recover the local thread, active
 branches, and likely follow-up commands. Use ds find for a focused question and
 ds map when you need subsystem boundaries.
 
-Human work setup: use ds task for repo-local bounded work and ds workspace for
-explicit multi-repo coordination.
+Human work setup: use ds task for repo-local bounded work, ds compose for
+repo-owned ADRs, RFCs, and PRDs, and ds workspace for explicit multi-repo
+coordination. Use ds thread only when one task or linked workspace change has
+multiple runnable execution lanes.
 
 AI execution: agents should consume bounded prompts with ds apply and record
-evidence with ds task checkpoint, ds task evaluate, or ds task audit.
+evidence with ds task checkpoint, ds task evaluate, or ds task audit. If apply
+is ambiguous, inspect ds thread and select one lane with ds apply --thread.
 
 Setup: run ds init once per repo to create local config and optional Codex,
 Cursor, Claude, or Windsurf adapter files for ds task and ds apply.
@@ -55,9 +65,9 @@ Diagnostic layer: start with ds recent when the target is unclear. Use ds find
 to pack focused evidence and ds map to verify subsystem boundaries before
 creating or continuing a task.
 
-Telemetry: DevSpecs sends minimal anonymous usage counts for install, init,
-scan, and query flows. It never sends repo names, file paths, git remotes,
-document text, or raw queries. Disable with DEVSPECS_TELEMETRY=0.`,
+Telemetry: DevSpecs sends minimal anonymous usage counts plus coarse command
+success and duration buckets. It never sends repo names, file paths, git
+remotes, document text, or raw queries. Disable with DEVSPECS_TELEMETRY=0.`,
 		Version: fmt.Sprintf("%s (commit: %s, built: %s)", version.Version, version.Commit, version.Date),
 	}
 
@@ -75,6 +85,8 @@ document text, or raw queries. Disable with DEVSPECS_TELEMETRY=0.`,
 	rootCmd.AddCommand(commands.NewRecentCmd())
 	rootCmd.AddCommand(commands.NewMapCmd())
 	rootCmd.AddCommand(commands.NewTaskCmd())
+	rootCmd.AddCommand(commands.NewThreadCmd())
+	rootCmd.AddCommand(commands.NewComposeCmd())
 	rootCmd.AddCommand(commands.NewApplyCmd())
 	rootCmd.AddCommand(commands.NewWorkspaceCmd())
 	addHiddenWorkspaceCompatibilityCommand(rootCmd, commands.NewChangeCmd(), "ds workspace change")
@@ -117,6 +129,8 @@ func assignRootCommandGroups(rootCmd *cobra.Command) {
 		"show":      rootGroupHumanOrientation,
 		"init":      rootGroupHumanWorkSetup,
 		"task":      rootGroupHumanWorkSetup,
+		"thread":    rootGroupHumanWorkSetup,
+		"compose":   rootGroupHumanWorkSetup,
 		"workspace": rootGroupHumanWorkSetup,
 		"apply":     rootGroupAIExecution,
 		"tldr":      rootGroupAIExecution,

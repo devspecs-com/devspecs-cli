@@ -2,40 +2,48 @@ package commands
 
 import (
 	"errors"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFriendlyDBOpenErrorExplainsSandboxAccessFailures(t *testing.T) {
 	err := friendlyDBOpenError("/home/user/.devspecs/devspecs.db", errors.New("create db dir: permission denied"))
-	if err == nil {
-		t.Fatal("expected wrapped error")
-	}
+	require.Error(t, err,
+		"expected wrapped error")
+
 	got := err.Error()
-	for _, want := range []string{"cannot open local DevSpecs index", "filesystem sandbox", "filesystem approval", "DEVSPECS_HOME"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("friendly error missing %q:\n%s", want, got)
-		}
-	}
+	assert.Contains(t, got, "cannot open local DevSpecs index",
+		"friendly error missing %q:\n%s", "cannot open local DevSpecs index", got)
+	assert.Contains(t, got, "filesystem sandbox",
+		"friendly error missing %q:\n%s", "filesystem sandbox", got)
+	assert.Contains(t, got, "filesystem approval",
+		"friendly error missing %q:\n%s", "filesystem approval", got)
+	assert.Contains(t, got, "DEVSPECS_HOME",
+		"friendly error missing %q:\n%s", "DEVSPECS_HOME", got)
+
 }
 
 func TestFriendlyDBOpenErrorPreservesBusyMessage(t *testing.T) {
 	err := friendlyDBOpenError("/home/user/.devspecs/devspecs.db", errors.New("database is locked"))
-	if err == nil {
-		t.Fatal("expected wrapped error")
-	}
+	require.Error(t, err,
+		"expected wrapped error")
+
 	got := err.Error()
-	if !strings.Contains(got, "another ds command is writing") {
-		t.Fatalf("busy error should keep concurrent writer guidance:\n%s", got)
-	}
-	if strings.Contains(got, "filesystem sandbox") {
-		t.Fatalf("busy error should not use sandbox wording:\n%s", got)
-	}
+	assert.Contains(t, got, "another ds command is writing",
+		"busy error should keep concurrent writer guidance:\n%s", got)
+	assert.NotContains(t, got, "filesystem sandbox",
+		"busy error should not use sandbox wording:\n%s", got)
+
 }
 
 func TestFriendlyDBOpenErrorLeavesOtherErrorsAlone(t *testing.T) {
 	base := errors.New("schema mismatch")
-	if got := friendlyDBOpenError("/tmp/devspecs.db", base); got != base {
-		t.Fatalf("non-access errors should pass through, got %#v", got)
+	{
+		got := friendlyDBOpenError("/tmp/devspecs.db", base)
+		assert.Equal(t, base, got,
+			"non-access errors should pass through, got %#v", got)
 	}
+
 }

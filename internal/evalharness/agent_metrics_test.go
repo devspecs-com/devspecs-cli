@@ -1,6 +1,11 @@
 package evalharness
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
 
 func TestGradeArtifactForAgentMetricsMarksSameFamilyMarkdownAsSameCluster(t *testing.T) {
 	expected := map[string]string{
@@ -9,9 +14,9 @@ func TestGradeArtifactForAgentMetricsMarksSameFamilyMarkdownAsSameCluster(t *tes
 	ctx := sameClusterContext{expectedPaths: expectedPathList(expected)}
 
 	got := gradeArtifactForAgentMetrics("docs/product-specs/index.md", expected, nil, ctx)
-	if got.grade != "same_cluster" || got.weight != 0.5 || !got.sameCluster {
-		t.Fatalf("expected same-cluster product-spec index, got %#v", got)
-	}
+	assert.Equal(t, "same_cluster", got.grade)
+	assert.Equal(t, 0.5, got.weight)
+	assert.True(t, got.sameCluster)
 }
 
 func TestGradeArtifactForAgentMetricsMarksLocalizedVariantAsSameCluster(t *testing.T) {
@@ -21,9 +26,10 @@ func TestGradeArtifactForAgentMetricsMarksLocalizedVariantAsSameCluster(t *testi
 	ctx := sameClusterContext{expectedPaths: expectedPathList(expected)}
 
 	got := gradeArtifactForAgentMetrics("docs/docs/zh/architecture/load-balance.md", expected, nil, ctx)
-	if got.grade != "same_cluster" || got.weight != 0.5 || !got.sameCluster {
-		t.Fatalf("expected same-cluster localized architecture doc, got %#v", got)
-	}
+	assert.Equal(t, "same_cluster", got.grade)
+	assert.Equal(t, 0.5, got.weight)
+	assert.True(t, got.sameCluster)
+
 }
 
 func TestGradeArtifactForAgentMetricsDoesNotSanitizeDifferentAreaAgentInstruction(t *testing.T) {
@@ -33,9 +39,9 @@ func TestGradeArtifactForAgentMetricsDoesNotSanitizeDifferentAreaAgentInstructio
 	ctx := sameClusterContext{expectedPaths: expectedPathList(expected)}
 
 	got := gradeArtifactForAgentMetrics("dolphinscheduler-alert/CLAUDE.md", expected, nil, ctx)
-	if got.grade != "unlabeled" || got.weight != 0 {
-		t.Fatalf("different-area agent instruction should remain unlabeled, got %#v", got)
-	}
+	assert.Equal(t, "unlabeled", got.grade)
+	assert.Zero(t, got.weight)
+
 }
 
 func TestGradeArtifactForAgentMetricsMarksSameDirectoryStemFamilyAsSameCluster(t *testing.T) {
@@ -45,9 +51,10 @@ func TestGradeArtifactForAgentMetricsMarksSameDirectoryStemFamilyAsSameCluster(t
 	ctx := sameClusterContext{expectedPaths: expectedPathList(expected)}
 
 	got := gradeArtifactForAgentMetrics("packages/coding-agent/src/prompts/system/plan-mode-subagent.md", expected, nil, ctx)
-	if got.grade != "same_cluster" || got.weight != 0.5 || !got.sameCluster {
-		t.Fatalf("expected same-cluster plan-mode sibling, got %#v", got)
-	}
+	assert.Equal(t, "same_cluster", got.grade)
+	assert.Equal(t, 0.5, got.weight)
+	assert.True(t, got.sameCluster)
+
 }
 
 func TestGradeArtifactForAgentMetricsDoesNotMarkArbitrarySameDirectoryDocsAsSameCluster(t *testing.T) {
@@ -57,9 +64,9 @@ func TestGradeArtifactForAgentMetricsDoesNotMarkArbitrarySameDirectoryDocsAsSame
 	ctx := sameClusterContext{expectedPaths: expectedPathList(expected)}
 
 	got := gradeArtifactForAgentMetrics("packages/coding-agent/src/prompts/system/error-handling.md", expected, nil, ctx)
-	if got.grade != "unlabeled" || got.weight != 0 {
-		t.Fatalf("arbitrary same-directory markdown should remain unlabeled, got %#v", got)
-	}
+	assert.Equal(t, "unlabeled", got.grade)
+	assert.Zero(t, got.weight)
+
 }
 
 func TestGradeArtifactForAgentMetricsHardNegativeWinsOverSameFamily(t *testing.T) {
@@ -72,9 +79,10 @@ func TestGradeArtifactForAgentMetricsHardNegativeWinsOverSameFamily(t *testing.T
 	ctx := sameClusterContext{expectedPaths: expectedPathList(expected)}
 
 	got := gradeArtifactForAgentMetrics("docs/design/obsolete.md", expected, hardNegatives, ctx)
-	if got.grade != "hard_negative" || got.weight != -1 || !got.hardNegative {
-		t.Fatalf("hard negative should win over same-family sanitation, got %#v", got)
-	}
+	assert.Equal(t, "hard_negative", got.grade)
+	assert.Equal(t, -1.0, got.weight)
+	assert.True(t, got.hardNegative)
+
 }
 
 func TestGradeArtifactForAgentMetricsTreatsFileAndLineAsSameArtifact(t *testing.T) {
@@ -84,9 +92,10 @@ func TestGradeArtifactForAgentMetricsTreatsFileAndLineAsSameArtifact(t *testing.
 	ctx := sameClusterContext{expectedPaths: expectedPathList(expected)}
 
 	got := gradeArtifactForAgentMetrics("src/auth/session.go#L24-L39", expected, nil, ctx)
-	if got.grade != "must" || got.weight != 1 || !got.exact {
-		t.Fatalf("file expectation should accept line-scoped artifact exactly, got %#v", got)
-	}
+	assert.Equal(t, "must", got.grade)
+	assert.Equal(t, 1.0, got.weight)
+	assert.True(t, got.exact)
+
 }
 
 func TestGradeArtifactForAgentMetricsKeepsDifferentLineRefsSameCluster(t *testing.T) {
@@ -99,62 +108,59 @@ func TestGradeArtifactForAgentMetricsKeepsDifferentLineRefsSameCluster(t *testin
 	}
 
 	got := gradeArtifactForAgentMetrics("src/auth/session.go#L60", expected, nil, ctx)
-	if got.grade != "same_cluster" || got.weight != 0.5 || !got.sameCluster || got.exact {
-		t.Fatalf("different line refs in the same file should be same-cluster, got %#v", got)
-	}
+	assert.Equal(t, "same_cluster", got.grade)
+	assert.Equal(t, 0.5, got.weight)
+	assert.True(t, got.sameCluster)
+	assert.False(t, got.exact)
+
 }
 
-func TestClassifyCanonicalLanePrefersConcreteDocLanes(t *testing.T) {
-	tests := []struct {
-		name string
-		path string
-		file File
-		want string
-	}{
-		{
-			name: "ordinary markdown defaults to intent",
-			path: "docs/security/access-control.md",
-			file: File{Path: "docs/security/access-control.md", Kind: "markdown_artifact"},
-			want: CanonicalLaneIntent,
-		},
-		{
-			name: "protocol subtype",
-			path: "AGENTS.md",
-			file: File{Path: "AGENTS.md", Kind: "markdown_artifact", Subtype: "agent_instruction"},
-			want: CanonicalLaneProtocol,
-		},
-		{
-			name: "model classifier",
-			path: "docs/reference/openapi.md",
-			file: File{Path: "docs/reference/openapi.md", Metadata: map[string]string{"classifier_mode": "model"}},
-			want: CanonicalLaneModel,
-		},
-		{
-			name: "template subtype",
-			path: ".github/pull_request_template.md",
-			file: File{Path: ".github/pull_request_template.md", Kind: "markdown_artifact", Subtype: "pull_request_template"},
-			want: CanonicalLaneTemplate,
-		},
-		{
-			name: "source context",
-			path: "internal/controller/failover.go",
-			file: File{Path: "internal/controller/failover.go", Kind: "source_context"},
-			want: CanonicalLaneSourceContext,
-		},
-		{
-			name: "trace classifier",
-			path: ".devspecs/traces/work.jsonl",
-			file: File{Path: ".devspecs/traces/work.jsonl", Metadata: map[string]string{"classifier_mode": "trace"}},
-			want: CanonicalLaneTrace,
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := classifyCanonicalLane(tc.path, tc.file, ""); got != tc.want {
-				t.Fatalf("classifyCanonicalLane() = %q, want %q", got, tc.want)
-			}
-		})
-	}
+func TestClassifyCanonicalLane_WithOrdinaryMarkdown_ReturnsIntent(t *testing.T) {
+	file := File{Path: "docs/security/access-control.md", Kind: "markdown_artifact"}
+
+	actual := classifyCanonicalLane(file.Path, file, "")
+
+	assert.Equal(t, CanonicalLaneIntent, actual)
+}
+
+func TestClassifyCanonicalLane_WithProtocolSubtype_ReturnsProtocol(t *testing.T) {
+	file := File{Path: "AGENTS.md", Kind: "markdown_artifact", Subtype: "agent_instruction"}
+
+	actual := classifyCanonicalLane(file.Path, file, "")
+
+	assert.Equal(t, CanonicalLaneProtocol, actual)
+}
+
+func TestClassifyCanonicalLane_WithModelClassifier_ReturnsModel(t *testing.T) {
+	file := File{Path: "docs/reference/openapi.md", Metadata: map[string]string{"classifier_mode": "model"}}
+
+	actual := classifyCanonicalLane(file.Path, file, "")
+
+	assert.Equal(t, CanonicalLaneModel, actual)
+}
+
+func TestClassifyCanonicalLane_WithTemplateSubtype_ReturnsTemplate(t *testing.T) {
+	file := File{Path: ".github/pull_request_template.md", Kind: "markdown_artifact", Subtype: "pull_request_template"}
+
+	actual := classifyCanonicalLane(file.Path, file, "")
+
+	assert.Equal(t, CanonicalLaneTemplate, actual)
+}
+
+func TestClassifyCanonicalLane_WithSourceContext_ReturnsSourceContext(t *testing.T) {
+	file := File{Path: "internal/controller/failover.go", Kind: "source_context"}
+
+	actual := classifyCanonicalLane(file.Path, file, "")
+
+	assert.Equal(t, CanonicalLaneSourceContext, actual)
+}
+
+func TestClassifyCanonicalLane_WithTraceClassifier_ReturnsTrace(t *testing.T) {
+	file := File{Path: ".devspecs/traces/work.jsonl", Metadata: map[string]string{"classifier_mode": "trace"}}
+
+	actual := classifyCanonicalLane(file.Path, file, "")
+
+	assert.Equal(t, CanonicalLaneTrace, actual)
 }
 
 func TestSummarizeCanonicalLaneMetricsCountsUnknownOnlyAsFallback(t *testing.T) {
@@ -171,13 +177,9 @@ func TestSummarizeCanonicalLaneMetricsCountsUnknownOnlyAsFallback(t *testing.T) 
 	for _, metric := range metrics {
 		byLane[metric.Lane] = metric
 	}
-	if byLane[CanonicalLaneIntent].IncludedArtifacts != 1 || byLane[CanonicalLaneIntent].ExactRelevantArtifacts != 1 {
-		t.Fatalf("intent lane metrics wrong: %#v", byLane[CanonicalLaneIntent])
-	}
-	if byLane[CanonicalLaneProtocol].IncludedArtifacts != 1 {
-		t.Fatalf("protocol lane metrics wrong: %#v", byLane[CanonicalLaneProtocol])
-	}
-	if byLane[CanonicalLaneUnknown].IncludedArtifacts != 0 {
-		t.Fatalf("unknown lane should be fallback only: %#v", byLane[CanonicalLaneUnknown])
-	}
+	require.Len(t, byLane, 7)
+	assert.Equal(t, 1, byLane[CanonicalLaneIntent].IncludedArtifacts)
+	assert.Equal(t, 1, byLane[CanonicalLaneIntent].ExactRelevantArtifacts)
+	assert.Equal(t, 1, byLane[CanonicalLaneProtocol].IncludedArtifacts)
+	assert.Zero(t, byLane[CanonicalLaneUnknown].IncludedArtifacts)
 }

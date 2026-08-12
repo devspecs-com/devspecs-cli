@@ -6,45 +6,45 @@ import (
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestClassificationBodyPrefersUnitBodyForBoundedArtifacts(t *testing.T) {
+func TestClassificationBodyForCandidate_WithTestCase_PrefersUnitBody(t *testing.T) {
 	missingPath := filepath.Join(t.TempDir(), "missing.test.ts")
 	art := adapters.Artifact{Body: "fallback full artifact body"}
 
-	for _, tc := range []struct {
-		name        string
-		adapterName string
-	}{
-		{name: "test case", adapterName: "test_case"},
-		{name: "code comment", adapterName: "code_comment"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got := classificationBodyForCandidate(adapters.Candidate{
-				PrimaryPath: missingPath,
-				AdapterName: tc.adapterName,
-				UnitBody:    "bounded unit body",
-			}, art)
-			if got != "bounded unit body" {
-				t.Fatalf("classification body = %q, want unit body", got)
-			}
-		})
-	}
+	actual := classificationBodyForCandidate(adapters.Candidate{
+		PrimaryPath: missingPath,
+		AdapterName: "test_case",
+		UnitBody:    "bounded unit body",
+	}, art)
+
+	assert.Equal(t, "bounded unit body", actual)
+}
+
+func TestClassificationBodyForCandidate_WithCodeComment_PrefersUnitBody(t *testing.T) {
+	missingPath := filepath.Join(t.TempDir(), "missing.go")
+	art := adapters.Artifact{Body: "fallback full artifact body"}
+
+	actual := classificationBodyForCandidate(adapters.Candidate{
+		PrimaryPath: missingPath,
+		AdapterName: "code_comment",
+		UnitBody:    "bounded unit body",
+	}, art)
+
+	assert.Equal(t, "bounded unit body", actual)
 }
 
 func TestClassificationBodyKeepsWholeFileBehavior(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "plan.md")
-	if err := os.WriteFile(path, []byte("file body"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.WriteFile(path, []byte("file body"), 0o644))
 
 	got := classificationBodyForCandidate(adapters.Candidate{
 		PrimaryPath: path,
 		AdapterName: "markdown",
 		UnitBody:    "bounded unit body",
 	}, adapters.Artifact{Body: "fallback artifact body"})
-	if got != "file body" {
-		t.Fatalf("classification body = %q, want file body", got)
-	}
+	assert.Equal(t, "file body", got)
 }

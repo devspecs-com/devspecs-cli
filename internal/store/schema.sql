@@ -1,4 +1,4 @@
--- DevSpecs v0.1 schema (version 15)
+-- DevSpecs v0.1 schema (version 16)
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version    INTEGER PRIMARY KEY,
@@ -273,6 +273,71 @@ CREATE TABLE IF NOT EXISTS task_checkpoint_facts (
   FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS thread_projections (
+  owner_id            TEXT PRIMARY KEY,
+  owner_kind          TEXT NOT NULL,
+  task_id             TEXT NOT NULL DEFAULT '',
+  workspace_id        TEXT NOT NULL DEFAULT '',
+  change_id           TEXT NOT NULL DEFAULT '',
+  repo_root           TEXT NOT NULL DEFAULT '',
+  workspace_root      TEXT NOT NULL DEFAULT '',
+  definition_path     TEXT NOT NULL,
+  definition_revision INTEGER NOT NULL,
+  definition_json     TEXT NOT NULL,
+  projected_at        TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS thread_projection_links (
+  owner_id       TEXT NOT NULL,
+  position       INTEGER NOT NULL,
+  repo_alias     TEXT NOT NULL DEFAULT '',
+  task_id        TEXT NOT NULL,
+  target         TEXT NOT NULL,
+  name           TEXT NOT NULL DEFAULT '',
+  status         TEXT NOT NULL DEFAULT '',
+  repo_root      TEXT NOT NULL,
+  task_workspace TEXT NOT NULL,
+  PRIMARY KEY (owner_id, position),
+  FOREIGN KEY (owner_id) REFERENCES thread_projections(owner_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS thread_projection_tasks (
+  owner_id       TEXT NOT NULL,
+  repo_alias     TEXT NOT NULL DEFAULT '',
+  task_id        TEXT NOT NULL,
+  repo_root      TEXT NOT NULL,
+  task_workspace TEXT NOT NULL,
+  manifest_path  TEXT NOT NULL,
+  manifest_json  TEXT NOT NULL,
+  PRIMARY KEY (owner_id, repo_alias, task_id),
+  FOREIGN KEY (owner_id) REFERENCES thread_projections(owner_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS thread_projection_events (
+  owner_id      TEXT NOT NULL,
+  repo_alias    TEXT NOT NULL DEFAULT '',
+  task_id       TEXT NOT NULL,
+  checkpoint_id TEXT NOT NULL,
+  target        TEXT NOT NULL,
+  json_path     TEXT NOT NULL,
+  markdown_path TEXT NOT NULL DEFAULT '',
+  record_json   TEXT NOT NULL,
+  PRIMARY KEY (owner_id, repo_alias, task_id, checkpoint_id),
+  FOREIGN KEY (owner_id) REFERENCES thread_projections(owner_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS thread_projection_sources (
+  owner_id     TEXT NOT NULL,
+  source_kind  TEXT NOT NULL,
+  source_key   TEXT NOT NULL,
+  path         TEXT NOT NULL,
+  size_bytes   INTEGER NOT NULL,
+  modified_ns  INTEGER NOT NULL,
+  content_hash TEXT NOT NULL,
+  PRIMARY KEY (owner_id, source_kind, source_key),
+  FOREIGN KEY (owner_id) REFERENCES thread_projections(owner_id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_todos_artifact ON artifact_todos(artifact_id);
 CREATE INDEX IF NOT EXISTS idx_todos_revision ON artifact_todos(revision_id);
 CREATE INDEX IF NOT EXISTS idx_todos_section ON artifact_todos(section_id);
@@ -303,6 +368,9 @@ CREATE INDEX IF NOT EXISTS idx_git_commit_files_repo_file ON git_commit_files(re
 CREATE INDEX IF NOT EXISTS idx_git_commit_files_commit ON git_commit_files(commit_sha);
 CREATE INDEX IF NOT EXISTS idx_task_checkpoint_facts_task ON task_checkpoint_facts(repo_id, task_id, target, created_at);
 CREATE INDEX IF NOT EXISTS idx_task_checkpoint_facts_stage ON task_checkpoint_facts(repo_id, stage, decision);
+CREATE INDEX IF NOT EXISTS idx_thread_projection_tasks_owner ON thread_projection_tasks(owner_id);
+CREATE INDEX IF NOT EXISTS idx_thread_projection_events_owner_target ON thread_projection_events(owner_id, task_id, target);
+CREATE INDEX IF NOT EXISTS idx_thread_projection_sources_owner_path ON thread_projection_sources(owner_id, path);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS artifacts_fts USING fts5(
   artifact_id UNINDEXED,

@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestInit_CreatesGlobalDB(t *testing.T) {
@@ -15,25 +16,30 @@ func TestInit_CreatesGlobalDB(t *testing.T) {
 	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
 
 	repoDir := filepath.Join(tmp, "repo")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatal(err)
+	{
+		err := os.MkdirAll(repoDir, 0o755)
+		require.NoError(t, err)
 	}
 
-	origWd, _ := os.Getwd()
+	origWd := testWorkingDirectory(t)
 	defer os.Chdir(origWd)
 	os.Chdir(repoDir)
 
 	cmd := NewInitCmd()
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
 
 	dbPath := filepath.Join(tmp, "home", "devspecs.db")
-	if _, err := os.Stat(dbPath); err != nil {
-		t.Errorf("global DB not created: %v", err)
+	{
+		_, err := os.Stat(dbPath)
+		require.NoError(t, err,
+			"global DB not created: %v", err)
 	}
+
 }
 
 func TestInit_CreatesRepoConfig(t *testing.T) {
@@ -41,43 +47,49 @@ func TestInit_CreatesRepoConfig(t *testing.T) {
 	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
 
 	repoDir := filepath.Join(tmp, "repo")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatal(err)
+	{
+		err := os.MkdirAll(repoDir, 0o755)
+		require.NoError(t, err)
 	}
 
-	origWd, _ := os.Getwd()
+	origWd := testWorkingDirectory(t)
 	defer os.Chdir(origWd)
 	os.Chdir(repoDir)
 
 	cmd := NewInitCmd()
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
 
 	configPath := filepath.Join(repoDir, ".devspecs", "config.yaml")
-	if _, err := os.Stat(configPath); err != nil {
-		t.Errorf("repo config not created: %v", err)
+	{
+		_, err := os.Stat(configPath)
+		require.NoError(t, err,
+			"repo config not created: %v", err)
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "Initialized DevSpecs.") {
-		t.Errorf("expected 'Initialized DevSpecs.' in output, got %q", output)
-	}
-	for _, want := range []string{
-		"Next:",
-		`ds task "goal"`,
-		"Agent tooling:",
-		"No Codex/Cursor/Claude/Windsurf project surfaces detected.",
-		"Indexing:",
-		"Not started automatically.",
-		"ds scan",
-	} {
-		if !strings.Contains(output, want) {
-			t.Errorf("expected init output to contain %q, got %q", want, output)
-		}
-	}
+	assert.Contains(t, output, "Initialized DevSpecs.",
+		"expected 'Initialized DevSpecs.' in output, got %q", output)
+
+	assert.Contains(t, output, "Next:",
+		"expected init output to contain %q, got %q", "Next:", output)
+	assert.Contains(t, output, `ds task "goal"`,
+		"expected init output to contain %q, got %q", `ds task "goal"`, output)
+	assert.Contains(t, output, "Agent tooling:",
+		"expected init output to contain %q, got %q", "Agent tooling:", output)
+	assert.Contains(t, output, "No Codex/Cursor/Claude/Windsurf project surfaces detected.",
+		"expected init output to contain %q, got %q", "No Codex/Cursor/Claude/Windsurf project surfaces detected.", output)
+	assert.Contains(t, output, "Indexing:",
+		"expected init output to contain %q, got %q", "Indexing:", output)
+	assert.Contains(t, output, "Not started automatically.",
+		"expected init output to contain %q, got %q", "Not started automatically.", output)
+	assert.Contains(t, output, "ds scan",
+		"expected init output to contain %q, got %q", "ds scan", output)
+
 }
 
 func TestInit_DetectsAgentToolingSurfaces(t *testing.T) {
@@ -85,124 +97,203 @@ func TestInit_DetectsAgentToolingSurfaces(t *testing.T) {
 	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
 
 	repoDir := filepath.Join(tmp, "repo")
-	for _, dir := range []string{filepath.Join(repoDir, ".cursor", "plans"), filepath.Join(repoDir, ".codex", "skills")} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
+	{
+		dir := filepath.Join(repoDir, ".cursor", "plans")
+
+		{
+			err := os.MkdirAll(dir, 0o755)
+			require.NoError(t, err)
 		}
+
 	}
-	if err := os.WriteFile(filepath.Join(repoDir, "CLAUDE.md"), []byte("# Claude\n"), 0o644); err != nil {
-		t.Fatal(err)
+	{
+		dir := filepath.Join(repoDir, ".codex", "skills")
+
+		{
+			err := os.MkdirAll(dir, 0o755)
+			require.NoError(t, err)
+		}
+
 	}
 
-	origWd, _ := os.Getwd()
+	{
+		err := os.WriteFile(filepath.Join(repoDir, "CLAUDE.md"), []byte("# Claude\n"), 0o644)
+		require.NoError(t, err)
+	}
+
+	origWd := testWorkingDirectory(t)
 	defer os.Chdir(origWd)
-	if err := os.Chdir(repoDir); err != nil {
-		t.Fatal(err)
+	{
+		err := os.Chdir(repoDir)
+		require.NoError(t, err)
 	}
 
 	cmd := NewInitCmd()
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	out := buf.String()
-	for _, want := range []string{
-		"Codex (detected:",
-		"Cursor (detected:",
-		"Claude (detected:",
-		"prepares:",
-		"Generated files:",
-		`/ds-task "goal"`,
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("expected %q in init output:\n%s", want, out)
-		}
-	}
-	if strings.Contains(out, "Windsurf (") {
-		t.Fatalf("did not expect undetected Windsurf to be selected by default:\n%s", out)
-	}
-	for _, rel := range []string{
-		".agents/skills/ds-task/SKILL.md",
-		".agents/skills/ds-apply/SKILL.md",
-		".cursor/commands/ds-task.md",
-		".cursor/commands/ds-apply.md",
-		".claude/skills/ds-task/SKILL.md",
-		".claude/skills/ds-apply/SKILL.md",
-	} {
+	assert.Contains(t, out, "Codex (detected:",
+		"expected %q in init output:\n%s", "Codex (detected:", out)
+	assert.Contains(t, out, "Cursor (detected:",
+		"expected %q in init output:\n%s", "Cursor (detected:", out)
+	assert.Contains(t, out, "Claude (detected:",
+		"expected %q in init output:\n%s", "Claude (detected:", out)
+	assert.Contains(t, out, "prepares:",
+		"expected %q in init output:\n%s", "prepares:", out)
+	assert.Contains(t, out, "Generated files:",
+		"expected %q in init output:\n%s", "Generated files:", out)
+	assert.Contains(t, out, `/ds-task "goal"`,
+		"expected %q in init output:\n%s", `/ds-task "goal"`, out)
+
+	assert.NotContains(t, out, "Windsurf (",
+		"did not expect undetected Windsurf to be selected by default:\n%s", out)
+
+	{
+		rel := ".agents/skills/ds-task/SKILL.md"
+
 		assertInitFileExists(t, repoDir, rel)
+
 	}
+	{
+		rel := ".agents/skills/ds-apply/SKILL.md"
+
+		assertInitFileExists(t, repoDir, rel)
+
+	}
+	{
+		rel := ".cursor/commands/ds-task.md"
+
+		assertInitFileExists(t, repoDir, rel)
+
+	}
+	{
+		rel := ".cursor/commands/ds-apply.md"
+
+		assertInitFileExists(t, repoDir, rel)
+
+	}
+	{
+		rel := ".claude/skills/ds-task/SKILL.md"
+
+		assertInitFileExists(t, repoDir, rel)
+
+	}
+	{
+		rel := ".claude/skills/ds-apply/SKILL.md"
+
+		assertInitFileExists(t, repoDir, rel)
+
+	}
+
 }
 
 func TestInit_ToolFlagSelectsUndetectedTooling(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
 	repoDir := filepath.Join(tmp, "repo")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatal(err)
+	{
+		err := os.MkdirAll(repoDir, 0o755)
+		require.NoError(t, err)
 	}
 
-	origWd, _ := os.Getwd()
+	origWd := testWorkingDirectory(t)
 	defer os.Chdir(origWd)
-	if err := os.Chdir(repoDir); err != nil {
-		t.Fatal(err)
+	{
+		err := os.Chdir(repoDir)
+		require.NoError(t, err)
 	}
 
 	cmd := NewInitCmd()
 	cmd.SetArgs([]string{"--tool", "codex,windsurf"})
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	out := buf.String()
-	for _, want := range []string{"Codex (not detected)", "Windsurf (not detected)", "Generated files:", `/ds-task "goal"`} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("expected %q in init output:\n%s", want, out)
-		}
-	}
-	for _, rel := range []string{
-		".agents/skills/ds-task/SKILL.md",
-		".agents/skills/ds-apply/SKILL.md",
-		".windsurf/workflows/ds-task.md",
-		".windsurf/workflows/ds-apply.md",
-	} {
+	assert.Contains(t, out, "Codex (not detected)",
+		"expected %q in init output:\n%s", "Codex (not detected)", out)
+	assert.Contains(t, out, "Windsurf (not detected)",
+		"expected %q in init output:\n%s", "Windsurf (not detected)", out)
+	assert.Contains(t, out, "Generated files:",
+		"expected %q in init output:\n%s", "Generated files:", out)
+	assert.Contains(t, out, `/ds-task "goal"`,
+		"expected %q in init output:\n%s", `/ds-task "goal"`, out)
+
+	{
+		rel := ".agents/skills/ds-task/SKILL.md"
+
 		assertInitFileExists(t, repoDir, rel)
+
 	}
+	{
+		rel := ".agents/skills/ds-apply/SKILL.md"
+
+		assertInitFileExists(t, repoDir, rel)
+
+	}
+	{
+		rel := ".windsurf/workflows/ds-task.md"
+
+		assertInitFileExists(t, repoDir, rel)
+
+	}
+	{
+		rel := ".windsurf/workflows/ds-apply.md"
+
+		assertInitFileExists(t, repoDir, rel)
+
+	}
+
 }
 
 func TestInit_NoToolsSkipsAgentTooling(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
 	repoDir := filepath.Join(tmp, "repo")
-	if err := os.MkdirAll(filepath.Join(repoDir, ".cursor"), 0o755); err != nil {
-		t.Fatal(err)
+	{
+		err := os.MkdirAll(filepath.Join(repoDir, ".cursor"), 0o755)
+		require.NoError(t, err)
 	}
 
-	origWd, _ := os.Getwd()
+	origWd := testWorkingDirectory(t)
 	defer os.Chdir(origWd)
-	if err := os.Chdir(repoDir); err != nil {
-		t.Fatal(err)
+	{
+		err := os.Chdir(repoDir)
+		require.NoError(t, err)
 	}
 
 	cmd := NewInitCmd()
 	cmd.SetArgs([]string{"--no-tools"})
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
-	if out := buf.String(); !strings.Contains(out, "Skipped (--no-tools).") {
-		t.Fatalf("expected no-tools output, got:\n%s", out)
+	{
+
+		out := buf.String()
+		assert.Contains(t, out, "Skipped (--no-tools).",
+			"expected no-tools output, got:\n%s", out)
 	}
+
 }
 
 func TestInit_IndexBackgroundUsesStarter(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
 	repoDir := filepath.Join(tmp, "repo")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatal(err)
+	{
+		err := os.MkdirAll(repoDir, 0o755)
+		require.NoError(t, err)
 	}
 
 	origStarter := startInitBackgroundScan
@@ -213,82 +304,65 @@ func TestInit_IndexBackgroundUsesStarter(t *testing.T) {
 	}
 	defer func() { startInitBackgroundScan = origStarter }()
 
-	origWd, _ := os.Getwd()
+	origWd := testWorkingDirectory(t)
 	defer os.Chdir(origWd)
-	if err := os.Chdir(repoDir); err != nil {
-		t.Fatal(err)
+	{
+		err := os.Chdir(repoDir)
+		require.NoError(t, err)
 	}
 
 	cmd := NewInitCmd()
 	cmd.SetArgs([]string{"--index", "background"})
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
-	if startedRoot != repoDir {
-		t.Fatalf("background scan root = %q, want %q", startedRoot, repoDir)
-	}
+	assert.Equal(t, repoDir, startedRoot,
+		"background scan root = %q, want %q", startedRoot, repoDir)
+
 	out := buf.String()
-	for _, want := range []string{"Started background index refresh.", "pid 1234"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("expected %q in init output:\n%s", want, out)
-		}
-	}
+	assert.Contains(t, out, "Started background index refresh.",
+		"expected %q in init output:\n%s", "Started background index refresh.", out)
+	assert.Contains(t, out, "pid 1234",
+		"expected %q in init output:\n%s", "pid 1234", out)
+
 }
 
-func TestInit_NoDestructiveRerun(t *testing.T) {
+func TestInit_WhenAlreadyInitialized_PreservesConfigAndAddsRequestedTooling(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
 
 	repoDir := filepath.Join(tmp, "repo")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	origWd, _ := os.Getwd()
-	defer os.Chdir(origWd)
-	os.Chdir(repoDir)
-
-	// First init
-	cmd1 := NewInitCmd()
-	cmd1.SetOut(&bytes.Buffer{})
-	if err := cmd1.Execute(); err != nil {
-		t.Fatal(err)
-	}
-
-	// Write a marker into config to detect overwrite
+	require.NoError(t, os.MkdirAll(filepath.Join(repoDir, ".devspecs"), 0o755))
 	configPath := filepath.Join(repoDir, ".devspecs", "config.yaml")
 	marker := []byte("# marker\nversion: 1\nsources: []\n")
-	if err := os.WriteFile(configPath, marker, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.WriteFile(configPath, marker, 0o644))
 
-	// Second init without --force may still add explicitly requested tooling.
-	cmd2 := NewInitCmd()
-	cmd2.SetArgs([]string{"--tool", "cursor"})
+	origWd := testWorkingDirectory(t)
+	defer os.Chdir(origWd)
+	require.NoError(t, os.Chdir(repoDir))
+
+	cmd := NewInitCmd()
+	cmd.SetArgs([]string{"--tool", "cursor"})
 	buf := &bytes.Buffer{}
-	cmd2.SetOut(buf)
-	if err := cmd2.Execute(); err != nil {
-		t.Fatal(err)
-	}
+	cmd.SetOut(buf)
 
-	// Config should NOT be overwritten
+	err := cmd.Execute()
+
+	require.NoError(t, err)
 	data, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "# marker") {
-		t.Error("config was overwritten without --force")
-	}
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "# marker",
+		"config was overwritten without --force")
 
 	output := buf.String()
-	if !strings.Contains(output, "already initialized") {
-		t.Errorf("expected 'already initialized' message, got %q", output)
-	}
-	if !strings.Contains(output, "Generated files:") {
-		t.Errorf("expected generated tooling files in output, got %q", output)
-	}
+	assert.Contains(t, output, "already initialized",
+		"expected 'already initialized' message, got %q", output)
+	assert.Contains(t, output, "Generated files:",
+		"expected generated tooling files in output, got %q", output)
+
 	assertInitFileExists(t, repoDir, ".cursor/commands/ds-task.md")
 }
 
@@ -296,143 +370,171 @@ func TestInit_DiscoveryMergesDenseDocs(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
 	repoDir := filepath.Join(tmp, "repo")
-	if err := os.MkdirAll(filepath.Join(repoDir, "docs", "x"), 0o755); err != nil {
-		t.Fatal(err)
+	{
+		err := os.MkdirAll(filepath.Join(repoDir, "docs", "x"), 0o755)
+		require.NoError(t, err)
 	}
-	if err := os.WriteFile(filepath.Join(repoDir, "docs", "x", "a.plan.md"), []byte("#\n"), 0o644); err != nil {
-		t.Fatal(err)
+	{
+
+		err := os.WriteFile(filepath.Join(repoDir, "docs", "x", "a.plan.md"), []byte("#\n"), 0o644)
+		require.NoError(t, err)
 	}
-	if err := os.WriteFile(filepath.Join(repoDir, "docs", "x", "b.spec.md"), []byte("#\n"), 0o644); err != nil {
-		t.Fatal(err)
+	{
+
+		err := os.WriteFile(filepath.Join(repoDir, "docs", "x", "b.spec.md"), []byte("#\n"), 0o644)
+		require.NoError(t, err)
 	}
 
-	origWd, _ := os.Getwd()
+	origWd := testWorkingDirectory(t)
 	defer os.Chdir(origWd)
-	if err := os.Chdir(repoDir); err != nil {
-		t.Fatal(err)
+	{
+		err := os.Chdir(repoDir)
+		require.NoError(t, err)
 	}
 
 	cmd := NewInitCmd()
 	cmd.SetIn(bytes.NewReader(nil))
 	cmd.SetOut(&bytes.Buffer{})
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	cfg, err := config.LoadRepoConfig(repoDir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	paths := markdownPathsFrom(t, cfg)
-	if !sliceContains(paths, "docs") {
-		t.Fatalf("expected bare docs/ merged when dense, got %v", paths)
-	}
+	assert.True(t, sliceContains(paths, "docs"),
+		"expected bare docs/ merged when dense, got %v", paths)
+
 }
 
 func TestInit_SparseDocsPrintsSuggestion(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
 	repoDir := filepath.Join(tmp, "repo")
-	if err := os.MkdirAll(filepath.Join(repoDir, "docs"), 0o755); err != nil {
-		t.Fatal(err)
+	{
+		err := os.MkdirAll(filepath.Join(repoDir, "docs"), 0o755)
+		require.NoError(t, err)
 	}
-	if err := os.WriteFile(filepath.Join(repoDir, "docs", "README.md"), []byte("#\n"), 0o644); err != nil {
-		t.Fatal(err)
+	{
+
+		err := os.WriteFile(filepath.Join(repoDir, "docs", "README.md"), []byte("#\n"), 0o644)
+		require.NoError(t, err)
 	}
 
-	origWd, _ := os.Getwd()
+	origWd := testWorkingDirectory(t)
 	defer os.Chdir(origWd)
-	if err := os.Chdir(repoDir); err != nil {
-		t.Fatal(err)
+	{
+		err := os.Chdir(repoDir)
+		require.NoError(t, err)
 	}
 
 	var buf bytes.Buffer
 	cmd := NewInitCmd()
 	cmd.SetIn(bytes.NewReader(nil))
 	cmd.SetOut(&buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	out := buf.String()
-	if !strings.Contains(out, "Suggestion:") {
-		t.Fatalf("expected Suggestion: in init output, got:\n%s", out)
-	}
-	if !strings.Contains(out, "docs/") {
-		t.Fatalf("expected docs/ hint in init output, got:\n%s", out)
-	}
+	assert.Contains(t, out, "Suggestion:",
+		"expected Suggestion: in init output, got:\n%s", out)
+	assert.Contains(t, out, "docs/",
+		"expected docs/ hint in init output, got:\n%s", out)
+
 }
 
 func TestInit_NoDetect_SkipsDenseDocsMerge(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
 	repoDir := filepath.Join(tmp, "repo")
-	if err := os.MkdirAll(filepath.Join(repoDir, "docs", "x"), 0o755); err != nil {
-		t.Fatal(err)
+	{
+		err := os.MkdirAll(filepath.Join(repoDir, "docs", "x"), 0o755)
+		require.NoError(t, err)
 	}
-	if err := os.WriteFile(filepath.Join(repoDir, "docs", "x", "a.plan.md"), []byte("#\n"), 0o644); err != nil {
-		t.Fatal(err)
+	{
+
+		err := os.WriteFile(filepath.Join(repoDir, "docs", "x", "a.plan.md"), []byte("#\n"), 0o644)
+		require.NoError(t, err)
 	}
-	if err := os.WriteFile(filepath.Join(repoDir, "docs", "x", "b.spec.md"), []byte("#\n"), 0o644); err != nil {
-		t.Fatal(err)
+	{
+
+		err := os.WriteFile(filepath.Join(repoDir, "docs", "x", "b.spec.md"), []byte("#\n"), 0o644)
+		require.NoError(t, err)
 	}
 
-	origWd, _ := os.Getwd()
+	origWd := testWorkingDirectory(t)
 	defer os.Chdir(origWd)
-	if err := os.Chdir(repoDir); err != nil {
-		t.Fatal(err)
+	{
+		err := os.Chdir(repoDir)
+		require.NoError(t, err)
 	}
 
 	cmd := NewInitCmd()
 	cmd.SetArgs([]string{"--no-detect"})
 	cmd.SetIn(bytes.NewReader(nil))
 	cmd.SetOut(&bytes.Buffer{})
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	cfg, err := config.LoadRepoConfig(repoDir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	paths := markdownPathsFrom(t, cfg)
-	if sliceContains(paths, "docs") {
-		t.Fatalf("did not expect bare docs/ with --no-detect, got %v", paths)
-	}
+	assert.False(t, sliceContains(paths, "docs"),
+		"did not expect bare docs/ with --no-detect, got %v", paths)
+
 }
 
 func TestInit_EmptyStdinNonBlocking(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
 	repoDir := filepath.Join(tmp, "repo")
-	if err := os.MkdirAll(repoDir, 0o755); err != nil {
-		t.Fatal(err)
+	{
+		err := os.MkdirAll(repoDir, 0o755)
+		require.NoError(t, err)
 	}
-	origWd, _ := os.Getwd()
+
+	origWd := testWorkingDirectory(t)
 	defer os.Chdir(origWd)
-	if err := os.Chdir(repoDir); err != nil {
-		t.Fatal(err)
+	{
+		err := os.Chdir(repoDir)
+		require.NoError(t, err)
 	}
+
 	cmd := NewInitCmd()
 	cmd.SetIn(bytes.NewReader(nil))
 	cmd.SetOut(&bytes.Buffer{})
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 }
 
 func markdownPathsFrom(t *testing.T, cfg *config.RepoConfig) []string {
 	t.Helper()
-	if cfg == nil {
-		t.Fatal("nil config")
-	}
+	require.NotNil(t, cfg, "config")
+
+	var paths []string
 	for _, s := range cfg.Sources {
 		if s.Type == "markdown" {
 			if s.Path != "" {
-				return append([]string{s.Path}, s.Paths...)
+				paths = append([]string{s.Path}, s.Paths...)
+				break
 			}
-			return append([]string(nil), s.Paths...)
+			paths = append([]string(nil), s.Paths...)
+			break
 		}
 	}
-	t.Fatal("no markdown source")
-	return nil
+	require.NotEmpty(t, paths, "markdown source paths")
+
+	return paths
 }
 
 func sliceContains(ss []string, want string) bool {
@@ -446,7 +548,10 @@ func sliceContains(ss []string, want string) bool {
 
 func assertInitFileExists(t *testing.T, root, relPath string) {
 	t.Helper()
-	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(relPath))); err != nil {
-		t.Fatalf("expected %s to exist: %v", relPath, err)
+	{
+		_, err := os.Stat(filepath.Join(root, filepath.FromSlash(relPath)))
+		require.NoError(t, err,
+			"expected %s to exist: %v", relPath, err)
 	}
+
 }

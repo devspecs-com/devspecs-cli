@@ -12,6 +12,8 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/format"
 	"github.com/devspecs-com/devspecs-cli/internal/ignore"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDiscover_DefaultPaths(t *testing.T) {
@@ -22,15 +24,13 @@ func TestDiscover_DefaultPaths(t *testing.T) {
 
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), tmp, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 1 {
-		t.Fatalf("expected 1 candidate, got %d", len(candidates))
-	}
-	if candidates[0].RelPath != "plans/refactor.md" {
-		t.Errorf("expected rel path 'plans/refactor.md', got %q", candidates[0].RelPath)
-	}
+	require.NoError(t, err)
+
+	require.Len(t, candidates, 1,
+		"expected 1 candidate, got %d", len(candidates))
+	assert.Equal(t, "plans/refactor.md", candidates[0].RelPath,
+		"expected rel path 'plans/refactor.md', got %q", candidates[0].RelPath)
+
 }
 
 func TestDiscover_RootStandardIntentDocs(t *testing.T) {
@@ -41,17 +41,16 @@ func TestDiscover_RootStandardIntentDocs(t *testing.T) {
 
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), tmp, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	for _, rel := range []string{"ROADMAP.md", "PLAN.md", "DESIGN.md", "ARCHITECTURE.md"} {
-		if findCandidate(candidates, rel).RelPath == "" {
-			t.Fatalf("missing root intent doc %s in %#v", rel, candidateRelPaths(candidates))
-		}
+		require.NotEqual(t, "", findCandidate(candidates, rel).RelPath,
+			"missing root intent doc %s in %#v", rel, candidateRelPaths(candidates))
+
 	}
-	if findCandidate(candidates, "README.md").RelPath != "" {
-		t.Fatalf("root README should not be included by standard intent globs: %#v", candidateRelPaths(candidates))
-	}
+	require.Equal(t, "", findCandidate(candidates, "README.md").RelPath,
+		"root README should not be included by standard intent globs: %#v", candidateRelPaths(candidates))
+
 }
 
 func TestDiscover_ConfigPaths(t *testing.T) {
@@ -68,12 +67,11 @@ func TestDiscover_ConfigPaths(t *testing.T) {
 
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), tmp, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 1 {
-		t.Fatalf("expected 1 candidate, got %d", len(candidates))
-	}
+	require.NoError(t, err)
+
+	require.Len(t, candidates, 1,
+		"expected 1 candidate, got %d", len(candidates))
+
 }
 
 func TestDiscover_DefaultNestedDocsIntentDirs(t *testing.T) {
@@ -83,21 +81,17 @@ func TestDiscover_DefaultNestedDocsIntentDirs(t *testing.T) {
 	nestedRFC := filepath.Join(tmp, "packages", "api", "docs", "rfcs")
 	nestedArchitecture := filepath.Join(tmp, "platform", "docs", "architecture")
 	nestedDesignDocs := filepath.Join(tmp, "runtime", "docs", "design-docs")
-	if err := os.MkdirAll(nestedPlan, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(nestedPRD, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(nestedRFC, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(nestedArchitecture, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(nestedDesignDocs, 0o755); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, os.MkdirAll(nestedPlan, 0o755))
+
+	require.NoError(t, os.MkdirAll(nestedPRD, 0o755))
+
+	require.NoError(t, os.MkdirAll(nestedRFC, 0o755))
+
+	require.NoError(t, os.MkdirAll(nestedArchitecture, 0o755))
+
+	require.NoError(t, os.MkdirAll(nestedDesignDocs, 0o755))
+
 	os.WriteFile(filepath.Join(nestedPlan, "pnpm-migration.md"), []byte("# PNPM Migration\n"), 0o644)
 	os.WriteFile(filepath.Join(nestedPRD, "billing.md"), []byte("# Billing PRD\n"), 0o644)
 	os.WriteFile(filepath.Join(nestedRFC, "token-boundary.md"), []byte("# Token Boundary RFC\n"), 0o644)
@@ -106,9 +100,8 @@ func TestDiscover_DefaultNestedDocsIntentDirs(t *testing.T) {
 
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), tmp, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	got := candidateRelPaths(candidates)
 	for _, want := range []string{
 		"apps/desktop/docs/plans/pnpm-migration.md",
@@ -117,9 +110,9 @@ func TestDiscover_DefaultNestedDocsIntentDirs(t *testing.T) {
 		"platform/docs/architecture/system-boundaries.md",
 		"runtime/docs/design-docs/worker-runtime.md",
 	} {
-		if !stringSliceContains(got, want) {
-			t.Fatalf("missing nested default intent doc %q in %v", want, got)
-		}
+		require.True(t, stringSliceContains(got, want),
+			"missing nested default intent doc %q in %v", want, got)
+
 	}
 }
 
@@ -140,16 +133,14 @@ func TestDiscover_CustomConfigDoesNotAddNestedDefaults(t *testing.T) {
 
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), tmp, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	got := candidateRelPaths(candidates)
-	if !stringSliceContains(got, "my-plans/plan.md") {
-		t.Fatalf("missing configured markdown candidate in %v", got)
-	}
-	if stringSliceContains(got, "apps/desktop/docs/plans/hidden.md") {
-		t.Fatalf("custom config should not add nested defaults, got %v", got)
-	}
+	require.True(t, stringSliceContains(got, "my-plans/plan.md"),
+		"missing configured markdown candidate in %v", got)
+	require.False(t, stringSliceContains(got, "apps/desktop/docs/plans/hidden.md"),
+		"custom config should not add nested defaults, got %v", got)
+
 }
 
 func TestDiscover_ExperimentalIntentDiscoveryFindsGenericCompoundPlanningDirs(t *testing.T) {
@@ -165,18 +156,15 @@ func TestDiscover_ExperimentalIntentDiscoveryFindsGenericCompoundPlanningDirs(t 
 
 	a := &Adapter{}
 	baseline, err := a.Discover(context.Background(), tmp, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	baselinePaths := candidateRelPaths(baseline)
-	if stringSliceContains(baselinePaths, "docs/exec-plans/active/cache-warmup.md") {
-		t.Fatalf("baseline unexpectedly discovered exec-plans path: %v", baselinePaths)
-	}
+	require.False(t, stringSliceContains(baselinePaths, "docs/exec-plans/active/cache-warmup.md"),
+		"baseline unexpectedly discovered exec-plans path: %v", baselinePaths)
 
 	candidates, err := a.Discover(context.Background(), tmp, config.WithIntentCandidateDiscovery(nil, true))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	got := candidateRelPaths(candidates)
 	for _, want := range []string{
 		"docs/exec-plans/active/cache-warmup.md",
@@ -184,9 +172,9 @@ func TestDiscover_ExperimentalIntentDiscoveryFindsGenericCompoundPlanningDirs(t 
 		"docs/project_planning/migration.md",
 		".github/AGENTS.md",
 	} {
-		if !stringSliceContains(got, want) {
-			t.Fatalf("missing experimental intent candidate %q in %v", want, got)
-		}
+		require.True(t, stringSliceContains(got, want),
+			"missing experimental intent candidate %q in %v", want, got)
+
 	}
 	for _, noisy := range []string{
 		"README.md",
@@ -194,21 +182,19 @@ func TestDiscover_ExperimentalIntentDiscoveryFindsGenericCompoundPlanningDirs(t 
 		".github/pull_request_template.md",
 		"examples/agent/browser_agent/build_in_prompt/browser_agent_task_decomposition_prompt.md",
 	} {
-		if stringSliceContains(got, noisy) {
-			t.Fatalf("experimental discovery should not admit noisy maintenance doc %q in %v", noisy, got)
-		}
+		require.False(t, stringSliceContains(got, noisy),
+			"experimental discovery should not admit noisy maintenance doc %q in %v", noisy, got)
+
 	}
 
 	candidate := findCandidate(candidates, "docs/exec-plans/active/cache-warmup.md")
-	if candidate.DiscoveryScore < intentCandidateMinScore {
-		t.Fatalf("discovery score = %.2f, want >= %.2f", candidate.DiscoveryScore, intentCandidateMinScore)
-	}
-	if !hasReasonPrefix(candidate.DiscoveryReasons, "intent_path_token:plan") {
-		t.Fatalf("expected plan path-token reason, got %#v", candidate.DiscoveryReasons)
-	}
-	if !hasReasonPrefix(candidate.DiscoveryReasons, "intent_heading:implementation_plan") {
-		t.Fatalf("expected implementation-plan heading reason, got %#v", candidate.DiscoveryReasons)
-	}
+	require.GreaterOrEqual(t, candidate.DiscoveryScore, intentCandidateMinScore,
+		"discovery score = %.2f, want >= %.2f", candidate.DiscoveryScore, intentCandidateMinScore)
+	require.True(t, hasReasonPrefix(candidate.DiscoveryReasons, "intent_path_token:plan"),
+		"expected plan path-token reason, got %#v", candidate.DiscoveryReasons)
+	require.True(t, hasReasonPrefix(candidate.DiscoveryReasons, "intent_heading:implementation_plan"),
+		"expected implementation-plan heading reason, got %#v", candidate.DiscoveryReasons)
+
 }
 
 func TestDiscover_ProposalFamilyDirectoryIndexes(t *testing.T) {
@@ -250,9 +236,8 @@ func TestDiscover_ProposalFamilyDirectoryIndexes(t *testing.T) {
 
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), tmp, config.WithIntentCandidateDiscovery(nil, true))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	got := candidateRelPaths(candidates)
 	for _, want := range []string{
 		"beps/0013-ai-skills/README.md",
@@ -260,9 +245,9 @@ func TestDiscover_ProposalFamilyDirectoryIndexes(t *testing.T) {
 		"docs/proposals/search-index.md",
 		"docs/roadmaps/2026-platform.md",
 	} {
-		if !stringSliceContains(got, want) {
-			t.Fatalf("missing proposal/roadmap candidate %q in %v", want, got)
-		}
+		require.True(t, stringSliceContains(got, want),
+			"missing proposal/roadmap candidate %q in %v", want, got)
+
 	}
 	for _, noisy := range []string{
 		"docs/release-notes/v1.md",
@@ -271,9 +256,9 @@ func TestDiscover_ProposalFamilyDirectoryIndexes(t *testing.T) {
 		".github/pull_request_template.md",
 		"README.md",
 	} {
-		if stringSliceContains(got, noisy) {
-			t.Fatalf("broad discovery admitted noisy doc %q in %v", noisy, got)
-		}
+		require.False(t, stringSliceContains(got, noisy),
+			"broad discovery admitted noisy doc %q in %v", noisy, got)
+
 	}
 
 	for _, rel := range []string{
@@ -281,20 +266,19 @@ func TestDiscover_ProposalFamilyDirectoryIndexes(t *testing.T) {
 		"enhancements/sig-node/2008-checkpointing/README.md",
 	} {
 		candidate := findCandidate(candidates, rel)
-		if candidate.DiscoveryScore < intentCandidateMinScore {
-			t.Fatalf("%s discovery score = %.2f, want >= %.2f", rel, candidate.DiscoveryScore, intentCandidateMinScore)
-		}
+		require.GreaterOrEqual(t, candidate.DiscoveryScore, intentCandidateMinScore,
+			"%s discovery score = %.2f, want >= %.2f", rel, candidate.DiscoveryScore, intentCandidateMinScore)
+
 	}
 	score, reasons := scoreIntentMarkdownCandidate(
 		filepath.Join(tmp, filepath.FromSlash("beps/0013-ai-skills/README.md")),
 		"beps/0013-ai-skills/README.md",
 	)
-	if score < intentCandidateMinScore {
-		t.Fatalf("proposal-family score = %.2f, want >= %.2f", score, intentCandidateMinScore)
-	}
-	if !hasReasonPrefix(reasons, "intent_heading:proposal") {
-		t.Fatalf("expected proposal heading reason, got %#v", reasons)
-	}
+	require.GreaterOrEqual(t, score, intentCandidateMinScore,
+		"proposal-family score = %.2f, want >= %.2f", score, intentCandidateMinScore)
+	require.True(t, hasReasonPrefix(reasons, "intent_heading:proposal"),
+		"expected proposal heading reason, got %#v", reasons)
+
 }
 
 func TestDiscover_SupportDocDiscoveryFindsBoundedDocs(t *testing.T) {
@@ -336,17 +320,14 @@ func TestDiscover_SupportDocDiscoveryFindsBoundedDocs(t *testing.T) {
 
 	a := &Adapter{}
 	withoutSupport, err := a.Discover(context.Background(), tmp, config.WithIntentCandidateDiscovery(nil, true))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stringSliceContains(candidateRelPaths(withoutSupport), "docs/security/access-control.md") {
-		t.Fatal("support doc discovery should require explicit support-doc experiment")
-	}
+	require.NoError(t, err)
+
+	require.False(t, stringSliceContains(candidateRelPaths(withoutSupport), "docs/security/access-control.md"),
+		"support doc discovery should require explicit support-doc experiment")
 
 	candidates, err := a.Discover(context.Background(), tmp, config.WithSupportDocDiscovery(config.WithIntentCandidateDiscovery(nil, true), true))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	got := candidateRelPaths(candidates)
 	for _, want := range []string{
 		"docs/security/how-to-authenticate.md",
@@ -355,13 +336,13 @@ func TestDiscover_SupportDocDiscoveryFindsBoundedDocs(t *testing.T) {
 		"docs/docs/ansible.md",
 		"docs/src/instance_manager.md",
 	} {
-		if !stringSliceContains(got, want) {
-			t.Fatalf("missing support doc %q in %v", want, got)
-		}
+		require.True(t, stringSliceContains(got, want),
+			"missing support doc %q in %v", want, got)
+
 		candidate := findCandidate(candidates, want)
-		if !hasReasonPrefix(candidate.DiscoveryReasons, "support_") {
-			t.Fatalf("%s missing support discovery reason: %#v", want, candidate.DiscoveryReasons)
-		}
+		require.True(t, hasReasonPrefix(candidate.DiscoveryReasons, "support_"),
+			"%s missing support discovery reason: %#v", want, candidate.DiscoveryReasons)
+
 	}
 	for _, noisy := range []string{
 		"docs/tutorials/getting-started.md",
@@ -372,9 +353,9 @@ func TestDiscover_SupportDocDiscoveryFindsBoundedDocs(t *testing.T) {
 		"library/methodologies/skills/security/SKILL.md",
 		"docs/release-notes/security-release-notes.md",
 	} {
-		if stringSliceContains(got, noisy) {
-			t.Fatalf("support-doc discovery admitted noisy doc %q in %v", noisy, got)
-		}
+		require.False(t, stringSliceContains(got, noisy),
+			"support-doc discovery admitted noisy doc %q in %v", noisy, got)
+
 	}
 }
 
@@ -386,24 +367,21 @@ func TestDiscover_SupportDocDiscoveryIsCapped(t *testing.T) {
 
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), tmp, config.WithSupportDocDiscovery(config.WithIntentCandidateDiscovery(nil, true), true))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	var supportCount int
 	for _, candidate := range candidates {
 		if strings.HasPrefix(filepath.ToSlash(candidate.RelPath), "docs/security/auth-") {
 			supportCount++
 		}
 	}
-	if supportCount != supportDocMaxFiles {
-		t.Fatalf("support candidates = %d, want cap %d", supportCount, supportDocMaxFiles)
-	}
-	if findCandidate(candidates, "docs/security/auth-000.md").RelPath == "" {
-		t.Fatal("expected deterministic low path to survive support-doc cap")
-	}
-	if findCandidate(candidates, fmt.Sprintf("docs/security/auth-%03d.md", supportDocMaxFiles+14)).RelPath != "" {
-		t.Fatal("expected path beyond support-doc cap to be excluded")
-	}
+	require.Equal(t, supportDocMaxFiles, supportCount,
+		"support candidates = %d, want cap %d", supportCount, supportDocMaxFiles)
+	require.NotEqual(t, "", findCandidate(candidates, "docs/security/auth-000.md").RelPath,
+		"expected deterministic low path to survive support-doc cap")
+	require.Equal(t, "", findCandidate(candidates, fmt.Sprintf("docs/security/auth-%03d.md", supportDocMaxFiles+14)).RelPath,
+		"expected path beyond support-doc cap to be excluded")
+
 }
 
 func TestDiscover_ExperimentalIntentDiscoverySkipsNestedOpenSpecRoots(t *testing.T) {
@@ -413,16 +391,40 @@ func TestDiscover_ExperimentalIntentDiscoverySkipsNestedOpenSpecRoots(t *testing
 
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), tmp, config.WithIntentCandidateDiscovery(nil, true))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	got := candidateRelPaths(candidates)
-	if stringSliceContains(got, "services/collector/openspec/changes/add-flow/proposal.md") {
-		t.Fatalf("nested OpenSpec files should not be generic markdown candidates: %v", got)
-	}
-	if !stringSliceContains(got, "services/collector/docs/plans/add-flow.md") {
-		t.Fatalf("expected nearby non-OpenSpec planning doc to remain discoverable: %v", got)
-	}
+	require.False(t, stringSliceContains(got, "services/collector/openspec/changes/add-flow/proposal.md"),
+		"nested OpenSpec files should not be generic markdown candidates: %v", got)
+	require.True(t, stringSliceContains(got, "services/collector/docs/plans/add-flow.md"),
+		"expected nearby non-OpenSpec planning doc to remain discoverable: %v", got)
+
+}
+
+func TestDiscover_WithConventionalADRPath_LeavesFileToADRAdapter(t *testing.T) {
+	repoRoot := t.TempDir()
+	adrPath := filepath.Join(repoRoot, "docs", "adr", "0001-use-postgresql.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(adrPath), 0o755))
+	require.NoError(t, os.WriteFile(adrPath, []byte("# ADR-0001: Use PostgreSQL\n\n## Status\nAccepted\n"), 0o644))
+
+	candidates, err := (&Adapter{}).Discover(context.Background(), repoRoot, config.DefaultRepoConfig())
+
+	require.NoError(t, err)
+	assert.Empty(t, candidates)
+}
+
+func TestDiscover_WithConfiguredADRPath_LeavesFileToADRAdapter(t *testing.T) {
+	repoRoot := t.TempDir()
+	adrPath := filepath.Join(repoRoot, "docs", "decisions", "0001-use-postgresql.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(adrPath), 0o755))
+	require.NoError(t, os.WriteFile(adrPath, []byte("# ADR-0001: Use PostgreSQL\n\n## Status\nAccepted\n"), 0o644))
+	cfg := config.DefaultRepoConfig()
+	cfg.Sources[1].Paths = []string{"docs/decisions"}
+
+	candidates, err := (&Adapter{}).Discover(context.Background(), repoRoot, cfg)
+
+	require.NoError(t, err)
+	assert.Empty(t, candidates)
 }
 
 func TestParse_FrontmatterOverrides(t *testing.T) {
@@ -437,22 +439,17 @@ func TestParse_FrontmatterOverrides(t *testing.T) {
 		RelPath:     "test.md",
 		AdapterName: "markdown",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
-	if art.Title != "Custom Title" {
-		t.Errorf("expected title 'Custom Title', got %q", art.Title)
-	}
-	if art.Kind != "spec" {
-		t.Errorf("expected kind 'spec', got %q", art.Kind)
-	}
-	if art.Status != "draft" {
-		t.Errorf("expected status 'draft', got %q", art.Status)
-	}
-	if len(sources) != 1 {
-		t.Errorf("expected 1 source, got %d", len(sources))
-	}
+	assert.Equal(t, "Custom Title", art.Title,
+		"expected title 'Custom Title', got %q", art.Title)
+	assert.Equal(t, "spec", art.Kind,
+		"expected kind 'spec', got %q", art.Kind)
+	assert.Equal(t, "draft", art.Status,
+		"expected status 'draft', got %q", art.Status)
+	assert.Len(t, sources, 1,
+		"expected 1 source, got %d", len(sources))
+
 }
 
 func TestParse_H1Fallback(t *testing.T) {
@@ -467,15 +464,13 @@ func TestParse_H1Fallback(t *testing.T) {
 		RelPath:     "plans/test.md",
 		AdapterName: "markdown",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if art.Title != "My Plan Title" {
-		t.Errorf("expected 'My Plan Title', got %q", art.Title)
-	}
-	if art.Kind != "plan" {
-		t.Errorf("expected kind 'plan', got %q", art.Kind)
-	}
+	require.NoError(t, err)
+
+	assert.Equal(t, "My Plan Title", art.Title,
+		"expected 'My Plan Title', got %q", art.Title)
+	assert.Equal(t, "plan", art.Kind,
+		"expected kind 'plan', got %q", art.Kind)
+
 }
 
 func TestParse_ExtractsTodos(t *testing.T) {
@@ -490,26 +485,23 @@ func TestParse_ExtractsTodos(t *testing.T) {
 		RelPath:     "plans/plan.md",
 		AdapterName: "markdown",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	todos := pr.Todos
-	if len(todos) != 2 {
-		t.Fatalf("expected 2 todos, got %d", len(todos))
-	}
-	if todos[0].Text != "First task" || todos[0].Done {
-		t.Errorf("first todo wrong: %+v", todos[0])
-	}
-	if todos[1].Text != "Done task" || !todos[1].Done {
-		t.Errorf("second todo wrong: %+v", todos[1])
-	}
+	require.Len(t, todos, 2,
+		"expected 2 todos, got %d", len(todos))
+	assert.Equal(t, "First task", todos[0].Text)
+	assert.False(t, todos[0].Done)
+	assert.Equal(t, "Done task", todos[1].Text)
+	assert.True(t, todos[1].Done)
+
 }
 
 func TestAdapter_Name(t *testing.T) {
 	a := &Adapter{}
-	if a.Name() != "markdown" {
-		t.Errorf("expected 'markdown', got %q", a.Name())
-	}
+	assert.Equal(t, "markdown", a.Name(),
+		"expected 'markdown', got %q", a.Name())
+
 }
 
 func TestParse_FilenameFallback(t *testing.T) {
@@ -524,12 +516,11 @@ func TestParse_FilenameFallback(t *testing.T) {
 		RelPath:     "plans/my-cool-plan.md",
 		AdapterName: "markdown",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if art.Title != "My Cool Plan" {
-		t.Errorf("expected 'My Cool Plan', got %q", art.Title)
-	}
+	require.NoError(t, err)
+
+	assert.Equal(t, "My Cool Plan", art.Title,
+		"expected 'My Cool Plan', got %q", art.Title)
+
 }
 
 func TestParse_FileNotFound(t *testing.T) {
@@ -539,9 +530,9 @@ func TestParse_FileNotFound(t *testing.T) {
 		RelPath:     "file.md",
 		AdapterName: "markdown",
 	})
-	if err == nil {
-		t.Error("expected error for missing file")
-	}
+	assert.Error(t, err,
+		"expected error for missing file")
+
 }
 
 func TestDiscover_SinglePathConfig(t *testing.T) {
@@ -557,12 +548,11 @@ func TestDiscover_SinglePathConfig(t *testing.T) {
 	}
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), tmp, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 1 {
-		t.Fatalf("expected 1 candidate, got %d", len(candidates))
-	}
+	require.NoError(t, err)
+
+	require.Len(t, candidates, 1,
+		"expected 1 candidate, got %d", len(candidates))
+
 }
 
 func TestDiscover_NonexistentPath(t *testing.T) {
@@ -574,12 +564,11 @@ func TestDiscover_NonexistentPath(t *testing.T) {
 	}
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), tmp, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 0 {
-		t.Errorf("expected 0 candidates for missing path, got %d", len(candidates))
-	}
+	require.NoError(t, err)
+
+	assert.Empty(t, candidates,
+		"expected 0 candidates for missing path, got %d", len(candidates))
+
 }
 
 func TestParse_NoFrontmatterStatus(t *testing.T) {
@@ -594,90 +583,213 @@ func TestParse_NoFrontmatterStatus(t *testing.T) {
 		RelPath:     "docs/test.md",
 		AdapterName: "markdown",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if art.Status != "unknown" {
-		t.Errorf("expected 'unknown' status, got %q", art.Status)
-	}
+	require.NoError(t, err)
+
+	assert.Equal(t, "unknown", art.Status,
+		"expected 'unknown' status, got %q", art.Status)
+
 }
 
 func TestStripFrontmatter_UnclosedFrontmatter(t *testing.T) {
 	content := "---\ntitle: Test\nno closing marker\n"
 	result := stripFrontmatter(content)
-	if result != content {
-		t.Errorf("unclosed frontmatter should return original, got %q", result)
-	}
+	assert.Equal(t, content, result,
+		"unclosed frontmatter should return original, got %q", result)
+
 }
 
-func TestFilenameTitle(t *testing.T) {
-	tests := []struct {
-		path string
-		want string
-	}{
-		{"plans/my-cool-plan.md", "My Cool Plan"},
-		{"specs/api_design.md", "Api Design"},
-		{"docs/README.md", "README"},
-		{"plans/a.md", "A"},
-	}
-	for _, tt := range tests {
-		got := filenameTitle(tt.path)
-		if got != tt.want {
-			t.Errorf("filenameTitle(%q) = %q, want %q", tt.path, got, tt.want)
-		}
-	}
+func TestFilenameTitle_WithHyphenatedPlan_ReturnsHumanTitle(t *testing.T) {
+	actual := filenameTitle("plans/my-cool-plan.md")
+
+	assert.Equal(t, "My Cool Plan", actual)
 }
 
-func TestInferKind(t *testing.T) {
-	tests := []struct {
-		path string
-		want string
-	}{
-		{"plans/refactor.md", "plan"},
-		{"specs/api.md", "spec"},
-		{"docs/rfcs/0007-auth-session.md", "design"},
-		{"rfcs/session-token-handoff.md", "design"},
-		{"token-boundary.rfc.md", "design"},
-		{"beps/0013-ai-skills/README.md", "design"},
-		{"enhancements/sig-node/2008-checkpointing/README.md", "design"},
-		{"docs/proposals/search-index.md", "design"},
-		{"design-docs/worker-runtime.md", "design"},
-		{"docs/architecture/system-boundaries.md", "design"},
-		{"docs/requirements/auth.md", "requirements"},
-		{"docs/product-specs/course-visit-analytics.md", "requirements"},
-		{"calm-suite/calm-studio/docs/REQ_fluxnova_aigf_integration.md", "requirements"},
-		{".codex/skills/query-plan-snapshot-cli/SKILL.md", "markdown_artifact"},
-		{".cursor/commands/ds-task.md", "markdown_artifact"},
-		{".windsurf/workflows/ds-apply.md", "markdown_artifact"},
-		{"agents/implementation-plan.agent.md", "markdown_artifact"},
-		{"contributingGuides/PROPOSAL_TEMPLATE.md", "markdown_artifact"},
-		{"GOVERNANCE.md", "markdown_artifact"},
-		{"MAINTAINERS.md", "markdown_artifact"},
-		{"notes/random.md", "markdown_artifact"},
-		{"v0.prd.md", "requirements"},
-		{"api.design.md", "design"},
-		{"api.contract.md", "contract"},
-		{"reqs.requirements.md", "requirements"},
-		{".cursor/plans/foo.plan.md", "plan"},
-	}
-	for _, tt := range tests {
-		got := inferKind(tt.path)
-		if got != tt.want {
-			t.Errorf("inferKind(%q) = %q, want %q", tt.path, got, tt.want)
-		}
-	}
+func TestFilenameTitle_WithUnderscoredSpec_ReturnsHumanTitle(t *testing.T) {
+	actual := filenameTitle("specs/api_design.md")
+
+	assert.Equal(t, "Api Design", actual)
 }
 
-func TestInferKindSubtype_AgentCommandFiles(t *testing.T) {
-	for _, path := range []string{
-		".cursor/commands/ds-task.md",
-		".windsurf/workflows/ds-apply.md",
-	} {
-		kind, subtype := inferKindSubtype(path)
-		if kind != config.KindMarkdownArtifact || subtype != config.SubtypeAgentInstruction {
-			t.Fatalf("inferKindSubtype(%q) = %q/%q, want %q/%q", path, kind, subtype, config.KindMarkdownArtifact, config.SubtypeAgentInstruction)
-		}
-	}
+func TestFilenameTitle_WithReadme_PreservesUppercaseName(t *testing.T) {
+	actual := filenameTitle("docs/README.md")
+
+	assert.Equal(t, "README", actual)
+}
+
+func TestFilenameTitle_WithSingleLetter_ReturnsUppercaseLetter(t *testing.T) {
+	actual := filenameTitle("plans/a.md")
+
+	assert.Equal(t, "A", actual)
+}
+
+func TestInferKind_WithPlanDirectory_ReturnsPlan(t *testing.T) {
+	actual := inferKind("plans/refactor.md")
+
+	assert.Equal(t, config.KindPlan, actual)
+}
+
+func TestInferKind_WithSpecDirectory_ReturnsSpec(t *testing.T) {
+	actual := inferKind("specs/api.md")
+
+	assert.Equal(t, config.KindSpec, actual)
+}
+
+func TestInferKind_WithDocsRFCPath_ReturnsDesign(t *testing.T) {
+	actual := inferKind("docs/rfcs/0007-auth-session.md")
+
+	assert.Equal(t, config.KindDesign, actual)
+}
+
+func TestInferKind_WithRootRFCPath_ReturnsDesign(t *testing.T) {
+	actual := inferKind("rfcs/session-token-handoff.md")
+
+	assert.Equal(t, config.KindDesign, actual)
+}
+
+func TestInferKind_WithRFCSuffix_ReturnsDesign(t *testing.T) {
+	actual := inferKind("token-boundary.rfc.md")
+
+	assert.Equal(t, config.KindDesign, actual)
+}
+
+func TestInferKind_WithBEPPath_ReturnsDesign(t *testing.T) {
+	actual := inferKind("beps/0013-ai-skills/README.md")
+
+	assert.Equal(t, config.KindDesign, actual)
+}
+
+func TestInferKind_WithEnhancementPath_ReturnsDesign(t *testing.T) {
+	actual := inferKind("enhancements/sig-node/2008-checkpointing/README.md")
+
+	assert.Equal(t, config.KindDesign, actual)
+}
+
+func TestInferKind_WithProposalPath_ReturnsDesign(t *testing.T) {
+	actual := inferKind("docs/proposals/search-index.md")
+
+	assert.Equal(t, config.KindDesign, actual)
+}
+
+func TestInferKind_WithDesignDocsPath_ReturnsDesign(t *testing.T) {
+	actual := inferKind("design-docs/worker-runtime.md")
+
+	assert.Equal(t, config.KindDesign, actual)
+}
+
+func TestInferKind_WithArchitecturePath_ReturnsDesign(t *testing.T) {
+	actual := inferKind("docs/architecture/system-boundaries.md")
+
+	assert.Equal(t, config.KindDesign, actual)
+}
+
+func TestInferKind_WithRequirementsPath_ReturnsRequirements(t *testing.T) {
+	actual := inferKind("docs/requirements/auth.md")
+
+	assert.Equal(t, config.KindRequirements, actual)
+}
+
+func TestInferKind_WithProductSpecsPath_ReturnsRequirements(t *testing.T) {
+	actual := inferKind("docs/product-specs/course-visit-analytics.md")
+
+	assert.Equal(t, config.KindRequirements, actual)
+}
+
+func TestInferKind_WithCALMRequirementPath_ReturnsRequirements(t *testing.T) {
+	actual := inferKind("calm-suite/calm-studio/docs/REQ_fluxnova_aigf_integration.md")
+
+	assert.Equal(t, config.KindRequirements, actual)
+}
+
+func TestInferKind_WithCodexSkill_ReturnsMarkdownArtifact(t *testing.T) {
+	actual := inferKind(".codex/skills/query-plan-snapshot-cli/SKILL.md")
+
+	assert.Equal(t, config.KindMarkdownArtifact, actual)
+}
+
+func TestInferKind_WithCursorCommand_ReturnsMarkdownArtifact(t *testing.T) {
+	actual := inferKind(".cursor/commands/ds-task.md")
+
+	assert.Equal(t, config.KindMarkdownArtifact, actual)
+}
+
+func TestInferKind_WithWindsurfWorkflow_ReturnsMarkdownArtifact(t *testing.T) {
+	actual := inferKind(".windsurf/workflows/ds-apply.md")
+
+	assert.Equal(t, config.KindMarkdownArtifact, actual)
+}
+
+func TestInferKind_WithAgentDefinition_ReturnsMarkdownArtifact(t *testing.T) {
+	actual := inferKind("agents/implementation-plan.agent.md")
+
+	assert.Equal(t, config.KindMarkdownArtifact, actual)
+}
+
+func TestInferKind_WithProposalTemplate_ReturnsMarkdownArtifact(t *testing.T) {
+	actual := inferKind("contributingGuides/PROPOSAL_TEMPLATE.md")
+
+	assert.Equal(t, config.KindMarkdownArtifact, actual)
+}
+
+func TestInferKind_WithGovernanceFile_ReturnsMarkdownArtifact(t *testing.T) {
+	actual := inferKind("GOVERNANCE.md")
+
+	assert.Equal(t, config.KindMarkdownArtifact, actual)
+}
+
+func TestInferKind_WithMaintainersFile_ReturnsMarkdownArtifact(t *testing.T) {
+	actual := inferKind("MAINTAINERS.md")
+
+	assert.Equal(t, config.KindMarkdownArtifact, actual)
+}
+
+func TestInferKind_WithRandomNote_ReturnsMarkdownArtifact(t *testing.T) {
+	actual := inferKind("notes/random.md")
+
+	assert.Equal(t, config.KindMarkdownArtifact, actual)
+}
+
+func TestInferKind_WithPRDSuffix_ReturnsRequirements(t *testing.T) {
+	actual := inferKind("v0.prd.md")
+
+	assert.Equal(t, config.KindRequirements, actual)
+}
+
+func TestInferKind_WithDesignSuffix_ReturnsDesign(t *testing.T) {
+	actual := inferKind("api.design.md")
+
+	assert.Equal(t, config.KindDesign, actual)
+}
+
+func TestInferKind_WithContractSuffix_ReturnsContract(t *testing.T) {
+	actual := inferKind("api.contract.md")
+
+	assert.Equal(t, config.KindContract, actual)
+}
+
+func TestInferKind_WithRequirementsSuffix_ReturnsRequirements(t *testing.T) {
+	actual := inferKind("reqs.requirements.md")
+
+	assert.Equal(t, config.KindRequirements, actual)
+}
+
+func TestInferKind_WithPlanSuffix_ReturnsPlan(t *testing.T) {
+	actual := inferKind(".cursor/plans/foo.plan.md")
+
+	assert.Equal(t, config.KindPlan, actual)
+}
+
+func TestInferKindSubtype_WithCursorCommand_ReturnsAgentInstruction(t *testing.T) {
+	kind, subtype := inferKindSubtype(".cursor/commands/ds-task.md")
+
+	assert.Equal(t, config.KindMarkdownArtifact, kind)
+	assert.Equal(t, config.SubtypeAgentInstruction, subtype)
+}
+
+func TestInferKindSubtype_WithWindsurfWorkflow_ReturnsAgentInstruction(t *testing.T) {
+	kind, subtype := inferKindSubtype(".windsurf/workflows/ds-apply.md")
+
+	assert.Equal(t, config.KindMarkdownArtifact, kind)
+	assert.Equal(t, config.SubtypeAgentInstruction, subtype)
 }
 
 func TestDefaultPaths_NarrowDocs(t *testing.T) {
@@ -698,18 +810,18 @@ func TestDefaultPaths_NarrowDocs(t *testing.T) {
 				break
 			}
 		}
-		if !found {
-			t.Errorf("defaultPaths() should include %q", req)
-		}
+		assert.True(t, found,
+			"defaultPaths() should include %q", req)
+
 	}
 	for _, p := range paths {
-		if p == "docs" {
-			t.Error("defaultPaths() should not include bare top-level docs/ (use docs/specs, docs/plans, …)")
-		}
+		assert.NotEqual(t, "docs", p,
+			"defaultPaths() should not include bare top-level docs/ (use docs/specs, docs/plans, …)")
+
 		for _, broadProposalRoot := range []string{"proposals", "docs/proposals", "enhancements", "docs/enhancements", "beps", "docs/beps"} {
-			if p == broadProposalRoot {
-				t.Errorf("defaultPaths() should not recursively include broad proposal root %q; use scored discovery", p)
-			}
+			assert.NotEqual(t, broadProposalRoot, p,
+				"defaultPaths() should not recursively include broad proposal root %q; use scored discovery", p)
+
 		}
 	}
 }
@@ -723,9 +835,9 @@ func TestDefaultRepoConfigMarkdownPathsMatchAdapterDefaults(t *testing.T) {
 			break
 		}
 	}
-	if !sameStrings(cfgPaths, defaultPaths()) {
-		t.Fatalf("config.DefaultRepoConfig markdown paths drifted from adapter defaults\nconfig:  %#v\nadapter: %#v", cfgPaths, defaultPaths())
-	}
+	require.True(t, sameStrings(cfgPaths, defaultPaths()),
+		"config.DefaultRepoConfig markdown paths drifted from adapter defaults\nconfig:  %#v\nadapter: %#v", cfgPaths, defaultPaths())
+
 }
 
 func TestRootGlobs_AllPatterns(t *testing.T) {
@@ -734,13 +846,13 @@ func TestRootGlobs_AllPatterns(t *testing.T) {
 		"*.spec.md", "*.plan.md", "*.prd.md", "*.rfc.md", "*.roadmap.md", "*.design.md", "*.contract.md", "*.requirements.md", "REQ_*.md", "REQ-*.md", "*_REQ.md", "*-REQ.md",
 		"*.spec.mdx", "*.plan.mdx", "*.prd.mdx", "*.rfc.mdx", "*.roadmap.mdx", "*.design.mdx", "*.contract.mdx", "*.requirements.mdx", "REQ_*.mdx", "REQ-*.mdx", "*_REQ.mdx", "*-REQ.mdx",
 	}
-	if len(globs) != len(expected) {
-		t.Fatalf("expected %d root globs, got %d", len(expected), len(globs))
-	}
+	require.Len(t, globs, len(expected),
+		"expected %d root globs, got %d", len(expected), len(globs))
+
 	for i, g := range globs {
-		if g != expected[i] {
-			t.Errorf("rootGlobs[%d] = %q, want %q", i, g, expected[i])
-		}
+		assert.Equal(t, expected[i], g,
+			"rootGlobs[%d] = %q, want %q", i, g, expected[i])
+
 	}
 }
 
@@ -755,12 +867,11 @@ func TestDiscover_RootGlobs(t *testing.T) {
 
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), tmp, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 6 {
-		t.Fatalf("expected 6 root glob candidates, got %d", len(candidates))
-	}
+	require.NoError(t, err)
+
+	require.Len(t, candidates, 6,
+		"expected 6 root glob candidates, got %d", len(candidates))
+
 }
 
 func TestDiscover_DefaultHighSignalMarkdownFiles(t *testing.T) {
@@ -773,9 +884,8 @@ func TestDiscover_DefaultHighSignalMarkdownFiles(t *testing.T) {
 
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), tmp, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	got := candidateRelPaths(candidates)
 	for _, want := range []string{
 		"contributingGuides/PROPOSAL_TEMPLATE.md",
@@ -783,13 +893,13 @@ func TestDiscover_DefaultHighSignalMarkdownFiles(t *testing.T) {
 		"project/GOVERNANCE.md",
 		"project/MAINTAINERS.md",
 	} {
-		if !stringSliceContains(got, want) {
-			t.Fatalf("missing high-signal markdown %q in %v", want, got)
-		}
+		require.True(t, stringSliceContains(got, want),
+			"missing high-signal markdown %q in %v", want, got)
+
 	}
-	if stringSliceContains(got, "docs/random-note.md") {
-		t.Fatalf("unexpected random doc in high-signal discovery: %v", got)
-	}
+	require.False(t, stringSliceContains(got, "docs/random-note.md"),
+		"unexpected random doc in high-signal discovery: %v", got)
+
 }
 
 func TestDiscover_DocsDir(t *testing.T) {
@@ -807,66 +917,67 @@ func TestDiscover_DocsDir(t *testing.T) {
 		},
 	}
 	candidates, err := a.Discover(context.Background(), tmp, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 2 {
-		t.Fatalf("expected 2 candidates from configured docs/, got %d", len(candidates))
-	}
+	require.NoError(t, err)
+
+	require.Len(t, candidates, 2,
+		"expected 2 candidates from configured docs/, got %d", len(candidates))
+
 	got := candidateRelPaths(candidates)
 	for _, want := range []string{"docs/guide.md", "docs/intent.mdx"} {
-		if !stringSliceContains(got, want) {
-			t.Errorf("missing %q from configured docs/: %v", want, got)
-		}
+		assert.True(t, stringSliceContains(got, want),
+			"missing %q from configured docs/: %v", want, got)
+
 	}
 }
 
 func TestParseFrontmatterTags_YAMLList(t *testing.T) {
 	fm := map[string]string{"tags": "[auth, v2]"}
 	tags := parseFrontmatterTags(fm)
-	if len(tags) != 2 || tags[0] != "auth" || tags[1] != "v2" {
-		t.Errorf("expected [auth v2], got %v", tags)
-	}
+	require.Len(t, tags, 2)
+	assert.Equal(t, "auth", tags[0])
+	assert.Equal(t, "v2", tags[1])
+
 }
 
 func TestParseFrontmatterTags_CommaSeparated(t *testing.T) {
 	fm := map[string]string{"tags": "auth, v2"}
 	tags := parseFrontmatterTags(fm)
-	if len(tags) != 2 || tags[0] != "auth" || tags[1] != "v2" {
-		t.Errorf("expected [auth v2], got %v", tags)
-	}
+	require.Len(t, tags, 2)
+	assert.Equal(t, "auth", tags[0])
+	assert.Equal(t, "v2", tags[1])
+
 }
 
 func TestParseFrontmatterTags_Labels(t *testing.T) {
 	fm := map[string]string{"labels": "security"}
 	tags := parseFrontmatterTags(fm)
-	if len(tags) != 1 || tags[0] != "security" {
-		t.Errorf("expected [security], got %v", tags)
-	}
+	require.Len(t, tags, 1)
+	assert.Equal(t, "security", tags[0])
+
 }
 
 func TestParseFrontmatterTags_Empty(t *testing.T) {
 	fm := map[string]string{"tags": ""}
 	tags := parseFrontmatterTags(fm)
-	if len(tags) != 0 {
-		t.Errorf("expected empty, got %v", tags)
-	}
+	assert.Empty(t, tags,
+		"expected empty, got %v", tags)
+
 }
 
 func TestParseFrontmatterTags_NoKey(t *testing.T) {
 	fm := map[string]string{"title": "Test"}
 	tags := parseFrontmatterTags(fm)
-	if len(tags) != 0 {
-		t.Errorf("expected empty, got %v", tags)
-	}
+	assert.Empty(t, tags,
+		"expected empty, got %v", tags)
+
 }
 
 func TestParseFrontmatterTags_Combined(t *testing.T) {
 	fm := map[string]string{"tags": "[auth, v2]", "labels": "security, backend"}
 	tags := parseFrontmatterTags(fm)
-	if len(tags) != 4 {
-		t.Errorf("expected 4 tags, got %v", tags)
-	}
+	assert.Len(t, tags, 4,
+		"expected 4 tags, got %v", tags)
+
 }
 
 func TestParse_ExtractsTags(t *testing.T) {
@@ -881,12 +992,11 @@ func TestParse_ExtractsTags(t *testing.T) {
 		RelPath:     "plans/test.md",
 		AdapterName: "markdown",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(art.Tags) != 3 {
-		t.Fatalf("expected 3 tags, got %v", art.Tags)
-	}
+	require.NoError(t, err)
+
+	require.Len(t, art.Tags, 3,
+		"expected 3 tags, got %v", art.Tags)
+
 }
 
 func TestParse_GeneratorFrontmatterSetsProfileWithoutToolTag(t *testing.T) {
@@ -901,313 +1011,346 @@ func TestParse_GeneratorFrontmatterSetsProfileWithoutToolTag(t *testing.T) {
 		RelPath:     "plans/x.md",
 		AdapterName: "markdown",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stringSliceContains(art.Tags, "claude-desktop") {
-		t.Fatalf("did not expect generator slug as tag, got %#v", art.Tags)
-	}
-	if art.FormatProfile != format.ProfileClaude {
-		t.Fatalf("format_profile: want %q, got %q", format.ProfileClaude, art.FormatProfile)
-	}
-	if g, _ := art.Extracted["generator"].(string); g != "Claude Desktop" {
-		t.Fatalf("extracted generator: want Claude Desktop, got %q", g)
-	}
+	require.NoError(t, err)
+
+	assert.False(t, stringSliceContains(art.Tags, "claude-desktop"))
+	assert.Equal(t, format.ProfileClaude, art.FormatProfile)
+	g, ok := art.Extracted["generator"].(string)
+	require.True(t, ok)
+	assert.Equal(t, "Claude Desktop", g)
 }
 
 func testSamplesRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", "..", "testdata", "samples"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	return root
 }
 
-func TestPathGeneratorForExtract(t *testing.T) {
-	tests := []struct {
-		relPath string
-		wantGen string
-	}{
-		{"_bmad-output/planning-artifacts/prd.md", "bmad-method"},
-		{"specs/001-x/spec.md", "speckit"},
-		{"specs/001-x/plan.md", "speckit"},
-		{".cursor/plans/foo.plan.md", "cursor-plan"},
-		{".codex/plans/PLAN.md", "codex"},
-		{"plans/nested/spec.md", ""},
-	}
-	for _, tt := range tests {
-		gen := pathGeneratorForExtract(tt.relPath)
-		if gen != tt.wantGen {
-			t.Errorf("%q: generator got %q want %q", tt.relPath, gen, tt.wantGen)
-		}
+func sampleMarkdownCandidate(t *testing.T, fixture, rel string) adapters.Candidate {
+	t.Helper()
+	root := filepath.Join(testSamplesRoot(t), fixture)
+
+	return adapters.Candidate{
+		PrimaryPath: filepath.Join(root, filepath.FromSlash(rel)),
+		RelPath:     rel,
+		AdapterName: "markdown",
 	}
 }
 
-func TestDiscover_SampleFixture_BMAD(t *testing.T) {
+func TestPathGeneratorForExtract_WithBmadArtifact_ReturnsBmad(t *testing.T) {
+	actual := pathGeneratorForExtract("_bmad-output/planning-artifacts/prd.md")
+
+	assert.Equal(t, "bmad-method", actual)
+}
+
+func TestPathGeneratorForExtract_WithSpecKitSpec_ReturnsSpecKit(t *testing.T) {
+	actual := pathGeneratorForExtract("specs/001-x/spec.md")
+
+	assert.Equal(t, "speckit", actual)
+}
+
+func TestPathGeneratorForExtract_WithSpecKitPlan_ReturnsSpecKit(t *testing.T) {
+	actual := pathGeneratorForExtract("specs/001-x/plan.md")
+
+	assert.Equal(t, "speckit", actual)
+}
+
+func TestPathGeneratorForExtract_WithCursorPlan_ReturnsCursorPlan(t *testing.T) {
+	actual := pathGeneratorForExtract(".cursor/plans/foo.plan.md")
+
+	assert.Equal(t, "cursor-plan", actual)
+}
+
+func TestPathGeneratorForExtract_WithCodexPlan_ReturnsCodex(t *testing.T) {
+	actual := pathGeneratorForExtract(".codex/plans/PLAN.md")
+
+	assert.Equal(t, "codex", actual)
+}
+
+func TestPathGeneratorForExtract_WithGenericNestedSpec_ReturnsEmpty(t *testing.T) {
+	actual := pathGeneratorForExtract("plans/nested/spec.md")
+
+	assert.Empty(t, actual)
+}
+
+func TestDiscover_SampleFixture_BMAD_ReturnsPlanningArtifacts(t *testing.T) {
 	root := filepath.Join(testSamplesRoot(t), "bmad")
 	a := &Adapter{}
+
 	candidates, err := a.Discover(context.Background(), root, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) < 2 {
-		t.Fatalf("bmad fixture: want >= 2 markdown candidates, got %d", len(candidates))
-	}
-	var prdCand adapters.Candidate
-	for _, c := range candidates {
-		if strings.HasSuffix(strings.ToLower(c.RelPath), "planning-artifacts/prd.md") {
-			prdCand = c
-			break
-		}
-	}
-	if prdCand.PrimaryPath == "" {
-		t.Fatal("prd.md not discovered")
-	}
-	art, _, _, err := a.Parse(context.Background(), prdCand)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if art.FormatProfile != format.ProfileBmad {
-		t.Fatalf("expected format_profile bmad, got %q", art.FormatProfile)
-	}
-	if g, _ := art.Extracted["generator"].(string); g != "bmad-method" {
-		t.Fatalf("extracted generator: want bmad-method, got %q", g)
-	}
+
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(candidates), 2,
+		"bmad fixture: want >= 2 markdown candidates, got %d", len(candidates))
+	assert.NotEmpty(t, findCandidate(candidates, "_bmad-output/planning-artifacts/prd.md").PrimaryPath,
+		"prd.md not discovered")
 }
 
-func TestDiscover_SampleFixture_Specify(t *testing.T) {
+func TestParse_SampleFixture_BMADPrd_UsesBMADProfile(t *testing.T) {
+	candidate := sampleMarkdownCandidate(t, "bmad", "_bmad-output/planning-artifacts/prd.md")
+	a := &Adapter{}
+
+	art, _, _, err := a.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, format.ProfileBmad, art.FormatProfile,
+		"expected format_profile bmad, got %q", art.FormatProfile)
+	g, ok := art.Extracted["generator"].(string)
+	require.True(t, ok)
+	assert.Equal(t, "bmad-method", g)
+}
+
+func TestDiscover_SampleFixture_Specify_ReturnsFeatureArtifacts(t *testing.T) {
 	root := filepath.Join(testSamplesRoot(t), "specify")
 	a := &Adapter{}
+
 	candidates, err := a.Discover(context.Background(), root, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) < 8 {
-		t.Fatalf("specify fixture: want >= 8 markdown candidates, got %d", len(candidates))
-	}
-	var specCand adapters.Candidate
-	wantRel := filepath.ToSlash(filepath.Join("specs", "001-synthetic-feature", "spec.md"))
-	for _, c := range candidates {
-		if filepath.ToSlash(c.RelPath) == wantRel {
-			specCand = c
-			break
-		}
-	}
-	if specCand.PrimaryPath == "" {
-		t.Fatal("spec.md not discovered under specs/001-synthetic-feature/")
-	}
-	art, _, _, err := a.Parse(context.Background(), specCand)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantLayout := filepath.ToSlash(filepath.Join("specs", "001-synthetic-feature"))
-	if art.FormatProfile != format.ProfileSpeckit {
-		t.Fatalf("expected format_profile speckit, got %q", art.FormatProfile)
-	}
-	if art.LayoutGroup != wantLayout {
-		t.Fatalf("layout_group: want %q, got %q", wantLayout, art.LayoutGroup)
-	}
-	if g, _ := art.Extracted["generator"].(string); g != "speckit" {
-		t.Fatalf("extracted generator: want speckit, got %q", g)
-	}
+
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(candidates), 8,
+		"specify fixture: want >= 8 markdown candidates, got %d", len(candidates))
+	assert.NotEmpty(t, findCandidate(candidates, "specs/001-synthetic-feature/spec.md").PrimaryPath,
+		"spec.md not discovered under specs/001-synthetic-feature/")
 }
 
-func TestDiscover_SampleFixture_SpecifyChildrenShareLayout(t *testing.T) {
-	root := filepath.Join(testSamplesRoot(t), "specify")
+func TestParse_SampleFixture_SpecifySpec_UsesSpecKitProfileAndLayout(t *testing.T) {
+	candidate := sampleMarkdownCandidate(t, "specify", "specs/001-synthetic-feature/spec.md")
 	a := &Adapter{}
-	candidates, err := a.Discover(context.Background(), root, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantLayout := filepath.ToSlash(filepath.Join("specs", "001-synthetic-feature"))
-	for _, rel := range []string{
-		filepath.ToSlash(filepath.Join("specs", "001-synthetic-feature", "plan.md")),
-		filepath.ToSlash(filepath.Join("specs", "001-synthetic-feature", "tasks.md")),
-		filepath.ToSlash(filepath.Join("specs", "001-synthetic-feature", "research.md")),
-	} {
-		candidate := findCandidate(candidates, rel)
-		if candidate.PrimaryPath == "" {
-			t.Fatalf("missing Spec Kit child %s", rel)
-		}
-		art, _, _, err := a.Parse(context.Background(), candidate)
-		if err != nil {
-			t.Fatalf("parse %s: %v", rel, err)
-		}
-		if art.FormatProfile != format.ProfileSpeckit {
-			t.Fatalf("%s format_profile: want %q got %q", rel, format.ProfileSpeckit, art.FormatProfile)
-		}
-		if art.LayoutGroup != wantLayout {
-			t.Fatalf("%s layout_group: want %q got %q", rel, wantLayout, art.LayoutGroup)
-		}
-	}
+
+	art, _, _, err := a.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, format.ProfileSpeckit, art.FormatProfile,
+		"expected format_profile speckit, got %q", art.FormatProfile)
+	assert.Equal(t, "specs/001-synthetic-feature", filepath.ToSlash(art.LayoutGroup))
+	g, ok := art.Extracted["generator"].(string)
+	require.True(t, ok)
+	assert.Equal(t, "speckit", g)
 }
 
-func TestDiscover_SampleFixture_SpecifyTasksTodos(t *testing.T) {
-	root := filepath.Join(testSamplesRoot(t), "specify")
-	wantRel := filepath.ToSlash(filepath.Join("specs", "001-synthetic-feature", "tasks.md"))
+func TestParse_SampleFixture_SpecifyPlan_UsesFeatureLayout(t *testing.T) {
+	candidate := sampleMarkdownCandidate(t, "specify", "specs/001-synthetic-feature/plan.md")
 	a := &Adapter{}
-	candidates, err := a.Discover(context.Background(), root, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var tasksCand adapters.Candidate
-	for _, c := range candidates {
-		if filepath.ToSlash(c.RelPath) == wantRel {
-			tasksCand = c
-			break
-		}
-	}
-	if tasksCand.PrimaryPath == "" {
-		t.Fatal("tasks.md not discovered")
-	}
-	_, _, pr, err := a.Parse(context.Background(), tasksCand)
-	if err != nil {
-		t.Fatal(err)
-	}
-	todos := pr.Todos
-	if len(todos) < 8 {
-		t.Fatalf("specify tasks fixture: want >= 8 checklist todos, got %d", len(todos))
-	}
+
+	art, _, _, err := a.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, format.ProfileSpeckit, art.FormatProfile)
+	assert.Equal(t, "specs/001-synthetic-feature", filepath.ToSlash(art.LayoutGroup))
 }
 
-func TestDiscover_SampleFixture_CursorPlan(t *testing.T) {
+func TestParse_SampleFixture_SpecifyTasks_UsesFeatureLayout(t *testing.T) {
+	candidate := sampleMarkdownCandidate(t, "specify", "specs/001-synthetic-feature/tasks.md")
+	a := &Adapter{}
+
+	art, _, _, err := a.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, format.ProfileSpeckit, art.FormatProfile)
+	assert.Equal(t, "specs/001-synthetic-feature", filepath.ToSlash(art.LayoutGroup))
+}
+
+func TestParse_SampleFixture_SpecifyResearch_UsesFeatureLayout(t *testing.T) {
+	candidate := sampleMarkdownCandidate(t, "specify", "specs/001-synthetic-feature/research.md")
+	a := &Adapter{}
+
+	art, _, _, err := a.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, format.ProfileSpeckit, art.FormatProfile)
+	assert.Equal(t, "specs/001-synthetic-feature", filepath.ToSlash(art.LayoutGroup))
+}
+
+func TestParse_SampleFixture_SpecifyTasks_ExtractsTodos(t *testing.T) {
+	candidate := sampleMarkdownCandidate(t, "specify", "specs/001-synthetic-feature/tasks.md")
+	a := &Adapter{}
+
+	_, _, result, err := a.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(result.Todos), 8,
+		"specify tasks fixture: want >= 8 checklist todos, got %d", len(result.Todos))
+}
+
+func TestDiscover_SampleFixture_CursorPlan_ReturnsPlan(t *testing.T) {
 	root := filepath.Join(testSamplesRoot(t), "cursor")
 	a := &Adapter{}
+
 	candidates, err := a.Discover(context.Background(), root, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 1 {
-		t.Fatalf("cursor fixture: want 1 candidate, got %d (%v)", len(candidates), candidates)
-	}
-	if want := ".cursor/plans/sample_cursor_plan.plan.md"; filepath.ToSlash(candidates[0].RelPath) != want {
-		t.Fatalf("rel path: want %s, got %s", want, candidates[0].RelPath)
-	}
-	art, _, _, err := a.Parse(context.Background(), candidates[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if art.FormatProfile != format.ProfileCursorPlan {
-		t.Fatalf("expected format_profile cursor_plan, got %q", art.FormatProfile)
-	}
+
+	require.NoError(t, err)
+	require.Len(t, candidates, 1,
+		"cursor fixture: want 1 candidate, got %d (%v)", len(candidates), candidates)
+	assert.Equal(t, ".cursor/plans/sample_cursor_plan.plan.md", filepath.ToSlash(candidates[0].RelPath))
+}
+
+func TestParse_SampleFixture_CursorPlan_UsesCursorProfile(t *testing.T) {
+	candidate := sampleMarkdownCandidate(t, "cursor", ".cursor/plans/sample_cursor_plan.plan.md")
+	a := &Adapter{}
+
+	art, _, _, err := a.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, format.ProfileCursorPlan, art.FormatProfile,
+		"expected format_profile cursor_plan, got %q", art.FormatProfile)
 }
 
 func TestDiscover_SampleFixture_CodexPlan(t *testing.T) {
 	root := filepath.Join(testSamplesRoot(t), "codex")
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), root, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 1 || filepath.ToSlash(candidates[0].RelPath) != "plans/PLAN.md" {
-		t.Fatalf("codex fixture: want plans/PLAN.md, got %#v", candidates)
-	}
+	require.NoError(t, err)
+
+	require.Len(t, candidates, 1)
+	assert.Equal(t, "plans/PLAN.md", filepath.ToSlash(candidates[0].RelPath))
+
 }
 
 func TestDiscover_SampleFixture_ClaudePlan(t *testing.T) {
 	root := filepath.Join(testSamplesRoot(t), "claude")
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), root, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 1 || filepath.ToSlash(candidates[0].RelPath) != "plans/dreamy-orbiting-quokka.md" {
-		t.Fatalf("claude fixture: want plans/dreamy-orbiting-quokka.md, got %#v", candidates)
+	require.NoError(t, err)
+
+	require.Len(t, candidates, 1)
+	assert.Equal(t, "plans/dreamy-orbiting-quokka.md", filepath.ToSlash(candidates[0].RelPath))
+
+}
+
+func TestDiscover_SampleFixture_FreetextWithRules_ReturnsAllCandidates(t *testing.T) {
+	root := filepath.Join(testSamplesRoot(t), "freetext")
+	cfg := freetextRepoConfig(freetextRules())
+	a := &Adapter{}
+
+	candidates, err := a.Discover(context.Background(), root, cfg)
+
+	require.NoError(t, err)
+	require.Len(t, candidates, 20,
+		"freetext fixture: want 20 markdown candidates, got %d", len(candidates))
+}
+
+func TestDiscover_SampleFixture_FreetextWithPathsOnly_ReturnsAllCandidates(t *testing.T) {
+	root := filepath.Join(testSamplesRoot(t), "freetext")
+	cfg := freetextRepoConfig(nil)
+	a := &Adapter{}
+
+	candidates, err := a.Discover(context.Background(), root, cfg)
+
+	require.NoError(t, err)
+	require.Len(t, candidates, 20,
+		"paths-only discover: want 20 candidates, got %d", len(candidates))
+}
+
+func TestParse_SampleFixture_FreetextRoadmap_UsesPlanRule(t *testing.T) {
+	candidate := freetextCandidate(t, "ROADMAP.md", freetextRules())
+	a := &Adapter{}
+
+	art, _, _, err := a.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, config.KindPlan, art.Kind)
+	assert.Empty(t, art.Subtype)
+}
+
+func TestParse_SampleFixture_FreetextPlanIndex_UsesPlanRule(t *testing.T) {
+	candidate := freetextCandidate(t, "v2/plans/README.md", freetextRules())
+	a := &Adapter{}
+
+	art, _, _, err := a.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, config.KindPlan, art.Kind)
+	assert.Empty(t, art.Subtype)
+}
+
+func TestParse_SampleFixture_FreetextWorkflowIndex_UsesPlanRule(t *testing.T) {
+	candidate := freetextCandidate(t, "v2/plans/01-sample-capture-workflow/README.md", freetextRules())
+	a := &Adapter{}
+
+	art, _, _, err := a.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, config.KindPlan, art.Kind)
+	assert.Empty(t, art.Subtype)
+}
+
+func TestParse_SampleFixture_FreetextNumberedTopic_UsesPlanRule(t *testing.T) {
+	candidate := freetextCandidate(t, "v2/plans/02_TOPIC_GROUPING.md", freetextRules())
+	a := &Adapter{}
+
+	art, _, _, err := a.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, config.KindPlan, art.Kind)
+	assert.Empty(t, art.Subtype)
+}
+
+func TestParse_SampleFixture_FreetextWorkflowStep_UsesPlanRule(t *testing.T) {
+	candidate := freetextCandidate(t, "v2/plans/01-sample-capture-workflow/03-service-integration-spike.md", freetextRules())
+	a := &Adapter{}
+
+	art, _, _, err := a.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, config.KindPlan, art.Kind)
+	assert.Empty(t, art.Subtype)
+}
+
+func TestParse_SampleFixture_FreetextDecision_UsesDecisionRule(t *testing.T) {
+	candidate := freetextCandidate(t, "decisions/001-capture-boundary.md", freetextRules())
+	a := &Adapter{}
+
+	art, _, _, err := a.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, config.KindDecision, art.Kind)
+	assert.Empty(t, art.Subtype)
+}
+
+func TestParse_SampleFixture_FreetextMarketingWithoutRules_UsesMarkdownArtifact(t *testing.T) {
+	candidate := freetextCandidate(t, "marketing.md", nil)
+	a := &Adapter{}
+
+	art, _, _, err := a.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, config.KindMarkdownArtifact, art.Kind)
+}
+
+func freetextRepoConfig(rules []config.SourceRule) *config.RepoConfig {
+	return &config.RepoConfig{
+		Version: 1,
+		Sources: []config.SourceConfig{{
+			Type:  "markdown",
+			Paths: []string{".", "v2/plans", "decisions"},
+			Rules: rules,
+		}},
 	}
 }
 
-func TestDiscover_SampleFixture_Freetext(t *testing.T) {
+func freetextRules() []config.SourceRule {
+	return []config.SourceRule{
+		{Match: "ROADMAP.md", Kind: config.KindPlan},
+		{Match: "*/README.md", Kind: config.KindPlan},
+		{Match: "README.md", Kind: config.KindPlan},
+		{Match: "[0-9][0-9]_*.md", Kind: config.KindPlan},
+		{Match: "*/[0-9][0-9]-*.md", Kind: config.KindPlan},
+		{Match: "decisions/*.md", Kind: config.KindDecision},
+	}
+}
+
+func freetextCandidate(t *testing.T, rel string, rules []config.SourceRule) adapters.Candidate {
+	t.Helper()
 	root := filepath.Join(testSamplesRoot(t), "freetext")
-	cfgRules := &config.RepoConfig{
-		Version: 1,
-		Sources: []config.SourceConfig{
-			{
-				Type:  "markdown",
-				Paths: []string{".", "v2/plans", "decisions"},
-				Rules: []config.SourceRule{
-					{Match: "ROADMAP.md", Kind: config.KindPlan},
-					{Match: "*/README.md", Kind: config.KindPlan},
-					{Match: "README.md", Kind: config.KindPlan},
-					{Match: "[0-9][0-9]_*.md", Kind: config.KindPlan},
-					{Match: "*/[0-9][0-9]-*.md", Kind: config.KindPlan},
-					{Match: "decisions/*.md", Kind: config.KindDecision},
-				},
-			},
-		},
-	}
-	if err := config.ValidateRepoConfig(cfgRules); err != nil {
-		t.Fatal(err)
-	}
 
-	a := &Adapter{}
-	candidates, err := a.Discover(context.Background(), root, cfgRules)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 20 {
-		t.Fatalf("freetext fixture: want 20 markdown candidates, got %d", len(candidates))
-	}
-
-	findCand := func(rel string) adapters.Candidate {
-		for _, c := range candidates {
-			if filepath.ToSlash(c.RelPath) == rel {
-				return c
-			}
-		}
-		t.Fatalf("missing candidate %s", rel)
-		return adapters.Candidate{}
-	}
-
-	for _, tc := range []struct {
-		rel  string
-		kind string
-		sub  string
-	}{
-		{"ROADMAP.md", config.KindPlan, ""},
-		{"v2/plans/README.md", config.KindPlan, ""},
-		{"v2/plans/01-sample-capture-workflow/README.md", config.KindPlan, ""},
-		{"v2/plans/02_TOPIC_GROUPING.md", config.KindPlan, ""},
-		{"v2/plans/01-sample-capture-workflow/03-service-integration-spike.md", config.KindPlan, ""},
-		{"decisions/001-capture-boundary.md", config.KindDecision, ""},
-	} {
-		art, _, _, err := a.Parse(context.Background(), findCand(tc.rel))
-		if err != nil {
-			t.Fatalf("parse %s: %v", tc.rel, err)
-		}
-		if art.Kind != tc.kind || art.Subtype != tc.sub {
-			t.Errorf("%s: want kind=%s subtype=%s got kind=%s subtype=%s", tc.rel, tc.kind, tc.sub, art.Kind, art.Subtype)
-		}
-	}
-
-	cfgPathsOnly := &config.RepoConfig{
-		Version: 1,
-		Sources: []config.SourceConfig{
-			{Type: "markdown", Paths: []string{".", "v2/plans", "decisions"}},
-		},
-	}
-	candidatesNoRules, err := a.Discover(context.Background(), root, cfgPathsOnly)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidatesNoRules) != 20 {
-		t.Fatalf("paths-only discover: want 20 candidates, got %d", len(candidatesNoRules))
-	}
-	findNR := func(rel string) adapters.Candidate {
-		for _, c := range candidatesNoRules {
-			if filepath.ToSlash(c.RelPath) == rel {
-				return c
-			}
-		}
-		t.Fatalf("missing candidate %s", rel)
-		return adapters.Candidate{}
-	}
-	art, _, _, err := a.Parse(context.Background(), findNR("marketing.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if art.Kind != config.KindMarkdownArtifact {
-		t.Errorf("marketing.md without rules: want kind markdown_artifact, got %q", art.Kind)
+	return adapters.Candidate{
+		PrimaryPath:   filepath.Join(root, filepath.FromSlash(rel)),
+		RelPath:       rel,
+		AdapterName:   "markdown",
+		MarkdownPaths: []string{".", "v2/plans", "decisions"},
+		MarkdownRules: rules,
 	}
 }
 
@@ -1231,12 +1374,11 @@ func candidateRelPaths(candidates []adapters.Candidate) []string {
 func writeMarkdown(t *testing.T, root, rel, content string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
 }
 
 func findCandidate(candidates []adapters.Candidate, rel string) adapters.Candidate {
@@ -1260,9 +1402,9 @@ func hasReasonPrefix(reasons []string, prefix string) bool {
 
 func TestDiscover_IgnoredSubtreeExcluded(t *testing.T) {
 	tmp := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmp, ".gitignore"), []byte("vendor-plans/\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, ".gitignore"), []byte("vendor-plans/\n"), 0o644))
+
 	pdir := filepath.Join(tmp, "plans")
 	os.MkdirAll(pdir, 0o755)
 	os.WriteFile(filepath.Join(pdir, "a.md"), []byte("# A\n"), 0o644)
@@ -1271,41 +1413,70 @@ func TestDiscover_IgnoredSubtreeExcluded(t *testing.T) {
 	os.WriteFile(filepath.Join(vdir, "b.md"), []byte("# B\n"), 0o644)
 
 	m, err := ignore.NewMatcher(tmp)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	ctx := ignore.WithContext(context.Background(), m)
 	a := &Adapter{}
 	cands, err := a.Discover(ctx, tmp, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	for _, c := range cands {
-		if strings.HasPrefix(c.RelPath, "vendor-plans/") {
-			t.Fatalf("got ignored path %q", c.RelPath)
-		}
+		require.False(t, strings.HasPrefix(c.RelPath, "vendor-plans/"),
+			"got ignored path %q", c.RelPath)
+
 	}
 }
 
-func TestInferDirectoryTag(t *testing.T) {
-	tests := []struct {
-		path string
-		want string
-	}{
-		{"plans/auth/middleware.plan.md", "auth"},
-		{"plans/billing.md", ""},
-		{"specs/api.md", ""},
-		{"docs/auth/login.md", "auth"},
-		{".cursor/plans/foo.md", ""},
-		{"plans/v2/migration.md", "v2"},
-		{"random.md", ""},
-		{"_bmad-output/planning-artifacts/prd.md", ""},
-		{"specs/001-feature/foo/spec.md", "foo"},
-	}
-	for _, tt := range tests {
-		got := InferDirectoryTag(tt.path)
-		if got != tt.want {
-			t.Errorf("InferDirectoryTag(%q) = %q, want %q", tt.path, got, tt.want)
-		}
-	}
+func TestInferDirectoryTag_WithNestedPlan_ReturnsParentDirectory(t *testing.T) {
+	actual := InferDirectoryTag("plans/auth/middleware.plan.md")
+
+	assert.Equal(t, "auth", actual)
+}
+
+func TestInferDirectoryTag_WithRootPlan_ReturnsEmpty(t *testing.T) {
+	actual := InferDirectoryTag("plans/billing.md")
+
+	assert.Empty(t, actual)
+}
+
+func TestInferDirectoryTag_WithRootSpec_ReturnsEmpty(t *testing.T) {
+	actual := InferDirectoryTag("specs/api.md")
+
+	assert.Empty(t, actual)
+}
+
+func TestInferDirectoryTag_WithNestedDocsFile_ReturnsParentDirectory(t *testing.T) {
+	actual := InferDirectoryTag("docs/auth/login.md")
+
+	assert.Equal(t, "auth", actual)
+}
+
+func TestInferDirectoryTag_WithCursorPlan_ReturnsEmpty(t *testing.T) {
+	actual := InferDirectoryTag(".cursor/plans/foo.md")
+
+	assert.Empty(t, actual)
+}
+
+func TestInferDirectoryTag_WithVersionedPlan_ReturnsVersion(t *testing.T) {
+	actual := InferDirectoryTag("plans/v2/migration.md")
+
+	assert.Equal(t, "v2", actual)
+}
+
+func TestInferDirectoryTag_WithRootMarkdown_ReturnsEmpty(t *testing.T) {
+	actual := InferDirectoryTag("random.md")
+
+	assert.Empty(t, actual)
+}
+
+func TestInferDirectoryTag_WithBmadArtifact_ReturnsEmpty(t *testing.T) {
+	actual := InferDirectoryTag("_bmad-output/planning-artifacts/prd.md")
+
+	assert.Empty(t, actual)
+}
+
+func TestInferDirectoryTag_WithNestedSpec_ReturnsParentDirectory(t *testing.T) {
+	actual := InferDirectoryTag("specs/001-feature/foo/spec.md")
+
+	assert.Equal(t, "foo", actual)
 }

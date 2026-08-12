@@ -5,6 +5,8 @@ import (
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
 	"github.com/devspecs-com/devspecs-cli/internal/format"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestResult_finalizeSourcesBreakdown_Sums(t *testing.T) {
@@ -14,6 +16,7 @@ func TestResult_finalizeSourcesBreakdown_Sums(t *testing.T) {
 	tallyIndexed(r, "openspec", []adapters.Source{{SourceType: "openspec", FormatProfile: format.ProfileOpenspec}}, adapters.Artifact{})
 	r.finalizeSourcesBreakdown()
 
+	require.Len(t, r.SourcesBreakdown, 4)
 	var totalIndexed, sumBreakdown int
 	for _, n := range r.Found {
 		totalIndexed += n
@@ -24,38 +27,32 @@ func TestResult_finalizeSourcesBreakdown_Sums(t *testing.T) {
 		for _, c := range row.Formats {
 			sumFormats += c
 		}
-		if sumFormats != row.Count {
-			t.Errorf("%s: format counts sum %d != row count %d", row.SourceType, sumFormats, row.Count)
-		}
+		assert.Equal(t, row.Count, sumFormats,
+			"%s: format counts sum %d != row count %d", row.SourceType, sumFormats, row.Count)
+
 	}
-	if totalIndexed != sumBreakdown {
-		t.Errorf("Found total %d != sources_breakdown count sum %d", totalIndexed, sumBreakdown)
-	}
-	if len(r.SourcesBreakdown) != 4 {
-		t.Fatalf("expected 4 breakdown rows, got %d", len(r.SourcesBreakdown))
-	}
+	assert.Equal(t, sumBreakdown, totalIndexed,
+		"Found total %d != sources_breakdown count sum %d", totalIndexed, sumBreakdown)
 }
 
 func TestResult_finalizeSourcesBreakdown_IncludesTestCasesWhenEnabled(t *testing.T) {
 	r := newResult([]string{"markdown", "openspec", "adr", "source_context", "test_case"})
 	r.finalizeSourcesBreakdown()
-	if len(r.SourcesBreakdown) != 5 {
-		t.Fatalf("expected 5 breakdown rows, got %d", len(r.SourcesBreakdown))
-	}
-	last := r.SourcesBreakdown[len(r.SourcesBreakdown)-1]
-	if last.SourceType != "test_case" || last.Label != "Test cases" {
-		t.Fatalf("last row = %#v", last)
-	}
+	require.Len(t, r.SourcesBreakdown, 5,
+		"expected 5 breakdown rows, got %d", len(r.SourcesBreakdown))
+
+	last := r.SourcesBreakdown[4]
+	assert.Equal(t, "test_case", last.SourceType)
+	assert.Equal(t, "Test cases", last.Label)
 }
 
 func TestResult_finalizeSourcesBreakdown_IncludesCodeCommentsWhenEnabled(t *testing.T) {
 	r := newResult([]string{"markdown", "openspec", "adr", "source_context", "code_comment"})
 	r.finalizeSourcesBreakdown()
-	if len(r.SourcesBreakdown) != 5 {
-		t.Fatalf("expected 5 breakdown rows, got %d", len(r.SourcesBreakdown))
-	}
-	last := r.SourcesBreakdown[len(r.SourcesBreakdown)-1]
-	if last.SourceType != "code_comment" || last.Label != "Code comments" {
-		t.Fatalf("last row = %#v", last)
-	}
+	require.Len(t, r.SourcesBreakdown, 5,
+		"expected 5 breakdown rows, got %d", len(r.SourcesBreakdown))
+
+	last := r.SourcesBreakdown[4]
+	assert.Equal(t, "code_comment", last.SourceType)
+	assert.Equal(t, "Code comments", last.Label)
 }

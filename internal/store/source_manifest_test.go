@@ -5,14 +5,15 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSourceManifest_ReplaceRepoSourceManifestIsIdempotent(t *testing.T) {
 	db := openTestDB(t)
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('repo_src', '/tmp/repo-src', ?, ?)", now, now); err != nil {
-		t.Fatal(err)
-	}
+	seedSourceManifestRepo(t, db, now)
 
 	files := []SourceManifestFileInput{{
 		FileID:          "src_1",
@@ -40,28 +41,25 @@ func TestSourceManifest_ReplaceRepoSourceManifestIsIdempotent(t *testing.T) {
 		TestNames:  "TestSession",
 		Imports:    "context",
 	}}
+	seedSourceManifestRows(t, db, now)
 
-	for i := 0; i < 2; i++ {
-		if err := db.ReplaceRepoSourceManifest("repo_src", files, symbols, tests, imports, fts, now); err != nil {
-			t.Fatal(err)
-		}
-		counts, err := db.CountSourceManifest("repo_src")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if counts.Files != 1 || counts.Symbols != 1 || counts.Tests != 1 || counts.Imports != 1 || counts.FTSRows != 1 {
-			t.Fatalf("unexpected counts after replace %d: %#v", i, counts)
-		}
-	}
+	err := db.ReplaceRepoSourceManifest("repo_src", files, symbols, tests, imports, fts, now)
+	require.NoError(t, err)
+
+	counts, err := db.CountSourceManifest("repo_src")
+	require.NoError(t, err)
+	assert.Equal(t, 1, counts.Files)
+	assert.Equal(t, 1, counts.Symbols)
+	assert.Equal(t, 1, counts.Tests)
+	assert.Equal(t, 1, counts.Imports)
+	assert.Equal(t, 1, counts.FTSRows)
 }
 
 func TestSourceManifest_ReplaceRepoSourceManifestBatchesLargeInputs(t *testing.T) {
 	db := openTestDB(t)
-	defer db.Close()
 	now := "2026-01-01T00:00:00Z"
-	if _, err := db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('repo_src', '/tmp/repo-src', ?, ?)", now, now); err != nil {
-		t.Fatal(err)
-	}
+	seedSourceManifestRepo(t, db, now)
+
 	var files []SourceManifestFileInput
 	var symbols []SourceManifestSymbolInput
 	var tests []SourceManifestTestInput
@@ -96,57 +94,53 @@ func TestSourceManifest_ReplaceRepoSourceManifestBatchesLargeInputs(t *testing.T
 			Imports:    "context",
 		})
 	}
-	if err := db.ReplaceRepoSourceManifest("repo_src", files, symbols, tests, imports, fts, now); err != nil {
-		t.Fatal(err)
-	}
+	err := db.ReplaceRepoSourceManifest("repo_src", files, symbols, tests, imports, fts, now)
+	require.NoError(t, err)
+
 	counts, err := db.CountSourceManifest("repo_src")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	want := sourceManifestInsertChunkSize + 25
-	if counts.Files != want || counts.Symbols != want || counts.Tests != want || counts.Imports != want || counts.FTSRows != want {
-		t.Fatalf("counts = %#v, want all %d", counts, want)
-	}
+	assert.Equal(t, want, counts.Files)
+	assert.Equal(t, want, counts.Symbols)
+	assert.Equal(t, want, counts.Tests)
+	assert.Equal(t, want, counts.Imports)
+	assert.Equal(t, want, counts.FTSRows)
 }
 
 func TestSourceManifest_DeleteRepoSourceManifest(t *testing.T) {
 	db := openTestDB(t)
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('repo_src', '/tmp/repo-src', ?, ?)", now, now); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.ReplaceRepoSourceManifest("repo_src",
+	seedSourceManifestRepo(t, db, now)
+	require.NoError(t, db.ReplaceRepoSourceManifest("repo_src",
 		[]SourceManifestFileInput{{FileID: "src_1", RepoID: "repo_src", Path: "src/app.ts", ContentHash: "abc", Language: "typescript", SourceRoot: "src", SourceRootKind: "common_root", SourceRole: "implementation"}},
 		nil, nil, nil,
 		[]SourceManifestFTSInput{{FileID: "src_1", Path: "src/app.ts", PathTerms: "src app ts", SourceRoot: "src", Language: "typescript", SourceRole: "implementation"}},
 		now,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.DeleteRepoSourceManifest("repo_src"); err != nil {
-		t.Fatal(err)
-	}
+	))
+
+	err := db.DeleteRepoSourceManifest("repo_src")
+	require.NoError(t, err)
+
 	counts, err := db.CountSourceManifest("repo_src")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if counts != (SourceManifestCounts{}) {
-		t.Fatalf("expected empty manifest counts after delete, got %#v", counts)
-	}
+	require.NoError(t, err)
+	assert.Zero(t, counts.Files)
+	assert.Zero(t, counts.Symbols)
+	assert.Zero(t, counts.Tests)
+	assert.Zero(t, counts.Imports)
+	assert.Zero(t, counts.FTSRows)
 }
 
 func TestSourceManifest_SearchSourceManifestFTS(t *testing.T) {
 	tmp := t.TempDir()
 	db, err := Open(filepath.Join(tmp, "devspecs.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 	now := "2026-06-05T00:00:00Z"
-	if _, err := db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES (?, ?, ?, ?)", "repo_src", tmp, now, now); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.ReplaceRepoSourceManifest("repo_src",
+	_, err = db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES (?, ?, ?, ?)", "repo_src", tmp, now, now)
+	require.NoError(t, err)
+	require.NoError(t, db.ReplaceRepoSourceManifest("repo_src",
 		[]SourceManifestFileInput{{
 			FileID: "src_1", RepoID: "repo_src", Path: "src/auth/session.go", ContentHash: "abc",
 			Language: "go", SourceRoot: "src/auth", SourceRootKind: "module_root", SourceRole: "implementation", FirstPartyScore: 0.9,
@@ -159,17 +153,46 @@ func TestSourceManifest_SearchSourceManifestFTS(t *testing.T) {
 			SourceRoot: "src/auth", Language: "go", SourceRole: "implementation",
 			Symbols: "RefreshSession", Imports: "context",
 		}},
-		now); err != nil {
-		t.Fatal(err)
-	}
+		now))
+
 	rows, err := db.SearchSourceManifestFTS(`"refresh" OR "session"`, FilterParams{RepoRoot: tmp}, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 row, got %d", len(rows))
-	}
-	if rows[0].Path != "src/auth/session.go" || rows[0].Symbols != "RefreshSession" {
-		t.Fatalf("unexpected row: %#v", rows[0])
-	}
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "src/auth/session.go", rows[0].Path)
+	assert.Equal(t, "RefreshSession", rows[0].Symbols)
+}
+
+func seedSourceManifestRepo(t *testing.T, db *DB, now string) {
+	t.Helper()
+
+	_, err := db.Exec("INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('repo_src', '/tmp/repo-src', ?, ?)", now, now)
+	require.NoError(t, err)
+}
+
+func seedSourceManifestRows(t *testing.T, db *DB, now string) {
+	t.Helper()
+
+	_, err := db.Exec(`INSERT INTO source_manifest (
+		file_id, repo_id, path, content_hash, size_bytes, language, source_root,
+		source_root_kind, source_role, first_party_score, ignored_reason, indexed_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"src_1", "repo_src", "internal/auth/session.go", "old", 1, "go", "internal",
+		"common_root", "implementation", 0.5, "", now)
+	require.NoError(t, err)
+
+	_, err = db.Exec(`INSERT INTO source_manifest_symbols (file_id, symbol, kind, line) VALUES (?, ?, ?, ?)`, "src_1", "OldSession", "symbol", 1)
+	require.NoError(t, err)
+
+	_, err = db.Exec(`INSERT INTO source_manifest_tests (file_id, test_name, parent, line) VALUES (?, ?, ?, ?)`, "src_1", "TestOldSession", "", 1)
+	require.NoError(t, err)
+
+	_, err = db.Exec(`INSERT INTO source_manifest_imports (file_id, import_ref, line) VALUES (?, ?, ?)`, "src_1", "errors", 1)
+	require.NoError(t, err)
+
+	_, err = db.Exec(`INSERT INTO source_manifest_fts (
+		file_id, path, path_terms, source_root, language, source_role, symbols, test_names, imports
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"src_1", "internal/auth/session.go", "internal auth session go", "internal", "go", "implementation", "OldSession", "TestOldSession", "errors")
+	require.NoError(t, err)
+
 }

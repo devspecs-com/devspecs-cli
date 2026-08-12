@@ -3,6 +3,7 @@
 package freshness
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,34 +31,50 @@ type Status struct {
 // Check determines if the index for repoRoot is stale.
 // Returns nil if the repo has never been scanned (uninitialized, not stale).
 func Check(db *store.DB, repoRoot string) *Status {
-	meta := db.GetRepoByRoot(repoRoot)
-	if meta == nil {
-		return nil
-	}
-
-	info := repo.Detect(repoRoot)
-	if info.IsGit {
-		return checkGit(meta, repoRoot)
-	}
-	return checkMtime(meta, repoRoot)
+	status, _ := CheckContext(context.Background(), db, repoRoot)
+	return status
 }
 
-func checkGit(meta *store.RepoMeta, repoRoot string) *Status {
-	head := repo.HeadCommit(repoRoot)
+// CheckContext determines index freshness while allowing Git subprocesses to
+// be canceled with the owning command.
+func CheckContext(ctx context.Context, db *store.DB, repoRoot string) (*Status, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	meta := db.GetRepoByRoot(repoRoot)
+	if meta == nil {
+		return nil, nil
+	}
+
+	info := repo.DetectContext(ctx, repoRoot)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if info.IsGit {
+		return checkGitContext(ctx, meta, repoRoot)
+	}
+	return checkMtime(meta, repoRoot), nil
+}
+
+func checkGitContext(ctx context.Context, meta *store.RepoMeta, repoRoot string) (*Status, error) {
+	head := repo.HeadCommitContext(ctx, repoRoot)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if head == "" {
 		debugLog("git HEAD unresolvable (not a git repo or empty?) — treating as fresh")
-		return &Status{Stale: false, RepoID: meta.ID, RepoRoot: meta.RootPath}
+		return &Status{Stale: false, RepoID: meta.ID, RepoRoot: meta.RootPath}, nil
 	}
 	debugLog("HEAD=%s stored=%s", head, meta.LastScanCommit)
 	if meta.LastScanCommit == head {
-		return &Status{Stale: false, RepoID: meta.ID, RepoRoot: meta.RootPath}
+		return &Status{Stale: false, RepoID: meta.ID, RepoRoot: meta.RootPath}, nil
 	}
 	return &Status{
 		Stale:    true,
 		Reason:   "git HEAD changed",
 		RepoID:   meta.ID,
 		RepoRoot: meta.RootPath,
-	}
+	}, nil
 }
 
 func checkMtime(meta *store.RepoMeta, repoRoot string) *Status {

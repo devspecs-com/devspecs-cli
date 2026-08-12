@@ -1,6 +1,19 @@
 package retrieval
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestIsBoundaryPrimaryPack_WithBoundaryMode_ReturnsTrue(t *testing.T) {
+	pack := RoleGroupedPack{Mode: BoundaryPrimaryPackMode}
+
+	isBoundaryPrimary := IsBoundaryPrimaryPack(pack)
+
+	assert.True(t, isBoundaryPrimary)
+}
 
 func TestApplyBoundaryPrimaryPackMarksRelatedDocsButKeepsSourcePrimary(t *testing.T) {
 	pack := RoleGroupedPack{
@@ -34,20 +47,19 @@ func TestApplyBoundaryPrimaryPackMarksRelatedDocsButKeepsSourcePrimary(t *testin
 	}
 
 	got := ApplyBoundaryPrimaryPack(pack)
-	if got.Mode != BoundaryPrimaryPackMode {
-		t.Fatalf("mode = %q", got.Mode)
-	}
-	if got.Metadata["boundary_primary"] != "true" {
-		t.Fatalf("missing boundary metadata: %#v", got.Metadata)
-	}
+	require.Equal(t, BoundaryPrimaryPackMode, got.Mode,
+		"mode = %q", got.Mode)
+	require.Equal(t, "true", got.Metadata["boundary_primary"],
+		"missing boundary metadata: %#v", got.Metadata)
+
 	relatedDocs := 0
 	primarySource := 0
 	primaryTests := 0
 	for _, group := range got.Groups {
 		for _, item := range group.Items {
-			if item.Boundary == "" {
-				t.Fatalf("item missing boundary: %#v", item)
-			}
+			require.NotEqual(t, "", item.Boundary,
+				"item missing boundary: %#v", item)
+
 			if group.Role == PackRoleBackgroundDecisions && item.PackTier == PackTierRelated {
 				relatedDocs++
 			}
@@ -59,15 +71,17 @@ func TestApplyBoundaryPrimaryPackMarksRelatedDocsButKeepsSourcePrimary(t *testin
 			}
 		}
 	}
-	if relatedDocs == 0 {
-		t.Fatalf("expected at least one duplicate doc to be related: %#v", got.Groups[0].Items)
+	require.NotEqual(t, 0, relatedDocs,
+		"expected at least one duplicate doc to be related: %#v", got.Groups[0].Items)
+	assert.Equal(t, 2, primarySource)
+	assert.Equal(t, 1, primaryTests)
+	{
+
+		summaries := BoundaryRelatedSummaries(got)
+		require.NotEmpty(t, summaries,
+			"expected related summaries")
 	}
-	if primarySource != 2 || primaryTests != 1 {
-		t.Fatalf("source/test not protected, source=%d tests=%d groups=%#v", primarySource, primaryTests, got.Groups)
-	}
-	if summaries := BoundaryRelatedSummaries(got); len(summaries) == 0 {
-		t.Fatalf("expected related summaries")
-	}
+
 }
 
 func TestApplyBoundaryPrimaryPackPreservesAllItems(t *testing.T) {
@@ -98,12 +112,11 @@ func TestApplyBoundaryPrimaryPackPreservesAllItems(t *testing.T) {
 			}
 		}
 	}
-	if total != 4 {
-		t.Fatalf("boundary pack should preserve all items, got %d", total)
-	}
-	if related == 0 {
-		t.Fatalf("expected some docs to be related")
-	}
+	require.Equal(t, 4, total,
+		"boundary pack should preserve all items, got %d", total)
+	require.NotEqual(t, 0, related,
+		"expected some docs to be related")
+
 }
 
 func TestApplyBoundaryPrimaryPackForQueryKeepsProposalFamilyAnchorVisible(t *testing.T) {
@@ -131,7 +144,7 @@ func TestApplyBoundaryPrimaryPackForQueryKeepsProposalFamilyAnchorVisible(t *tes
 			tiers[item.Path] = item.PackTier
 		}
 	}
-	if tiers["beps/README.md"] != PackTierPrimary {
-		t.Fatalf("proposal family anchor should remain primary, tiers=%#v", tiers)
-	}
+	require.Equal(t, PackTierPrimary, tiers["beps/README.md"],
+		"proposal family anchor should remain primary, tiers=%#v", tiers)
+
 }

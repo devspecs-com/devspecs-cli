@@ -23,6 +23,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/repo"
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/devspecs-com/devspecs-cli/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -133,36 +134,39 @@ type taskDecideOptions struct {
 }
 
 type taskCheckpointOptions struct {
-	Dir            string
-	Slice          string
-	Target         string
-	Stage          string
-	Decision       string
-	Note           string
-	Description    string
-	Goal           string
-	Resources      []string
-	FilesRead      []string
-	FilesEdited    []string
-	TestsRead      []string
-	TestsRun       []string
-	RunLogs        []string
-	MissedFiles    []string
-	NoiseFiles     []string
-	Tasks          []string
-	Learnings      []string
-	NextTarget     string
-	NextDecision   string
-	GitDiff        bool
-	FromGit        bool
-	GitDiffMax     int
-	TestOutput     bool
-	TestMax        int
-	Index          bool
-	Draft          bool
-	AsJSON         bool
-	gitEvidence    *taskGitDiffEvidence
-	runLogEvidence []taskCommandRunEvidence
+	Dir              string
+	Slice            string
+	Target           string
+	Stage            string
+	Decision         string
+	Note             string
+	Description      string
+	Goal             string
+	Resources        []string
+	FilesRead        []string
+	FilesEdited      []string
+	TestsRead        []string
+	TestsRun         []string
+	RunLogs          []string
+	MissedFiles      []string
+	NoiseFiles       []string
+	Tasks            []string
+	Learnings        []string
+	NextTarget       string
+	NextDecision     string
+	DurableRecord    string
+	DurableArtifacts []string
+	Supersedes       []string
+	GitDiff          bool
+	FromGit          bool
+	GitDiffMax       int
+	TestOutput       bool
+	TestMax          int
+	Index            bool
+	Draft            bool
+	AsJSON           bool
+	gitEvidence      *taskGitDiffEvidence
+	runLogEvidence   []taskCommandRunEvidence
 }
 
 type taskStartOutput struct {
@@ -218,11 +222,16 @@ type taskStatusOutput struct {
 	NextTitle            string                  `json:"next_title,omitempty"`
 	NextKind             string                  `json:"next_kind,omitempty"`
 	NextCommand          string                  `json:"next_command,omitempty"`
+	ThreadStatusCommand  string                  `json:"thread_status_command,omitempty"`
+	ThreadApplyCommands  []string                `json:"thread_apply_commands,omitempty"`
 	LatestCheckpointID   string                  `json:"latest_checkpoint_id,omitempty"`
 	LatestCheckpoint     string                  `json:"latest_checkpoint,omitempty"`
 	LatestCheckpointJSON string                  `json:"latest_checkpoint_json,omitempty"`
 	Slices               []taskStatusSliceOutput `json:"slices,omitempty"`
 	ArtifactFreshness    []taskArtifactFreshness `json:"artifact_freshness,omitempty"`
+	Durability           *taskDurabilityReview   `json:"durability,omitempty"`
+	LifecycleDiagnostics []string                `json:"lifecycle_diagnostics,omitempty"`
+	LifecycleConflicts   []taskLifecycleConflict `json:"lifecycle_conflicts,omitempty"`
 }
 
 type taskStatusSliceOutput struct {
@@ -267,6 +276,10 @@ type taskCheckpointOutput struct {
 	LearningCount      int      `json:"learning_count,omitempty"`
 	FactIndexed        bool     `json:"fact_indexed,omitempty"`
 	TestEvidenceCount  int      `json:"test_evidence_count,omitempty"`
+	DurableRecord      string   `json:"durable_record,omitempty"`
+	DurableArtifacts   []string `json:"durable_artifacts,omitempty"`
+	ThreadProjection   string   `json:"thread_projection,omitempty"`
+	ThreadWarning      string   `json:"thread_warning,omitempty"`
 }
 
 type taskCheckpointDraftOutput struct {
@@ -373,29 +386,40 @@ type taskAuditOutput struct {
 }
 
 type taskManifest struct {
-	TaskID               string                 `json:"task_id"`
-	Series               string                 `json:"series,omitempty"`
-	Profile              string                 `json:"profile,omitempty"`
-	WorkspaceID          string                 `json:"workspace_id,omitempty"`
-	WorkspaceRoot        string                 `json:"workspace_root,omitempty"`
-	ParentChange         string                 `json:"parent_change,omitempty"`
-	RepoAlias            string                 `json:"repo_alias,omitempty"`
-	Query                string                 `json:"query"`
-	Status               string                 `json:"status"`
-	Decision             string                 `json:"decision,omitempty"`
-	CreatedAt            string                 `json:"created_at"`
-	UpdatedAt            string                 `json:"updated_at,omitempty"`
-	LatestCheckpointID   string                 `json:"latest_checkpoint_id,omitempty"`
-	LatestCheckpoint     string                 `json:"latest_checkpoint,omitempty"`
-	LatestCheckpointJSON string                 `json:"latest_checkpoint_json,omitempty"`
-	RepoRoot             string                 `json:"repo_root"`
-	Workspace            string                 `json:"workspace"`
-	Artifacts            taskArtifactPaths      `json:"artifacts"`
-	Predicted            taskPredictedContext   `json:"predicted_context"`
-	AdvisoryFiles        []taskAdvisoryFile     `json:"advisory_files,omitempty"`
-	FreshnessWarnings    []taskFreshnessWarning `json:"freshness_warnings,omitempty"`
-	RiskCards            []taskRiskCard         `json:"risk_cards,omitempty"`
-	Confidence           taskConfidence         `json:"confidence"`
+	TaskID               string                  `json:"task_id"`
+	Series               string                  `json:"series,omitempty"`
+	Profile              string                  `json:"profile,omitempty"`
+	WorkspaceID          string                  `json:"workspace_id,omitempty"`
+	WorkspaceRoot        string                  `json:"workspace_root,omitempty"`
+	ParentChange         string                  `json:"parent_change,omitempty"`
+	RepoAlias            string                  `json:"repo_alias,omitempty"`
+	Query                string                  `json:"query"`
+	Status               string                  `json:"status"`
+	Decision             string                  `json:"decision,omitempty"`
+	CreatedAt            string                  `json:"created_at"`
+	UpdatedAt            string                  `json:"updated_at,omitempty"`
+	LatestCheckpointID   string                  `json:"latest_checkpoint_id,omitempty"`
+	LatestCheckpoint     string                  `json:"latest_checkpoint,omitempty"`
+	LatestCheckpointJSON string                  `json:"latest_checkpoint_json,omitempty"`
+	RepoRoot             string                  `json:"repo_root"`
+	Workspace            string                  `json:"workspace"`
+	Artifacts            taskArtifactPaths       `json:"artifacts"`
+	Predicted            taskPredictedContext    `json:"predicted_context"`
+	AdvisoryFiles        []taskAdvisoryFile      `json:"advisory_files,omitempty"`
+	FreshnessWarnings    []taskFreshnessWarning  `json:"freshness_warnings,omitempty"`
+	RiskCards            []taskRiskCard          `json:"risk_cards,omitempty"`
+	Confidence           taskConfidence          `json:"confidence"`
+	Durability           taskDurabilityReview    `json:"durability,omitempty"`
+	LifecycleDiagnostics []string                `json:"-"`
+	LifecycleConflicts   []taskLifecycleConflict `json:"-"`
+}
+
+type taskDurabilityReview struct {
+	Required       bool     `json:"required,omitempty"`
+	Disposition    string   `json:"disposition,omitempty"`
+	Artifacts      []string `json:"artifacts,omitempty"`
+	DeferredTarget string   `json:"deferred_target,omitempty"`
+	UpdatedAt      string   `json:"updated_at,omitempty"`
 }
 
 type taskWorkspaceLink struct {
@@ -512,7 +536,9 @@ type taskConfidence struct {
 
 type taskCheckpointRecord struct {
 	SchemaVersion            int                              `json:"schema_version"`
+	EventKind                string                           `json:"event_kind,omitempty"`
 	CheckpointID             string                           `json:"checkpoint_id,omitempty"`
+	SupersedesCheckpointIDs  []string                         `json:"supersedes_checkpoint_ids,omitempty"`
 	TaskID                   string                           `json:"task_id"`
 	WorkspaceID              string                           `json:"workspace_id,omitempty"`
 	WorkspaceRoot            string                           `json:"workspace_root,omitempty"`
@@ -544,6 +570,8 @@ type taskCheckpointRecord struct {
 	Evidence                 taskCheckpointEvidence           `json:"evidence,omitempty"`
 	Learnings                []taskCheckpointLearning         `json:"learnings,omitempty"`
 	Next                     taskCheckpointNextRecommendation `json:"next,omitempty"`
+	DurableRecord            string                           `json:"durable_record,omitempty"`
+	DurableArtifacts         []string                         `json:"durable_artifacts,omitempty"`
 }
 
 type taskCheckpointActualContext struct {
@@ -782,9 +810,11 @@ func newTaskNextCmd() *cobra.Command {
 	var opts taskTargetOptions
 	opts.Dir = defaultTaskWorkspaceDir
 	cmd := &cobra.Command{
-		Use:   "next <task-id>",
-		Short: "Show the next bounded task target",
-		Args:  cobra.ExactArgs(1),
+		Use:    "next <task-id>",
+		Short:  "Compatibility path for one unambiguous next target",
+		Long:   "Hidden compatibility path. Prefer `ds apply <task-id>` to emit a bounded prompt or `ds thread task:<task-id>` to inspect named lanes. This command never chooses among multiple runnable threads.",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskNext(cmd, args[0], opts)
 		},
@@ -974,6 +1004,9 @@ func newTaskCheckpointCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&opts.Learnings, "learning", nil, "Compact learning as type: summary or type|summary|confidence|applies_to|refs; may be repeated")
 	cmd.Flags().StringVar(&opts.NextTarget, "next-target", "", "Recommended next task target")
 	cmd.Flags().StringVar(&opts.NextDecision, "next-decision", "", "Recommended next decision gate")
+	cmd.Flags().StringVar(&opts.DurableRecord, "durable-record", "", "Track closeout disposition: none, recorded, or deferred")
+	cmd.Flags().StringArrayVar(&opts.DurableArtifacts, "durable-artifact", nil, "Repo-owned ADR, RFC, or PRD recorded by this track; may be repeated")
+	cmd.Flags().StringArrayVar(&opts.Supersedes, "supersedes", nil, "Conflicting checkpoint event ID resolved by this checkpoint; repeat for every current head")
 	cmd.Flags().BoolVar(&opts.GitDiff, "git-diff", false, "Include bounded git diff stat and changed-file evidence in checkpoint JSON")
 	cmd.Flags().BoolVar(&opts.FromGit, "from-git", false, "Populate edited-file evidence from current git status and diff")
 	cmd.Flags().IntVar(&opts.GitDiffMax, "git-diff-max-bytes", opts.GitDiffMax, "Maximum bytes of git diff stat evidence to keep")
@@ -991,14 +1024,31 @@ func runTaskStart(cmd *cobra.Command, query string, opts taskStartOptions) error
 		return err
 	}
 	if opts.AsJSON {
-		enc := json.NewEncoder(cmd.OutOrStdout())
+		var body bytes.Buffer
+		enc := json.NewEncoder(&body)
 		enc.SetIndent("", "  ")
-		return enc.Encode(out)
+		if err := enc.Encode(out); err != nil {
+			return taskStartOutputError(out, err)
+		}
+		n, err := cmd.OutOrStdout().Write(body.Bytes())
+		if err == nil && n != body.Len() {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
+			return taskStartOutputError(out, err)
+		}
+		return nil
 	}
 	if opts.Quick {
-		return writeTaskQuickStartHuman(cmd.OutOrStdout(), out, confidence)
+		if err := writeTaskQuickStartHuman(cmd.OutOrStdout(), out, confidence); err != nil {
+			return taskStartOutputError(out, err)
+		}
+		return nil
 	}
-	return writeTaskStartHuman(cmd.OutOrStdout(), out, confidence)
+	if err := writeTaskStartHuman(cmd.OutOrStdout(), out, confidence); err != nil {
+		return taskStartOutputError(out, err)
+	}
+	return nil
 }
 
 func createTaskWorkspace(cmd *cobra.Command, query string, opts taskStartOptions) (taskStartOutput, taskConfidence, error) {
@@ -1006,7 +1056,7 @@ func createTaskWorkspace(cmd *cobra.Command, query string, opts taskStartOptions
 	if query == "" {
 		return taskStartOutput{}, taskConfidence{}, fmt.Errorf("task query is empty")
 	}
-	repoRoot, err := resolveTargetRepoRoot(firstNonEmptyTaskString(opts.Repo, commandRepoTarget(cmd)))
+	repoRoot, err := resolveTargetRepoRootContext(cmd.Context(), firstNonEmptyTaskString(opts.Repo, commandRepoTarget(cmd)))
 	if err != nil {
 		return taskStartOutput{}, taskConfidence{}, err
 	}
@@ -1028,8 +1078,13 @@ func createTaskWorkspace(cmd *cobra.Command, query string, opts taskStartOptions
 	if err != nil {
 		return taskStartOutput{}, taskConfidence{}, err
 	}
-	if err := prepareTaskWorkspace(workspace, opts.Force); err != nil {
+	if err := validateTaskWorkspaceTarget(workspace, opts.Force); err != nil {
 		return taskStartOutput{}, taskConfidence{}, err
+	}
+	if opts.Index {
+		if err := preflightTaskIndexMutation(cmd); err != nil {
+			return taskStartOutput{}, taskConfidence{}, err
+		}
 	}
 
 	preflight, err := buildTaskPreflight(cmd, repoRoot, query, opts.NoRefresh)
@@ -1064,24 +1119,25 @@ func createTaskWorkspace(cmd *cobra.Command, query string, opts taskStartOptions
 		FreshnessWarnings: preflight.FreshnessWarnings,
 		RiskCards:         preflight.RiskCards,
 		Confidence:        preflight.Confidence,
+		Durability:        taskDurabilityReview{Required: !opts.Quick},
 	}
 
 	paths := taskAbsoluteArtifactPaths(workspace, relArtifacts)
-	files := map[string]string{
-		paths.Index: renderTaskIndex(manifest),
+	files := map[string][]byte{
+		relArtifacts.Index: []byte(renderTaskIndex(manifest)),
 	}
 	for _, slice := range slices {
-		files[filepath.Join(workspace, slice.Plan)] = renderTaskSlicePlan(manifest, slice)
-		files[filepath.Join(workspace, slice.Result)] = renderTaskSliceResultTemplate(manifest, slice)
+		files[slice.Plan] = []byte(renderTaskSlicePlan(manifest, slice))
+		files[slice.Result] = []byte(renderTaskSliceResultTemplate(manifest, slice))
 	}
-	for path, body := range files {
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			return taskStartOutput{}, taskConfidence{}, fmt.Errorf("write %s: %w", path, err)
-		}
-	}
-	manifestPath := filepath.Join(workspace, taskManifestFilename)
-	if err := writeTaskManifest(manifestPath, manifest); err != nil {
+	manifestBody, err := marshalTaskManifest(manifest)
+	if err != nil {
 		return taskStartOutput{}, taskConfidence{}, err
+	}
+	files[taskManifestFilename] = manifestBody
+	manifestPath := filepath.Join(workspace, taskManifestFilename)
+	if err := publishTaskWorkspace(cmd.Context(), workspace, opts.Force, files); err != nil {
+		return taskStartOutput{}, taskConfidence{}, fmt.Errorf("publish task %s workspace %s: %w", taskID, workspace, err)
 	}
 
 	var indexed []string
@@ -1098,7 +1154,7 @@ func createTaskWorkspace(cmd *cobra.Command, query string, opts taskStartOptions
 		}
 		indexed, err = captureTaskArtifacts(cmd, repoRoot, requests)
 		if err != nil {
-			return taskStartOutput{}, taskConfidence{}, err
+			return taskStartOutput{}, taskConfidence{}, fmt.Errorf("task %s workspace was created at %s, but index capture failed: %w", taskID, workspace, err)
 		}
 	}
 
@@ -1203,6 +1259,10 @@ func loadTaskWorkspaceManifestForRepo(baseDir, taskID, repoPath string) (string,
 		manifestPath := filepath.Join(workspace, taskManifestFilename)
 		manifest, err := readTaskManifest(manifestPath)
 		if err == nil {
+			manifest, err = reconcileTaskManifestLifecycle(workspace, manifest)
+			if err != nil {
+				return "", "", taskManifest{}, fmt.Errorf("reconcile task checkpoint events: %w", err)
+			}
 			return repoRoot, workspace, manifest, nil
 		}
 		if firstErr == nil {
@@ -1219,6 +1279,11 @@ func loadTaskWorkspaceManifestForRepo(baseDir, taskID, repoPath string) (string,
 }
 
 func writeAddedTaskArtifact(cmd *cobra.Command, repoRoot, workspace string, manifest taskManifest, slice taskSliceArtifact, opts taskArtifactAddOptions) error {
+	if opts.Index {
+		if err := preflightTaskIndexMutation(cmd); err != nil {
+			return err
+		}
+	}
 	indexPath := filepath.Join(workspace, manifest.Artifacts.Index)
 	planPath := filepath.Join(workspace, slice.Plan)
 	resultPath := filepath.Join(workspace, slice.Result)
@@ -1244,7 +1309,7 @@ func writeAddedTaskArtifact(cmd *cobra.Command, repoRoot, workspace string, mani
 			{Path: planPath, Title: "Task " + manifest.TaskID + " " + slice.ID + " plan: " + slice.Title, Status: "implementing"},
 		})
 		if err != nil {
-			return err
+			return fmt.Errorf("task slice %s files were written at %s, but index capture failed; do not retry blindly: %w", slice.ID, workspace, err)
 		}
 	}
 
@@ -1347,7 +1412,7 @@ func runTaskSync(cmd *cobra.Command, taskID string, opts taskSyncOptions) error 
 }
 
 func runTaskNext(cmd *cobra.Command, taskID string, opts taskTargetOptions) error {
-	ctx, err := loadTaskTargetContext(cmd, opts.Dir, taskID, "")
+	ctx, err := loadTaskNextCompatibilityContext(cmd, taskID, opts)
 	if err != nil {
 		return err
 	}
@@ -1360,8 +1425,71 @@ func runTaskNext(cmd *cobra.Command, taskID string, opts taskTargetOptions) erro
 	return writeTaskTargetHuman(cmd.OutOrStdout(), "Next task target", out, false)
 }
 
+func loadTaskNextCompatibilityContext(cmd *cobra.Command, taskID string, opts taskTargetOptions) (taskTargetContext, error) {
+	return loadThreadAwareResolvedTaskTargetContext(cmd, opts.Dir, taskID, "")
+}
+
+func loadThreadAwareResolvedTaskTargetContext(cmd *cobra.Command, baseDir, taskIDOrTarget, selector string) (taskTargetContext, error) {
+	if strings.TrimSpace(selector) != "" {
+		return loadResolvedTaskTargetContext(cmd, baseDir, taskIDOrTarget, selector)
+	}
+	target, found, err := resolveTaskThreadTarget(cmd, baseDir, taskIDOrTarget)
+	if err != nil {
+		return taskTargetContext{}, err
+	}
+	if !found {
+		return loadResolvedTaskTargetContext(cmd, baseDir, taskIDOrTarget, selector)
+	}
+	return loadResolvedTaskTargetContext(cmd, baseDir, taskIDOrTarget, target)
+}
+
+func resolveTaskThreadTarget(cmd *cobra.Command, baseDir, taskID string) (string, bool, error) {
+	location, found, err := findRepoThreadOwnerLocationMode(cmd, strings.TrimSpace(taskID), baseDir, false)
+	if err != nil {
+		return "", true, err
+	}
+	if !found {
+		return "", false, nil
+	}
+	if _, err := os.Stat(location.DefinitionPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", true, err
+	}
+	status, err := deriveThreadStatus(cmd, location)
+	if err != nil {
+		return "", true, err
+	}
+	lane, closeout, err := selectThreadApplyLane(status, "", "")
+	if err != nil {
+		return "", true, err
+	}
+	if closeout {
+		if location.Kind != threadOwnerTask {
+			return "", true, fmt.Errorf("workspace change %q has completed all assigned threads", location.ChangeID)
+		}
+		manifest, manifestErr := readTaskManifest(filepath.Join(location.TaskWorkspace, taskManifestFilename))
+		if manifestErr != nil {
+			return "", true, manifestErr
+		}
+		return defaultTaskSeries(manifest.Series) + "00", true, nil
+	}
+	target := *lane.CurrentTarget
+	if !strings.EqualFold(target.TaskID, strings.TrimSpace(taskID)) {
+		return "", true, fmt.Errorf(
+			"task %q has no singular runnable target in its workspace thread graph; current target %s belongs to task %q\nInspect: %s",
+			taskID,
+			threadStatusTargetAddress(target),
+			target.TaskID,
+			threadOwnerStatusCommand(status.Owner),
+		)
+	}
+	return target.Target, true, nil
+}
+
 func runTaskShow(cmd *cobra.Command, taskID string, opts taskTargetOptions) error {
-	ctx, err := loadResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
+	ctx, err := loadThreadAwareResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1375,7 +1503,7 @@ func runTaskShow(cmd *cobra.Command, taskID string, opts taskTargetOptions) erro
 }
 
 func runTaskPrompt(cmd *cobra.Command, taskID string, opts taskTargetOptions) error {
-	ctx, err := loadResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
+	ctx, err := loadThreadAwareResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1400,7 +1528,7 @@ func runTaskPrompt(cmd *cobra.Command, taskID string, opts taskTargetOptions) er
 }
 
 func runTaskStartTarget(cmd *cobra.Command, taskID string, opts taskTargetStateOptions) error {
-	ctx, err := loadResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
+	ctx, err := loadThreadAwareResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1415,7 +1543,7 @@ func runTaskStartTarget(cmd *cobra.Command, taskID string, opts taskTargetStateO
 }
 
 func runTaskFinish(cmd *cobra.Command, taskID string, opts taskTargetStateOptions) error {
-	ctx, err := loadResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
+	ctx, err := loadThreadAwareResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1448,7 +1576,7 @@ func runTaskFinish(cmd *cobra.Command, taskID string, opts taskTargetStateOption
 }
 
 func runTaskAudit(cmd *cobra.Command, taskID string, opts taskAuditOptions) error {
-	ctx, err := loadResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
+	ctx, err := loadThreadAwareResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1475,12 +1603,71 @@ func runTaskStatus(cmd *cobra.Command, taskID string, opts taskStatusOptions) er
 	}
 	out := taskStatusFromManifest(manifest, commandRepoTarget(cmd))
 	out.ArtifactFreshness = taskArtifactFreshnessWarnings(workspace, manifest)
+	if err := applyTaskStatusThreadSelection(cmd, opts, manifest, &out); err != nil {
+		return err
+	}
 	if opts.AsJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)
 	}
 	return writeTaskStatusHuman(cmd.OutOrStdout(), out)
+}
+
+func applyTaskStatusThreadSelection(cmd *cobra.Command, opts taskStatusOptions, manifest taskManifest, out *taskStatusOutput) error {
+	location, found, err := findRepoThreadOwnerLocationMode(cmd, manifest.TaskID, opts.Dir, false)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	if _, err := os.Stat(location.DefinitionPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	status, err := deriveThreadStatus(cmd, location)
+	if err != nil {
+		return err
+	}
+	out.ThreadStatusCommand = threadOwnerStatusCommand(status.Owner)
+	out.ThreadApplyCommands = threadRunnableApplyCommands(status)
+
+	var matching []threadStatusLane
+	for _, lane := range status.Threads {
+		if lane.CurrentTarget == nil || (lane.State != threadStateReady && lane.State != threadStateActive) {
+			continue
+		}
+		if strings.EqualFold(lane.CurrentTarget.TaskID, manifest.TaskID) {
+			matching = append(matching, lane)
+		}
+	}
+	if len(matching) == 1 {
+		target := *matching[0].CurrentTarget
+		slice, sliceErr := taskSliceForCheckpoint(manifest, target.Target)
+		if sliceErr != nil {
+			return sliceErr
+		}
+		out.NextTarget = target.Target
+		out.NextTitle = target.Title
+		out.NextKind = slice.Kind
+		out.NextCommand = threadOwnerApplyCommand(status.Owner, matching[0].Key)
+		return nil
+	}
+	if location.Kind == threadOwnerTask && allThreadLanesCompleted(status.Threads) && len(status.UnassignedTargets) == 0 {
+		return nil
+	}
+	clearTaskStatusNext(out)
+	return nil
+}
+
+func clearTaskStatusNext(out *taskStatusOutput) {
+	out.NextTarget = ""
+	out.NextTitle = ""
+	out.NextKind = ""
+	out.NextCommand = ""
 }
 
 func taskStatusFromManifest(manifest taskManifest, repoPath string) taskStatusOutput {
@@ -1498,6 +1685,12 @@ func taskStatusFromManifest(manifest taskManifest, repoPath string) taskStatusOu
 		LatestCheckpointID:   manifest.LatestCheckpointID,
 		LatestCheckpoint:     manifest.LatestCheckpoint,
 		LatestCheckpointJSON: manifest.LatestCheckpointJSON,
+		LifecycleDiagnostics: manifest.LifecycleDiagnostics,
+		LifecycleConflicts:   manifest.LifecycleConflicts,
+	}
+	if manifest.Durability.Required {
+		durability := manifest.Durability
+		out.Durability = &durability
 	}
 	if next, err := taskNextSlice(manifest); err == nil {
 		out.NextTarget = next.ID
@@ -1562,6 +1755,18 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 			fmt.Fprintf(out, "Run: %s\n", status.NextCommand)
 		}
 	}
+	if status.ThreadStatusCommand != "" {
+		if status.NextTarget == "" {
+			fmt.Fprintln(out, "Named threads: no singular next target")
+		}
+		fmt.Fprintf(out, "Inspect: %s\n", status.ThreadStatusCommand)
+		if status.NextTarget == "" && len(status.ThreadApplyCommands) > 0 {
+			fmt.Fprintln(out, "Run one:")
+			for _, command := range status.ThreadApplyCommands {
+				fmt.Fprintf(out, "  %s\n", command)
+			}
+		}
+	}
 	if status.LatestCheckpoint != "" {
 		fmt.Fprintf(out, "Latest Checkpoint: %s\n", status.LatestCheckpoint)
 	}
@@ -1570,6 +1775,22 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 	}
 	if status.LatestCheckpointJSON != "" {
 		fmt.Fprintf(out, "Latest Checkpoint JSON: %s\n", status.LatestCheckpointJSON)
+	}
+	if status.Durability != nil && status.Durability.Required {
+		disposition := emptyAsDash(status.Durability.Disposition)
+		fmt.Fprintf(out, "Durable Record: %s\n", disposition)
+		for _, artifact := range status.Durability.Artifacts {
+			fmt.Fprintf(out, "  - %s\n", artifact)
+		}
+		if status.Durability.DeferredTarget != "" {
+			fmt.Fprintf(out, "Durable Record Deferred To: %s\n", status.Durability.DeferredTarget)
+		}
+	}
+	for _, diagnostic := range status.LifecycleDiagnostics {
+		fmt.Fprintf(out, "Lifecycle diagnostic: %s\n", diagnostic)
+	}
+	for _, conflict := range status.LifecycleConflicts {
+		fmt.Fprintf(out, "Lifecycle conflict: %s heads=%s\n", conflict.Target, strings.Join(conflict.HeadCheckpointIDs, ","))
 	}
 	if len(status.ArtifactFreshness) > 0 {
 		writeTaskArtifactFreshnessHuman(out, status.TaskID, status.ArtifactFreshness)
@@ -1614,7 +1835,7 @@ func writeTaskArtifactFreshnessHuman(out io.Writer, taskID string, warnings []ta
 			fmt.Fprintf(out, " (%s)", warning.StateUpdatedAt)
 		}
 		fmt.Fprintln(out, ".")
-		fmt.Fprintf(out, "    task.json lifecycle state is still usable; run `%s` to recapture edited docs without rewriting them.\n", next)
+		fmt.Fprintf(out, "    checkpoint events remain lifecycle authority; run `%s` to recapture edited docs without rewriting them.\n", next)
 	}
 }
 
@@ -1649,12 +1870,15 @@ func runTaskDecide(cmd *cobra.Command, taskID string, opts taskDecideOptions) er
 		return fmt.Errorf("invalid stage %q; valid values: %s", stage, strings.Join(taskLifecycleStages, ", "))
 	}
 
-	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(cmd, opts.Dir, taskID)
+	repoRoot, _, manifest, err := loadTaskWorkspaceManifest(cmd, opts.Dir, taskID)
 	if err != nil {
 		return err
 	}
 	targetID := target
 	if isTaskSeriesTarget(manifest, target) {
+		if manifest.Durability.Required {
+			return fmt.Errorf("task-series closeout requires `ds task checkpoint %s --target %s00 --stage completed --decision complete --durable-record <none|recorded|deferred>`", taskID, defaultTaskSeries(manifest.Series))
+		}
 		targetID = defaultTaskSeries(manifest.Series) + "00"
 	} else {
 		slice, err := taskSliceForCheckpoint(manifest, target)
@@ -1663,27 +1887,37 @@ func runTaskDecide(cmd *cobra.Command, taskID string, opts taskDecideOptions) er
 		}
 		targetID = slice.ID
 	}
-
-	now := time.Now().UTC()
-	applyTaskTargetState(&manifest, targetID, stage, decision, now)
-	stage, decision = taskStateForTarget(manifest, targetID)
-
-	manifestPath := filepath.Join(workspace, taskManifestFilename)
-	if err := writeTaskManifest(manifestPath, manifest); err != nil {
+	if stage == "" {
+		stage, _ = taskStateForTarget(manifest, targetID)
+		if stage == "" {
+			stage = "implemented"
+		}
+	}
+	originalOutput := cmd.OutOrStdout()
+	cmd.SetOut(io.Discard)
+	err = runTaskCheckpoint(cmd, taskID, taskCheckpointOptions{
+		Dir:         opts.Dir,
+		Target:      targetID,
+		Stage:       stage,
+		Decision:    decision,
+		Goal:        fmt.Sprintf("Record compatibility lifecycle update for `%s`.", targetID),
+		Description: "Lifecycle state recorded through a compatibility command.",
+		Index:       opts.Index,
+	})
+	cmd.SetOut(originalOutput)
+	if err != nil {
 		return err
 	}
+	_, workspace, manifest, err := loadTaskWorkspaceManifest(cmd, opts.Dir, taskID)
+	if err != nil {
+		return err
+	}
+	stage, decision = taskStateForTarget(manifest, targetID)
+	manifestPath := filepath.Join(workspace, taskManifestFilename)
 	indexPath := filepath.Join(workspace, manifest.Artifacts.Index)
-
 	var indexed []string
 	if opts.Index {
-		indexed, err = captureTaskArtifacts(cmd, repoRoot, []taskCaptureRequest{{
-			Path:   indexPath,
-			Title:  "Task " + taskID + " preflight",
-			Status: taskArtifactStatus(stage, decision),
-		}})
-		if err != nil {
-			return err
-		}
+		indexed = []string{taskRelativePath(repoRoot, indexPath)}
 	}
 
 	out := taskDecideOutput{
@@ -1704,9 +1938,6 @@ func runTaskDecide(cmd *cobra.Command, taskID string, opts taskDecideOptions) er
 	fmt.Fprintf(cmd.OutOrStdout(), "Updated %s: stage=%s decision=%s\n", targetID, emptyAsDash(stage), decision)
 	fmt.Fprintf(cmd.OutOrStdout(), "Manifest: %s\n", manifestPath)
 	fmt.Fprintf(cmd.OutOrStdout(), "Index: %s\n", indexPath)
-	if len(indexed) > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "Indexed: %s\n", strings.Join(indexed, ", "))
-	}
 	return nil
 }
 
@@ -1854,10 +2085,6 @@ func findTaskTargetAddressMatchesForRepo(baseDir, selector, repoPath string) ([]
 	return matches, nil
 }
 
-func loadTaskTargetContext(cmd *cobra.Command, baseDir, taskID, selector string) (taskTargetContext, error) {
-	return loadTaskTargetContextForRepo(baseDir, taskID, selector, commandRepoTarget(cmd))
-}
-
 func loadTaskTargetContextForRepo(baseDir, taskID, selector, repoPath string) (taskTargetContext, error) {
 	taskID = strings.TrimSpace(taskID)
 	if err := validateTaskID(taskID); err != nil {
@@ -1961,6 +2188,9 @@ func writeTaskTargetHuman(out io.Writer, title string, target taskTargetOutput, 
 }
 
 func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput, priorEvidence []taskAdvisoryFile) string {
+	if target.Kind == "closeout" {
+		return renderTaskCloseoutPrompt(ctx, target, priorEvidence)
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are working on DevSpecs task %s target %s only.\n\n", target.TaskID, target.Target)
 	fmt.Fprintln(&b, "Boundary:")
@@ -2006,6 +2236,28 @@ func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput, prior
 		fmt.Fprintln(&b)
 		fmt.Fprintln(&b, target.PlanBody)
 	}
+	return b.String()
+}
+
+func renderTaskCloseoutPrompt(ctx taskTargetContext, target taskTargetOutput, priorEvidence []taskAdvisoryFile) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are closing DevSpecs task %s at track target %s. Do not implement more product work.\n\n", target.TaskID, target.Target)
+	fmt.Fprintln(&b, "Review the completed slice receipts once for institutional knowledge that should survive task pruning.")
+	fmt.Fprintln(&b, "A durable record is warranted when the track settled a cross-system boundary or contract, a costly-to-reverse choice, a dependency/protocol/storage/security/privacy/performance policy, real alternatives with rationale, or context a future track will need to understand why.")
+	fmt.Fprintln(&b, "Skip local, obvious, reversible implementation details.")
+	fmt.Fprintln(&b)
+	writeTaskPromptPriorSliceEvidence(&b, priorEvidence)
+	repoArg := ""
+	if strings.TrimSpace(ctx.RepoArg) != "" {
+		repoArg = " --repo " + commandArg(ctx.RepoArg)
+	}
+	fmt.Fprintln(&b, "Choose exactly one disposition:")
+	fmt.Fprintf(&b, "- none: `ds task checkpoint %s --target %s --stage completed --decision complete --durable-record none%s`\n", target.TaskID, target.Target, repoArg)
+	fmt.Fprintf(&b, "- recorded: create or finish repo-owned ADR/RFC/PRD files, then run `ds task checkpoint %s --target %s --stage completed --decision complete --durable-record recorded --durable-artifact <path>%s`\n", target.TaskID, target.Target, repoArg)
+	fmt.Fprintf(&b, "- deferred: `ds task checkpoint %s --target %s --stage completed --decision complete --durable-record deferred --next-target <target>%s`\n", target.TaskID, target.Target, repoArg)
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "Use `ds compose adr|rfc|prd \"<title>\" --from-task "+target.TaskID+" --target "+target.Target+repoArg+"` when a new durable draft is needed. Complete its placeholders before recording it.")
+	fmt.Fprintln(&b, "ADR formats: Nygard for compact records; MADR for explicit option comparison; Y-Statement for the shortest reviewable choice; Outcome-First for async alignment; ISO 42010 Companion for stakeholders, concerns, views, and traceability.")
 	return b.String()
 }
 
@@ -2065,6 +2317,10 @@ func firstNonEmptyTaskString(values ...string) string {
 }
 
 func taskNextSlice(manifest taskManifest) (taskSliceArtifact, error) {
+	if len(manifest.LifecycleConflicts) > 0 {
+		conflict := manifest.LifecycleConflicts[0]
+		return taskSliceArtifact{}, fmt.Errorf("task target %s has conflicting checkpoint heads (%s); record a resolving checkpoint with repeatable --supersedes", conflict.Target, strings.Join(conflict.HeadCheckpointIDs, ", "))
+	}
 	slices := taskSyncSlices(manifest)
 	for _, slice := range slices {
 		if strings.EqualFold(strings.TrimSpace(slice.Stage), "started") && !taskTargetTerminal(slice) {
@@ -2093,7 +2349,36 @@ func taskNextSlice(manifest taskManifest) (taskSliceArtifact, error) {
 	if len(slices) == 0 {
 		return taskSliceArtifact{}, fmt.Errorf("task has no slice targets")
 	}
+	if manifest.Durability.Required && !taskDurabilityReviewComplete(manifest) {
+		return taskSeriesCloseoutTarget(manifest), nil
+	}
 	return taskSliceArtifact{}, fmt.Errorf("all task targets are terminal")
+}
+
+func taskSeriesCloseoutTarget(manifest taskManifest) taskSliceArtifact {
+	series := defaultTaskSeries(manifest.Series)
+	return taskSliceArtifact{
+		ID:                   series + "00",
+		Title:                "Review durable records and close the task track",
+		Plan:                 manifest.Artifacts.Index,
+		Result:               manifest.Artifacts.Index,
+		Kind:                 "closeout",
+		Stage:                manifest.Status,
+		Decision:             manifest.Decision,
+		UpdatedAt:            manifest.UpdatedAt,
+		LatestCheckpointID:   manifest.LatestCheckpointID,
+		LatestCheckpoint:     manifest.LatestCheckpoint,
+		LatestCheckpointJSON: manifest.LatestCheckpointJSON,
+	}
+}
+
+func taskDurabilityReviewComplete(manifest taskManifest) bool {
+	disposition := strings.ToLower(strings.TrimSpace(manifest.Durability.Disposition))
+	if disposition != "none" && disposition != "recorded" && disposition != "deferred" {
+		return false
+	}
+	decision := strings.ToLower(strings.TrimSpace(manifest.Decision))
+	return decision == "complete" || decision == "completed"
 }
 
 func taskSliceProgressionGroups(manifest taskManifest) [][]taskSliceArtifact {
@@ -2680,6 +2965,9 @@ func taskSliceForCheckpoint(manifest taskManifest, selector string) (taskSliceAr
 	if selector == "" {
 		return first, nil
 	}
+	if isTaskSeriesTarget(manifest, selector) {
+		return taskSeriesCloseoutTarget(manifest), nil
+	}
 	for _, slice := range manifest.Artifacts.Slices {
 		if taskSliceMatchesSelector(slice, selector) {
 			return slice, nil
@@ -2740,7 +3028,9 @@ func buildTaskPreflight(cmd *cobra.Command, repoRoot, query string, noRefresh bo
 	defer db.Close()
 
 	if !noRefresh {
-		ensureRepoIndexedForTask(cmd, db, repoRoot)
+		if err := ensureRepoIndexedForTask(cmd, db, repoRoot); err != nil {
+			return taskPreflight{}, err
+		}
 	}
 	fp := store.FilterParams{RepoRoot: repoRoot}
 	loadResult, err := loadRetrievalCandidatesForQueryWithReport(db, fp, query)
@@ -4067,6 +4357,9 @@ func renderTaskIndex(manifest taskManifest) string {
 			fmt.Fprintln(&b, "- [ ] Record files actually read, edited, tests run, misses, and noise in the slice result or `ds task checkpoint`.")
 		}
 	}
+	if manifest.Durability.Required {
+		fmt.Fprintf(&b, "- [ ] After all slices are terminal, complete the one-time durable record review at `%s00`; record none, recorded artifacts, or a deferred target.\n", defaultTaskSeries(manifest.Series))
+	}
 	return b.String()
 }
 
@@ -4581,6 +4874,15 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	if err != nil {
 		return err
 	}
+	if target == "" {
+		threadTarget, found, threadErr := resolveTaskThreadTarget(cmd, opts.Dir, taskID)
+		if threadErr != nil {
+			return threadErr
+		}
+		if found {
+			target = threadTarget
+		}
+	}
 	resolvedTaskID, resolvedSlice, err := resolveTaskTargetArgument(cmd, opts.Dir, taskID, target)
 	if err != nil {
 		return err
@@ -4617,12 +4919,55 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	if err != nil {
 		return err
 	}
+	opts, err = validateTaskDurabilityCheckpoint(repoRoot, workspace, manifest, selectedSlice, opts)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(selectedSlice.Result) == "" {
 		return fmt.Errorf("selected task slice %q has no result artifact", selectedSlice.ID)
 	}
 	now := time.Now().UTC()
 	if opts.Draft {
 		return runTaskCheckpointDraft(cmd, taskID, repoRoot, workspace, manifest, selectedSlice, opts, now)
+	}
+	if opts.Index {
+		if err := preflightTaskIndexMutation(cmd); err != nil {
+			return err
+		}
+	}
+	mutationLease, err := acquireTaskMutation(cmd.Context(), workspace)
+	if err != nil {
+		return err
+	}
+	mutationLocked := true
+	defer func() {
+		if mutationLocked {
+			_ = mutationLease.Release()
+		}
+	}()
+	manifest, err = readTaskManifest(filepath.Join(workspace, taskManifestFilename))
+	if err != nil {
+		return err
+	}
+	manifest, err = reconcileTaskManifestLifecycle(workspace, manifest)
+	if err != nil {
+		return fmt.Errorf("reconcile task checkpoint events: %w", err)
+	}
+	selectedSlice, err = taskSliceForCheckpoint(manifest, opts.Slice)
+	if err != nil {
+		return err
+	}
+	opts, err = validateTaskDurabilityCheckpoint(repoRoot, workspace, manifest, selectedSlice, opts)
+	if err != nil {
+		return err
+	}
+	events, err := readTaskCheckpointEvents(workspace, manifest.TaskID)
+	if err != nil {
+		return err
+	}
+	opts.Supersedes, err = checkpointSupersedesForWrite(events, selectedSlice.ID, opts.Supersedes)
+	if err != nil {
+		return err
 	}
 	checkpointDir := filepath.Join(workspace, "checkpoints")
 	if err := os.MkdirAll(checkpointDir, 0o755); err != nil {
@@ -4640,21 +4985,26 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	record := buildTaskCheckpointRecord(manifest, opts, selectedSlice, checkpointID, now, repoRoot)
 	jsonRel := taskRelativePath(workspace, checkpointJSONPath)
 	body := renderTaskCheckpoint(manifest, selectedSlice, opts, now, checkpointID, jsonRel)
-	if err := writeNewTaskArtifactFile(checkpointPath, body); err != nil {
-		return fmt.Errorf("write checkpoint: %w", err)
-	}
 	if err := writeTaskCheckpointRecord(checkpointJSONPath, record); err != nil {
 		return err
 	}
+	if err := writeNewAtomicFile(checkpointPath, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("checkpoint event %s was published, but Markdown projection failed; do not retry blindly: %w", checkpointID, err)
+	}
 	resultPath := filepath.Join(workspace, selectedSlice.Result)
 	if err := appendTaskCheckpointToResult(resultPath, checkpointPath, checkpointJSONPath, workspace, selectedSlice, opts, now); err != nil {
-		return err
+		return fmt.Errorf("checkpoint event %s was published, but result projection failed; do not retry blindly: %w", checkpointID, err)
 	}
 	applyTaskTargetState(&manifest, selectedSlice.ID, opts.Stage, opts.Decision, now)
+	applyTaskDurabilityReview(&manifest, selectedSlice, opts, now)
 	applyTaskTargetCheckpointRefs(&manifest, selectedSlice.ID, checkpointID, taskRelativePath(workspace, checkpointPath), jsonRel)
 	if err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), manifest); err != nil {
-		return err
+		return fmt.Errorf("checkpoint event %s was published, but task.json projection failed; do not retry blindly: %w", checkpointID, err)
 	}
+	if err := mutationLease.Release(); err != nil {
+		return fmt.Errorf("release task mutation lock: %w", err)
+	}
+	mutationLocked = false
 	indexPath := filepath.Join(workspace, manifest.Artifacts.Index)
 
 	var indexed []string
@@ -4673,13 +5023,14 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 			},
 		})
 		if err != nil {
-			return err
+			return fmt.Errorf("task checkpoint %s files were written at %s, but index capture failed; do not retry blindly: %w", checkpointID, workspace, err)
 		}
-		if err := indexTaskCheckpointFact(repoRoot, manifest, record, checkpointPath, checkpointJSONPath, workspace, now); err != nil {
-			return err
+		if err := indexTaskCheckpointFact(cmd.Context(), repoRoot, manifest, record, checkpointPath, checkpointJSONPath, workspace, now); err != nil {
+			return fmt.Errorf("task checkpoint %s files were written at %s, but checkpoint fact indexing failed; do not retry blindly: %w", checkpointID, workspace, err)
 		}
 		factIndexed = true
 	}
+	threadProjection, threadWarning := refreshCheckpointThreadProjection(repoRoot, workspace, manifest)
 
 	out := taskCheckpointOutput{
 		TaskID:             taskID,
@@ -4695,6 +5046,10 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 		LearningCount:      len(record.Learnings),
 		FactIndexed:        factIndexed,
 		TestEvidenceCount:  len(record.Evidence.TestCommands),
+		DurableRecord:      record.DurableRecord,
+		DurableArtifacts:   record.DurableArtifacts,
+		ThreadProjection:   threadProjection,
+		ThreadWarning:      threadWarning,
 	}
 	if record.Evidence.GitDiff != nil {
 		out.GitDiffFiles = record.Evidence.GitDiff.ChangedFiles
@@ -4710,7 +5065,36 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	if len(indexed) > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "Indexed: %s\n", strings.Join(indexed, ", "))
 	}
+	if threadWarning != "" {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Thread projection warning: checkpoint is durable; projection refresh was deferred (%s)\n", threadWarning)
+	}
 	return nil
+}
+
+func refreshCheckpointThreadProjection(repoRoot, taskWorkspace string, manifest taskManifest) (string, string) {
+	var location threadOwnerLocation
+	if strings.TrimSpace(manifest.ParentChange) != "" {
+		resolved, err := linkedWorkspaceThreadOwnerLocation(manifest)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), "has no thread definition") {
+				return "", ""
+			}
+			return "deferred", err.Error()
+		}
+		location = resolved
+	} else {
+		location = repoThreadOwnerLocation(repoRoot, taskWorkspace, manifest)
+		if _, err := os.Stat(location.DefinitionPath); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return "", ""
+			}
+			return "deferred", err.Error()
+		}
+	}
+	if warning := refreshThreadProjection(location); warning != "" {
+		return "deferred", warning
+	}
+	return "refreshed", ""
 }
 
 func runTaskCheckpointDraft(cmd *cobra.Command, taskID, repoRoot, workspace string, manifest taskManifest, selectedSlice taskSliceArtifact, opts taskCheckpointOptions, now time.Time) error {
@@ -4776,6 +5160,9 @@ func normalizeTaskCheckpointOptions(opts taskCheckpointOptions) taskCheckpointOp
 	opts.Learnings = normalizeList(opts.Learnings)
 	opts.NextTarget = strings.TrimSpace(opts.NextTarget)
 	opts.NextDecision = strings.TrimSpace(opts.NextDecision)
+	opts.DurableRecord = strings.ToLower(strings.TrimSpace(opts.DurableRecord))
+	opts.DurableArtifacts = normalizePathList(opts.DurableArtifacts)
+	opts.Supersedes = normalizeList(opts.Supersedes)
 	if opts.GitDiffMax <= 0 {
 		opts.GitDiffMax = 12000
 	}
@@ -5016,8 +5403,10 @@ func buildTaskCheckpointRecord(manifest taskManifest, opts taskCheckpointOptions
 		DistractingIncluded: opts.NoiseFiles,
 	}
 	record := taskCheckpointRecord{
-		SchemaVersion:            2,
+		SchemaVersion:            taskCheckpointSchemaVersion,
+		EventKind:                taskCheckpointEventKind,
 		CheckpointID:             checkpointID,
+		SupersedesCheckpointIDs:  append([]string(nil), opts.Supersedes...),
 		TaskID:                   manifest.TaskID,
 		WorkspaceID:              manifest.WorkspaceID,
 		WorkspaceRoot:            manifest.WorkspaceRoot,
@@ -5051,6 +5440,8 @@ func buildTaskCheckpointRecord(manifest taskManifest, opts taskCheckpointOptions
 			RecommendedTarget:   opts.NextTarget,
 			RecommendedDecision: opts.NextDecision,
 		},
+		DurableRecord:    opts.DurableRecord,
+		DurableArtifacts: opts.DurableArtifacts,
 	}
 	record.Evidence.PlanRefs = appendUniqueValues(nil, record.Resources...)
 	if opts.gitEvidence != nil {
@@ -5133,6 +5524,8 @@ func normalizeTaskCheckpointRecord(record *taskCheckpointRecord) {
 	if record == nil {
 		return
 	}
+	record.EventKind = strings.ToLower(strings.TrimSpace(record.EventKind))
+	record.SupersedesCheckpointIDs = normalizeList(record.SupersedesCheckpointIDs)
 	if record.Target == "" {
 		record.Target = record.Slice
 	}
@@ -5141,9 +5534,6 @@ func normalizeTaskCheckpointRecord(record *taskCheckpointRecord) {
 	}
 	if record.ParentSlice == "" {
 		record.ParentSlice = record.Slice
-	}
-	if record.CheckpointID == "" {
-		record.CheckpointID = taskCheckpointID(firstNonEmptyTaskString(record.Target, record.Slice), record.Stage, parseTaskCheckpointCreatedAt(record.CreatedAt))
 	}
 	if len(record.ActualContext.FilesRead)+len(record.ActualContext.FilesEdited)+len(record.ActualContext.TestsRead)+len(record.ActualContext.TestsRun) == 0 {
 		record.ActualContext = taskCheckpointActualContext{
@@ -5178,13 +5568,24 @@ func parseTaskCheckpointCreatedAt(createdAt string) time.Time {
 	return time.Unix(0, 0).UTC()
 }
 
-func indexTaskCheckpointFact(repoRoot string, manifest taskManifest, record taskCheckpointRecord, checkpointPath, checkpointJSONPath, workspace string, now time.Time) error {
-	db, err := openDB()
+func indexTaskCheckpointFact(ctx context.Context, repoRoot string, manifest taskManifest, record taskCheckpointRecord, checkpointPath, checkpointJSONPath, workspace string, now time.Time) error {
+	dbPath, err := config.DBPath()
+	if err != nil {
+		return fmt.Errorf("resolve db: %w", err)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, autoIndexDeadline)
+	defer cancel()
+	lease, err := store.AcquireIndexWriter(waitCtx, dbPath, nil)
+	if err != nil {
+		return indexOperationError("task checkpoint writer wait", autoIndexDeadlineLabel, err)
+	}
+	defer func() { _ = lease.Release() }()
+	db, err := openDBAtPath(dbPath)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	repoID, err := ensureTaskFactRepo(db, repoRoot, now.Format(time.RFC3339))
+	repoID, err := ensureTaskFactRepoContext(waitCtx, db, repoRoot, now.Format(time.RFC3339))
 	if err != nil {
 		return err
 	}
@@ -5229,8 +5630,15 @@ func indexTaskCheckpointFact(repoRoot string, manifest taskManifest, record task
 }
 
 func ensureTaskFactRepo(db *store.DB, repoRoot, now string) (string, error) {
+	return ensureTaskFactRepoContext(context.Background(), db, repoRoot, now)
+}
+
+func ensureTaskFactRepoContext(ctx context.Context, db *store.DB, repoRoot, now string) (string, error) {
 	ids := idgen.NewFactory()
-	info := repo.DetectIdentity(repoRoot)
+	info := repo.DetectIdentityContext(ctx, repoRoot)
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if strings.TrimSpace(info.RootPath) == "" {
 		info.RootPath = repoRoot
 	}
@@ -5261,7 +5669,7 @@ func writeTaskCheckpointRecord(path string, record taskCheckpointRecord) error {
 		return err
 	}
 	data = append(data, '\n')
-	if err := writeNewTaskArtifactFile(path, string(data)); err != nil {
+	if err := writeNewAtomicFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("write checkpoint JSON: %w", err)
 	}
 	return nil
@@ -5560,6 +5968,7 @@ func renderTaskCheckpoint(manifest taskManifest, slice taskSliceArtifact, opts t
 	writeMarkdownList(&b, "Tests Actually Run", opts.TestsRun)
 	writeMarkdownList(&b, "Critical Files DevSpecs Missed", opts.MissedFiles)
 	writeMarkdownList(&b, "Distracting Files DevSpecs Included", opts.NoiseFiles)
+	writeTaskCheckpointDurabilityReview(&b, opts)
 	writeTaskCheckpointCompletionContract(&b, slice, opts)
 	fmt.Fprintln(&b, "## Success Criteria")
 	fmt.Fprintln(&b, "- [ ] Checkpoint records actual context used.")
@@ -5592,6 +6001,26 @@ func writeTaskCheckpointCompletionContract(b *strings.Builder, slice taskSliceAr
 	fmt.Fprintf(b, "- Evidence for decision: %s\n", taskCheckpointEvidenceSummary(opts))
 	fmt.Fprintf(b, "- What remains: %s\n", taskCheckpointRemainingSummary(opts))
 	fmt.Fprintf(b, "- Next iteration: %s\n", taskCheckpointNextSummary(slice, opts))
+	fmt.Fprintln(b)
+}
+
+func writeTaskCheckpointDurabilityReview(b *strings.Builder, opts taskCheckpointOptions) {
+	if opts.DurableRecord == "" {
+		return
+	}
+	fmt.Fprintln(b, "## Durable Record Review")
+	fmt.Fprintf(b, "- Disposition: `%s`\n", opts.DurableRecord)
+	if len(opts.DurableArtifacts) == 0 {
+		fmt.Fprintln(b, "- Artifacts: -")
+	} else {
+		fmt.Fprintln(b, "- Artifacts:")
+		for _, artifact := range opts.DurableArtifacts {
+			fmt.Fprintf(b, "  - `%s`\n", artifact)
+		}
+	}
+	if opts.DurableRecord == "deferred" {
+		fmt.Fprintf(b, "- Deferred target: `%s`\n", opts.NextTarget)
+	}
 	fmt.Fprintln(b)
 }
 
@@ -5711,6 +6140,10 @@ func renderTaskCheckpointResultAppend(checkpointPath, checkpointJSONPath, worksp
 	writeIndentedResultList(&b, "Tests run", opts.TestsRun)
 	writeIndentedResultList(&b, "Missed files", opts.MissedFiles)
 	writeIndentedResultList(&b, "Noise files", opts.NoiseFiles)
+	if opts.DurableRecord != "" {
+		fmt.Fprintf(&b, "- Durable record: %s\n", opts.DurableRecord)
+		writeIndentedResultList(&b, "Durable artifacts", opts.DurableArtifacts)
+	}
 	return b.String()
 }
 
@@ -5837,6 +6270,8 @@ func writeTaskCheckpointDraftHuman(out io.Writer, draft taskCheckpointDraftOutpu
 }
 
 func writeTaskStartHuman(out io.Writer, result taskStartOutput, confidence taskConfidence) error {
+	tracked := &taskOutputWriter{out: out}
+	out = tracked
 	fmt.Fprintf(out, "Created task workspace: %s\n", result.Workspace)
 	fmt.Fprintf(out, "Task ID: %s\n", result.TaskID)
 	fmt.Fprintf(out, "Series: %s\n", result.Series)
@@ -5882,10 +6317,12 @@ func writeTaskStartHuman(out io.Writer, result taskStartOutput, confidence taskC
 	if len(result.IndexedPaths) > 0 {
 		fmt.Fprintf(out, "Indexed: %s\n", strings.Join(result.IndexedPaths, ", "))
 	}
-	return nil
+	return tracked.err
 }
 
 func writeTaskQuickStartHuman(out io.Writer, result taskStartOutput, confidence taskConfidence) error {
+	tracked := &taskOutputWriter{out: out}
+	out = tracked
 	target := defaultTaskSeries(result.Series) + "01"
 	planPath := result.FirstSlicePath
 	resultPath := result.ResultPath
@@ -5918,7 +6355,28 @@ func writeTaskQuickStartHuman(out io.Writer, result taskStartOutput, confidence 
 	fmt.Fprintf(out, "\nNext:\n")
 	fmt.Fprintf(out, "  ds apply %s --target %s\n", result.TaskID, target)
 	fmt.Fprintf(out, "  ds task checkpoint %s --target %s --stage validated --decision promote\n", result.TaskID, target)
-	return nil
+	return tracked.err
+}
+
+type taskOutputWriter struct {
+	out io.Writer
+	err error
+}
+
+func (w *taskOutputWriter) Write(p []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	n, err := w.out.Write(p)
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
+	w.err = err
+	return n, err
+}
+
+func taskStartOutputError(result taskStartOutput, err error) error {
+	return fmt.Errorf("task %s was created at %s, but success output failed: %w", result.TaskID, result.Workspace, err)
 }
 
 func firstTaskRiskCards(cards []taskRiskCard, limit int) []taskRiskCard {
@@ -5942,13 +6400,20 @@ func firstTaskFreshnessWarnings(warnings []taskFreshnessWarning, limit int) []ta
 	return warnings[:limit]
 }
 
-func writeTaskManifest(path string, manifest taskManifest) error {
+func marshalTaskManifest(manifest taskManifest) ([]byte, error) {
 	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
+}
+
+func writeTaskManifest(path string, manifest taskManifest) error {
+	data, err := marshalTaskManifest(manifest)
 	if err != nil {
 		return err
 	}
-	data = append(data, '\n')
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := writeAtomicFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("write manifest: %w", err)
 	}
 	return nil
@@ -5981,16 +6446,137 @@ func normalizeTaskManifest(manifest *taskManifest) {
 	manifest.Profile = defaultTaskProfile(manifest.Profile)
 }
 
-func prepareTaskWorkspace(workspace string, force bool) error {
-	if _, err := os.Stat(workspace); err == nil {
+func validateTaskWorkspaceTarget(workspace string, force bool) error {
+	info, err := os.Stat(workspace)
+	if err == nil {
 		if !force {
 			return fmt.Errorf("task workspace already exists: %s", workspace)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("task workspace path is not a directory: %s", workspace)
 		}
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	if err := os.MkdirAll(workspace, 0o755); err != nil {
-		return fmt.Errorf("create task workspace: %w", err)
+	return nil
+}
+
+func publishTaskWorkspace(ctx context.Context, workspace string, force bool, files map[string][]byte) error {
+	parent := filepath.Dir(workspace)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return fmt.Errorf("create task workspace parent: %w", err)
+	}
+	staging, err := os.MkdirTemp(parent, "."+filepath.Base(workspace)+".staging-*")
+	if err != nil {
+		return fmt.Errorf("create task workspace staging directory: %w", err)
+	}
+	defer func() {
+		if staging != "" {
+			_ = os.RemoveAll(staging)
+		}
+	}()
+	if err := writeTaskWorkspaceFiles(staging, files); err != nil {
+		return err
+	}
+	if err := validateTaskWorkspaceFiles(staging, files); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	backup, err := moveExistingTaskWorkspaceAside(workspace, force)
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(staging, workspace); err != nil {
+		restoreErr := restoreTaskWorkspaceBackup(workspace, backup)
+		return errors.Join(fmt.Errorf("publish staged task workspace: %w", err), restoreErr)
+	}
+	staging = ""
+	if err := validateTaskWorkspaceFiles(workspace, files); err != nil {
+		removeErr := os.RemoveAll(workspace)
+		restoreErr := restoreTaskWorkspaceBackup(workspace, backup)
+		return errors.Join(err, removeErr, restoreErr)
+	}
+	if backup != "" {
+		if err := os.RemoveAll(backup); err != nil {
+			return fmt.Errorf("task workspace published, but remove replaced workspace backup: %w", err)
+		}
+	}
+	return nil
+}
+
+func writeTaskWorkspaceFiles(workspace string, files map[string][]byte) error {
+	for relativePath, body := range files {
+		path, err := taskWorkspaceFilePath(workspace, relativePath)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return fmt.Errorf("create task artifact parent %s: %w", relativePath, err)
+		}
+		if err := os.WriteFile(path, body, 0o644); err != nil {
+			return fmt.Errorf("write task artifact %s: %w", relativePath, err)
+		}
+	}
+	return nil
+}
+
+func validateTaskWorkspaceFiles(workspace string, files map[string][]byte) error {
+	for relativePath := range files {
+		path, err := taskWorkspaceFilePath(workspace, relativePath)
+		if err != nil {
+			return err
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return fmt.Errorf("validate task artifact %s: %w", relativePath, err)
+		}
+		if !info.Mode().IsRegular() || info.Size() == 0 {
+			return fmt.Errorf("validate task artifact %s: expected a non-empty regular file", relativePath)
+		}
+	}
+	return nil
+}
+
+func taskWorkspaceFilePath(workspace, relativePath string) (string, error) {
+	relativePath = filepath.Clean(filepath.FromSlash(strings.TrimSpace(relativePath)))
+	if relativePath == "." || filepath.IsAbs(relativePath) || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid task artifact path: %s", relativePath)
+	}
+	return filepath.Join(workspace, relativePath), nil
+}
+
+func moveExistingTaskWorkspaceAside(workspace string, force bool) (string, error) {
+	if _, err := os.Stat(workspace); err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	if !force {
+		return "", fmt.Errorf("task workspace already exists: %s", workspace)
+	}
+	backup, err := os.MkdirTemp(filepath.Dir(workspace), "."+filepath.Base(workspace)+".backup-*")
+	if err != nil {
+		return "", fmt.Errorf("reserve task workspace backup: %w", err)
+	}
+	if err := os.Remove(backup); err != nil {
+		return "", fmt.Errorf("prepare task workspace backup: %w", err)
+	}
+	if err := os.Rename(workspace, backup); err != nil {
+		return "", fmt.Errorf("back up existing task workspace: %w", err)
+	}
+	return backup, nil
+}
+
+func restoreTaskWorkspaceBackup(workspace, backup string) error {
+	if backup == "" {
+		return nil
+	}
+	if err := os.Rename(backup, workspace); err != nil {
+		return fmt.Errorf("restore existing task workspace: %w", err)
 	}
 	return nil
 }
@@ -6329,6 +6915,42 @@ type taskCaptureRequest struct {
 	Status string
 }
 
+func preflightTaskIndexMutation(cmd *cobra.Command) error {
+	dbPath, err := config.DBPath()
+	if err != nil {
+		return taskIndexPreflightError("", err)
+	}
+	waitCtx, cancel := context.WithTimeout(cmd.Context(), autoIndexDeadline)
+	defer cancel()
+	lease, err := store.AcquireIndexWriter(waitCtx, dbPath, indexWaitNotice(cmd, "Task index preflight"))
+	if err != nil {
+		return taskIndexPreflightError(dbPath, indexOperationError("task index preflight writer wait", autoIndexDeadlineLabel, err))
+	}
+	defer func() { _ = lease.Release() }()
+	db, err := openDBAtPath(dbPath)
+	if err != nil {
+		return taskIndexPreflightError(dbPath, err)
+	}
+	if err := db.Close(); err != nil {
+		return taskIndexPreflightError(dbPath, fmt.Errorf("close local index: %w", err))
+	}
+	return nil
+}
+
+func taskIndexPreflightError(dbPath string, err error) error {
+	executable, executableErr := os.Executable()
+	if executableErr != nil {
+		executable = "unknown"
+	}
+	var newer *store.NewerSchemaError
+	if errors.As(err, &newer) {
+		return fmt.Errorf("cannot safely update task files because the local DevSpecs index is newer than this CLI\nDatabase: %s\nDatabase schema: v%d\nCLI: %s (supports schema v%d)\nExecutable: %s\nRepository files written: no\nRun `ds update` and install a CLI that supports schema v%d. To continue without index capture, rerun with `--index=false`: %w",
+			firstNonEmptyTaskString(dbPath, "unknown"), newer.DatabaseVersion, version.Version, newer.SupportedVersion, executable, newer.DatabaseVersion, err)
+	}
+	return fmt.Errorf("task index preflight failed before repository mutation\nDatabase: %s\nExecutable: %s\nRepository files written: no: %w",
+		firstNonEmptyTaskString(dbPath, "unknown"), executable, err)
+}
+
 func captureTaskArtifacts(cmd *cobra.Command, repoRoot string, requests []taskCaptureRequest) ([]string, error) {
 	origWd, err := os.Getwd()
 	if err != nil {
@@ -6342,6 +6964,7 @@ func captureTaskArtifacts(cmd *cobra.Command, repoRoot string, requests []taskCa
 	var indexed []string
 	for _, request := range requests {
 		silent := &cobra.Command{}
+		silent.SetContext(cmd.Context())
 		silent.SetOut(io.Discard)
 		silent.SetErr(io.Discard)
 		status := request.Status

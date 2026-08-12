@@ -9,9 +9,20 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var update = flag.Bool("update", false, "update golden files")
+
+func testWorkingDirectory(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	require.NoError(t, err)
+
+	return dir
+}
 
 func goldenPath(name string) string {
 	_, filename, _, _ := runtime.Caller(0)
@@ -23,31 +34,37 @@ func assertGolden(t *testing.T, name string, got []byte) {
 
 	// Normalize JSON: re-encode with stable formatting, then mask dynamic values
 	var raw any
-	if err := json.Unmarshal(got, &raw); err != nil {
-		t.Fatalf("output is not valid JSON: %v\n%s", err, got)
+	{
+		err := json.Unmarshal(got, &raw)
+		require.NoError(t, err,
+			"output is not valid JSON: %v\n%s", err, got)
 	}
+
 	maskDynamic(raw)
-	normalized, _ := json.MarshalIndent(raw, "", "  ")
+	normalized, err := json.MarshalIndent(raw, "", "  ")
+	require.NoError(t, err)
 	normalized = append(normalized, '\n')
 
 	path := goldenPath(name)
 	if *update {
-		os.MkdirAll(filepath.Dir(path), 0o755)
-		if err := os.WriteFile(path, normalized, 0o644); err != nil {
-			t.Fatal(err)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		{
+			err := os.WriteFile(path, normalized, 0o644)
+			require.NoError(t, err)
 		}
+
 		return
 	}
 
 	expected, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("golden file missing (run with -update to create): %v", err)
-	}
+	require.NoError(t, err,
+		"golden file missing (run with -update to create): %v", err)
+
 	// Git on Windows may materialize tracked JSON with CRLF; json.MarshalIndent uses LF only.
 	expected = bytes.ReplaceAll(expected, []byte("\r\n"), []byte("\n"))
-	if !bytes.Equal(normalized, expected) {
-		t.Errorf("output differs from golden file %s\n--- got ---\n%s\n--- want ---\n%s", path, normalized, expected)
-	}
+	assert.Equal(t, string(expected), string(normalized),
+		"output differs from golden file %s\n--- got ---\n%s\n--- want ---\n%s", path, normalized, expected)
+
 }
 
 func maskDynamic(v any) {
@@ -86,22 +103,22 @@ func setupGoldenEnv(t *testing.T) string {
 	t.Setenv("DEVSPECS_HOME", filepath.Join(tmp, "home"))
 
 	repoDir := filepath.Join(tmp, "repo")
-	os.MkdirAll(repoDir, 0o755)
-	os.WriteFile(filepath.Join(repoDir, "plan.md"), []byte("---\ntitle: Golden Plan\nkind: plan\nstatus: draft\n---\n# Golden Plan\n\n- [ ] First task\n- [x] Second task\n"), 0o644)
+	require.NoError(t, os.MkdirAll(repoDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "plan.md"), []byte("---\ntitle: Golden Plan\nkind: plan\nstatus: draft\n---\n# Golden Plan\n\n- [ ] First task\n- [x] Second task\n"), 0o644))
 
-	origWd, _ := os.Getwd()
-	os.Chdir(repoDir)
+	origWd := testWorkingDirectory(t)
+	require.NoError(t, os.Chdir(repoDir))
 	t.Cleanup(func() { os.Chdir(origWd) })
 
 	initCmd := NewInitCmd()
 	initCmd.SetOut(&bytes.Buffer{})
-	initCmd.Execute()
+	require.NoError(t, initCmd.Execute())
 
 	captureCmd := NewCaptureCmd()
 	captureCmd.SetArgs([]string{"plan.md", "--kind", "plan"})
 	capBuf := &bytes.Buffer{}
 	captureCmd.SetOut(capBuf)
-	captureCmd.Execute()
+	require.NoError(t, captureCmd.Execute())
 
 	var artID string
 	for _, line := range strings.Split(capBuf.String(), "\n") {
@@ -120,9 +137,11 @@ func TestGolden_TodosJSON(t *testing.T) {
 	cmd.SetArgs([]string{"--json"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	assertGolden(t, "todos", buf.Bytes())
 }
 
@@ -132,9 +151,11 @@ func TestGolden_ListJSON(t *testing.T) {
 	cmd.SetArgs([]string{"--json"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	assertGolden(t, "list", buf.Bytes())
 }
 
@@ -144,9 +165,11 @@ func TestGolden_ShowJSON(t *testing.T) {
 	cmd.SetArgs([]string{artID, "--json"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	assertGolden(t, "show", buf.Bytes())
 }
 
@@ -156,9 +179,11 @@ func TestGolden_FindJSON(t *testing.T) {
 	cmd.SetArgs([]string{"Golden", "--json", "--plain"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	assertGolden(t, "find", buf.Bytes())
 }
 
@@ -168,9 +193,11 @@ func TestGolden_ResolveJSON(t *testing.T) {
 	cmd.SetArgs([]string{artID, "--json"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	assertGolden(t, "resolve", buf.Bytes())
 }
 
@@ -180,8 +207,10 @@ func TestGolden_ContextJSON(t *testing.T) {
 	cmd.SetArgs([]string{artID, "--json"})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	assertGolden(t, "context", buf.Bytes())
 }

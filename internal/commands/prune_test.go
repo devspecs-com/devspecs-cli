@@ -9,68 +9,122 @@ import (
 	"time"
 
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestPruneCommand_DryRunThenDeleteJSON(t *testing.T) {
+func TestPruneCommand_WithDryRunJSON_ReportsStaleDataWithoutDeleting(t *testing.T) {
+	home := setupPruneStaleIndex(t)
+
+	cmd := NewPruneCmd()
+	cmd.SetArgs([]string{"--dry-run", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var report store.PruneReport
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &report))
+	assert.True(t, report.DryRun)
+	assert.Equal(t, 1, report.RepositoriesPruned)
+	assert.Equal(t, 1, report.ArtifactsPruned)
+	db, err := store.Open(filepath.Join(home, "devspecs.db"))
+	require.NoError(t, err)
+	defer db.Close()
+	var count int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM repos`).Scan(&count))
+	assert.Equal(t, 1, count)
+}
+
+func TestPruneCommand_WithJSON_DeletesStaleData(t *testing.T) {
+	home := setupPruneStaleIndex(t)
+
+	cmd := NewPruneCmd()
+	cmd.SetArgs([]string{"--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var report store.PruneReport
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &report))
+	assert.False(t, report.DryRun)
+	assert.Equal(t, 1, report.RepositoriesPruned)
+	assert.Equal(t, 1, report.ArtifactsPruned)
+	db, err := store.Open(filepath.Join(home, "devspecs.db"))
+	require.NoError(t, err)
+	defer db.Close()
+	var count int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM repos`).Scan(&count))
+	assert.Zero(t, count)
+}
+
+func TestPruneCommand_WithActiveComposedADR_PreservesRepoDocumentAndIndexArtifact(t *testing.T) {
+	repoRoot := setupComposeCommandRepo(t)
+	composed := executeComposeJSON(t, "adr", "Use PostgreSQL", "--no-refresh")
+	cmd := NewPruneCmd()
+	cmd.SetArgs([]string{"--json"})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var report store.PruneReport
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &report))
+	assert.Zero(t, report.RepositoriesPruned)
+	assert.FileExists(t, filepath.Join(repoRoot, filepath.FromSlash(composed.Path)))
+	db, err := store.Open(filepath.Join(filepath.Dir(repoRoot), "home", "devspecs.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, db.Close()) })
+	artifact, err := db.GetArtifact(composed.ArtifactID)
+	require.NoError(t, err)
+	assert.Equal(t, "Use PostgreSQL", artifact.Title)
+}
+
+func TestPruneHelp_ExplainsRepositoryFilesRemainAuthoritative(t *testing.T) {
+	cmd := NewPruneCmd()
+	cmd.SetArgs([]string{"--help"})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "Prune never deletes files from")
+	assert.Contains(t, stdout.String(), "ADRs, RFCs, PRDs, or DevSpecs task artifacts")
+}
+
+func setupPruneStaleIndex(t *testing.T) string {
+	t.Helper()
 	home := filepath.Join(t.TempDir(), "home")
 	t.Setenv("DEVSPECS_HOME", home)
 	t.Setenv("DEVSPECS_TELEMETRY", "0")
 	db, err := store.Open(filepath.Join(home, "devspecs.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	staleRoot := filepath.Join(t.TempDir(), "deleted")
-	if _, err := db.Exec(`INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('stale', ?, ?, ?)`, staleRoot, now, now); err != nil {
-		t.Fatal(err)
+	{
+		_, err := db.Exec(`INSERT INTO repos (id, root_path, created_at, updated_at) VALUES ('stale', ?, ?, ?)`, staleRoot, now, now)
+		require.NoError(t, err)
 	}
-	if _, err := db.Exec(`INSERT INTO artifacts
+	{
+
+		_, err := db.Exec(`INSERT INTO artifacts
 		(id, repo_id, kind, subtype, title, status, created_at, updated_at, last_observed_at, authored_at)
-		VALUES ('artifact', 'stale', 'plan', '', 'Plan', 'draft', ?, ?, ?, ?)`, now, now, now, now); err != nil {
-		t.Fatal(err)
+		VALUES ('artifact', 'stale', 'plan', '', 'Plan', 'draft', ?, ?, ?, ?)`, now, now, now, now)
+		require.NoError(t, err)
 	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
+	{
+
+		err := db.Close()
+		require.NoError(t, err)
 	}
 
-	dryRun := NewPruneCmd()
-	dryRun.SetArgs([]string{"--dry-run", "--json"})
-	dryRunOut := &bytes.Buffer{}
-	dryRun.SetOut(dryRunOut)
-	if err := dryRun.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var preview store.PruneReport
-	if err := json.Unmarshal(dryRunOut.Bytes(), &preview); err != nil {
-		t.Fatal(err)
-	}
-	if !preview.DryRun || preview.RepositoriesPruned != 1 || preview.ArtifactsPruned != 1 {
-		t.Fatalf("unexpected preview: %#v", preview)
-	}
-
-	prune := NewPruneCmd()
-	prune.SetArgs([]string{"--json"})
-	pruneOut := &bytes.Buffer{}
-	prune.SetOut(pruneOut)
-	if err := prune.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var applied store.PruneReport
-	if err := json.Unmarshal(pruneOut.Bytes(), &applied); err != nil {
-		t.Fatal(err)
-	}
-	if applied.DryRun || applied.RepositoriesPruned != 1 || applied.ArtifactsPruned != 1 {
-		t.Fatalf("unexpected applied report: %#v", applied)
-	}
-	db, err = store.Open(filepath.Join(home, "devspecs.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM repos`).Scan(&count); err != nil || count != 0 {
-		t.Fatalf("repository remains after prune: count=%d err=%v", count, err)
-	}
+	return home
 }
 
 func TestPruneCommand_NoIndexDoesNotCreateOne(t *testing.T) {
@@ -80,12 +134,17 @@ func TestPruneCommand_NoIndexDoesNotCreateOne(t *testing.T) {
 	cmd := NewPruneCmd()
 	cmd.SetArgs([]string{"--json"})
 	cmd.SetOut(&bytes.Buffer{})
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
-	if _, err := os.Stat(filepath.Join(home, "devspecs.db")); !os.IsNotExist(err) {
-		t.Fatalf("prune created an index unexpectedly: %v", err)
+	{
+
+		_, err := os.Stat(filepath.Join(home, "devspecs.db"))
+		assert.True(t, os.IsNotExist(err),
+			"prune created an index unexpectedly: %v", err)
 	}
+
 }
 
 func TestPruneCommand_VacuumProgressUsesStderr(t *testing.T) {
@@ -93,11 +152,11 @@ func TestPruneCommand_VacuumProgressUsesStderr(t *testing.T) {
 	t.Setenv("DEVSPECS_HOME", home)
 	t.Setenv("DEVSPECS_TELEMETRY", "0")
 	db, err := store.Open(filepath.Join(home, "devspecs.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
+	require.NoError(t, err)
+	{
+
+		err := db.Close()
+		require.NoError(t, err)
 	}
 
 	cmd := NewPruneCmd()
@@ -106,16 +165,15 @@ func TestPruneCommand_VacuumProgressUsesStderr(t *testing.T) {
 	stderr := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
-	if !bytes.Contains(stderr.Bytes(), []byte("Prune progress: compacting index")) ||
-		!bytes.Contains(stderr.Bytes(), []byte("Prune progress: complete")) {
-		t.Fatalf("vacuum progress missing from stderr: %q", stderr.String())
-	}
-	if bytes.Contains(stdout.Bytes(), []byte("Prune progress:")) {
-		t.Fatalf("progress leaked into stdout: %q", stdout.String())
-	}
+	assert.Contains(t, stderr.String(), "Prune progress: compacting index", "vacuum progress missing from stderr: %q", stderr.String())
+	assert.Contains(t, stderr.String(), "Prune progress: complete", "vacuum progress missing from stderr: %q", stderr.String())
+	assert.NotContains(t, stdout.String(), "Prune progress:",
+		"progress leaked into stdout: %q", stdout.String())
+
 }
 
 func TestPruneCommand_JSONSuppressesProgress(t *testing.T) {
@@ -123,11 +181,11 @@ func TestPruneCommand_JSONSuppressesProgress(t *testing.T) {
 	t.Setenv("DEVSPECS_HOME", home)
 	t.Setenv("DEVSPECS_TELEMETRY", "0")
 	db, err := store.Open(filepath.Join(home, "devspecs.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
+	require.NoError(t, err)
+	{
+
+		err := db.Close()
+		require.NoError(t, err)
 	}
 
 	cmd := NewPruneCmd()
@@ -136,19 +194,22 @@ func TestPruneCommand_JSONSuppressesProgress(t *testing.T) {
 	stderr := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var report store.PruneReport
-	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
-		t.Fatalf("invalid JSON stdout: %v\n%s", err, stdout.String())
+	{
+		err := json.Unmarshal(stdout.Bytes(), &report)
+		require.NoError(t, err,
+			"invalid JSON stdout: %v\n%s", err, stdout.String())
 	}
-	if !report.Vacuumed {
-		t.Fatalf("expected vacuumed report: %#v", report)
-	}
-	if stderr.Len() != 0 {
-		t.Fatalf("JSON progress should be suppressed, got stderr: %q", stderr.String())
-	}
+	assert.True(t, report.Vacuumed,
+		"expected vacuumed report: %#v", report)
+	assert.Equal(t, 0, stderr.Len(),
+		"JSON progress should be suppressed, got stderr: %q", stderr.String())
+
 }
 
 func TestPruneProgressReporter_DelaysShortOperations(t *testing.T) {
@@ -157,7 +218,7 @@ func TestPruneProgressReporter_DelaysShortOperations(t *testing.T) {
 	progress.setPhase("inspect")
 	progress.setPhase("complete")
 	progress.stop()
-	if out.Len() != 0 {
-		t.Fatalf("short operation emitted progress: %q", out.String())
-	}
+	assert.Equal(t, 0, out.Len(),
+		"short operation emitted progress: %q", out.String())
+
 }

@@ -10,10 +10,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
-func TestEvalActivationMatrixUpdateAndCompare(t *testing.T) {
+func TestEvalActivationMatrixUpdate_WritesUniqueNormalizedGoldens(t *testing.T) {
 	skinnyRepo := setupActivationMatrixRepo(t, "credentials", "feat: credentials rotation context")
 	fatRepo := setupActivationMatrixRepo(t, "billing", "feat: billing analytics export")
 	manifest := writeActivationMatrixManifest(t, skinnyRepo, fatRepo)
@@ -30,62 +32,74 @@ func TestEvalActivationMatrixUpdateAndCompare(t *testing.T) {
 	})
 	updateBuf := &bytes.Buffer{}
 	updateCmd.SetOut(updateBuf)
-	if err := updateCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var update activationMatrixResult
-	if err := json.Unmarshal(updateBuf.Bytes(), &update); err != nil {
-		t.Fatalf("activation update JSON: %v\n%s", err, updateBuf.String())
-	}
-	if update.Summary.Total != 3 || update.Summary.Updated != 3 {
-		t.Fatalf("unexpected update summary: %#v", update.Summary)
-	}
-	if strings.Contains(readActivationGolden(t, update.Cases[0].GoldenPath), filepath.ToSlash(skinnyRepo)) {
-		t.Fatalf("golden output leaked repo path: %s", update.Cases[0].GoldenPath)
-	}
-	seenGoldens := map[string]bool{}
-	for _, c := range update.Cases {
-		if seenGoldens[c.GoldenPath] {
-			t.Fatalf("activation matrix reused golden path for repeated command: %s", c.GoldenPath)
-		}
-		seenGoldens[c.GoldenPath] = true
+	{
+		err := updateCmd.Execute()
+		require.NoError(t, err)
 	}
 
-	compareCmd := NewEvalCmd()
-	compareCmd.SetArgs([]string{
+	var update activationMatrixResult
+	{
+		err := json.Unmarshal(updateBuf.Bytes(), &update)
+		require.NoError(t, err,
+			"activation update JSON: %v\n%s", err, updateBuf.String())
+	}
+	assert.Equal(t, 3, update.Summary.Total, "unexpected update summary: %#v", update.Summary)
+	assert.Equal(t, 3, update.Summary.Updated, "unexpected update summary: %#v", update.Summary)
+	assert.NotContains(t, readActivationGolden(t, update.Cases[0].GoldenPath), filepath.ToSlash(skinnyRepo),
+		"golden output leaked repo path: %s", update.Cases[0].GoldenPath)
+
+	seenGoldens := map[string]bool{}
+	for _, c := range update.Cases {
+		assert.False(t, seenGoldens[c.GoldenPath],
+			"activation matrix reused golden path for repeated command: %s", c.GoldenPath)
+
+		seenGoldens[c.GoldenPath] = true
+	}
+}
+
+func TestEvalActivationMatrixCompare_UsesForcedSkinnyArgs(t *testing.T) {
+	skinnyRepo := setupActivationMatrixRepo(t, "credentials", "feat: credentials rotation context")
+	fatRepo := setupActivationMatrixRepo(t, "billing", "feat: billing analytics export")
+	manifest := writeActivationMatrixManifest(t, skinnyRepo, fatRepo)
+	goldenDir := filepath.Join(t.TempDir(), "goldens")
+	writeActivationMatrixGoldens(t, manifest, goldenDir)
+
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{
 		manifest,
 		"--activation-matrix",
 		"--activation-profile", "skinny",
 		"--activation-golden-dir", goldenDir,
 		"--json",
 	})
-	compareBuf := &bytes.Buffer{}
-	compareCmd.SetOut(compareBuf)
-	if err := compareCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
 	var compare activationMatrixResult
-	if err := json.Unmarshal(compareBuf.Bytes(), &compare); err != nil {
-		t.Fatalf("activation compare JSON: %v\n%s", err, compareBuf.String())
-	}
-	if compare.Summary.Total != 3 || compare.Summary.Passed != 3 {
-		t.Fatalf("unexpected compare summary: %#v", compare.Summary)
-	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &compare), "activation compare JSON:\n%s", buf.String())
+	assert.Equal(t, 3, compare.Summary.Total, "unexpected compare summary: %#v", compare.Summary)
+	assert.Equal(t, 3, compare.Summary.Passed, "unexpected compare summary: %#v", compare.Summary)
+
 	for _, c := range compare.Cases {
-		if c.Profile != "skinny" || c.Status != "passed" {
-			t.Fatalf("unexpected compare case: %#v", c)
-		}
-		if len(c.Args) == 0 || !containsActivationArg(c.Args, "--json") || !containsActivationArg(c.Args, "--quiet") || !containsActivationArg(c.Args, "--path") {
-			t.Fatalf("activation args did not enforce quiet JSON path contract: %#v", c.Args)
-		}
+		assert.Equal(t, "skinny", c.Profile, "unexpected compare case: %#v", c)
+		assert.Equal(t, "passed", c.Status, "unexpected compare case: %#v", c)
+		require.NotEmpty(t, c.Args, "activation args did not enforce quiet JSON path contract: %#v", c.Args)
+		assert.True(t, containsActivationArg(c.Args, "--json"), "activation args did not enforce quiet JSON path contract: %#v", c.Args)
+		assert.True(t, containsActivationArg(c.Args, "--quiet"), "activation args did not enforce quiet JSON path contract: %#v", c.Args)
+		assert.True(t, containsActivationArg(c.Args, "--path"), "activation args did not enforce quiet JSON path contract: %#v", c.Args)
+
 		joinedArgs := strings.Join(c.Args, "\x00")
-		if strings.Contains(joinedArgs, "--json=false") || strings.Contains(joinedArgs, "--quiet=false") || strings.Contains(joinedArgs, "ignored") {
-			t.Fatalf("activation args kept manifest values that should be overridden: %#v", c.Args)
-		}
+		assert.NotContains(t, joinedArgs, "--json=false", "activation args kept manifest values that should be overridden: %#v", c.Args)
+		assert.NotContains(t, joinedArgs, "--quiet=false", "activation args kept manifest values that should be overridden: %#v", c.Args)
+		assert.NotContains(t, joinedArgs, "ignored", "activation args kept manifest values that should be overridden: %#v", c.Args)
+
 	}
 }
 
-func TestEvalActivationMatrixSupportsFindAndTaskSmoke(t *testing.T) {
+func TestEvalActivationMatrixCrossCommandUpdate_UsesExactTaskGoldens(t *testing.T) {
 	repo := setupActivationMatrixRepo(t, "billing", "feat: billing analytics export")
 	manifest := writeActivationCrossCommandManifest(t, repo)
 	goldenDir := filepath.Join(t.TempDir(), "goldens")
@@ -101,55 +115,85 @@ func TestEvalActivationMatrixSupportsFindAndTaskSmoke(t *testing.T) {
 	})
 	updateBuf := &bytes.Buffer{}
 	updateCmd.SetOut(updateBuf)
-	if err := updateCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var update activationMatrixResult
-	if err := json.Unmarshal(updateBuf.Bytes(), &update); err != nil {
-		t.Fatalf("activation cross-command update JSON: %v\n%s", err, updateBuf.String())
-	}
-	if update.Summary.Total != 2 || update.Summary.Passed != 1 || update.Summary.Updated != 1 {
-		t.Fatalf("unexpected cross-command update summary: %#v", update.Summary)
-	}
-	taskUpdate := activationCaseByCommand(t, update.Cases, "task")
-	if taskUpdate.CompareMode != activationCompareModeExact || taskUpdate.Status != "updated" {
-		t.Fatalf("task update case = %#v", taskUpdate)
-	}
-	if body := readActivationGolden(t, taskUpdate.GoldenPath); strings.Contains(body, filepath.ToSlash(repo)) || strings.Contains(body, activationTaskDirPlaceholder) {
-		t.Fatalf("task golden leaked repo path or placeholder:\n%s", body)
+	{
+		err := updateCmd.Execute()
+		require.NoError(t, err)
 	}
 
-	compareCmd := NewEvalCmd()
-	compareCmd.SetArgs([]string{
+	var update activationMatrixResult
+	{
+		err := json.Unmarshal(updateBuf.Bytes(), &update)
+		require.NoError(t, err,
+			"activation cross-command update JSON: %v\n%s", err, updateBuf.String())
+	}
+	assert.Equal(t, 2, update.Summary.Total, "unexpected cross-command update summary: %#v", update.Summary)
+	assert.Equal(t, 1, update.Summary.Passed, "unexpected cross-command update summary: %#v", update.Summary)
+	assert.Equal(t, 1, update.Summary.Updated, "unexpected cross-command update summary: %#v", update.Summary)
+
+	taskUpdate := activationCaseByCommand(t, update.Cases, "task")
+	assert.Equal(t, activationCompareModeExact, taskUpdate.CompareMode, "task update case = %#v", taskUpdate)
+	assert.Equal(t, "updated", taskUpdate.Status, "task update case = %#v", taskUpdate)
+	{
+
+		body := readActivationGolden(t, taskUpdate.GoldenPath)
+		assert.NotContains(t, body, filepath.ToSlash(repo), "task golden leaked repo path or placeholder:\n%s", body)
+		assert.NotContains(t, body, activationTaskDirPlaceholder, "task golden leaked repo path or placeholder:\n%s", body)
+	}
+}
+
+func TestEvalActivationMatrixCrossCommandCompare_SupportsFindAndTaskSmoke(t *testing.T) {
+	repo := setupActivationMatrixRepo(t, "billing", "feat: billing analytics export")
+	manifest := writeActivationCrossCommandManifest(t, repo)
+	goldenDir := filepath.Join(t.TempDir(), "goldens")
+	writeActivationMatrixGoldens(t, manifest, goldenDir)
+
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{
 		manifest,
 		"--activation-matrix",
 		"--activation-profile", "skinny",
 		"--activation-golden-dir", goldenDir,
 		"--json",
 	})
-	compareBuf := &bytes.Buffer{}
-	compareCmd.SetOut(compareBuf)
-	if err := compareCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
 	var compare activationMatrixResult
-	if err := json.Unmarshal(compareBuf.Bytes(), &compare); err != nil {
-		t.Fatalf("activation cross-command compare JSON: %v\n%s", err, compareBuf.String())
-	}
-	if compare.Summary.Total != 2 || compare.Summary.Passed != 2 {
-		t.Fatalf("unexpected cross-command compare summary: %#v", compare.Summary)
-	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &compare), "activation cross-command compare JSON:\n%s", buf.String())
+	assert.Equal(t, 2, compare.Summary.Total, "unexpected cross-command compare summary: %#v", compare.Summary)
+	assert.Equal(t, 2, compare.Summary.Passed, "unexpected cross-command compare summary: %#v", compare.Summary)
+
 	findCase := activationCaseByCommand(t, compare.Cases, "find")
-	if findCase.CompareMode != activationCompareModeJSONSmoke || findCase.Status != "passed" {
-		t.Fatalf("find smoke case = %#v", findCase)
-	}
-	if containsActivationArg(findCase.Args, "--path") || containsActivationArg(findCase.Args, "--quiet") || !containsActivationArg(findCase.Args, "--json") {
-		t.Fatalf("find activation args should use cwd plus json only: %#v", findCase.Args)
-	}
+	assert.Equal(t, activationCompareModeJSONSmoke, findCase.CompareMode, "find smoke case = %#v", findCase)
+	assert.Equal(t, "passed", findCase.Status, "find smoke case = %#v", findCase)
+	assert.False(t, containsActivationArg(findCase.Args, "--path"), "find activation args should use cwd plus json only: %#v", findCase.Args)
+	assert.False(t, containsActivationArg(findCase.Args, "--quiet"), "find activation args should use cwd plus json only: %#v", findCase.Args)
+	assert.True(t, containsActivationArg(findCase.Args, "--json"), "find activation args should use cwd plus json only: %#v", findCase.Args)
+
 	taskCase := activationCaseByCommand(t, compare.Cases, "task")
-	if !containsActivationArg(taskCase.Args, "--"+repoTargetFlagName) || !containsActivationArg(taskCase.Args, "--dir") || !containsActivationArg(taskCase.Args, "--json") {
-		t.Fatalf("task activation args missing repo/dir/json isolation: %#v", taskCase.Args)
-	}
+	assert.True(t, containsActivationArg(taskCase.Args, "--"+repoTargetFlagName), "task activation args missing repo/dir/json isolation: %#v", taskCase.Args)
+	assert.True(t, containsActivationArg(taskCase.Args, "--dir"), "task activation args missing repo/dir/json isolation: %#v", taskCase.Args)
+	assert.True(t, containsActivationArg(taskCase.Args, "--json"), "task activation args missing repo/dir/json isolation: %#v", taskCase.Args)
+
+}
+
+func writeActivationMatrixGoldens(t *testing.T, manifest, goldenDir string) {
+	t.Helper()
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{
+		manifest,
+		"--activation-matrix",
+		"--activation-profile", "skinny",
+		"--activation-golden-dir", goldenDir,
+		"--activation-update",
+		"--json",
+	})
+	cmd.SetOut(&bytes.Buffer{})
+
+	require.NoError(t, cmd.Execute())
 }
 
 func TestEvalActivationMatrixProfileFilteringAndMissingGoldens(t *testing.T) {
@@ -169,19 +213,20 @@ func TestEvalActivationMatrixProfileFilteringAndMissingGoldens(t *testing.T) {
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "activation matrix regressions failed") {
-		t.Fatalf("expected missing fat goldens to fail, got %v", err)
-	}
+	require.NotNil(t, err, "expected missing fat goldens to fail, got %v", err)
+	assert.Contains(t, err.Error(), "activation matrix regressions failed", "expected missing fat goldens to fail, got %v", err)
+
 	var result activationMatrixResult
-	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
-		t.Fatalf("activation missing JSON: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &result)
+		require.NoError(t, err,
+			"activation missing JSON: %v\n%s", err, buf.String())
 	}
-	if result.Summary.Total != 1 || result.Summary.Missing != 1 {
-		t.Fatalf("fat profile should select only one missing command, got %#v", result.Summary)
-	}
-	if result.Cases[0].RepoID != "fat-repo" || result.Cases[0].Command != "map" {
-		t.Fatalf("unexpected fat case: %#v", result.Cases[0])
-	}
+	assert.Equal(t, 1, result.Summary.Total, "fat profile should select only one missing command, got %#v", result.Summary)
+	assert.Equal(t, 1, result.Summary.Missing, "fat profile should select only one missing command, got %#v", result.Summary)
+	assert.Equal(t, "fat-repo", result.Cases[0].RepoID, "unexpected fat case: %#v", result.Cases[0])
+	assert.Equal(t, "map", result.Cases[0].Command, "unexpected fat case: %#v", result.Cases[0])
+
 }
 
 func TestEvalActivationMatrixAcceptsUTF8BOMJSONManifest(t *testing.T) {
@@ -200,12 +245,12 @@ func TestEvalActivationMatrixAcceptsUTF8BOMJSONManifest(t *testing.T) {
 		}},
 	}
 	data, err := json.Marshal(manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	data = append([]byte{0xEF, 0xBB, 0xBF}, data...)
-	if err := os.WriteFile(manifestPath, data, 0o644); err != nil {
-		t.Fatal(err)
+	{
+		err := os.WriteFile(manifestPath, data, 0o644)
+		require.NoError(t, err)
 	}
 
 	cmd := NewEvalCmd()
@@ -219,16 +264,20 @@ func TestEvalActivationMatrixAcceptsUTF8BOMJSONManifest(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var result activationMatrixResult
-	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
-		t.Fatalf("activation BOM JSON: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &result)
+		require.NoError(t, err,
+			"activation BOM JSON: %v\n%s", err, buf.String())
 	}
-	if result.Summary.Total != 1 || result.Summary.Updated != 1 {
-		t.Fatalf("unexpected BOM manifest summary: %#v", result.Summary)
-	}
+	assert.Equal(t, 1, result.Summary.Total, "unexpected BOM manifest summary: %#v", result.Summary)
+	assert.Equal(t, 1, result.Summary.Updated, "unexpected BOM manifest summary: %#v", result.Summary)
+
 }
 
 func TestEvalActivationMatrixResultMetadataAndResultDir(t *testing.T) {
@@ -251,34 +300,40 @@ func TestEvalActivationMatrixResultMetadataAndResultDir(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var result activationMatrixResult
-	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
-		t.Fatalf("activation result metadata JSON: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &result)
+		require.NoError(t, err,
+			"activation result metadata JSON: %v\n%s", err, buf.String())
 	}
-	if result.CloneMode != "full" || result.RunnerMode != activationMatrixRunnerGolden || result.NormalizationVersion == "" {
-		t.Fatalf("activation metadata missing clone/runner/normalization: %#v", result)
+	assert.Equal(t, "full", result.CloneMode, "activation metadata missing clone/runner/normalization: %#v", result)
+	assert.Equal(t, activationMatrixRunnerGolden, result.RunnerMode, "activation metadata missing clone/runner/normalization: %#v", result)
+	assert.NotEqual(t, "", result.NormalizationVersion, "activation metadata missing clone/runner/normalization: %#v", result)
+	assert.Equal(t, activationIndexStateCold, result.IndexState,
+		"default activation index state = %q", result.IndexState)
+	assert.Equal(t, filepath.ToSlash(resultDir), result.ResultDir, "activation result dir/path not recorded: %#v", result)
+	assert.NotEqual(t, "", result.ResultPath, "activation result dir/path not recorded: %#v", result)
+	assert.Equal(t, 1, result.RepoSet.Total, "activation repo set metadata = %#v", result.RepoSet)
+	assert.Equal(t, 1, result.RepoSet.Full, "activation repo set metadata = %#v", result.RepoSet)
+	assert.Equal(t, 0, result.RepoSet.Shallow, "activation repo set metadata = %#v", result.RepoSet)
+	assert.Greater(t, result.Timing.Command.Total, 0, "activation timing missing command stats: %#v", result.Timing)
+	assert.Greater(t, result.Timing.Command.P50, 0, "activation timing missing command stats: %#v", result.Timing)
+	assert.Greater(t, result.Timing.Command.Max, 0, "activation timing missing command stats: %#v", result.Timing)
+	require.NotEmpty(t, result.SlowestCases, "activation slowest case metadata missing: %#v", result.SlowestCases)
+	assert.NotEqual(t, "", result.SlowestCases[0].RepoID, "activation slowest case metadata missing: %#v", result.SlowestCases)
+	assert.Greater(t, result.SlowestCases[0].DurationMillis, 0, "activation slowest case metadata missing: %#v", result.SlowestCases)
+	{
+
+		_, err := os.Stat(filepath.Join(resultDir, activationMatrixDefaultResultFilename))
+		require.NoError(t, err,
+			"activation result file not written: %v", err)
 	}
-	if result.IndexState != activationIndexStateCold {
-		t.Fatalf("default activation index state = %q", result.IndexState)
-	}
-	if result.ResultDir != filepath.ToSlash(resultDir) || result.ResultPath == "" {
-		t.Fatalf("activation result dir/path not recorded: %#v", result)
-	}
-	if result.RepoSet.Total != 1 || result.RepoSet.Full != 1 || result.RepoSet.Shallow != 0 {
-		t.Fatalf("activation repo set metadata = %#v", result.RepoSet)
-	}
-	if result.Timing.Command.Total <= 0 || result.Timing.Command.P50 <= 0 || result.Timing.Command.Max <= 0 {
-		t.Fatalf("activation timing missing command stats: %#v", result.Timing)
-	}
-	if len(result.SlowestCases) == 0 || result.SlowestCases[0].RepoID == "" || result.SlowestCases[0].DurationMillis <= 0 {
-		t.Fatalf("activation slowest case metadata missing: %#v", result.SlowestCases)
-	}
-	if _, err := os.Stat(filepath.Join(resultDir, activationMatrixDefaultResultFilename)); err != nil {
-		t.Fatalf("activation result file not written: %v", err)
-	}
+
 	_ = fatRepo
 }
 
@@ -299,20 +354,24 @@ func TestEvalActivationMatrixWarmIndexState(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var result activationMatrixResult
-	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
-		t.Fatalf("activation warm JSON: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &result)
+		require.NoError(t, err,
+			"activation warm JSON: %v\n%s", err, buf.String())
 	}
-	if result.IndexState != activationIndexStateWarm {
-		t.Fatalf("result index state = %q", result.IndexState)
-	}
+	assert.Equal(t, activationIndexStateWarm, result.IndexState,
+		"result index state = %q", result.IndexState)
+
 	for _, c := range result.Cases {
-		if c.IndexState != activationIndexStateWarm {
-			t.Fatalf("case index state = %q in %#v", c.IndexState, c)
-		}
+		assert.Equal(t, activationIndexStateWarm, c.IndexState,
+			"case index state = %q in %#v", c.IndexState, c)
+
 	}
 }
 
@@ -337,40 +396,180 @@ func TestEvalActivationMatrixBinaryCompare(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var result activationMatrixResult
-	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
-		t.Fatalf("activation binary compare JSON: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &result)
+		require.NoError(t, err,
+			"activation binary compare JSON: %v\n%s", err, buf.String())
 	}
-	if result.RunnerMode != activationMatrixRunnerBinaryComparison {
-		t.Fatalf("expected binary comparison runner, got %q", result.RunnerMode)
-	}
-	if result.BaselineIndexState != activationIndexStateCold || result.CandidateIndexState != activationIndexStateCold {
-		t.Fatalf("default binary index states missing: baseline=%q candidate=%q", result.BaselineIndexState, result.CandidateIndexState)
-	}
-	if result.Summary.Total != 3 || result.Summary.Passed != 3 {
-		t.Fatalf("unexpected binary compare summary: %#v", result.Summary)
-	}
-	if result.BaselineBin == "" || result.CandidateBin == "" || result.BaselineBinaryID == "" || result.CandidateBinaryID == "" {
-		t.Fatalf("binary metadata missing: %#v", result)
-	}
-	if len(result.SlowestCases) == 0 || result.SlowestCases[0].BaselineMillis <= 0 || result.SlowestCases[0].CandidateMillis <= 0 {
-		t.Fatalf("binary slowest case metadata missing: %#v", result.SlowestCases)
-	}
+	assert.Equal(t, activationMatrixRunnerBinaryComparison, result.RunnerMode,
+		"expected binary comparison runner, got %q", result.RunnerMode)
+	assert.Equal(t, 1, result.Repetitions, "default repetitions = %d", result.Repetitions)
+	assert.True(t, result.SelfComparison)
+	assert.Equal(t, activationIndexStateCold, result.BaselineIndexState, "default binary index states missing: baseline=%q candidate=%q", result.BaselineIndexState, result.CandidateIndexState)
+	assert.Equal(t, activationIndexStateCold, result.CandidateIndexState, "default binary index states missing: baseline=%q candidate=%q", result.BaselineIndexState, result.CandidateIndexState)
+	assert.Equal(t, 3, result.Summary.Total, "unexpected binary compare summary: %#v", result.Summary)
+	assert.Equal(t, 3, result.Summary.Passed, "unexpected binary compare summary: %#v", result.Summary)
+	assert.NotEqual(t, "", result.BaselineBin, "binary metadata missing: %#v", result)
+	assert.NotEqual(t, "", result.CandidateBin, "binary metadata missing: %#v", result)
+	assert.NotEqual(t, "", result.BaselineBinaryID, "binary metadata missing: %#v", result)
+	assert.NotEqual(t, "", result.CandidateBinaryID, "binary metadata missing: %#v", result)
+	require.NotEmpty(t, result.SlowestCases, "binary slowest case metadata missing: %#v", result.SlowestCases)
+	assert.Greater(t, result.SlowestCases[0].BaselineMillis, 0, "binary slowest case metadata missing: %#v", result.SlowestCases)
+	assert.Greater(t, result.SlowestCases[0].CandidateMillis, 0, "binary slowest case metadata missing: %#v", result.SlowestCases)
+
 	for _, c := range result.Cases {
-		if c.Baseline == nil || c.Candidate == nil || !c.StdoutMatch {
-			t.Fatalf("binary comparison run metadata missing: %#v", c)
-		}
-		if len(c.Baseline.Args) == 0 || c.Baseline.Args[0] != c.Command {
-			t.Fatalf("baseline args should include command name: %#v", c.Baseline.Args)
-		}
-		if c.Baseline.StdoutPath == "" || c.Candidate.StdoutPath == "" {
-			t.Fatalf("binary outputs were not written: %#v", c)
-		}
+		require.NotNil(t, c.Baseline, "binary comparison run metadata missing: %#v", c)
+		require.NotNil(t, c.Candidate, "binary comparison run metadata missing: %#v", c)
+		assert.True(t, c.StdoutMatch, "binary comparison run metadata missing: %#v", c)
+		require.NotEmpty(t, c.Baseline.Args, "baseline args should include command name: %#v", c.Baseline.Args)
+		assert.Equal(t, c.Command, c.Baseline.Args[0], "baseline args should include command name: %#v", c.Baseline.Args)
+		assert.NotEqual(t, "", c.Baseline.StdoutPath, "binary outputs were not written: %#v", c)
+		assert.NotEqual(t, "", c.Candidate.StdoutPath, "binary outputs were not written: %#v", c)
+
 	}
 	_ = fatRepo
+}
+
+func TestEvalActivationMatrixBinaryCompare_WithEvenRepetitions_ReturnsValidationError(t *testing.T) {
+	repo := setupActivationMatrixRepo(t, "credentials", "feat: credentials rotation context")
+	manifest := writeActivationSingleCommandManifest(t, repo)
+	binary := writeActivationFakeBinary(t)
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{
+		manifest,
+		"--activation-matrix",
+		"--activation-baseline-bin", binary,
+		"--activation-candidate-bin", binary,
+		"--activation-repetitions", "2",
+	})
+
+	err := cmd.Execute()
+
+	require.Error(t, err)
+	assert.Equal(t, "--activation-repetitions must be odd", err.Error())
+}
+
+func TestEvalActivationMatrixBinaryCompare_WithThreeRepetitions_AlternatesOrderAndRecordsSamples(t *testing.T) {
+	repo := setupActivationMatrixRepo(t, "credentials", "feat: credentials rotation context")
+	manifest := writeActivationSingleCommandManifest(t, repo)
+	orderPath := filepath.Join(t.TempDir(), "order.log")
+	baselineBinary := writeActivationLoggingFakeBinary(t, "baseline", orderPath)
+	candidateBinary := writeActivationLoggingFakeBinary(t, "candidate", orderPath)
+	resultDir := filepath.Join(t.TempDir(), "results")
+	cmd := NewEvalCmd()
+	cmd.SetArgs([]string{
+		manifest,
+		"--activation-matrix",
+		"--activation-baseline-bin", baselineBinary,
+		"--activation-candidate-bin", candidateBinary,
+		"--activation-repetitions", "3",
+		"--activation-result-dir", resultDir,
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var result activationMatrixResult
+	err = json.Unmarshal(buf.Bytes(), &result)
+	require.NoError(t, err)
+	assert.Equal(t, 3, result.Repetitions)
+	assert.False(t, result.SelfComparison)
+	require.Len(t, result.Cases, 1)
+	caseResult := result.Cases[0]
+	assert.Equal(t, "passed", caseResult.Status)
+	require.Len(t, caseResult.Samples, 3)
+	assert.Equal(t, 1, caseResult.Samples[0].Repetition)
+	assert.Equal(t, "baseline", caseResult.Samples[0].FirstRole)
+	assert.Equal(t, 2, caseResult.Samples[1].Repetition)
+	assert.Equal(t, "candidate", caseResult.Samples[1].FirstRole)
+	assert.Equal(t, 3, caseResult.Samples[2].Repetition)
+	assert.Equal(t, "baseline", caseResult.Samples[2].FirstRole)
+	assert.Contains(t, caseResult.Samples[0].Baseline.StdoutPath, "r001")
+	assert.Contains(t, caseResult.Samples[1].Baseline.StdoutPath, "r002")
+	assert.Contains(t, caseResult.Samples[2].Baseline.StdoutPath, "r003")
+	require.NotNil(t, caseResult.ComparisonTiming)
+	assert.Greater(t, caseResult.ComparisonTiming.BaselineMedianMillis, 0)
+	assert.Greater(t, caseResult.ComparisonTiming.CandidateMedianMillis, 0)
+	orderBytes, err := os.ReadFile(orderPath)
+	require.NoError(t, err)
+	order := strings.Fields(string(orderBytes))
+	require.Len(t, order, 6)
+	assert.Equal(t, "baseline", order[0])
+	assert.Equal(t, "candidate", order[1])
+	assert.Equal(t, "candidate", order[2])
+	assert.Equal(t, "baseline", order[3])
+	assert.Equal(t, "baseline", order[4])
+	assert.Equal(t, "candidate", order[5])
+}
+
+func TestSummarizeActivationMatrixBinaryComparison_WhenOneSampleFails_FailsCase(t *testing.T) {
+	out := activationMatrixCaseResult{RepoID: "sample-repo"}
+	samples := []activationMatrixComparisonSample{
+		{
+			Repetition:       1,
+			Status:           "passed",
+			StdoutMatch:      true,
+			Baseline:         activationMatrixCommandRun{DurationMillis: 10},
+			Candidate:        activationMatrixCommandRun{DurationMillis: 11},
+			MapActionQuality: &activationMapActionQualityComparison{Accepted: true, Status: "accepted_non_action_deltas"},
+		},
+		{
+			Repetition:       2,
+			Status:           "failed",
+			Error:            "baseline and candidate stdout differed",
+			Baseline:         activationMatrixCommandRun{DurationMillis: 20},
+			Candidate:        activationMatrixCommandRun{DurationMillis: 21},
+			MapActionQuality: &activationMapActionQualityComparison{Accepted: false, Status: "rejected"},
+		},
+		{
+			Repetition:  3,
+			Status:      "passed",
+			StdoutMatch: true,
+			Baseline:    activationMatrixCommandRun{DurationMillis: 30},
+			Candidate:   activationMatrixCommandRun{DurationMillis: 31},
+		},
+	}
+
+	result := summarizeActivationMatrixBinaryComparison(out, samples)
+
+	assert.Equal(t, "failed", result.Status)
+	assert.Equal(t, "repetition 2 failed: baseline and candidate stdout differed", result.Error)
+	assert.False(t, result.StdoutMatch)
+	require.Len(t, result.Samples, 3)
+	assert.Equal(t, "failed", result.Samples[1].Status)
+	require.NotNil(t, result.MapActionQuality)
+	assert.Equal(t, "rejected", result.MapActionQuality.Status)
+}
+
+func TestActivationComparisonTiming_WithThreeSamples_UsesMedianRunsAndPairDeltas(t *testing.T) {
+	samples := []activationMatrixComparisonSample{
+		{Baseline: activationMatrixCommandRun{DurationMillis: 30}, Candidate: activationMatrixCommandRun{DurationMillis: 38}},
+		{Baseline: activationMatrixCommandRun{DurationMillis: 10}, Candidate: activationMatrixCommandRun{DurationMillis: 50}},
+		{Baseline: activationMatrixCommandRun{DurationMillis: 20}, Candidate: activationMatrixCommandRun{DurationMillis: 21}},
+	}
+
+	baseline := activationMedianComparisonRun(samples, true)
+	candidate := activationMedianComparisonRun(samples, false)
+	timing := activationComparisonTiming(samples, baseline.DurationMillis, candidate.DurationMillis)
+
+	assert.Equal(t, 20, baseline.DurationMillis)
+	assert.Equal(t, 38, candidate.DurationMillis)
+	require.NotNil(t, timing)
+	assert.Equal(t, 20, timing.BaselineMedianMillis)
+	assert.Equal(t, 38, timing.CandidateMedianMillis)
+	assert.Equal(t, 18, timing.CandidateDeltaMillis)
+	assert.Equal(t, 8, timing.MedianPairedDeltaMillis)
+	assert.Equal(t, 8, timing.MedianAbsolutePairDeltaMS)
+	assert.Equal(t, 40, timing.MaximumAbsolutePairDeltaMS)
 }
 
 func TestEvalActivationMatrixBinaryCompareRecordsDifferentIndexStates(t *testing.T) {
@@ -394,26 +593,28 @@ func TestEvalActivationMatrixBinaryCompareRecordsDifferentIndexStates(t *testing
 	})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var result activationMatrixResult
-	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
-		t.Fatalf("activation binary state JSON: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &result)
+		require.NoError(t, err,
+			"activation binary state JSON: %v\n%s", err, buf.String())
 	}
-	if result.BaselineIndexState != activationIndexStateCold || result.CandidateIndexState != activationIndexStateWarm {
-		t.Fatalf("binary index states = baseline %q candidate %q", result.BaselineIndexState, result.CandidateIndexState)
-	}
+	assert.Equal(t, activationIndexStateCold, result.BaselineIndexState, "binary index states = baseline %q candidate %q", result.BaselineIndexState, result.CandidateIndexState)
+	assert.Equal(t, activationIndexStateWarm, result.CandidateIndexState, "binary index states = baseline %q candidate %q", result.BaselineIndexState, result.CandidateIndexState)
+
 	for _, c := range result.Cases {
-		if c.Baseline == nil || c.Candidate == nil {
-			t.Fatalf("missing binary runs: %#v", c)
-		}
-		if c.Baseline.IndexState != activationIndexStateCold || c.Candidate.IndexState != activationIndexStateWarm {
-			t.Fatalf("case index states = baseline %q candidate %q", c.Baseline.IndexState, c.Candidate.IndexState)
-		}
-		if c.Candidate.WarmupMillis < 0 {
-			t.Fatalf("warmup millis should be non-negative: %#v", c.Candidate)
-		}
+		require.NotNil(t, c.Baseline, "missing binary runs: %#v", c)
+		require.NotNil(t, c.Candidate, "missing binary runs: %#v", c)
+		assert.Equal(t, activationIndexStateCold, c.Baseline.IndexState, "case index states = baseline %q candidate %q", c.Baseline.IndexState, c.Candidate.IndexState)
+		assert.Equal(t, activationIndexStateWarm, c.Candidate.IndexState, "case index states = baseline %q candidate %q", c.Baseline.IndexState, c.Candidate.IndexState)
+		assert.GreaterOrEqual(t, c.Candidate.WarmupMillis, 0,
+			"warmup millis should be non-negative: %#v", c.Candidate)
+
 	}
 }
 
@@ -432,41 +633,47 @@ func TestEvalActivationScanBenchmarkCapturesPhaseAndDBStats(t *testing.T) {
 	})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var result activationScanBenchmarkResult
-	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
-		t.Fatalf("activation scan benchmark JSON: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &result)
+		require.NoError(t, err,
+			"activation scan benchmark JSON: %v\n%s", err, buf.String())
 	}
-	if result.Schema != activationScanBenchmarkSchemaVersion {
-		t.Fatalf("schema = %q", result.Schema)
-	}
-	if result.Summary.Total != 1 || result.Summary.Passed != 1 {
-		t.Fatalf("unexpected summary: %#v", result.Summary)
-	}
-	if result.Timing.Max <= 0 || len(result.PhaseTiming) == 0 {
-		t.Fatalf("missing aggregate timing: %#v phases=%#v", result.Timing, result.PhaseTiming)
-	}
+	assert.Equal(t, activationScanBenchmarkSchemaVersion, result.Schema,
+		"schema = %q", result.Schema)
+	assert.Equal(t, 1, result.Summary.Total, "unexpected summary: %#v", result.Summary)
+	assert.Equal(t, 1, result.Summary.Passed, "unexpected summary: %#v", result.Summary)
+	assert.Greater(t, result.Timing.Max, 0, "missing aggregate timing: %#v phases=%#v", result.Timing, result.PhaseTiming)
+	require.NotEmpty(t, result.PhaseTiming, "missing aggregate timing: %#v phases=%#v", result.Timing, result.PhaseTiming)
+
 	c := result.Cases[0]
-	if c.Command != "scan" || !containsActivationArg(c.Args, "--phase-timing") || !containsActivationArg(c.Args, "--quiet") || !containsActivationArg(c.Args, "--path") {
-		t.Fatalf("scan benchmark args not forced: %#v", c.Args)
+	assert.Equal(t, "scan", c.Command, "scan benchmark args not forced: %#v", c.Args)
+	assert.True(t, containsActivationArg(c.Args, "--phase-timing"), "scan benchmark args not forced: %#v", c.Args)
+	assert.True(t, containsActivationArg(c.Args, "--quiet"), "scan benchmark args not forced: %#v", c.Args)
+	assert.True(t, containsActivationArg(c.Args, "--path"), "scan benchmark args not forced: %#v", c.Args)
+	assert.Greater(t, c.DBSizeBytes, int64(0), "missing DB stats: size=%d rows=%#v groups=%#v", c.DBSizeBytes, c.TableRows, c.TableGroups)
+	assert.Greater(t, c.TableRows["artifacts"], 0, "missing DB stats: size=%d rows=%#v groups=%#v", c.DBSizeBytes, c.TableRows, c.TableGroups)
+	assert.Greater(t, c.TableGroups["artifacts"], 0, "missing DB stats: size=%d rows=%#v groups=%#v", c.DBSizeBytes, c.TableRows, c.TableGroups)
+	assert.Greater(t, c.Found["markdown"], 0, "missing scan summary/phase timing: %#v", c)
+	require.NotNil(t, c.PhaseTiming, "missing scan summary/phase timing: %#v", c)
+	require.NotEmpty(t, c.PhaseTiming.Phases, "missing scan summary/phase timing: %#v", c)
+	require.NotNil(t, c.SourceManifest, "missing source manifest summary: %#v", c.SourceManifest)
+	assert.True(t, c.SourceManifest.Enabled, "missing source manifest summary: %#v", c.SourceManifest)
+	assert.Greater(t, c.SourceManifest.IndexedFiles, 0, "missing source manifest summary: %#v", c.SourceManifest)
+	assert.NotEqual(t, "", c.StdoutPath, "expected retained stdout/stderr paths: %#v", c)
+	assert.NotEqual(t, "", c.StderrPath, "expected retained stdout/stderr paths: %#v", c)
+	{
+
+		_, err := os.Stat(filepath.Join(resultDir, activationScanBenchmarkResultName))
+		require.NoError(t, err,
+			"benchmark result file not written: %v", err)
 	}
-	if c.DBSizeBytes <= 0 || c.TableRows["artifacts"] <= 0 || c.TableGroups["artifacts"] <= 0 {
-		t.Fatalf("missing DB stats: size=%d rows=%#v groups=%#v", c.DBSizeBytes, c.TableRows, c.TableGroups)
-	}
-	if c.Found["markdown"] <= 0 || c.PhaseTiming == nil || len(c.PhaseTiming.Phases) == 0 {
-		t.Fatalf("missing scan summary/phase timing: %#v", c)
-	}
-	if c.SourceManifest == nil || !c.SourceManifest.Enabled || c.SourceManifest.IndexedFiles <= 0 {
-		t.Fatalf("missing source manifest summary: %#v", c.SourceManifest)
-	}
-	if c.StdoutPath == "" || c.StderrPath == "" {
-		t.Fatalf("expected retained stdout/stderr paths: %#v", c)
-	}
-	if _, err := os.Stat(filepath.Join(resultDir, activationScanBenchmarkResultName)); err != nil {
-		t.Fatalf("benchmark result file not written: %v", err)
-	}
+
 }
 
 func TestActivationScanBenchmarkThresholdsFailDurationRegression(t *testing.T) {
@@ -491,16 +698,18 @@ func TestActivationScanBenchmarkThresholdsFailDurationRegression(t *testing.T) {
 	applyActivationScanBenchmarkThresholds(&current, baseline, activationScanBenchmarkOptions{
 		MaxRegressionRatio: 1.1,
 	})
+	assert.Equal(t, "failed", current.Status, "expected regression failure, got %#v", current)
+	require.NotNil(t, current.Regression, "expected regression failure, got %#v", current)
+	assert.Equal(t, "failed", current.Regression.Status, "expected regression failure, got %#v", current)
+	assert.Equal(t, 100, current.Regression.DurationDeltaMS, "unexpected regression deltas: %#v", current.Regression)
+	assert.Equal(t, int64(30), current.Regression.DBSizeDeltaBytes, "unexpected regression deltas: %#v", current.Regression)
+	{
 
-	if current.Status != "failed" || current.Regression == nil || current.Regression.Status != "failed" {
-		t.Fatalf("expected regression failure, got %#v", current)
+		got := current.Regression.TableGroupDeltas["artifacts"]
+		assert.Equal(t, 2, got,
+			"artifact table group delta = %d, want 2", got)
 	}
-	if current.Regression.DurationDeltaMS != 100 || current.Regression.DBSizeDeltaBytes != 30 {
-		t.Fatalf("unexpected regression deltas: %#v", current.Regression)
-	}
-	if got := current.Regression.TableGroupDeltas["artifacts"]; got != 2 {
-		t.Fatalf("artifact table group delta = %d, want 2", got)
-	}
+
 }
 
 func TestActivationMapActionQualityAcceptsNonActionDeltas(t *testing.T) {
@@ -520,15 +729,13 @@ func TestActivationMapActionQualityAcceptsNonActionDeltas(t *testing.T) {
 	candidate.Areas[0].Diagnostics.Packability.IndexedQueryAnchorCount = 3
 
 	comparison := compareActivationMapActionQuality(mustActivationMapJSON(t, baseline), mustActivationMapJSON(t, candidate))
-	if !comparison.Accepted {
-		t.Fatalf("expected non-action map deltas to be accepted: %#v", comparison)
-	}
-	if comparison.Status != "accepted_non_action_deltas" {
-		t.Fatalf("expected accepted non-action status, got %#v", comparison)
-	}
-	if len(comparison.ActionDiffs) != 0 || len(comparison.AcceptedDiffs) == 0 {
-		t.Fatalf("unexpected comparison detail: %#v", comparison)
-	}
+	assert.True(t, comparison.Accepted,
+		"expected non-action map deltas to be accepted: %#v", comparison)
+	assert.Equal(t, "accepted_non_action_deltas", comparison.Status,
+		"expected accepted non-action status, got %#v", comparison)
+	assert.Empty(t, comparison.ActionDiffs, "unexpected comparison detail: %#v", comparison)
+	require.NotEmpty(t, comparison.AcceptedDiffs, "unexpected comparison detail: %#v", comparison)
+
 }
 
 func TestActivationMapActionQualityRejectsTryDelta(t *testing.T) {
@@ -537,12 +744,11 @@ func TestActivationMapActionQualityRejectsTryDelta(t *testing.T) {
 	candidate.Areas[0].Try = `ds find "launch website skeleton"`
 
 	comparison := compareActivationMapActionQuality(mustActivationMapJSON(t, baseline), mustActivationMapJSON(t, candidate))
-	if comparison.Accepted {
-		t.Fatalf("expected try delta to be rejected: %#v", comparison)
-	}
-	if !strings.Contains(strings.Join(comparison.ActionDiffs, "\n"), "areas[0].try") {
-		t.Fatalf("expected try diff to be reported: %#v", comparison)
-	}
+	assert.False(t, comparison.Accepted,
+		"expected try delta to be rejected: %#v", comparison)
+	assert.Contains(t, strings.Join(comparison.ActionDiffs, "\n"), "areas[0].try",
+		"expected try diff to be reported: %#v", comparison)
+
 }
 
 func TestActivationMapActionQualityAcceptsSuppressedTryDiagnosticDelta(t *testing.T) {
@@ -564,12 +770,11 @@ func TestActivationMapActionQualityAcceptsSuppressedTryDiagnosticDelta(t *testin
 	}
 
 	comparison := compareActivationMapActionQuality(mustActivationMapJSON(t, baseline), mustActivationMapJSON(t, candidate))
-	if !comparison.Accepted {
-		t.Fatalf("expected suppressed diagnostic delta to be accepted: %#v", comparison)
-	}
-	if len(comparison.ActionDiffs) != 0 || len(comparison.AcceptedDiffs) == 0 {
-		t.Fatalf("unexpected comparison detail: %#v", comparison)
-	}
+	assert.True(t, comparison.Accepted,
+		"expected suppressed diagnostic delta to be accepted: %#v", comparison)
+	assert.Empty(t, comparison.ActionDiffs, "unexpected comparison detail: %#v", comparison)
+	require.NotEmpty(t, comparison.AcceptedDiffs, "unexpected comparison detail: %#v", comparison)
+
 }
 
 func TestActivationMapActionQualityRejectsKeyPathDelta(t *testing.T) {
@@ -578,12 +783,11 @@ func TestActivationMapActionQualityRejectsKeyPathDelta(t *testing.T) {
 	candidate.Areas[0].KeyPaths = []string{"app/page.tsx", "components/other-panel.tsx"}
 
 	comparison := compareActivationMapActionQuality(mustActivationMapJSON(t, baseline), mustActivationMapJSON(t, candidate))
-	if comparison.Accepted {
-		t.Fatalf("expected key path delta to be rejected: %#v", comparison)
-	}
-	if !strings.Contains(strings.Join(comparison.ActionDiffs, "\n"), "areas[0].key_paths") {
-		t.Fatalf("expected key path diff to be reported: %#v", comparison)
-	}
+	assert.False(t, comparison.Accepted,
+		"expected key path delta to be rejected: %#v", comparison)
+	assert.Contains(t, strings.Join(comparison.ActionDiffs, "\n"), "areas[0].key_paths",
+		"expected key path diff to be reported: %#v", comparison)
+
 }
 
 func activationMapActionQualityFixture(tryCommand string) mapOutput {
@@ -639,9 +843,8 @@ func activationMapActionQualityFixture(tryCommand string) mapOutput {
 func mustActivationMapJSON(t *testing.T, output mapOutput) []byte {
 	t.Helper()
 	data, err := json.Marshal(output)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	return data
 }
 
@@ -677,9 +880,29 @@ repos:
       - name: map
         args: ["--max-areas", "3"]
 `, filepath.ToSlash(skinnyRepo), filepath.ToSlash(fatRepo))
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
+	{
+		err := os.WriteFile(path, []byte(body), 0o644)
+		require.NoError(t, err)
 	}
+
+	return path
+}
+
+func writeActivationSingleCommandManifest(t *testing.T, repo string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "activation-single-command.yaml")
+	body := fmt.Sprintf(`version: 1
+repos:
+  - id: single-repo
+    path: %q
+    profiles: [skinny]
+    commands:
+      - name: recent
+        args: ["credentials"]
+`, filepath.ToSlash(repo))
+	err := os.WriteFile(path, []byte(body), 0o644)
+	require.NoError(t, err)
+
 	return path
 }
 
@@ -698,9 +921,11 @@ repos:
       - name: task
         args: ["quick", "trace billing activation", "--id", "activation-task-smoke", "--index=false"]
 `, filepath.ToSlash(repo))
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
+	{
+		err := os.WriteFile(path, []byte(body), 0o644)
+		require.NoError(t, err)
 	}
+
 	return path
 }
 
@@ -718,21 +943,25 @@ repos:
       - name: scan
         args: ["--include-tests", "--experimental-source-manifest"]
 `, filepath.ToSlash(repo))
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
+	{
+		err := os.WriteFile(path, []byte(body), 0o644)
+		require.NoError(t, err)
 	}
+
 	return path
 }
 
 func activationCaseByCommand(t *testing.T, cases []activationMatrixCaseResult, command string) activationMatrixCaseResult {
 	t.Helper()
+	matches := make([]activationMatrixCaseResult, 0, 1)
 	for _, c := range cases {
 		if c.Command == command {
-			return c
+			matches = append(matches, c)
 		}
 	}
-	t.Fatalf("missing activation case for command %q in %#v", command, cases)
-	return activationMatrixCaseResult{}
+	require.Len(t, matches, 1, "activation cases for command %q in %#v", command, cases)
+
+	return matches[0]
 }
 
 type evalRegressionSetRegistry struct {
@@ -759,17 +988,17 @@ func TestEvalRegressionSetRegistryIfPresent(t *testing.T) {
 	if os.IsNotExist(err) {
 		t.Skip("local private eval registry is absent")
 	}
-	if err != nil {
-		t.Fatalf("read eval registry: %v", err)
-	}
+	require.NoError(t, err,
+		"read eval registry: %v", err)
 
 	var registry evalRegressionSetRegistry
-	if err := yaml.Unmarshal(data, &registry); err != nil {
-		t.Fatalf("parse eval registry: %v", err)
+	{
+		err := yaml.Unmarshal(data, &registry)
+		require.NoError(t, err,
+			"parse eval registry: %v", err)
 	}
-	if registry.Version != 1 {
-		t.Fatalf("unexpected registry version %d", registry.Version)
-	}
+	assert.Equal(t, 1, registry.Version,
+		"unexpected registry version %d", registry.Version)
 
 	requiredSets := map[string]int{
 		"smoke-5-recent-quality":               5,
@@ -788,46 +1017,47 @@ func TestEvalRegressionSetRegistryIfPresent(t *testing.T) {
 
 	seen := map[string]bool{}
 	for _, set := range registry.Sets {
-		if set.ID == "" || set.Status == "" || set.Tier == "" {
-			t.Fatalf("registry set has missing identity fields: %#v", set)
-		}
-		if !allowedStatus[set.Status] {
-			t.Fatalf("registry set %s has unsupported status %q", set.ID, set.Status)
-		}
+		assert.NotEqual(t, "", set.ID, "registry set has missing identity fields: %#v", set)
+		assert.NotEqual(t, "", set.Status, "registry set has missing identity fields: %#v", set)
+		assert.NotEqual(t, "", set.Tier, "registry set has missing identity fields: %#v", set)
+		assert.True(t, allowedStatus[set.Status],
+			"registry set %s has unsupported status %q", set.ID, set.Status)
+
 		seen[set.ID] = true
 		minRepos := set.MinimumRepoCount
 		if requiredMin, ok := requiredSets[set.ID]; ok && requiredMin > minRepos {
 			minRepos = requiredMin
 		}
-		if set.RepoCount < minRepos {
-			t.Fatalf("registry set %s has repo_count %d below minimum %d", set.ID, set.RepoCount, minRepos)
-		}
-		if set.CanonicalDir == "" {
-			t.Fatalf("registry set %s missing canonical_dir", set.ID)
-		}
-		if len(set.RequiredPaths) == 0 {
-			t.Fatalf("registry set %s has no required_paths", set.ID)
-		}
+		assert.GreaterOrEqual(t, set.RepoCount, minRepos,
+			"registry set %s has repo_count %d below minimum %d", set.ID, set.RepoCount, minRepos)
+		assert.NotEqual(t, "", set.CanonicalDir,
+			"registry set %s missing canonical_dir", set.ID)
+		require.NotEmpty(t, set.RequiredPaths,
+			"registry set %s has no required_paths", set.ID)
+
 		for _, p := range set.RequiredPaths {
 			full := evalRegistryPath(root, p)
-			if _, err := os.Stat(full); err != nil {
-				t.Fatalf("registry set %s required path %s missing: %v", set.ID, p, err)
+			{
+				_, err := os.Stat(full)
+				require.NoError(t, err,
+					"registry set %s required path %s missing: %v", set.ID, p, err)
 			}
+
 		}
 	}
 	for id := range requiredSets {
-		if !seen[id] {
-			t.Fatalf("registry missing required set %s", id)
-		}
+		assert.True(t, seen[id],
+			"registry missing required set %s", id)
+
 	}
 }
 
 func evalActivationRepoRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve test file")
-	}
+	require.True(t, ok,
+		"resolve test file")
+
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
@@ -842,9 +1072,8 @@ func evalRegistryPath(root, p string) string {
 func readActivationGolden(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.FromSlash(path))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	return string(data)
 }
 
@@ -866,15 +1095,38 @@ func writeActivationFakeBinary(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		path := filepath.Join(dir, "fake-ds.cmd")
 		body := "@echo off\r\necho {\"schema\":\"fake.activation.v1\",\"ok\":true}\r\n"
-		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-			t.Fatal(err)
+		{
+			err := os.WriteFile(path, []byte(body), 0o755)
+			require.NoError(t, err)
 		}
+
 		return path
 	}
 	path := filepath.Join(dir, "fake-ds")
 	body := "#!/bin/sh\nprintf '%s\\n' '{\"schema\":\"fake.activation.v1\",\"ok\":true}'\n"
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
+	{
+		err := os.WriteFile(path, []byte(body), 0o755)
+		require.NoError(t, err)
 	}
+
+	return path
+}
+
+func writeActivationLoggingFakeBinary(t *testing.T, marker, orderPath string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		path := filepath.Join(dir, marker+"-ds.cmd")
+		body := fmt.Sprintf("@echo off\r\n>>\"%s\" echo %s\r\necho {\"schema\":\"fake.activation.v1\",\"ok\":true}\r\n", orderPath, marker)
+		err := os.WriteFile(path, []byte(body), 0o755)
+		require.NoError(t, err)
+
+		return path
+	}
+	path := filepath.Join(dir, marker+"-ds")
+	body := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' '%s' >> '%s'\nprintf '%%s\\n' '{\"schema\":\"fake.activation.v1\",\"ok\":true}'\n", marker, orderPath)
+	err := os.WriteFile(path, []byte(body), 0o755)
+	require.NoError(t, err)
+
 	return path
 }

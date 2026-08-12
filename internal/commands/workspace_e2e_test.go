@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWorkspaceEAGSTGEndToEndWorkflow(t *testing.T) {
@@ -14,59 +17,60 @@ func TestWorkspaceEAGSTGEndToEndWorkflow(t *testing.T) {
 	workspace := runWorkspaceInitJSON(t, root)
 	change := runChangeCreateJSON(t, "Customer export across frontend/backend", root, "backend,frontend,database,prefect")
 
-	for _, path := range []string{
-		filepath.Join(root, "devspecs", "workspace.yaml"),
-		filepath.Join(root, "devspecs", "workspace.md"),
-		change.ChangePath,
-	} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("expected workspace artifact %s: %v", path, err)
+	{
+		path := filepath.Join(root, "devspecs", "workspace.yaml")
+
+		{
+			_, err := os.Stat(path)
+			require.NoError(t, err,
+				"expected workspace artifact %s: %v", path, err)
 		}
+
 	}
-	if workspace.WorkspaceRoot != root {
-		t.Fatalf("workspace root = %q, want %q", workspace.WorkspaceRoot, root)
+	{
+		path := filepath.Join(root, "devspecs", "workspace.md")
+
+		{
+			_, err := os.Stat(path)
+			require.NoError(t, err,
+				"expected workspace artifact %s: %v", path, err)
+		}
+
+	}
+	{
+		path := change.ChangePath
+
+		{
+			_, err := os.Stat(path)
+			require.NoError(t, err,
+				"expected workspace artifact %s: %v", path, err)
+		}
+
 	}
 
-	slices := map[string]sliceCreateOutput{
-		"backend":  runSliceCreateJSON(t, root, change.ChangeID, "backend", "Backend API"),
-		"frontend": runSliceCreateJSON(t, root, change.ChangeID, "frontend", "Frontend UI"),
-		"database": runSliceCreateJSON(t, root, change.ChangeID, "database", "Database check"),
-		"prefect":  runSliceCreateJSON(t, root, change.ChangeID, "prefect", "Prefect check"),
-	}
-	for alias, out := range slices {
-		if !strings.HasPrefix(out.TaskWorkspace, filepath.Join(out.RepoRoot, "devspecs", "tasks", out.TaskID)) {
-			t.Fatalf("%s task workspace = %q, want under %q", alias, out.TaskWorkspace, out.RepoRoot)
-		}
-		if _, err := os.Stat(filepath.Join(root, "devspecs", "tasks", out.TaskID)); !os.IsNotExist(err) {
-			t.Fatalf("%s task unexpectedly written under umbrella root: %v", alias, err)
-		}
-		manifestBody := mustReadFile(t, out.ManifestPath)
-		for _, want := range []string{
-			`"workspace_id": "eag-stg"`,
-			`"parent_change": "EAG-C001"`,
-			`"repo_alias": "` + alias + `"`,
-		} {
-			if !strings.Contains(manifestBody, want) {
-				t.Fatalf("%s manifest missing %q:\n%s", alias, want, manifestBody)
-			}
-		}
-	}
+	assert.Equal(t, root, workspace.WorkspaceRoot,
+		"workspace root = %q, want %q", workspace.WorkspaceRoot, root)
 
-	backend := slices["backend"]
+	backend := runSliceCreateJSON(t, root, change.ChangeID, "backend", "Backend API")
+	frontend := runSliceCreateJSON(t, root, change.ChangeID, "frontend", "Frontend UI")
+	database := runSliceCreateJSON(t, root, change.ChangeID, "database", "Database check")
+	prefect := runSliceCreateJSON(t, root, change.ChangeID, "prefect", "Prefect check")
+	assertWorkspaceSlice(t, root, "backend", backend)
+	assertWorkspaceSlice(t, root, "frontend", frontend)
+	assertWorkspaceSlice(t, root, "database", database)
+	assertWorkspaceSlice(t, root, "prefect", prefect)
+
 	show := runTaskShowJSON(t, backend.TaskID, "--repo", backend.RepoRoot, "--json")
-	if show.WorkspaceID != "eag-stg" || show.ParentChange != change.ChangeID || show.RepoAlias != "backend" {
-		t.Fatalf("task show workspace link = %#v", show)
-	}
+	assert.Equal(t, "eag-stg", show.WorkspaceID, "task show workspace link = %#v", show)
+	assert.Equal(t, change.ChangeID, show.ParentChange, "task show workspace link = %#v", show)
+	assert.Equal(t, "backend", show.RepoAlias, "task show workspace link = %#v", show)
+
 	apply, err := runApplyJSON(t, []string{backend.TaskID, "--repo", backend.RepoRoot, "--json"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if apply.TaskID != backend.TaskID || apply.Target != backend.Target {
-		t.Fatalf("apply output = %#v", apply)
-	}
-	if !strings.Contains(apply.Prompt, "ds task checkpoint "+backend.TaskID+" --target "+backend.Target+" --repo ") {
-		t.Fatalf("apply prompt missing repo-aware checkpoint command:\n%s", apply.Prompt)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, backend.TaskID, apply.TaskID, "apply output = %#v", apply)
+	assert.Equal(t, backend.Target, apply.Target, "apply output = %#v", apply)
+	assert.Contains(t, apply.Prompt, "ds task checkpoint "+backend.TaskID+" --target "+backend.Target+" --repo ",
+		"apply prompt missing repo-aware checkpoint command:\n%s", apply.Prompt)
 
 	runTaskCommand(t, "checkpoint", backend.TaskID,
 		"--repo", backend.RepoRoot,
@@ -78,24 +82,34 @@ func TestWorkspaceEAGSTGEndToEndWorkflow(t *testing.T) {
 		"--json",
 	)
 	trace := runTraceJSON(t, change.ChangeID, "--workspace", root, "--json")
-	if trace.Status != traceStatusIncomplete || len(trace.Slices) != 4 {
-		t.Fatalf("trace after one completed slice = %#v", trace)
-	}
+	assert.Equal(t, traceStatusIncomplete, trace.Status, "trace after one completed slice = %#v", trace)
+	require.Len(t, trace.Slices, 4, "trace after one completed slice = %#v", trace)
 
-	for _, alias := range []string{"frontend", "database", "prefect"} {
-		out := slices[alias]
-		runTaskCommand(t, "decide", out.TaskID,
-			"--repo", out.RepoRoot,
-			"--target", out.Target,
-			"--decision", "block",
-			"--index=false",
-			"--json",
-		)
-	}
+	runTaskCommand(t, "decide", frontend.TaskID,
+		"--repo", frontend.RepoRoot,
+		"--target", frontend.Target,
+		"--decision", "block",
+		"--index=false",
+		"--json",
+	)
+	runTaskCommand(t, "decide", database.TaskID,
+		"--repo", database.RepoRoot,
+		"--target", database.Target,
+		"--decision", "block",
+		"--index=false",
+		"--json",
+	)
+	runTaskCommand(t, "decide", prefect.TaskID,
+		"--repo", prefect.RepoRoot,
+		"--target", prefect.Target,
+		"--decision", "block",
+		"--index=false",
+		"--json",
+	)
+
 	trace = runTraceJSON(t, change.ChangeID, "--workspace", root, "--json")
-	if trace.Status != traceStatusComplete {
-		t.Fatalf("trace status after required repos completed or ruled out = %q, trace = %#v", trace.Status, trace)
-	}
+	assert.Equal(t, traceStatusComplete, trace.Status,
+		"trace status after required repos completed or ruled out = %q, trace = %#v", trace.Status, trace)
 
 	duplicate := NewWorkspaceCmd()
 	duplicate.SetArgs([]string{
@@ -108,23 +122,37 @@ func TestWorkspaceEAGSTGEndToEndWorkflow(t *testing.T) {
 		"--json",
 	})
 	duplicate.SetOut(&bytes.Buffer{})
-	if err := duplicate.Execute(); err == nil || !strings.Contains(err.Error(), "task workspace already exists") {
-		t.Fatalf("duplicate slice create error = %v, want clear existing workspace error", err)
+	err = duplicate.Execute()
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "task workspace already exists")
+	{
+
+		err := os.Chdir(backend.RepoRoot)
+		require.NoError(t, err)
 	}
 
-	if err := os.Chdir(backend.RepoRoot); err != nil {
-		t.Fatal(err)
-	}
 	plain := runTaskQuickJSON(t, "local-fix", "local fix")
-	if !strings.HasPrefix(plain.Workspace, filepath.Join(backend.RepoRoot, "devspecs", "tasks", plain.TaskID)) {
-		t.Fatalf("plain task workspace = %q, want under backend repo", plain.Workspace)
-	}
+	assert.True(t, strings.HasPrefix(plain.Workspace, filepath.Join(backend.RepoRoot, "devspecs", "tasks", plain.TaskID)),
+		"plain task workspace = %q, want under backend repo", plain.Workspace)
+
 	plainManifest := mustReadFile(t, plain.ManifestPath)
-	for _, unexpected := range []string{"workspace_id", "parent_change", "repo_alias"} {
-		if strings.Contains(plainManifest, unexpected) {
-			t.Fatalf("plain task manifest unexpectedly contains %q:\n%s", unexpected, plainManifest)
-		}
-	}
+	assert.NotContains(t, plainManifest, "workspace_id",
+		"plain task manifest unexpectedly contains %q:\n%s", "workspace_id", plainManifest)
+	assert.NotContains(t, plainManifest, "parent_change",
+		"plain task manifest unexpectedly contains %q:\n%s", "parent_change", plainManifest)
+	assert.NotContains(t, plainManifest, "repo_alias",
+		"plain task manifest unexpectedly contains %q:\n%s", "repo_alias", plainManifest)
+
+}
+
+func assertWorkspaceSlice(t *testing.T, root, alias string, out sliceCreateOutput) {
+	t.Helper()
+	assert.True(t, strings.HasPrefix(out.TaskWorkspace, filepath.Join(out.RepoRoot, "devspecs", "tasks", out.TaskID)))
+	assert.NoFileExists(t, filepath.Join(root, "devspecs", "tasks", out.TaskID))
+	manifestBody := mustReadFile(t, out.ManifestPath)
+	assert.Contains(t, manifestBody, `"workspace_id": "eag-stg"`)
+	assert.Contains(t, manifestBody, `"parent_change": "EAG-C001"`)
+	assert.Contains(t, manifestBody, `"repo_alias": "`+alias+`"`)
 }
 
 func runTaskShowJSON(t *testing.T, args ...string) taskTargetOutput {
@@ -133,13 +161,18 @@ func runTaskShowJSON(t *testing.T, args ...string) taskTargetOutput {
 	cmd.SetArgs(append([]string{"show"}, args...))
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var out taskTargetOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("task show json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoError(t, err,
+			"task show json: %v\n%s", err, buf.String())
 	}
+
 	return out
 }
 
@@ -156,12 +189,17 @@ func runTaskQuickJSON(t *testing.T, id, query string) taskStartOutput {
 	})
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
+	{
+		err := cmd.Execute()
+		require.NoError(t, err)
 	}
+
 	var out taskStartOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("task quick json: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &out)
+		require.NoError(t, err,
+			"task quick json: %v\n%s", err, buf.String())
 	}
+
 	return out
 }

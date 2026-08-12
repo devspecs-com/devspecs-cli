@@ -1,9 +1,9 @@
-.PHONY: build test lint cover cover-check snapshot clean hooks
+.PHONY: build test test-policy lint cover cover-check snapshot clean hooks
 
 BINARY := ds
 MODULE := github.com/devspecs-com/devspecs-cli
 VERSION_PKG := $(MODULE)/internal/version
-COVERAGE_FLOOR ?= 70.0
+COVERAGE_FLOOR ?= 80.0
 
 LDFLAGS := -s -w \
 	-X $(VERSION_PKG).Version=dev \
@@ -13,10 +13,17 @@ LDFLAGS := -s -w \
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/ds
 
-RACE := $(shell go env CGO_ENABLED 2>/dev/null | grep -q 1 && echo "-race")
+ifeq ($(shell go env CGO_ENABLED),1)
+RACE := -race
+else
+RACE :=
+endif
 
 test:
 	go test $(RACE) -count=1 ./...
+
+test-policy:
+	go run ./scripts/ci/check-test-assertions
 
 lint:
 	go vet ./...
@@ -32,12 +39,10 @@ cover:
 	go test $(RACE) -coverprofile coverage.out ./...
 	go tool cover -func coverage.out
 
-# Aggregate statement coverage across ./... (current baseline ~75%). Per-package floors vary.
+# Aggregate statement coverage across ./... using exact profile counts. Per-package floors vary.
 cover-check:
 	go test $(RACE) -coverprofile coverage.out -covermode atomic ./...
-	@TOTAL=$$(go tool cover -func coverage.out | awk '/^total:/ { gsub(/%/,"",$$NF); print $$NF }'); \
-	awk -v t="$$TOTAL" -v floor="$(COVERAGE_FLOOR)" 'BEGIN{ exit !(t+0 >= floor+0) }' || { echo "total coverage $$TOTAL% is below $(COVERAGE_FLOOR)%"; exit 1; }; \
-	echo "total coverage $$TOTAL% (floor $(COVERAGE_FLOOR)%)"
+	go run ./scripts/ci/check-coverage --profile coverage.out --floor "$(COVERAGE_FLOOR)"
 
 snapshot:
 	goreleaser release --snapshot --clean

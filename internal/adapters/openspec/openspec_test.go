@@ -11,6 +11,8 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/todoparse"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/format"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func setupOpenSpecRepo(t *testing.T) string {
@@ -18,35 +20,80 @@ func setupOpenSpecRepo(t *testing.T) string {
 	tmp := t.TempDir()
 
 	changeDir := filepath.Join(tmp, "openspec", "changes", "add-sso")
-	os.MkdirAll(changeDir, 0o755)
+	require.NoError(t, os.MkdirAll(changeDir, 0o755))
 
 	proposal := "# Add SSO Login\n\n## Acceptance Criteria\n\n- [ ] Users can login with Google\n- [ ] Users can login with GitHub\n\n## Design\n\nUse OAuth2 flow.\n"
-	os.WriteFile(filepath.Join(changeDir, "proposal.md"), []byte(proposal), 0o644)
+	require.NoError(t, os.WriteFile(filepath.Join(changeDir, "proposal.md"), []byte(proposal), 0o644))
 
 	tasks := "# Tasks\n\n- [ ] Implement OAuth2 flow\n- [ ] Add Google provider\n- [x] Design database schema\n"
-	os.WriteFile(filepath.Join(changeDir, "tasks.md"), []byte(tasks), 0o644)
+	require.NoError(t, os.WriteFile(filepath.Join(changeDir, "tasks.md"), []byte(tasks), 0o644))
 
-	os.WriteFile(filepath.Join(changeDir, "design.md"), []byte("# Design\nDetails here.\n"), 0o644)
+	require.NoError(t, os.WriteFile(filepath.Join(changeDir, "design.md"), []byte("# Design\nDetails here.\n"), 0o644))
 
 	return tmp
+}
+
+func TestAdapter_Name_ReturnsOpenSpec(t *testing.T) {
+	adapter := &Adapter{}
+
+	name := adapter.Name()
+
+	assert.Equal(t, "openspec", name)
+}
+
+func TestParse_WithCollectionCandidate_SummarizesActiveArchivedAndCapabilityEntries(t *testing.T) {
+	root := t.TempDir()
+	baseDir := filepath.Join(root, "openspec")
+	require.NoError(t, os.MkdirAll(filepath.Join(baseDir, "changes", "add-login"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(baseDir, "changes", "archive", "retire-passwords"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(baseDir, "specs", "authentication"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(baseDir, "specs", "authentication", "spec.md"), []byte("# Authentication\n"), 0o644))
+	adapter := &Adapter{}
+	candidate := adapters.Candidate{
+		PrimaryPath: baseDir, RelPath: "openspec", ArtifactScope: scopeCollection, Role: roleCollection,
+	}
+
+	artifact, sources, parsed, err := adapter.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, config.SubtypeOpenspecCollection, artifact.Subtype)
+	assert.Equal(t, 2, artifact.Extracted["openspec_change_count"])
+	assert.Equal(t, 1, artifact.Extracted["openspec_capability_count"])
+	assert.Contains(t, artifact.Body, "## Active Changes\n\n- add-login")
+	assert.Contains(t, artifact.Body, "## Archived Changes\n\n- retire-passwords")
+	assert.Contains(t, artifact.Body, "## Capability Specs\n\n- specs/authentication/spec.md")
+	require.Len(t, sources, 1)
+	assert.Equal(t, "openspec", sources[0].Path)
+	assert.Empty(t, parsed.Todos)
+}
+
+func TestParse_WithEmptyCollectionCandidate_RendersNoneForEveryCollection(t *testing.T) {
+	baseDir := filepath.Join(t.TempDir(), "openspec")
+	require.NoError(t, os.MkdirAll(baseDir, 0o755))
+	adapter := &Adapter{}
+	candidate := adapters.Candidate{
+		PrimaryPath: baseDir, RelPath: "openspec", ArtifactScope: scopeCollection, Role: roleCollection,
+	}
+
+	artifact, _, _, err := adapter.Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, 3, strings.Count(artifact.Body, "- none"))
 }
 
 func TestOpenSpec_ProposalDetected(t *testing.T) {
 	tmp := setupOpenSpecRepo(t)
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), tmp, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 5 {
-		t.Fatalf("expected 5 candidates, got %d", len(candidates))
-	}
-	if candidates[0].AdapterName != "openspec" {
-		t.Errorf("expected adapter 'openspec', got %q", candidates[0].AdapterName)
-	}
-	if candidates[0].ArtifactScope != scopeCollection || candidates[1].ArtifactScope != scopeBundle {
-		t.Fatalf("expected collection then bundle candidates, got %#v", candidates[:2])
-	}
+	require.NoError(t, err)
+
+	require.Len(t, candidates, 5,
+		"expected 5 candidates, got %d", len(candidates))
+	assert.Equal(t, "openspec", candidates[0].AdapterName,
+		"expected adapter 'openspec', got %q", candidates[0].AdapterName)
+	assert.Equal(t, scopeCollection, candidates[0].ArtifactScope)
+	assert.Equal(t, scopeBundle, candidates[1].ArtifactScope)
+
 }
 
 func TestOpenSpec_ParseExtractsTitleAndCriteria(t *testing.T) {
@@ -60,42 +107,31 @@ func TestOpenSpec_ParseExtractsTitleAndCriteria(t *testing.T) {
 		RelPath:     relPath,
 		AdapterName: "openspec",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if art.Title != "Add SSO Login" {
-		t.Errorf("title: want 'Add SSO Login', got %q", art.Title)
-	}
-	if art.Kind != "spec" || art.Subtype != config.SubtypeOpenspecChild {
-		t.Errorf("kind/subtype: want spec/%s, got %q/%q", config.SubtypeOpenspecChild, art.Kind, art.Subtype)
-	}
-	if art.Status != "proposed" {
-		t.Errorf("status: want 'proposed', got %q", art.Status)
-	}
-	if len(pr.Criteria) != 2 {
-		t.Errorf("expected 2 criteria checklists, got %d", len(pr.Criteria))
-	}
-	for _, c := range pr.Criteria {
-		if c.CriteriaKind != todoparse.KindAcceptance {
-			t.Errorf("criteria kind: want %q, got %q", todoparse.KindAcceptance, c.CriteriaKind)
-		}
-	}
-	if len(pr.Todos) != 0 {
-		t.Errorf("proposal should not duplicate tasks.md todos, got %d", len(pr.Todos))
-	}
-	if len(sources) != 1 {
-		t.Errorf("expected 1 source, got %d", len(sources))
-	}
-	if art.FormatProfile != format.ProfileOpenspec || sources[0].FormatProfile != format.ProfileOpenspec {
-		t.Errorf("format_profile: want openspec, art=%q src=%q", art.FormatProfile, sources[0].FormatProfile)
-	}
+	require.NoError(t, err)
+
+	assert.Equal(t, "Add SSO Login", art.Title,
+		"title: want 'Add SSO Login', got %q", art.Title)
+	assert.Equal(t, "spec", art.Kind)
+	assert.Equal(t, config.SubtypeOpenspecChild, art.Subtype)
+	assert.Equal(t, "proposed", art.Status,
+		"status: want 'proposed', got %q", art.Status)
+	require.Len(t, pr.Criteria, 2,
+		"expected 2 criteria checklists, got %d", len(pr.Criteria))
+	assert.Equal(t, todoparse.KindAcceptance, pr.Criteria[0].CriteriaKind)
+	assert.Equal(t, todoparse.KindAcceptance, pr.Criteria[1].CriteriaKind)
+	assert.Empty(t, pr.Todos,
+		"proposal should not duplicate tasks.md todos, got %d", len(pr.Todos))
+	require.Len(t, sources, 1,
+		"expected 1 source, got %d", len(sources))
+	assert.Equal(t, format.ProfileOpenspec, art.FormatProfile)
+	assert.Equal(t, format.ProfileOpenspec, sources[0].FormatProfile)
+
 	wantLayout := filepath.ToSlash(filepath.Join("openspec", "changes", "add-sso"))
-	if art.LayoutGroup != wantLayout || sources[0].LayoutGroup != wantLayout {
-		t.Errorf("layout_group: want %q, art=%q src=%q", wantLayout, art.LayoutGroup, sources[0].LayoutGroup)
-	}
-	if art.Extracted["artifact_scope"] != scopeFile || art.Extracted["openspec_role"] != roleProposal {
-		t.Fatalf("missing OpenSpec extracted scope/role: %#v", art.Extracted)
-	}
+	assert.Equal(t, wantLayout, art.LayoutGroup)
+	assert.Equal(t, wantLayout, sources[0].LayoutGroup)
+	assert.Equal(t, scopeFile, art.Extracted["artifact_scope"])
+	assert.Equal(t, roleProposal, art.Extracted["openspec_role"])
+
 }
 
 func TestOpenSpec_ParseChangeBundleAggregatesChildren(t *testing.T) {
@@ -110,27 +146,21 @@ func TestOpenSpec_ParseChangeBundleAggregatesChildren(t *testing.T) {
 		ArtifactScope: scopeBundle,
 		Role:          roleChangeBundle,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if art.Subtype != config.SubtypeOpenspecChangeBundle {
-		t.Fatalf("subtype = %q", art.Subtype)
-	}
-	if art.Title != "Add SSO Login" {
-		t.Fatalf("bundle title = %q", art.Title)
-	}
-	if !strings.Contains(art.Body, "## Proposal") || !strings.Contains(art.Body, "## Tasks") {
-		t.Fatalf("bundle body missing child sections:\n%s", art.Body)
-	}
-	if len(sources) != 4 {
-		t.Fatalf("sources = %d, want bundle + 3 children", len(sources))
-	}
-	if len(pr.Todos) != 3 || len(pr.Criteria) != 2 {
-		t.Fatalf("parse result todos=%d criteria=%d, want 3/2", len(pr.Todos), len(pr.Criteria))
-	}
-	if art.Extracted["artifact_scope"] != scopeBundle || art.Extracted["openspec_role"] != roleChangeBundle {
-		t.Fatalf("missing bundle extracted metadata: %#v", art.Extracted)
-	}
+	require.NoError(t, err)
+
+	require.Equal(t, config.SubtypeOpenspecChangeBundle, art.Subtype,
+		"subtype = %q", art.Subtype)
+	require.Equal(t, "Add SSO Login", art.Title,
+		"bundle title = %q", art.Title)
+	assert.Contains(t, art.Body, "## Proposal")
+	assert.Contains(t, art.Body, "## Tasks")
+	require.Len(t, sources, 4,
+		"sources = %d, want bundle + 3 children", len(sources))
+	require.Len(t, pr.Todos, 3)
+	require.Len(t, pr.Criteria, 2)
+	assert.Equal(t, scopeBundle, art.Extracted["artifact_scope"])
+	assert.Equal(t, roleChangeBundle, art.Extracted["openspec_role"])
+
 }
 
 func TestOpenSpec_TasksChildFeedsTodoTable(t *testing.T) {
@@ -144,126 +174,128 @@ func TestOpenSpec_TasksChildFeedsTodoTable(t *testing.T) {
 		RelPath:     relPath,
 		AdapterName: "openspec",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pr.Todos) != 3 {
-		t.Fatalf("expected 3 todos from tasks.md, got %d", len(pr.Todos))
-	}
-	if len(pr.Criteria) != 0 {
-		t.Fatalf("expected 0 criteria from tasks.md, got %d", len(pr.Criteria))
-	}
+	require.NoError(t, err)
+
+	require.Len(t, pr.Todos, 3,
+		"expected 3 todos from tasks.md, got %d", len(pr.Todos))
+	require.Empty(t, pr.Criteria,
+		"expected 0 criteria from tasks.md, got %d", len(pr.Criteria))
+
 	todos := pr.Todos
-	if todos[0].Text != "Implement OAuth2 flow" || todos[0].Done {
-		t.Errorf("todo 0 wrong: %+v", todos[0])
-	}
-	if todos[2].Text != "Design database schema" || !todos[2].Done {
-		t.Errorf("todo 2 wrong: %+v", todos[2])
-	}
+	assert.Equal(t, "Implement OAuth2 flow", todos[0].Text)
+	assert.False(t, todos[0].Done)
+	assert.Equal(t, "Design database schema", todos[2].Text)
+	assert.True(t, todos[2].Done)
+
 }
 
-func TestOpenSpec_IdentityStableAcrossSiblingChanges(t *testing.T) {
+func TestOpenSpec_WithChangedSibling_ReturnsPathBasedIdentity(t *testing.T) {
 	tmp := setupOpenSpecRepo(t)
 	proposalPath := filepath.Join(tmp, "openspec", "changes", "add-sso", "proposal.md")
 	relPath := "openspec/changes/add-sso/proposal.md"
-
-	a := &Adapter{}
-	art1, _, _, _ := a.Parse(context.Background(), adapters.Candidate{
-		PrimaryPath: proposalPath,
-		RelPath:     relPath,
-		AdapterName: "openspec",
-	})
-
-	// Modify design.md (sibling)
 	designPath := filepath.Join(tmp, "openspec", "changes", "add-sso", "design.md")
-	os.WriteFile(designPath, []byte("# Updated Design\nNew details.\n"), 0o644)
+	require.NoError(t, os.WriteFile(designPath, []byte("# Updated Design\nNew details.\n"), 0o644))
+	a := &Adapter{}
 
-	art2, _, _, _ := a.Parse(context.Background(), adapters.Candidate{
+	artifact, _, _, err := a.Parse(context.Background(), adapters.Candidate{
 		PrimaryPath: proposalPath,
 		RelPath:     relPath,
 		AdapterName: "openspec",
 	})
 
-	if art1.SourceIdentity != art2.SourceIdentity {
-		t.Errorf("identity changed when sibling modified: %q vs %q", art1.SourceIdentity, art2.SourceIdentity)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "openspec/changes/add-sso/proposal.md|openspec", artifact.SourceIdentity)
 }
 
 func TestOpenSpec_ConfigCustomPath(t *testing.T) {
 	tmp := t.TempDir()
 	changeDir := filepath.Join(tmp, "custom", "changes", "test")
-	os.MkdirAll(changeDir, 0o755)
-	os.WriteFile(filepath.Join(changeDir, "proposal.md"), []byte("# Test\n"), 0o644)
+	require.NoError(t, os.MkdirAll(changeDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(changeDir, "proposal.md"), []byte("# Test\n"), 0o644))
 
 	cfg := &config.RepoConfig{Sources: []config.SourceConfig{{Type: "openspec", Path: "custom"}}}
 	a := &Adapter{}
 	candidates, err := a.Discover(context.Background(), tmp, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(candidates) != 3 {
-		t.Fatalf("expected 3 candidates, got %d", len(candidates))
-	}
+	require.NoError(t, err)
+
+	require.Len(t, candidates, 3,
+		"expected 3 candidates, got %d", len(candidates))
+
 }
 
-func TestOpenSpec_Parse_inferStatusVariants(t *testing.T) {
-	tmp := t.TempDir()
-	changeDir := filepath.Join(tmp, "openspec", "changes", "status-test")
-	if err := os.MkdirAll(changeDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	prop := filepath.Join(changeDir, "proposal.md")
-	a := &Adapter{}
-	cases := []struct {
-		content string
-		want    string
-	}{
-		{"# Title\n\nstatus: accepted\n", "approved"},
-		{"# Title\n\nstatus: approved\n", "approved"},
-		{"# Title\n\nstatus: rejected\n", "rejected"},
-		{"# Title\n\nstatus: implementing\n", "implementing"},
-		{"# Title\n\nstatus: implemented\n", "implemented"},
-		{"# Title\n\nPlain body.\n", "proposed"},
-	}
-	for _, tc := range cases {
-		if err := os.WriteFile(prop, []byte(tc.content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		art, _, _, err := a.Parse(context.Background(), adapters.Candidate{
-			PrimaryPath: prop,
-			RelPath:     "openspec/changes/status-test/proposal.md",
-			AdapterName: "openspec",
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if art.Status != tc.want {
-			t.Fatalf("status want %q got %q for %q", tc.want, art.Status, tc.content)
-		}
-	}
+func TestOpenSpec_ParseAcceptedStatus_ReturnsApproved(t *testing.T) {
+	candidate := writeOpenSpecStatusFixture(t, "# Title\n\nstatus: accepted\n")
+
+	artifact, _, _, err := (&Adapter{}).Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, "approved", artifact.Status)
+}
+
+func TestOpenSpec_ParseApprovedStatus_ReturnsApproved(t *testing.T) {
+	candidate := writeOpenSpecStatusFixture(t, "# Title\n\nstatus: approved\n")
+
+	artifact, _, _, err := (&Adapter{}).Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, "approved", artifact.Status)
+}
+
+func TestOpenSpec_ParseRejectedStatus_ReturnsRejected(t *testing.T) {
+	candidate := writeOpenSpecStatusFixture(t, "# Title\n\nstatus: rejected\n")
+
+	artifact, _, _, err := (&Adapter{}).Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, "rejected", artifact.Status)
+}
+
+func TestOpenSpec_ParseImplementingStatus_ReturnsImplementing(t *testing.T) {
+	candidate := writeOpenSpecStatusFixture(t, "# Title\n\nstatus: implementing\n")
+
+	artifact, _, _, err := (&Adapter{}).Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, "implementing", artifact.Status)
+}
+
+func TestOpenSpec_ParseImplementedStatus_ReturnsImplemented(t *testing.T) {
+	candidate := writeOpenSpecStatusFixture(t, "# Title\n\nstatus: implemented\n")
+
+	artifact, _, _, err := (&Adapter{}).Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, "implemented", artifact.Status)
+}
+
+func TestOpenSpec_ParseWithoutStatus_ReturnsProposed(t *testing.T) {
+	candidate := writeOpenSpecStatusFixture(t, "# Title\n\nPlain body.\n")
+
+	artifact, _, _, err := (&Adapter{}).Parse(context.Background(), candidate)
+
+	require.NoError(t, err)
+	assert.Equal(t, "proposed", artifact.Status)
 }
 
 func TestOpenSpec_Parse_titleHumanizeFallback(t *testing.T) {
 	tmp := t.TempDir()
 	changeDir := filepath.Join(tmp, "openspec", "changes", "my-change-id")
-	if err := os.MkdirAll(changeDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(changeDir, "proposal.md"), []byte("No heading at top.\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+
+	require.NoError(t, os.MkdirAll(changeDir, 0o755))
+
+	require.NoError(t, os.WriteFile(filepath.Join(changeDir, "proposal.md"), []byte("No heading at top.\n"), 0o644))
+
 	a := &Adapter{}
 	art, _, _, err := a.Parse(context.Background(), adapters.Candidate{
 		PrimaryPath: filepath.Join(changeDir, "proposal.md"),
 		RelPath:     "openspec/changes/my-change-id/proposal.md",
 		AdapterName: "openspec",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if art.Title == "" {
-		t.Fatal("expected humanized title from change id")
-	}
+	require.NoError(t, err)
+
+	require.NotEmpty(t, art.Title,
+		"expected humanized title from change id")
+
 }
 
 func TestOpenSpec_CapabilitySpecPathStaysCanonical(t *testing.T) {
@@ -279,18 +311,15 @@ func TestOpenSpec_CapabilitySpecPathStaysCanonical(t *testing.T) {
 		ArtifactScope: scopeFile,
 		Role:          roleCapabilitySpec,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if art.Subtype != config.SubtypeOpenspecCapabilitySpec {
-		t.Fatalf("subtype = %q, want %q", art.Subtype, config.SubtypeOpenspecCapabilitySpec)
-	}
-	if art.Extracted["openspec_role"] != roleCapabilitySpec {
-		t.Fatalf("openspec_role = %#v, want %q", art.Extracted["openspec_role"], roleCapabilitySpec)
-	}
-	if art.Extracted["openspec_role_mismatch"] != nil {
-		t.Fatalf("unexpected role mismatch metadata: %#v", art.Extracted)
-	}
+	require.NoError(t, err)
+
+	require.Equal(t, config.SubtypeOpenspecCapabilitySpec, art.Subtype,
+		"subtype = %q, want %q", art.Subtype, config.SubtypeOpenspecCapabilitySpec)
+	require.Equal(t, roleCapabilitySpec, art.Extracted["openspec_role"],
+		"openspec_role = %#v, want %q", art.Extracted["openspec_role"], roleCapabilitySpec)
+	require.Nil(t, art.Extracted["openspec_role_mismatch"],
+		"unexpected role mismatch metadata: %#v", art.Extracted)
+
 }
 
 func TestOpenSpec_CapabilitySpecWithDeltaHeadingReassigned(t *testing.T) {
@@ -306,21 +335,17 @@ func TestOpenSpec_CapabilitySpecWithDeltaHeadingReassigned(t *testing.T) {
 		ArtifactScope: scopeFile,
 		Role:          roleCapabilitySpec,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if art.Subtype != config.SubtypeOpenspecChild {
-		t.Fatalf("subtype = %q, want %q", art.Subtype, config.SubtypeOpenspecChild)
-	}
-	if art.Extracted["openspec_role"] != roleSpecDelta {
-		t.Fatalf("openspec_role = %#v, want %q", art.Extracted["openspec_role"], roleSpecDelta)
-	}
-	if art.Extracted["openspec_path_role"] != roleCapabilitySpec {
-		t.Fatalf("openspec_path_role = %#v, want %q", art.Extracted["openspec_path_role"], roleCapabilitySpec)
-	}
-	if art.Extracted["openspec_role_mismatch"] != openSpecRoleMismatchCapabilityDelta {
-		t.Fatalf("openspec_role_mismatch = %#v, want %q", art.Extracted["openspec_role_mismatch"], openSpecRoleMismatchCapabilityDelta)
-	}
+	require.NoError(t, err)
+
+	require.Equal(t, config.SubtypeOpenspecChild, art.Subtype,
+		"subtype = %q, want %q", art.Subtype, config.SubtypeOpenspecChild)
+	require.Equal(t, roleSpecDelta, art.Extracted["openspec_role"],
+		"openspec_role = %#v, want %q", art.Extracted["openspec_role"], roleSpecDelta)
+	require.Equal(t, roleCapabilitySpec, art.Extracted["openspec_path_role"],
+		"openspec_path_role = %#v, want %q", art.Extracted["openspec_path_role"], roleCapabilitySpec)
+	require.Equal(t, openSpecRoleMismatchCapabilityDelta, art.Extracted["openspec_role_mismatch"],
+		"openspec_role_mismatch = %#v, want %q", art.Extracted["openspec_role_mismatch"], openSpecRoleMismatchCapabilityDelta)
+
 }
 
 func TestOpenSpec_DeltaHeadingInsideFenceDoesNotReassign(t *testing.T) {
@@ -336,15 +361,13 @@ func TestOpenSpec_DeltaHeadingInsideFenceDoesNotReassign(t *testing.T) {
 		ArtifactScope: scopeFile,
 		Role:          roleCapabilitySpec,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if art.Extracted["openspec_role"] != roleCapabilitySpec {
-		t.Fatalf("openspec_role = %#v, want %q", art.Extracted["openspec_role"], roleCapabilitySpec)
-	}
-	if art.Subtype != config.SubtypeOpenspecCapabilitySpec {
-		t.Fatalf("subtype = %q, want %q", art.Subtype, config.SubtypeOpenspecCapabilitySpec)
-	}
+	require.NoError(t, err)
+
+	require.Equal(t, roleCapabilitySpec, art.Extracted["openspec_role"],
+		"openspec_role = %#v, want %q", art.Extracted["openspec_role"], roleCapabilitySpec)
+	require.Equal(t, config.SubtypeOpenspecCapabilitySpec, art.Subtype,
+		"subtype = %q, want %q", art.Subtype, config.SubtypeOpenspecCapabilitySpec)
+
 }
 
 func TestOpenSpec_ChangeSpecPathStaysDeltaWithoutDeltaHeading(t *testing.T) {
@@ -358,25 +381,26 @@ func TestOpenSpec_ChangeSpecPathStaysDeltaWithoutDeltaHeading(t *testing.T) {
 		RelPath:     relPath,
 		AdapterName: "openspec",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if art.Subtype != config.SubtypeOpenspecChild {
-		t.Fatalf("subtype = %q, want %q", art.Subtype, config.SubtypeOpenspecChild)
-	}
-	if art.Extracted["openspec_role"] != roleSpecDelta {
-		t.Fatalf("openspec_role = %#v, want %q", art.Extracted["openspec_role"], roleSpecDelta)
-	}
+	require.NoError(t, err)
+
+	require.Equal(t, config.SubtypeOpenspecChild, art.Subtype,
+		"subtype = %q, want %q", art.Subtype, config.SubtypeOpenspecChild)
+	require.Equal(t, roleSpecDelta, art.Extracted["openspec_role"],
+		"openspec_role = %#v, want %q", art.Extracted["openspec_role"], roleSpecDelta)
+
 }
 
 func writeOpenSpecTestFile(t *testing.T, repoRoot, relPath, content string) string {
 	t.Helper()
 	path := filepath.Join(repoRoot, filepath.FromSlash(relPath))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 	return path
+}
+
+func writeOpenSpecStatusFixture(t *testing.T, content string) adapters.Candidate {
+	t.Helper()
+	root := t.TempDir()
+	path := writeOpenSpecTestFile(t, root, "openspec/changes/status-test/proposal.md", content)
+	return adapters.Candidate{PrimaryPath: path, RelPath: "openspec/changes/status-test/proposal.md", AdapterName: "openspec"}
 }

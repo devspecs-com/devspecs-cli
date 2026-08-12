@@ -7,80 +7,85 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestDetectInstallSourceHomebrew(t *testing.T) {
-	for _, path := range []string{"/opt/homebrew/bin/ds", "/home/linuxbrew/.linuxbrew/bin/ds"} {
-		source, confidence, command, alternatives := detectInstallSource(path)
-		if source != "homebrew" {
-			t.Fatalf("%s source = %q", path, source)
-		}
-		if confidence != "medium" {
-			t.Fatalf("%s confidence = %q", path, confidence)
-		}
-		if command != "brew update && brew upgrade devspecs-com/tap/devspecs" {
-			t.Fatalf("%s command = %q", path, command)
-		}
-		if len(alternatives) != 0 {
-			t.Fatalf("%s alternatives = %#v", path, alternatives)
-		}
-	}
+func TestNewUpdateCmd_ReturnsOfflineSafeCommandSurface(t *testing.T) {
+	cmd := NewUpdateCmd()
+
+	assert.Equal(t, "update", cmd.Use)
+	assert.Contains(t, cmd.Short, "update")
+	assert.NotNil(t, cmd.Flags().Lookup("json"))
+	assert.NotNil(t, cmd.Flags().Lookup("no-check"))
+	assert.NotNil(t, cmd.Flags().Lookup("refresh"))
+}
+
+func TestDetectInstallSource_WithAppleHomebrewPath_ReturnsHomebrewGuidance(t *testing.T) {
+	source, confidence, command, alternatives := detectInstallSource("/opt/homebrew/bin/ds")
+
+	assert.Equal(t, "homebrew", source)
+	assert.Equal(t, "medium", confidence)
+	assert.Equal(t, "brew update && brew upgrade devspecs-com/tap/devspecs", command)
+	assert.Empty(t, alternatives)
+}
+
+func TestDetectInstallSource_WithLinuxbrewPath_ReturnsHomebrewGuidance(t *testing.T) {
+	source, confidence, command, alternatives := detectInstallSource("/home/linuxbrew/.linuxbrew/bin/ds")
+
+	assert.Equal(t, "homebrew", source)
+	assert.Equal(t, "medium", confidence)
+	assert.Equal(t, "brew update && brew upgrade devspecs-com/tap/devspecs", command)
+	assert.Empty(t, alternatives)
 }
 
 func TestDetectInstallSourceUsrLocalBinaryIsManual(t *testing.T) {
 	source, confidence, command, _ := detectInstallSource("/usr/local/bin/ds")
-	if source != "manual or unknown" || confidence != "low" {
-		t.Fatalf("source=%q confidence=%q", source, confidence)
-	}
-	if strings.Contains(command, "brew") || !strings.Contains(command, "install.sh") {
-		t.Fatalf("unexpected manual update guidance: %q", command)
-	}
+	assert.Equal(t, "manual or unknown", source, "source=%q confidence=%q", source, confidence)
+	assert.Equal(t, "low", confidence, "source=%q confidence=%q", source, confidence)
+	assert.NotContains(t, command, "brew", "unexpected manual update guidance: %q", command)
+	assert.Contains(t, command, "install.sh", "unexpected manual update guidance: %q", command)
+
 }
 
-func TestDetectInstallSourceScoop(t *testing.T) {
-	for _, path := range []string{
-		`C:\Users\alice\scoop\apps\devspecs\current\ds.exe`,
-		`C:\Users\alice\scoop\shims\ds.exe`,
-	} {
-		source, _, command, _ := detectInstallSource(path)
-		if source != "scoop" {
-			t.Fatalf("%s source = %q", path, source)
-		}
-		if command != "scoop update devspecs" {
-			t.Fatalf("%s command = %q", path, command)
-		}
-	}
+func TestDetectInstallSource_WithScoopAppPath_ReturnsScoopGuidance(t *testing.T) {
+	source, _, command, _ := detectInstallSource(`C:\Users\alice\scoop\apps\devspecs\current\ds.exe`)
+
+	assert.Equal(t, "scoop", source)
+	assert.Equal(t, "scoop update devspecs", command)
+}
+
+func TestDetectInstallSource_WithScoopShimPath_ReturnsScoopGuidance(t *testing.T) {
+	source, _, command, _ := detectInstallSource(`C:\Users\alice\scoop\shims\ds.exe`)
+
+	assert.Equal(t, "scoop", source)
+	assert.Equal(t, "scoop update devspecs", command)
 }
 
 func TestDetectInstallSourceGoInstall(t *testing.T) {
 	source, _, command, _ := detectInstallSource(`/home/dev/go/bin/ds`)
-	if source != "go install" {
-		t.Fatalf("source = %q", source)
-	}
-	if command != "go install github.com/devspecs-com/devspecs-cli/cmd/ds@latest" {
-		t.Fatalf("command = %q", command)
-	}
+	assert.Equal(t, "go install", source,
+		"source = %q", source)
+	assert.Equal(t, "go install github.com/devspecs-com/devspecs-cli/cmd/ds@latest", command,
+		"command = %q", command)
+
 }
 
 func TestUpdateReportManualIncludesSupportedChannels(t *testing.T) {
 	report := buildUpdateReport(`/tmp/ds`)
-	if report.InstallSource != "manual or unknown" {
-		t.Fatalf("install source = %q", report.InstallSource)
-	}
-	if report.UpdateCommand == "" || !strings.Contains(report.UpdateCommand, "install.sh") {
-		t.Fatalf("update command = %q", report.UpdateCommand)
-	}
-	if !containsUpdateString(report.Alternatives, "scoop update devspecs") {
-		t.Fatalf("expected scoop alternative, got %#v", report.Alternatives)
-	}
-	if report.CanApply {
-		t.Fatal("expected guidance-only update report")
-	}
+	assert.Equal(t, "manual or unknown", report.InstallSource,
+		"install source = %q", report.InstallSource)
+	assert.NotEqual(t, "", report.UpdateCommand, "update command = %q", report.UpdateCommand)
+	assert.Contains(t, report.UpdateCommand, "install.sh", "update command = %q", report.UpdateCommand)
+	assert.True(t, containsUpdateString(report.Alternatives, "scoop update devspecs"),
+		"expected scoop alternative, got %#v", report.Alternatives)
+	assert.False(t, report.CanApply,
+		"expected guidance-only update report")
+
 }
 
 func TestOutputUpdateReportText(t *testing.T) {
@@ -98,21 +103,23 @@ func TestOutputUpdateReportText(t *testing.T) {
 	cmd := &cobra.Command{}
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := outputUpdateReport(cmd, report, false); err != nil {
-		t.Fatal(err)
+	{
+		err := outputUpdateReport(cmd, report, false)
+		require.NoError(t, err)
 	}
+
 	got := buf.String()
-	for _, want := range []string{
-		"DevSpecs update",
-		"Installed version: v1.1.0",
-		"Install source: homebrew",
-		"brew update && brew upgrade devspecs-com/tap/devspecs",
-		"guidance-only",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("output missing %q:\n%s", want, got)
-		}
-	}
+	assert.Contains(t, got, "DevSpecs update",
+		"output missing %q:\n%s", "DevSpecs update", got)
+	assert.Contains(t, got, "Installed version: v1.1.0",
+		"output missing %q:\n%s", "Installed version: v1.1.0", got)
+	assert.Contains(t, got, "Install source: homebrew",
+		"output missing %q:\n%s", "Install source: homebrew", got)
+	assert.Contains(t, got, "brew update && brew upgrade devspecs-com/tap/devspecs",
+		"output missing %q:\n%s", "brew update && brew upgrade devspecs-com/tap/devspecs", got)
+	assert.Contains(t, got, "guidance-only",
+		"output missing %q:\n%s", "guidance-only", got)
+
 }
 
 func TestOutputUpdateReportJSON(t *testing.T) {
@@ -120,40 +127,64 @@ func TestOutputUpdateReportJSON(t *testing.T) {
 	cmd := &cobra.Command{}
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	if err := outputUpdateReport(cmd, report, true); err != nil {
-		t.Fatal(err)
+	{
+		err := outputUpdateReport(cmd, report, true)
+		require.NoError(t, err)
 	}
+
 	var got updateReport
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("invalid JSON: %v\n%s", err, buf.String())
+	{
+		err := json.Unmarshal(buf.Bytes(), &got)
+		require.NoError(t, err,
+			"invalid JSON: %v\n%s", err, buf.String())
 	}
-	if got.InstallSource != "go install" {
-		t.Fatalf("install source = %q", got.InstallSource)
-	}
-	if got.UpdateCommand != "go install github.com/devspecs-com/devspecs-cli/cmd/ds@latest" {
-		t.Fatalf("update command = %q", got.UpdateCommand)
-	}
+	assert.Equal(t, "go install", got.InstallSource,
+		"install source = %q", got.InstallSource)
+	assert.Equal(t, "go install github.com/devspecs-com/devspecs-cli/cmd/ds@latest", got.UpdateCommand,
+		"update command = %q", got.UpdateCommand)
+
 }
 
-func TestClassifyVersionStatus(t *testing.T) {
-	cases := []struct {
-		current string
-		latest  string
-		want    string
-	}{
-		{current: "v1.0.0", latest: "v1.0.1", want: "stale"},
-		{current: "v1.0.1", latest: "v1.0.1", want: "current"},
-		{current: "v1.1.0", latest: "v1.0.1", want: "current"},
-		{current: "dev", latest: "v1.0.1", want: "development"},
-		{current: "v1.1.0-dev", latest: "v1.0.1", want: "development"},
-		{current: "not-a-version", latest: "v1.0.1", want: "unknown"},
-		{current: "v1.0.0", latest: "", want: "unknown"},
-	}
-	for _, tc := range cases {
-		if got := classifyVersionStatus(tc.current, tc.latest); got != tc.want {
-			t.Fatalf("classifyVersionStatus(%q, %q) = %q, want %q", tc.current, tc.latest, got, tc.want)
-		}
-	}
+func TestClassifyVersionStatus_WhenLatestIsNewer_ReturnsStale(t *testing.T) {
+	got := classifyVersionStatus("v1.0.0", "v1.0.1")
+
+	assert.Equal(t, "stale", got)
+}
+
+func TestClassifyVersionStatus_WhenVersionsMatch_ReturnsCurrent(t *testing.T) {
+	got := classifyVersionStatus("v1.0.1", "v1.0.1")
+
+	assert.Equal(t, "current", got)
+}
+
+func TestClassifyVersionStatus_WhenCurrentIsNewer_ReturnsCurrent(t *testing.T) {
+	got := classifyVersionStatus("v1.1.0", "v1.0.1")
+
+	assert.Equal(t, "current", got)
+}
+
+func TestClassifyVersionStatus_WithDevelopmentVersion_ReturnsDevelopment(t *testing.T) {
+	got := classifyVersionStatus("dev", "v1.0.1")
+
+	assert.Equal(t, "development", got)
+}
+
+func TestClassifyVersionStatus_WithDevelopmentSuffix_ReturnsDevelopment(t *testing.T) {
+	got := classifyVersionStatus("v1.1.0-dev", "v1.0.1")
+
+	assert.Equal(t, "development", got)
+}
+
+func TestClassifyVersionStatus_WithInvalidCurrentVersion_ReturnsUnknown(t *testing.T) {
+	got := classifyVersionStatus("not-a-version", "v1.0.1")
+
+	assert.Equal(t, "unknown", got)
+}
+
+func TestClassifyVersionStatus_WithoutLatestVersion_ReturnsUnknown(t *testing.T) {
+	got := classifyVersionStatus("v1.0.0", "")
+
+	assert.Equal(t, "unknown", got)
 }
 
 func TestEnrichUpdateReportUsesFreshCacheWithoutFetcher(t *testing.T) {
@@ -168,25 +199,23 @@ func TestEnrichUpdateReportUsesFreshCacheWithoutFetcher(t *testing.T) {
 
 	report := buildUpdateReport("/opt/homebrew/bin/ds")
 	report.Version = "v1.0.0"
+	fetchCalled := false
+
 	enrichUpdateReportWithLatest(context.Background(), &report, updateCheckOptions{
 		Enabled: true,
 		Now:     now,
 		TTL:     updateCacheTTL,
 		Fetcher: func(context.Context) (string, error) {
-			t.Fatal("fetcher should not run when cache is fresh")
+			fetchCalled = true
 			return "", nil
 		},
 	})
 
-	if report.Latest != "v1.0.1" {
-		t.Fatalf("latest = %q", report.Latest)
-	}
-	if report.LatestSource != "cache" {
-		t.Fatalf("latest source = %q", report.LatestSource)
-	}
-	if report.VersionStatus != "stale" || !report.UpdateAvailable {
-		t.Fatalf("status = %q update_available=%v", report.VersionStatus, report.UpdateAvailable)
-	}
+	assert.False(t, fetchCalled)
+	assert.Equal(t, "v1.0.1", report.Latest)
+	assert.Equal(t, "cache", report.LatestSource)
+	assert.Equal(t, "stale", report.VersionStatus)
+	assert.True(t, report.UpdateAvailable)
 }
 
 func TestEnrichUpdateReportFetchesAndCachesLatest(t *testing.T) {
@@ -204,17 +233,15 @@ func TestEnrichUpdateReportFetchesAndCachesLatest(t *testing.T) {
 			return "v1.0.1", nil
 		},
 	})
+	assert.Equal(t, "v1.0.1", report.Latest, "latest/source = %q/%q", report.Latest, report.LatestSource)
+	assert.Equal(t, "github", report.LatestSource, "latest/source = %q/%q", report.Latest, report.LatestSource)
 
-	if report.Latest != "v1.0.1" || report.LatestSource != "github" {
-		t.Fatalf("latest/source = %q/%q", report.Latest, report.LatestSource)
-	}
 	cached, ok := readUpdateCheckCache(filepath.Join(home, updateCacheFileName))
-	if !ok {
-		t.Fatal("expected cache to be written")
-	}
-	if cached.Latest != "v1.0.1" || cached.CheckedAt != now.Format(time.RFC3339) {
-		t.Fatalf("cache = %#v", cached)
-	}
+	require.True(t, ok,
+		"expected cache to be written")
+	assert.Equal(t, "v1.0.1", cached.Latest, "cache = %#v", cached)
+	assert.Equal(t, now.Format(time.RFC3339), cached.CheckedAt, "cache = %#v", cached)
+
 }
 
 func TestEnrichUpdateReportOfflineGracefulWithoutCache(t *testing.T) {
@@ -229,16 +256,13 @@ func TestEnrichUpdateReportOfflineGracefulWithoutCache(t *testing.T) {
 			return "", errors.New("network unavailable")
 		},
 	})
+	assert.Equal(t, "unknown", report.Latest,
+		"latest = %q", report.Latest)
+	assert.Equal(t, "unknown", report.VersionStatus,
+		"status = %q", report.VersionStatus)
+	assert.Contains(t, report.CheckError, "network unavailable",
+		"check error = %q", report.CheckError)
 
-	if report.Latest != "unknown" {
-		t.Fatalf("latest = %q", report.Latest)
-	}
-	if report.VersionStatus != "unknown" {
-		t.Fatalf("status = %q", report.VersionStatus)
-	}
-	if !strings.Contains(report.CheckError, "network unavailable") {
-		t.Fatalf("check error = %q", report.CheckError)
-	}
 }
 
 func TestEnrichUpdateReportUsesStaleCacheAfterFetchFailure(t *testing.T) {
@@ -261,19 +285,15 @@ func TestEnrichUpdateReportUsesStaleCacheAfterFetchFailure(t *testing.T) {
 			return "", errors.New("offline")
 		},
 	})
+	assert.Equal(t, "v1.0.1", report.Latest,
+		"latest = %q", report.Latest)
+	assert.Equal(t, "stale cache", report.LatestSource,
+		"source = %q", report.LatestSource)
+	assert.NotEqual(t, "", report.CheckError,
+		"expected check error to explain stale cache fallback")
+	assert.Equal(t, "stale", report.VersionStatus,
+		"status = %q", report.VersionStatus)
 
-	if report.Latest != "v1.0.1" {
-		t.Fatalf("latest = %q", report.Latest)
-	}
-	if report.LatestSource != "stale cache" {
-		t.Fatalf("source = %q", report.LatestSource)
-	}
-	if report.CheckError == "" {
-		t.Fatal("expected check error to explain stale cache fallback")
-	}
-	if report.VersionStatus != "stale" {
-		t.Fatalf("status = %q", report.VersionStatus)
-	}
 }
 
 func containsUpdateString(values []string, want string) bool {
@@ -288,13 +308,16 @@ func containsUpdateString(values []string, want string) bool {
 func mustWriteUpdateCheckCache(t *testing.T, path string, cached updateCheckCache) {
 	t.Helper()
 	data, err := json.Marshal(cached)
-	if err != nil {
-		t.Fatal(err)
+	require.NoError(t, err)
+	{
+
+		err := os.MkdirAll(filepath.Dir(path), 0o755)
+		require.NoError(t, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
+	{
+
+		err := os.WriteFile(path, data, 0o644)
+		require.NoError(t, err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
+
 }

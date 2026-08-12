@@ -6,89 +6,39 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestApplyNextEmitsOneSlicePromptWithoutChangingState(t *testing.T) {
+func setupApplyTask(t *testing.T, taskID, series string, slices ...string) string {
+	t.Helper()
 	repoDir := setupTaskCommandRepo(t)
-
-	startCmd := NewTaskCmd()
-	startCmd.SetArgs([]string{
-		"--id", "apply-next-test",
-		"--no-refresh",
-		"--index=false",
-		"--json",
-		"--slice", "first apply slice",
-		"--slice", "second apply slice",
-		"apply next workflow",
-	})
-	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	manifestPath := filepath.Join(repoDir, "devspecs", "tasks", "apply-next-test", taskManifestFilename)
-	before := mustReadFile(t, manifestPath)
-
-	applyCmd := NewApplyCmd()
-	applyCmd.SetArgs([]string{"next", "--json"})
-	applyBuf := &bytes.Buffer{}
-	applyCmd.SetOut(applyBuf)
-	if err := applyCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-	var out applyPromptOutput
-	if err := json.Unmarshal(applyBuf.Bytes(), &out); err != nil {
-		t.Fatalf("apply json: %v\n%s", err, applyBuf.String())
-	}
-	if out.Command != "ds apply next" || out.TaskID != "apply-next-test" || out.Target != "A01" {
-		t.Fatalf("apply next resolved wrong target: %#v", out)
-	}
-	for _, want := range []string{
-		"task apply-next-test target A01 only",
-		"must_not_implement",
-		"- A02",
-		"Completion contract:",
-		"Record the outcome",
-		"ds task checkpoint apply-next-test --target A01",
-		"Command roles:",
-		"use `ds find` to discover and pack evidence",
-		"`status` and `index_status` are separate signals",
-	} {
-		if !strings.Contains(out.Prompt, want) {
-			t.Fatalf("apply prompt missing %q:\n%s", want, out.Prompt)
-		}
-	}
-	if got := mustReadFile(t, manifestPath); got != before {
-		t.Fatalf("ds apply should not mutate task state.\nBefore:\n%s\nAfter:\n%s", before, got)
-	}
+	createApplyTask(t, taskID, series, slices...)
+	return repoDir
 }
 
-func TestApplyDefaultsToNextWhenUnambiguous(t *testing.T) {
-	repoDir := setupTaskCommandRepo(t)
-	createApplyTestTask(t, "apply-default-next", "first default apply slice", "second default apply slice")
-
-	manifestPath := filepath.Join(repoDir, "devspecs", "tasks", "apply-default-next", taskManifestFilename)
-	before := mustReadFile(t, manifestPath)
-
-	out, err := runApplyJSON(t, []string{"--json"})
-	if err != nil {
-		t.Fatal(err)
+func createApplyTask(t *testing.T, taskID, series string, slices ...string) {
+	t.Helper()
+	args := []string{"--id", taskID, "--no-refresh", "--index=false", "--json"}
+	if series != "" {
+		args = append(args, "--series", series)
 	}
-	if out.Command != "ds apply" || out.TaskID != "apply-default-next" || out.Target != "A01" {
-		t.Fatalf("implicit apply resolved wrong target: %#v", out)
+	for _, title := range slices {
+		args = append(args, "--slice", title)
 	}
-	if !strings.Contains(out.Prompt, "task apply-default-next target A01 only") {
-		t.Fatalf("implicit apply prompt not bounded to A01:\n%s", out.Prompt)
-	}
-	if got := mustReadFile(t, manifestPath); got != before {
-		t.Fatalf("ds apply should not mutate task state.\nBefore:\n%s\nAfter:\n%s", before, got)
-	}
+	args = append(args, "apply workflow")
+	cmd := NewTaskCmd()
+	cmd.SetArgs(args)
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
 }
 
-func TestApplyRepoFlagResolvesTargetRepoFromUmbrella(t *testing.T) {
+func setupApplyRepoRouteTask(t *testing.T) string {
+	t.Helper()
 	_, child := setupTaskCommandUmbrellaRepo(t)
-
-	startCmd := NewTaskCmd()
-	startCmd.SetArgs([]string{
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
 		"--repo", "./enalytics-backend",
 		"--id", "apply-repo-route",
 		"--no-refresh",
@@ -98,236 +48,335 @@ func TestApplyRepoFlagResolvesTargetRepoFromUmbrella(t *testing.T) {
 		"--slice", "second backend apply slice",
 		"apply backend workspace route",
 	})
-	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
-
-	out, err := runApplyJSON(t, []string{"next", "--repo", "./enalytics-backend", "--json"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Command != "ds apply next --repo ./enalytics-backend" || out.TaskID != "apply-repo-route" || out.Target != "A01" {
-		t.Fatalf("apply next resolved wrong target: %#v", out)
-	}
-	if !strings.HasPrefix(out.TargetContext.Workspace, filepath.Join(child, "devspecs", "tasks", "apply-repo-route")) {
-		t.Fatalf("apply target workspace = %q, want under child repo", out.TargetContext.Workspace)
-	}
-	if !strings.Contains(out.Prompt, "ds task checkpoint apply-repo-route --target A01 --repo ./enalytics-backend") {
-		t.Fatalf("apply prompt missing repo-aware checkpoint command:\n%s", out.Prompt)
-	}
-
-	implicit, err := runApplyJSON(t, []string{"--repo", "./enalytics-backend", "--json"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if implicit.Command != "ds apply --repo ./enalytics-backend" || implicit.TaskID != "apply-repo-route" || implicit.Target != "A01" {
-		t.Fatalf("implicit repo apply resolved wrong target: %#v", implicit)
-	}
-
-	explicit, err := runApplyJSON(t, []string{"apply-repo-route", "--target", "A02", "--repo", "./enalytics-backend", "--json"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if explicit.Command != "ds apply apply-repo-route --target A02 --repo ./enalytics-backend" || explicit.Target != "A02" {
-		t.Fatalf("explicit apply resolved wrong target: %#v", explicit)
-	}
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+	return child
 }
 
-func TestApplyExplicitIdentifiersResolveOneTarget(t *testing.T) {
-	setupTaskCommandRepo(t)
-
-	startCmd := NewTaskCmd()
-	startCmd.SetArgs([]string{
-		"--id", "apply-target-test",
-		"--no-refresh",
-		"--index=false",
-		"--json",
-		"--slice", "first explicit slice",
-		"--slice", "second explicit slice",
-		"apply target workflow",
-	})
-	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
+func setupApplyDecisionGate(t *testing.T, taskID, decision string, withIteration bool) {
+	t.Helper()
+	setupApplyTask(t, taskID, "A", "first gate slice", "second gate slice")
+	if withIteration {
+		addApplyTestIteration(t, taskID, "repair first gate slice", "A01", decision)
 	}
-
-	for _, tc := range []struct {
-		name string
-		args []string
-		want string
-	}{
-		{name: "unique-slice", args: []string{"A02", "--json"}, want: "A02"},
-		{name: "task-target", args: []string{"apply-target-test", "--target", "A02", "--json"}, want: "A02"},
-		{name: "series-index", args: []string{"A00", "--json"}, want: "A01"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			applyCmd := NewApplyCmd()
-			applyCmd.SetArgs(tc.args)
-			buf := &bytes.Buffer{}
-			applyCmd.SetOut(buf)
-			if err := applyCmd.Execute(); err != nil {
-				t.Fatal(err)
-			}
-			var out applyPromptOutput
-			if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-				t.Fatalf("apply json: %v\n%s", err, buf.String())
-			}
-			if out.TaskID != "apply-target-test" || out.Target != tc.want {
-				t.Fatalf("apply resolved wrong target for %s: %#v", tc.name, out)
-			}
-			if !strings.Contains(out.Prompt, "target "+tc.want+" only") {
-				t.Fatalf("apply prompt not bounded to %s:\n%s", tc.want, out.Prompt)
-			}
-		})
-	}
+	decideApplyTestTarget(t, taskID, "A01", decision)
 }
 
-func TestApplyNextRespectsDecisionGateProgression(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		decision   string
-		iteration  bool
-		wantTarget string
-		wantErr    []string
-	}{
-		{name: "promote-advances-to-next-slice", decision: "promote", wantTarget: "A02"},
-		{name: "improve-selects-existing-iteration", decision: "improve", iteration: true, wantTarget: "A01-1"},
-		{name: "rework-selects-existing-iteration", decision: "rework", iteration: true, wantTarget: "A01-1"},
-		{name: "improve-without-iteration-stops-before-sibling", decision: "improve", wantErr: []string{"A01 ended with improve", "ds task slice add", "--after A01", "--reason improve"}},
-		{name: "rollback-blocks-automatic-next", decision: "rollback", wantErr: []string{"A01 ended with rollback", "automatic next is blocked", "choose an explicit target"}},
-		{name: "block-blocks-automatic-next", decision: "block", wantErr: []string{"A01 ended with block", "automatic next is blocked", "choose an explicit target"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			setupTaskCommandRepo(t)
-			taskID := "apply-gate-" + sanitizeTaskFilename(tc.name)
-			createApplyTestTask(t, taskID, "first gate slice", "second gate slice")
-			if tc.iteration {
-				addApplyTestIteration(t, taskID, "repair first gate slice", "A01", tc.decision)
-			}
-			decideApplyTestTarget(t, taskID, "A01", tc.decision)
-
-			out, err := runApplyJSON(t, []string{"next", "--json"})
-			if len(tc.wantErr) > 0 {
-				if err == nil {
-					t.Fatalf("expected apply next error, got output %#v", out)
-				}
-				for _, want := range tc.wantErr {
-					if !strings.Contains(err.Error(), want) {
-						t.Fatalf("apply next error missing %q: %v", want, err)
-					}
-				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if out.TaskID != taskID || out.Target != tc.wantTarget {
-				t.Fatalf("apply next resolved wrong target: %#v", out)
-			}
-			if !strings.Contains(out.Prompt, "target "+tc.wantTarget+" only") {
-				t.Fatalf("apply prompt not bounded to %s:\n%s", tc.wantTarget, out.Prompt)
-			}
-		})
-	}
+func decodeApplyPromptOutput(t *testing.T, buf *bytes.Buffer) applyPromptOutput {
+	t.Helper()
+	var out applyPromptOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	return out
 }
 
-func TestApplyNextReportsCompletedTrack(t *testing.T) {
-	setupTaskCommandRepo(t)
+func TestApplyNextEmitsOneSlicePromptWithoutChangingState(t *testing.T) {
+	repoDir := setupApplyTask(t, "apply-next-test", "", "first apply slice", "second apply slice")
+	manifestPath := filepath.Join(repoDir, "devspecs", "tasks", "apply-next-test", taskManifestFilename)
+	before := mustReadFile(t, manifestPath)
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"next", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	out := decodeApplyPromptOutput(t, buf)
+	assert.Equal(t, "ds apply next", out.Command)
+	assert.Equal(t, "apply-next-test", out.TaskID)
+	assert.Equal(t, "A01", out.Target)
+	assert.Contains(t, out.Prompt, "task apply-next-test target A01 only")
+	assert.Contains(t, out.Prompt, "must_not_implement")
+	assert.Contains(t, out.Prompt, "- A02")
+	assert.Contains(t, out.Prompt, "Completion contract:")
+	assert.Contains(t, out.Prompt, "Record the outcome")
+	assert.Contains(t, out.Prompt, "ds task checkpoint apply-next-test --target A01")
+	assert.Contains(t, out.Prompt, "Command roles:")
+	assert.Contains(t, out.Prompt, "use `ds find` to discover and pack evidence")
+	assert.Contains(t, out.Prompt, "`status` and `index_status` are separate signals")
+	assert.Equal(t, before, mustReadFile(t, manifestPath))
+}
+
+func TestApplyDefaultsToNextWhenUnambiguous(t *testing.T) {
+	repoDir := setupApplyTask(t, "apply-default-next", "A", "first default apply slice", "second default apply slice")
+	manifestPath := filepath.Join(repoDir, "devspecs", "tasks", "apply-default-next", taskManifestFilename)
+	before := mustReadFile(t, manifestPath)
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	out := decodeApplyPromptOutput(t, buf)
+	assert.Equal(t, "ds apply", out.Command)
+	assert.Equal(t, "apply-default-next", out.TaskID)
+	assert.Equal(t, "A01", out.Target)
+	assert.Contains(t, out.Prompt, "task apply-default-next target A01 only")
+	assert.Equal(t, before, mustReadFile(t, manifestPath))
+}
+
+func TestApplyNextRepoFlagResolvesTargetRepoFromUmbrella(t *testing.T) {
+	child := setupApplyRepoRouteTask(t)
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"next", "--repo", "./enalytics-backend", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	out := decodeApplyPromptOutput(t, buf)
+	assert.Equal(t, "ds apply next --repo ./enalytics-backend", out.Command)
+	assert.Equal(t, "apply-repo-route", out.TaskID)
+	assert.Equal(t, "A01", out.Target)
+	assert.True(t, strings.HasPrefix(out.TargetContext.Workspace, filepath.Join(child, "devspecs", "tasks", "apply-repo-route")))
+	assert.Contains(t, out.Prompt, "ds task checkpoint apply-repo-route --target A01 --repo ./enalytics-backend")
+}
+
+func TestApplyImplicitRepoFlagResolvesTargetRepoFromUmbrella(t *testing.T) {
+	setupApplyRepoRouteTask(t)
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"--repo", "./enalytics-backend", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	out := decodeApplyPromptOutput(t, buf)
+	assert.Equal(t, "ds apply --repo ./enalytics-backend", out.Command)
+	assert.Equal(t, "apply-repo-route", out.TaskID)
+	assert.Equal(t, "A01", out.Target)
+}
+
+func TestApplyExplicitRepoTargetResolvesTargetRepoFromUmbrella(t *testing.T) {
+	setupApplyRepoRouteTask(t)
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"apply-repo-route", "--target", "A02", "--repo", "./enalytics-backend", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	out := decodeApplyPromptOutput(t, buf)
+	assert.Equal(t, "ds apply apply-repo-route --target A02 --repo ./enalytics-backend", out.Command)
+	assert.Equal(t, "apply-repo-route", out.TaskID)
+	assert.Equal(t, "A02", out.Target)
+}
+
+func TestApplyExplicitSliceIdentifierResolvesOneTarget(t *testing.T) {
+	setupApplyTask(t, "apply-target-test", "A", "first explicit slice", "second explicit slice")
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"A02", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	out := decodeApplyPromptOutput(t, buf)
+	assert.Equal(t, "apply-target-test", out.TaskID)
+	assert.Equal(t, "A02", out.Target)
+	assert.Contains(t, out.Prompt, "target A02 only")
+}
+
+func TestApplyTaskAndTargetIdentifiersResolveOneTarget(t *testing.T) {
+	setupApplyTask(t, "apply-target-test", "A", "first explicit slice", "second explicit slice")
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"apply-target-test", "--target", "A02", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	out := decodeApplyPromptOutput(t, buf)
+	assert.Equal(t, "apply-target-test", out.TaskID)
+	assert.Equal(t, "A02", out.Target)
+	assert.Contains(t, out.Prompt, "target A02 only")
+}
+
+func TestApplySeriesIndexResolvesFirstSlice(t *testing.T) {
+	setupApplyTask(t, "apply-target-test", "A", "first explicit slice", "second explicit slice")
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"A00", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	out := decodeApplyPromptOutput(t, buf)
+	assert.Equal(t, "apply-target-test", out.TaskID)
+	assert.Equal(t, "A01", out.Target)
+	assert.Contains(t, out.Prompt, "target A01 only")
+}
+
+func TestApplyNextAfterPromoteAdvancesToNextSlice(t *testing.T) {
+	taskID := "apply-gate-promote"
+	setupApplyDecisionGate(t, taskID, "promote", false)
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"next", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	out := decodeApplyPromptOutput(t, buf)
+	assert.Equal(t, taskID, out.TaskID)
+	assert.Equal(t, "A02", out.Target)
+	assert.Contains(t, out.Prompt, "target A02 only")
+}
+
+func TestApplyNextAfterImproveSelectsExistingIteration(t *testing.T) {
+	taskID := "apply-gate-improve-iteration"
+	setupApplyDecisionGate(t, taskID, "improve", true)
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"next", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	out := decodeApplyPromptOutput(t, buf)
+	assert.Equal(t, taskID, out.TaskID)
+	assert.Equal(t, "A01-1", out.Target)
+	assert.Contains(t, out.Prompt, "target A01-1 only")
+}
+
+func TestApplyNextAfterReworkSelectsExistingIteration(t *testing.T) {
+	taskID := "apply-gate-rework-iteration"
+	setupApplyDecisionGate(t, taskID, "rework", true)
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"next", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	out := decodeApplyPromptOutput(t, buf)
+	assert.Equal(t, taskID, out.TaskID)
+	assert.Equal(t, "A01-1", out.Target)
+	assert.Contains(t, out.Prompt, "target A01-1 only")
+}
+
+func TestApplyNextAfterImproveWithoutIterationExplainsRequiredSlice(t *testing.T) {
+	setupApplyDecisionGate(t, "apply-gate-improve-without-iteration", "improve", false)
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"next", "--json"})
+	cmd.SetOut(&bytes.Buffer{})
+
+	err := cmd.Execute()
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "A01 ended with improve")
+	assert.ErrorContains(t, err, "ds task slice add")
+	assert.ErrorContains(t, err, "--after A01")
+	assert.ErrorContains(t, err, "--reason improve")
+}
+
+func TestApplyNextAfterRollbackRequiresExplicitTarget(t *testing.T) {
+	setupApplyDecisionGate(t, "apply-gate-rollback", "rollback", false)
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"next", "--json"})
+	cmd.SetOut(&bytes.Buffer{})
+
+	err := cmd.Execute()
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "A01 ended with rollback")
+	assert.ErrorContains(t, err, "automatic next is blocked")
+	assert.ErrorContains(t, err, "choose an explicit target")
+}
+
+func TestApplyNextAfterBlockRequiresExplicitTarget(t *testing.T) {
+	setupApplyDecisionGate(t, "apply-gate-block", "block", false)
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"next", "--json"})
+	cmd.SetOut(&bytes.Buffer{})
+
+	err := cmd.Execute()
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "A01 ended with block")
+	assert.ErrorContains(t, err, "automatic next is blocked")
+	assert.ErrorContains(t, err, "choose an explicit target")
+}
+
+func TestApplyNextAfterCompletedSlicesReturnsDurabilityCloseout(t *testing.T) {
 	taskID := "apply-completed-track"
-	createApplyTestTask(t, taskID, "only slice")
+	setupApplyTask(t, taskID, "A", "only slice")
 	decideApplyTestTarget(t, taskID, "A01", "promote")
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"next", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
 
-	out, err := runApplyJSON(t, []string{"next", "--json"})
-	if err == nil {
-		t.Fatalf("expected completed track error, got output %#v", out)
-	}
-	if !strings.Contains(err.Error(), "no non-terminal DevSpecs task targets found") {
-		t.Fatalf("completed track error was not useful: %v", err)
-	}
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var output applyPromptOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &output))
+	assert.Equal(t, "A00", output.Target)
+	assert.Contains(t, output.Prompt, "Choose exactly one disposition")
+	assert.Contains(t, output.Prompt, "--durable-record none")
 }
 
 func TestApplySeriesIndexRequiresUnambiguousTrack(t *testing.T) {
 	setupTaskCommandRepo(t)
-	createApplyTestTask(t, "apply-series-a", "first shared series")
-	createApplyTestTask(t, "apply-series-b", "second shared series")
+	createApplyTask(t, "apply-series-a", "A", "first shared series")
+	createApplyTask(t, "apply-series-b", "A", "second shared series")
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"A00", "--json"})
+	cmd.SetOut(&bytes.Buffer{})
 
-	applyCmd := NewApplyCmd()
-	applyCmd.SetArgs([]string{"A00", "--json"})
-	applyCmd.SetOut(&bytes.Buffer{})
-	err := applyCmd.Execute()
-	if err == nil {
-		t.Fatal("expected ambiguous series error")
-	}
-	for _, want := range []string{
-		"ambiguous task series",
-		"apply-series-a:A01",
-		"apply-series-b:A01",
-		"use a task id with --target",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("ambiguous series error missing %q: %v", want, err)
-		}
-	}
+	err := cmd.Execute()
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "ambiguous task series")
+	assert.ErrorContains(t, err, "apply-series-a:A01")
+	assert.ErrorContains(t, err, "apply-series-b:A01")
+	assert.ErrorContains(t, err, "use a task id with --target")
 }
 
 func TestApplyNextRequiresUnambiguousTask(t *testing.T) {
 	setupTaskCommandRepo(t)
+	createApplyTask(t, "apply-ambiguous-a", "", "shared apply slice")
+	createApplyTask(t, "apply-ambiguous-b", "", "shared apply slice")
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"next", "--json"})
+	cmd.SetOut(&bytes.Buffer{})
 
-	for _, taskID := range []string{"apply-ambiguous-a", "apply-ambiguous-b"} {
-		startCmd := NewTaskCmd()
-		startCmd.SetArgs([]string{
-			"--id", taskID,
-			"--no-refresh",
-			"--index=false",
-			"--json",
-			"--slice", "shared apply slice",
-			"apply ambiguity",
-		})
-		startCmd.SetOut(&bytes.Buffer{})
-		if err := startCmd.Execute(); err != nil {
-			t.Fatal(err)
-		}
-	}
+	err := cmd.Execute()
 
-	applyCmd := NewApplyCmd()
-	applyCmd.SetArgs([]string{"next", "--json"})
-	applyCmd.SetOut(&bytes.Buffer{})
-	err := applyCmd.Execute()
-	if err == nil {
-		t.Fatal("expected ambiguous next error")
-	}
-	for _, want := range []string{
-		"ambiguous next task target",
-		"apply-ambiguous-a:A01",
-		"apply-ambiguous-b:B01",
-		"use `ds apply <task-id>`",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("ambiguous error missing %q: %v", want, err)
-		}
-	}
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "ambiguous next task target")
+	assert.ErrorContains(t, err, "apply-ambiguous-a:A01")
+	assert.ErrorContains(t, err, "apply-ambiguous-b:B01")
+	assert.ErrorContains(t, err, "use `ds apply <task-id>`")
 }
 
-func createApplyTestTask(t *testing.T, taskID string, slices ...string) {
-	t.Helper()
-	args := []string{
-		"--id", taskID,
-		"--series", "A",
-		"--no-refresh",
-		"--index=false",
-		"--json",
-	}
-	for _, slice := range slices {
-		args = append(args, "--slice", slice)
-	}
-	args = append(args, "apply gate workflow")
-	startCmd := NewTaskCmd()
-	startCmd.SetArgs(args)
-	startCmd.SetOut(&bytes.Buffer{})
-	if err := startCmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+func TestApplyExplicitSliceRequiresUnambiguousTarget(t *testing.T) {
+	setupTaskCommandRepo(t)
+	createApplyTask(t, "apply-target-a", "A", "shared first slice")
+	createApplyTask(t, "apply-target-b", "A", "shared first slice")
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"A01", "--json"})
+	cmd.SetOut(&bytes.Buffer{})
+
+	err := cmd.Execute()
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "ambiguous task target")
+	assert.ErrorContains(t, err, "apply-target-a:A01")
+	assert.ErrorContains(t, err, "apply-target-b:A01")
+	assert.ErrorContains(t, err, "use a task id with --target")
 }
 
 func addApplyTestIteration(t *testing.T, taskID, title, parent, reason string) {
@@ -341,9 +390,7 @@ func addApplyTestIteration(t *testing.T, taskID, title, parent, reason string) {
 		"--json",
 	})
 	cmd.SetOut(&bytes.Buffer{})
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, cmd.Execute())
 }
 
 func decideApplyTestTarget(t *testing.T, taskID, target, decision string) {
@@ -357,63 +404,19 @@ func decideApplyTestTarget(t *testing.T, taskID, target, decision string) {
 		"--json",
 	})
 	cmd.SetOut(&bytes.Buffer{})
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, cmd.Execute())
 }
 
+// runApplyJSON supports the workspace end-to-end fixture in workspace_e2e_test.go.
 func runApplyJSON(t *testing.T, args []string) (applyPromptOutput, error) {
 	t.Helper()
-	applyCmd := NewApplyCmd()
-	applyCmd.SetArgs(args)
+	cmd := NewApplyCmd()
+	cmd.SetArgs(args)
 	buf := &bytes.Buffer{}
-	applyCmd.SetOut(buf)
-	err := applyCmd.Execute()
+	cmd.SetOut(buf)
+	err := cmd.Execute()
 	if err != nil {
 		return applyPromptOutput{}, err
 	}
-	var out applyPromptOutput
-	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
-		t.Fatalf("apply json: %v\n%s", err, buf.String())
-	}
-	return out, nil
-}
-
-func TestApplyExplicitSliceRequiresUnambiguousTarget(t *testing.T) {
-	setupTaskCommandRepo(t)
-
-	for _, taskID := range []string{"apply-target-a", "apply-target-b"} {
-		startCmd := NewTaskCmd()
-		startCmd.SetArgs([]string{
-			"--id", taskID,
-			"--series", "A",
-			"--no-refresh",
-			"--index=false",
-			"--json",
-			"--slice", "shared first slice",
-			"apply target ambiguity",
-		})
-		startCmd.SetOut(&bytes.Buffer{})
-		if err := startCmd.Execute(); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	applyCmd := NewApplyCmd()
-	applyCmd.SetArgs([]string{"A01", "--json"})
-	applyCmd.SetOut(&bytes.Buffer{})
-	err := applyCmd.Execute()
-	if err == nil {
-		t.Fatal("expected ambiguous target error")
-	}
-	for _, want := range []string{
-		"ambiguous task target",
-		"apply-target-a:A01",
-		"apply-target-b:A01",
-		"use a task id with --target",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("ambiguous error missing %q: %v", want, err)
-		}
-	}
+	return decodeApplyPromptOutput(t, buf), nil
 }

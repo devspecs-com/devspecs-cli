@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -12,6 +11,8 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/adapters/sourcecontext"
 	"github.com/devspecs-com/devspecs-cli/internal/idgen"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestScan_SourceManifestHiddenByDefault(t *testing.T) {
@@ -21,23 +22,19 @@ func TestScan_SourceManifestHiddenByDefault(t *testing.T) {
 	db := openScanManifestTestDB(t)
 	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
 	result, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{UseTransaction: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.SourceManifest != nil {
-		t.Fatalf("default scan should not emit source manifest diagnostics: %#v", result.SourceManifest)
-	}
+	require.NoError(t, err)
+	require.Nil(t, result.SourceManifest,
+		"default scan should not emit source manifest diagnostics: %#v", result.SourceManifest)
+
 	repo := db.GetRepoByRoot(repoRoot)
-	if repo == nil {
-		t.Fatal("repo not recorded")
-	}
+	require.NotNil(t, repo,
+		"repo not recorded")
+
 	counts, err := db.CountSourceManifest(repo.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if counts.Files != 0 {
-		t.Fatalf("default scan should not populate source manifest, got %#v", counts)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 0, counts.Files,
+		"default scan should not populate source manifest, got %#v", counts)
+
 }
 
 func TestScan_SourceManifestPopulatesCompactRowsWithoutArtifacts(t *testing.T) {
@@ -55,60 +52,66 @@ func TestScan_SourceManifestPopulatesCompactRowsWithoutArtifacts(t *testing.T) {
 		UseTransaction: true,
 		SourceManifest: true,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.SourceManifest == nil {
-		t.Fatal("expected source manifest diagnostics")
-	}
-	if result.SourceManifest.IndexedFiles != 2 || result.SourceManifest.IndexedTests != 1 {
-		t.Fatalf("unexpected source manifest diagnostics: %#v", result.SourceManifest)
-	}
-	if result.Found["source_context"] != 0 {
-		t.Fatalf("manifest-only Lua files should not become source_context artifacts, got found=%#v", result.Found)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, result.SourceManifest,
+		"expected source manifest diagnostics")
+	assert.Equal(t, 2, result.SourceManifest.IndexedFiles)
+	assert.Equal(t, 1, result.SourceManifest.IndexedTests)
+	assert.Zero(t, result.Found["source_context"])
+
 	repo := db.GetRepoByRoot(repoRoot)
-	if repo == nil {
-		t.Fatal("repo not recorded")
-	}
+	require.NotNil(t, repo,
+		"repo not recorded")
+
 	counts, err := db.CountSourceManifest(repo.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if counts.Files != 2 || counts.FTSRows != 2 {
-		t.Fatalf("unexpected manifest counts: %#v", counts)
-	}
-	if counts.Symbols == 0 || counts.Tests == 0 || counts.Imports == 0 {
-		t.Fatalf("expected compact symbols/tests/imports, got %#v", counts)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 2, counts.Files)
+	assert.Equal(t, 2, counts.FTSRows)
+	assert.Positive(t, counts.Symbols)
+	assert.Positive(t, counts.Tests)
+	assert.Positive(t, counts.Imports)
+
 	var ftsSymbols string
-	if err := db.QueryRow("SELECT symbols FROM source_manifest_fts WHERE path = ?", "plugins/auth.lua").Scan(&ftsSymbols); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(ftsSymbols, "logout") {
-		t.Fatalf("expected FTS symbols to be capped while structured symbols remain, got %q", ftsSymbols)
-	}
+	require.NoError(t, db.QueryRow("SELECT symbols FROM source_manifest_fts WHERE path = ?", "plugins/auth.lua").Scan(&ftsSymbols))
+	assert.NotContains(t, ftsSymbols, "logout")
+
 	var artifactCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM artifacts WHERE repo_id = ?", repo.ID).Scan(&artifactCount); err != nil {
-		t.Fatal(err)
-	}
-	if artifactCount != 0 {
-		t.Fatalf("source manifest should not inflate artifacts, got %d", artifactCount)
-	}
+	require.NoError(t, db.QueryRow("SELECT COUNT(*) FROM artifacts WHERE repo_id = ?", repo.ID).Scan(&artifactCount))
+	assert.Zero(t, artifactCount)
 }
 
-func TestScan_SourceManifestParallelExtractionIsDeterministic(t *testing.T) {
+func TestScan_SourceManifestExtractionWithOneWorkerProducesCanonicalSnapshot(t *testing.T) {
 	repoRoot := t.TempDir()
-	writeScanTestFile(t, repoRoot, "plugins/auth.lua", "local function login() return true end\nlocal function logout() return true end\nrequire('kong.plugins.base')\n")
-	writeScanTestFile(t, repoRoot, "plugins/session.lua", "local function session() return true end\nrequire('kong.plugins.auth')\n")
-	writeScanTestFile(t, repoRoot, "tests/auth.lua", "describe('auth plugin', function() it('logs in', function() end) end)\n")
-	writeScanTestFile(t, repoRoot, "tests/session.lua", "describe('session plugin', function() it('refreshes', function() end) end)\n")
+	seedSourceManifestParallelFixture(t, repoRoot)
+	db := openScanManifestTestDB(t)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
 
-	oneWorker := runSourceManifestSnapshot(t, repoRoot, 1)
-	manyWorkers := runSourceManifestSnapshot(t, repoRoot, 4)
-	if !reflect.DeepEqual(manyWorkers, oneWorker) {
-		t.Fatalf("parallel source manifest extraction changed snapshot:\ngot:  %#v\nwant: %#v", manyWorkers, oneWorker)
-	}
+	_, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{
+		UseTransaction:  true,
+		SourceManifest:  true,
+		FileWorkerCount: 1,
+	})
+	require.NoError(t, err)
+	snapshot := sourceManifestSnapshot(t, db)
+
+	assertCanonicalSourceManifestSnapshot(t, snapshot)
+}
+
+func TestScan_SourceManifestExtractionWithFourWorkersProducesCanonicalSnapshot(t *testing.T) {
+	repoRoot := t.TempDir()
+	seedSourceManifestParallelFixture(t, repoRoot)
+	db := openScanManifestTestDB(t)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
+
+	_, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{
+		UseTransaction:  true,
+		SourceManifest:  true,
+		FileWorkerCount: 4,
+	})
+	require.NoError(t, err)
+	snapshot := sourceManifestSnapshot(t, db)
+
+	assertCanonicalSourceManifestSnapshot(t, snapshot)
 }
 
 func TestScan_SourceManifestCapsNestedModuleRootRows(t *testing.T) {
@@ -143,40 +146,18 @@ func TestScan_SourceManifestCapsNestedModuleRootRows(t *testing.T) {
 		UseTransaction: true,
 		SourceManifest: true,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.SourceManifest == nil {
-		t.Fatal("expected source manifest diagnostics")
-	}
-	if result.SourceManifest.IndexedFiles != 2 || result.SourceManifest.IndexedTests != 1 {
-		t.Fatalf("expected role-balanced module-root cap, got %#v", result.SourceManifest)
-	}
-	if got := result.SourceManifest.IgnoredByReason["module_root_cap"]; got != 2 {
-		t.Fatalf("expected 2 module_root_cap skips, got %d in %#v", got, result.SourceManifest.IgnoredByReason)
-	}
-	repo := db.GetRepoByRoot(repoRoot)
-	counts, err := db.CountSourceManifest(repo.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if counts.Files != 2 {
-		t.Fatalf("expected capped manifest rows, got %#v", counts)
-	}
-}
+	require.NoError(t, err)
+	require.NotNil(t, result.SourceManifest,
+		"expected source manifest diagnostics")
+	assert.Equal(t, 2, result.SourceManifest.IndexedFiles)
+	assert.Equal(t, 1, result.SourceManifest.IndexedTests)
+	assert.Equal(t, 2, result.SourceManifest.IgnoredByReason["module_root_cap"])
 
-func runSourceManifestSnapshot(t *testing.T, repoRoot string, workers int) []string {
-	t.Helper()
-	db := openScanManifestTestDB(t)
-	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
-	if _, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{
-		UseTransaction:  true,
-		SourceManifest:  true,
-		FileWorkerCount: workers,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	return sourceManifestSnapshot(t, db)
+	repo := db.GetRepoByRoot(repoRoot)
+	require.NotNil(t, repo)
+	counts, err := db.CountSourceManifest(repo.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 2, counts.Files)
 }
 
 func sourceManifestSnapshot(t *testing.T, db *store.DB) []string {
@@ -186,21 +167,18 @@ func sourceManifestSnapshot(t *testing.T, db *store.DB) []string {
 		FROM source_manifest sm
 		LEFT JOIN source_manifest_fts fts ON fts.file_id = sm.file_id
 		ORDER BY sm.path`)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer rows.Close()
 	var out []string
 	for rows.Next() {
 		var path, hash, language, root, role, symbols, tests, imports string
-		if err := rows.Scan(&path, &hash, &language, &root, &role, &symbols, &tests, &imports); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, rows.Scan(&path, &hash, &language, &root, &role, &symbols, &tests, &imports))
+
 		out = append(out, strings.Join([]string{path, hash, language, root, role, symbols, tests, imports}, "\x00"))
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, rows.Err())
+
 	return out
 }
 
@@ -208,10 +186,10 @@ func TestSourceManifestModuleRootLimitIndexesSmallRootsFully(t *testing.T) {
 	oldSoftFull := sourceManifestModuleRootSoftFullFiles
 	sourceManifestModuleRootSoftFullFiles = 5
 	t.Cleanup(func() { sourceManifestModuleRootSoftFullFiles = oldSoftFull })
+	got := sourceManifestModuleRootCandidateLimit(5)
 
-	if got := sourceManifestModuleRootCandidateLimit(5); got != 5 {
-		t.Fatalf("small module roots should be fully indexed, got limit %d", got)
-	}
+	assert.Equal(t, 5, got)
+
 }
 
 func TestSourceManifestModuleRootCapSeedsMultipleRoots(t *testing.T) {
@@ -242,41 +220,47 @@ func TestSourceManifestModuleRootCapSeedsMultipleRoots(t *testing.T) {
 		{rel: "sdk/c/server.go", root: firstPartySourceRoot{path: "sdk/c", kind: "module_root"}, role: "implementation"},
 	}
 	selected, skipped := capSourceManifestModuleRootCandidates(candidates, sourceManifestModuleRootCandidateLimit(len(candidates)))
-	if skipped != 2 || len(selected) != 4 {
-		t.Fatalf("unexpected selected/skipped: selected=%#v skipped=%d", selected, skipped)
-	}
+	assert.Equal(t, 2, skipped)
+	require.Len(t, selected, 4)
+
 	roots := map[string]bool{}
 	for _, candidate := range selected {
 		roots[candidate.root.path] = true
 	}
-	for _, want := range []string{"sdk/a", "sdk/b", "sdk/c"} {
-		if !roots[want] {
-			t.Fatalf("expected capped selection to seed root %s, got %#v", want, selected)
-		}
-	}
+	require.Len(t, roots, 3)
+	assert.True(t, roots["sdk/a"])
+	assert.True(t, roots["sdk/b"])
+	assert.True(t, roots["sdk/c"])
 }
 
 func TestScan_SourceManifestRescanReplacesRows(t *testing.T) {
 	repoRoot := t.TempDir()
 	writeScanTestFile(t, repoRoot, "plugins/auth.lua", "local function login() return true end\n")
 
-	db := openScanManifestTestDB(t)
-	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
-	if _, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{UseTransaction: true, SourceManifest: true}); err != nil {
-		t.Fatal(err)
-	}
 	writeScanTestFile(t, repoRoot, "plugins/session.lua", "local function session() return true end\n")
-	if _, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{UseTransaction: true, SourceManifest: true}); err != nil {
-		t.Fatal(err)
-	}
+	db := openScanManifestTestDB(t)
+	now := "2026-08-11T00:00:00Z"
+	mustExecScanManifestSQL(t, db, `INSERT INTO repos (id, root_path, created_at, updated_at) VALUES (?, ?, ?, ?)`, "repo_existing", repoRoot, now, now)
+	mustExecScanManifestSQL(t, db, `INSERT INTO source_manifest (
+		file_id, repo_id, path, content_hash, size_bytes, language, source_root,
+		source_root_kind, source_role, first_party_score, ignored_reason, indexed_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"stale_file", "repo_existing", "plugins/stale.lua", "old", 1, "lua", "plugins", "common_root", "implementation", 1, "", now)
+	mustExecScanManifestSQL(t, db, `INSERT INTO source_manifest_fts (
+		file_id, path, path_terms, source_root, language, source_role, symbols, test_names, imports
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"stale_file", "plugins/stale.lua", "plugins stale lua", "plugins", "lua", "implementation", "stale", "", "")
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
+
+	_, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{UseTransaction: true, SourceManifest: true})
+	require.NoError(t, err)
+
 	repo := db.GetRepoByRoot(repoRoot)
+	require.NotNil(t, repo)
 	counts, err := db.CountSourceManifest(repo.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if counts.Files != 2 || counts.FTSRows != 2 {
-		t.Fatalf("rescan should replace, not duplicate, got %#v", counts)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 2, counts.Files)
+	assert.Equal(t, 2, counts.FTSRows)
 }
 
 func TestSourceManifestImportExtraction(t *testing.T) {
@@ -287,13 +271,14 @@ from pathlib import Path
 use crate::session::Token
 #include <stdio.h>
 `)
-	want := map[string]bool{"React": true, "fs": true, "pathlib": true, "crate::session::Token": true, "stdio.h": true}
-	for _, value := range got {
-		delete(want, value)
-	}
-	if len(want) != 0 {
-		t.Fatalf("missing imports: %#v; got %#v", want, got)
-	}
+	require.Len(t, got, 6)
+	assert.Equal(t, "React", got[0])
+	assert.Equal(t, "pathlib", got[1])
+	assert.Equal(t, "fs", got[2])
+	assert.Equal(t, "react", got[3])
+	assert.Equal(t, "crate::session::Token", got[4])
+	assert.Equal(t, "stdio.h", got[5])
+
 }
 
 func TestSourceManifestImportCompactionPrefersLocalAndCaps(t *testing.T) {
@@ -311,47 +296,55 @@ func TestSourceManifestImportCompactionPrefersLocalAndCaps(t *testing.T) {
 		"apps/admin",
 		"components/button",
 	})
-	if len(got) != sourceManifestMaxImportsPerFile {
-		t.Fatalf("expected cap %d, got %d: %#v", sourceManifestMaxImportsPerFile, len(got), got)
-	}
-	for _, want := range []string{"./local", "internal/auth", "pkg/config"} {
-		found := false
-		for _, value := range got {
-			if value == want {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("missing preferred local import %q in %#v", want, got)
-		}
-	}
-	for _, unexpected := range []string{"fmt", "net/http", "react"} {
-		for _, value := range got {
-			if value == unexpected {
-				t.Fatalf("low-signal import %q should be displaced by local imports: %#v", unexpected, got)
-			}
-		}
-	}
+	require.Len(t, got, sourceManifestMaxImportsPerFile,
+		"expected cap %d, got %d: %#v", sourceManifestMaxImportsPerFile, len(got), got)
+
+	assert.Equal(t, "./local", got[0])
+	assert.Equal(t, "apps/admin", got[1])
+	assert.Equal(t, "components/button", got[2])
+	assert.Equal(t, "crate::session::token", got[3])
+	assert.Equal(t, "internal/auth", got[4])
+	assert.Equal(t, "pkg/config", got[5])
 }
 
 func writeScanTestFile(t *testing.T, root, rel, body string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o644))
 }
 
 func openScanManifestTestDB(t *testing.T) *store.DB {
 	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "devspecs.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
+	require.NoError(t, err)
+
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	return db
+}
+
+func seedSourceManifestParallelFixture(t *testing.T, repoRoot string) {
+	t.Helper()
+
+	writeScanTestFile(t, repoRoot, "plugins/auth.lua", "local function login() return true end\nlocal function logout() return true end\nrequire('kong.plugins.base')\n")
+	writeScanTestFile(t, repoRoot, "plugins/session.lua", "local function session() return true end\nrequire('kong.plugins.auth')\n")
+	writeScanTestFile(t, repoRoot, "tests/auth.lua", "describe('auth plugin', function() it('logs in', function() end) end)\n")
+	writeScanTestFile(t, repoRoot, "tests/session.lua", "describe('session plugin', function() it('refreshes', function() end) end)\n")
+}
+
+func assertCanonicalSourceManifestSnapshot(t *testing.T, snapshot []string) {
+	t.Helper()
+
+	require.Len(t, snapshot, 4)
+	assert.Contains(t, snapshot[0], "plugins/auth.lua\x00")
+	assert.Contains(t, snapshot[1], "plugins/session.lua\x00")
+	assert.Contains(t, snapshot[2], "tests/auth.lua\x00")
+	assert.Contains(t, snapshot[3], "tests/session.lua\x00")
+}
+
+func mustExecScanManifestSQL(t *testing.T, db *store.DB, query string, args ...any) {
+	t.Helper()
+
+	_, err := db.Exec(query, args...)
+	require.NoError(t, err)
 }

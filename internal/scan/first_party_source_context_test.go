@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFirstPartySourceContextAdmitsPackageSourceAndTests(t *testing.T) {
@@ -24,44 +26,27 @@ func TestFirstPartySourceContextAdmitsPackageSourceAndTests(t *testing.T) {
 
 	got := buildFirstPartySourceContextCandidates(context.Background(), root, []adapters.Candidate{{RelPath: "httpie/__init__.py"}})
 	paths := firstPartySourceCandidatePaths(got)
-	for _, want := range []string{
-		"httpie/downloads.py",
-		"httpie/ssl_.py",
-		"httpie/manager/tasks/sessions.py",
-		"tests/test_ssl.py",
-		"tests/test_tutorial/test_docs.py",
-	} {
-		if !paths[want] {
-			t.Fatalf("missing %s in %#v", want, paths)
-		}
-	}
-	for _, unexpected := range []string{
-		"httpie/__init__.py",
-		"docs_src/tutorial001.py",
-		"node_modules/pkg/index.js",
-		"httpie/generated.pb.go",
-	} {
-		if paths[unexpected] {
-			t.Fatalf("unexpected %s in %#v", unexpected, paths)
-		}
-	}
+	require.Len(t, paths, 5)
+	assert.True(t, paths["httpie/downloads.py"])
+	assert.True(t, paths["httpie/ssl_.py"])
+	assert.True(t, paths["httpie/manager/tasks/sessions.py"])
+	assert.True(t, paths["tests/test_ssl.py"])
+	assert.True(t, paths["tests/test_tutorial/test_docs.py"])
+	assert.False(t, paths["httpie/__init__.py"])
+	assert.False(t, paths["docs_src/tutorial001.py"])
+	assert.False(t, paths["node_modules/pkg/index.js"])
+	assert.False(t, paths["httpie/generated.pb.go"])
 
 	byPath := map[string]adapters.Candidate{}
 	for _, candidate := range got {
 		byPath[candidate.RelPath] = candidate
-		if candidate.Metadata["admission_reason"] != firstPartySourceAdmissionReason {
-			t.Fatalf("missing admission metadata on %#v", candidate)
-		}
+		require.Equal(t, firstPartySourceAdmissionReason, candidate.Metadata["admission_reason"],
+			"missing admission metadata on %#v", candidate)
+
 	}
-	if byPath["httpie/downloads.py"].Metadata["source_role"] != "implementation" {
-		t.Fatalf("implementation role metadata = %#v", byPath["httpie/downloads.py"].Metadata)
-	}
-	if byPath["tests/test_ssl.py"].Metadata["source_role"] != "test" {
-		t.Fatalf("test role metadata = %#v", byPath["tests/test_ssl.py"].Metadata)
-	}
-	if byPath["httpie/downloads.py"].Metadata["source_root"] != "httpie" {
-		t.Fatalf("source root metadata = %#v", byPath["httpie/downloads.py"].Metadata)
-	}
+	assert.Equal(t, "implementation", byPath["httpie/downloads.py"].Metadata["source_role"])
+	assert.Equal(t, "test", byPath["tests/test_ssl.py"].Metadata["source_role"])
+	assert.Equal(t, "httpie", byPath["httpie/downloads.py"].Metadata["source_root"])
 }
 
 func TestFirstPartySourceContextAdmitsLongTailLanguageInFirstPartyRoot(t *testing.T) {
@@ -72,12 +57,9 @@ func TestFirstPartySourceContextAdmitsLongTailLanguageInFirstPartyRoot(t *testin
 
 	got := buildFirstPartySourceContextCandidates(context.Background(), root, nil)
 	paths := firstPartySourceCandidatePaths(got)
-	if !paths["plugins/auth/access.lua"] {
-		t.Fatalf("missing first-party lua source in %#v", paths)
-	}
-	if paths["examples/auth/access.lua"] {
-		t.Fatalf("docs/examples lua should stay out: %#v", paths)
-	}
+	require.Len(t, paths, 1)
+	assert.True(t, paths["plugins/auth/access.lua"])
+	assert.False(t, paths["examples/auth/access.lua"])
 }
 
 func TestFirstPartySourceContextDetectsNestedModuleRoots(t *testing.T) {
@@ -92,23 +74,16 @@ func TestFirstPartySourceContextDetectsNestedModuleRoots(t *testing.T) {
 
 	got := buildFirstPartySourceContextCandidates(context.Background(), root, nil)
 	paths := firstPartySourceCandidatePaths(got)
-	for _, want := range []string{
-		"sdk/storage/blob/client.go",
-		"sdk/storage/blob/client_test.go",
-		"sdk/storage/queue/client.go",
-	} {
-		if !paths[want] {
-			t.Fatalf("missing nested module source %s in %#v", want, paths)
-		}
-	}
-	if paths["vendor/example.com/other/ignored.go"] {
-		t.Fatalf("vendor module should stay out: %#v", paths)
-	}
+	require.Len(t, paths, 3)
+	assert.True(t, paths["sdk/storage/blob/client.go"])
+	assert.True(t, paths["sdk/storage/blob/client_test.go"])
+	assert.True(t, paths["sdk/storage/queue/client.go"])
+	assert.False(t, paths["vendor/example.com/other/ignored.go"])
+	byPath := map[string]adapters.Candidate{}
 	for _, candidate := range got {
-		if candidate.RelPath == "sdk/storage/blob/client.go" && candidate.Metadata["source_root_kind"] != "module_root" {
-			t.Fatalf("nested module root metadata = %#v", candidate.Metadata)
-		}
+		byPath[candidate.RelPath] = candidate
 	}
+	assert.Equal(t, "module_root", byPath["sdk/storage/blob/client.go"].Metadata["source_root_kind"])
 }
 
 func firstPartySourceCandidatePaths(candidates []adapters.Candidate) map[string]bool {
@@ -122,10 +97,6 @@ func firstPartySourceCandidatePaths(candidates []adapters.Candidate) map[string]
 func writeFirstPartySourceTestFile(t *testing.T, root, rel, body string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o644))
 }

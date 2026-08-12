@@ -37,7 +37,9 @@ func runResolve(cmd *cobra.Command, idOrPrefix string, asJSON, noRefresh bool) e
 	defer db.Close()
 
 	if !noRefresh {
-		ensureFresh(cmd, db)
+		if err := ensureFresh(cmd, db); err != nil {
+			return err
+		}
 	}
 
 	art, err := db.GetArtifact(idOrPrefix)

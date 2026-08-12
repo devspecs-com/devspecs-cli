@@ -131,12 +131,12 @@ func ArtifactCandidateWithLinks(art store.ArtifactRow, sources []store.SourceRow
 	}
 	return retrieval.Candidate{
 		ID:       art.ID,
-		Path:     filepath.ToSlash(path),
+		Path:     normalizeCandidatePath(path),
 		Kind:     art.Kind,
 		Subtype:  art.Subtype,
 		Title:    art.Title,
 		Status:   art.Status,
-		Source:   filepath.ToSlash(sourcePath),
+		Source:   normalizeCandidatePath(sourcePath),
 		Body:     RenderCandidateBody(art, sources, todos, body),
 		Metadata: metadata,
 		Sections: retrievalSections(sections),
@@ -153,7 +153,7 @@ func retrievalSections(rows []store.SectionRow) []retrieval.IndexedSection {
 			ID:            row.ID,
 			ArtifactID:    row.ArtifactID,
 			RevisionID:    row.RevisionID,
-			SourcePath:    filepath.ToSlash(row.SourcePath),
+			SourcePath:    normalizeCandidatePath(row.SourcePath),
 			HeadingPath:   row.HeadingPath,
 			HeadingDepth:  row.HeadingDepth,
 			StartLine:     row.StartLine,
@@ -196,7 +196,7 @@ func candidatePathFromSources(sources []store.SourceRow) string {
 		if strings.TrimSpace(src.Path) == "" {
 			continue
 		}
-		path := filepath.ToSlash(src.Path)
+		path := normalizeCandidatePath(src.Path)
 		if src.SourceType != "test_case" && src.SourceType != "code_comment" {
 			return path
 		}
@@ -349,7 +349,7 @@ func RenderCandidateBody(art store.ArtifactRow, sources []store.SourceRow, todos
 	fmt.Fprintf(&b, "Status: %s\n", art.Status)
 	for _, src := range sources {
 		if src.Path != "" {
-			fmt.Fprintf(&b, "Source: %s\n", filepath.ToSlash(src.Path))
+			fmt.Fprintf(&b, "Source: %s\n", normalizeCandidatePath(src.Path))
 		}
 		if src.FormatProfile != "" {
 			fmt.Fprintf(&b, "Format profile: %s\n", src.FormatProfile)
@@ -377,10 +377,14 @@ func RenderCandidateBody(art store.ArtifactRow, sources []store.SourceRow, todos
 func firstSourcePath(sources []store.SourceRow) string {
 	for _, src := range sources {
 		if strings.TrimSpace(src.Path) != "" {
-			return filepath.ToSlash(src.Path)
+			return normalizeCandidatePath(src.Path)
 		}
 	}
 	return ""
+}
+
+func normalizeCandidatePath(path string) string {
+	return strings.ReplaceAll(filepath.ToSlash(path), "\\", "/")
 }
 
 func ApproximateTokenCount(text string) int {

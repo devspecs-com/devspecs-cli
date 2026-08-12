@@ -231,11 +231,12 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 	defer db.Close()
 
 	if !noRefresh {
+		var refreshErr error
 		if allRepos {
-			ensureFresh(cmd, db)
+			refreshErr = ensureFresh(cmd, db)
 		} else if repoName != "" {
 			if repoRoot := resolveRepoRootByName(db, repoName); repoRoot != "" {
-				ensureRepoIndexed(cmd, db, repoRoot)
+				refreshErr = ensureRepoIndexed(cmd, db, repoRoot)
 			}
 		} else {
 			wd, _ := os.Getwd()
@@ -243,7 +244,10 @@ func runFind(cmd *cobra.Command, query string, fp store.FilterParams, repoName s
 			if repoRoot == "" {
 				repoRoot = canonicalRepoRoot(resolveRepoRootFromWd(wd))
 			}
-			ensureRepoIndexed(cmd, db, repoRoot)
+			refreshErr = ensureRepoIndexed(cmd, db, repoRoot)
+		}
+		if refreshErr != nil {
+			return refreshErr
 		}
 	}
 
