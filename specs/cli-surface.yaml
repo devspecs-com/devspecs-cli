@@ -4,11 +4,13 @@ kind: cli_surface_tree
 metadata:
   product: devspecs-cli
   binary: ds
-  audited_at: "2026-07-12"
+  audited_at: "2026-08-12"
   source:
     - go run ./cmd/ds --help
     - go run ./cmd/ds task --help
     - go run ./cmd/ds workspace --help
+    - go run ./cmd/ds compose --help
+    - go run ./cmd/ds prune --help
     - cmd/ds/main.go
     - internal/commands
   intent: >
@@ -317,9 +319,15 @@ planned_simplification:
       - init
       - recent
       - task
+      - compose
       - apply
       - find
       - map
+      - context
+      - show
+      - workspace
+      - scan
+      - prune
       - config
       - update
       - version

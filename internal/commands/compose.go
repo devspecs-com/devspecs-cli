@@ -76,7 +76,11 @@ func NewComposeCmd() *cobra.Command {
 
 Use an ADR after a settled technical choice, an RFC when a proposal needs
 review before commitment, and a PRD for a product problem, users, outcomes,
-and requirements. Skip local, obvious, reversible implementation details.`,
+and requirements. Skip local, obvious, reversible implementation details.
+
+The Markdown file is authoritative and remains in the repository; ds prune
+only maintains the rebuildable local index. From an umbrella workspace, pass
+--repo <child-repo> so the owning repository receives the document.`,
 	}
 	addRepoTargetPersistentFlag(cmd)
 	cmd.AddCommand(newComposeADRCmd())
@@ -145,7 +149,7 @@ func newComposePRDCmd() *cobra.Command {
 func addComposeCommonFlags(cmd *cobra.Command, opts *composeOptions) {
 	cmd.Flags().StringVar(&opts.FromTask, "from-task", "", "Related DevSpecs task ID")
 	cmd.Flags().StringVar(&opts.Target, "target", "", "Related task series or slice target")
-	cmd.Flags().StringVar(&opts.Output, "output", "", "Repository-relative output file; overrides inferred directory and filename")
+	cmd.Flags().StringVar(&opts.Output, "output", "", "Repository-relative output file; configure custom directories for rebuild discovery")
 	cmd.Flags().BoolVar(&opts.NoRefresh, "no-refresh", false, "Use the current index without a pre-compose freshness scan")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 }
@@ -202,10 +206,17 @@ func runCompose(cmd *cobra.Command, title string, opts composeOptions) error {
 	if err != nil {
 		return err
 	}
+	relPath, err := filepath.Rel(repoRoot, path)
+	if err != nil {
+		return err
+	}
+	relPath = filepath.ToSlash(relPath)
+	sourceType := composeCaptureSourceType(cfg, relPath, opts.DocumentType)
 	body, err := renderComposeDocument(title, recordID, provenance, convention, opts)
 	if err != nil {
 		return err
 	}
+	body = addComposeIndexMetadata(body, relPath, opts.DocumentType, sourceType)
 	if err := writeComposeFile(path, body); err != nil {
 		return err
 	}
@@ -215,12 +226,7 @@ func runCompose(cmd *cobra.Command, title string, opts composeOptions) error {
 			_ = os.Remove(path)
 		}
 	}()
-	relPath, err := filepath.Rel(repoRoot, path)
-	if err != nil {
-		return err
-	}
-	relPath = filepath.ToSlash(relPath)
-	artifactID, err := captureComposedDocument(cmd, repoRoot, path, title, opts.DocumentType)
+	artifactID, err := captureComposedDocument(cmd, repoRoot, path, title, opts.DocumentType, sourceType)
 	if err != nil {
 		return err
 	}
@@ -309,6 +315,61 @@ func renderComposeDocument(title, recordID, provenance string, convention compos
 	default:
 		return "", fmt.Errorf("unsupported compose document type %q", opts.DocumentType)
 	}
+}
+
+func composeCaptureSourceType(cfg *config.RepoConfig, relPath, documentType string) string {
+	if documentType != composeTypeADR {
+		return "markdown"
+	}
+	directory := normalizeComposePath(filepath.Dir(relPath))
+	if cfg == nil {
+		cfg = config.DefaultRepoConfig()
+	}
+	for _, source := range cfg.Sources {
+		if source.Type != composeTypeADR {
+			continue
+		}
+		paths := append([]string(nil), source.Paths...)
+		if source.Path != "" {
+			paths = append(paths, source.Path)
+		}
+		for _, path := range paths {
+			path = normalizeComposePath(path)
+			if directory == path || strings.HasPrefix(directory, path+"/") {
+				return composeTypeADR
+			}
+		}
+		break
+	}
+	return "markdown"
+}
+
+func addComposeIndexMetadata(body, relPath, documentType, sourceType string) string {
+	kind := ""
+	subtype := ""
+	status := "draft"
+	switch {
+	case documentType == composeTypeADR && sourceType == "markdown":
+		kind = config.KindDecision
+		subtype = config.SubtypeADR
+		status = "proposed"
+	case documentType == composeTypeRFC && !composePathMatchesType(relPath, composeTypeRFC):
+		kind = config.KindDesign
+	case documentType == composeTypePRD && !composePathMatchesType(relPath, composeTypePRD):
+		kind = config.KindRequirements
+		subtype = config.SubtypePRD
+	}
+	if kind == "" {
+		return body
+	}
+	metadata := "kind: " + kind + "\n"
+	if subtype != "" {
+		metadata += "subtype: " + subtype + "\n"
+	}
+	if strings.HasPrefix(body, "---\n") {
+		return "---\n" + metadata + strings.TrimPrefix(body, "---\n")
+	}
+	return "---\n" + metadata + "status: " + status + "\n---\n\n" + body
 }
 
 func loadComposeCandidates(ctx context.Context, db *store.DB, repoRoot, documentType string) ([]composeCandidate, error) {
@@ -829,22 +890,19 @@ func writeComposeFile(path, body string) error {
 	return nil
 }
 
-func captureComposedDocument(cmd *cobra.Command, repoRoot, path, title, documentType string) (string, error) {
+func captureComposedDocument(cmd *cobra.Command, repoRoot, path, title, documentType, sourceType string) (string, error) {
 	kind := config.KindDecision
 	subtype := config.SubtypeADR
 	status := "proposed"
-	sourceType := "adr"
 	switch documentType {
 	case composeTypeRFC:
 		kind = config.KindDesign
 		subtype = ""
 		status = "draft"
-		sourceType = "markdown"
 	case composeTypePRD:
 		kind = config.KindRequirements
 		subtype = config.SubtypePRD
 		status = "draft"
-		sourceType = "markdown"
 	}
 	originalWD, err := os.Getwd()
 	if err != nil {

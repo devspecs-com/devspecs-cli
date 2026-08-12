@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/config"
@@ -174,6 +175,88 @@ func TestComposeADR_WithExplicitOutputOutsideConfiguredSources_CapturesArtifact(
 	require.NoError(t, err)
 	assert.Equal(t, "decision", artifact.Kind)
 	assert.Equal(t, "adr", artifact.Subtype)
+	sources, err := db.GetSourcesForArtifact(output.ArtifactID)
+	require.NoError(t, err)
+	require.Len(t, sources, 1)
+	assert.Equal(t, "markdown", sources[0].SourceType)
+	body, err := os.ReadFile(filepath.Join(repoRoot, filepath.FromSlash(output.Path)))
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "kind: decision\nsubtype: adr")
+}
+
+func TestComposeADR_FromWorkspaceRootWithRepoTask_WritesToOwningChildAndRecordsProvenance(t *testing.T) {
+	workspaceRoot := setupWorkspaceCommandFixture(t)
+	runWorkspaceInitJSON(t, workspaceRoot)
+	change := runChangeCreateJSON(t, "Export ownership", workspaceRoot, "backend")
+	backend := runSliceCreateJSON(t, workspaceRoot, change.ChangeID, "backend", "Backend ownership")
+
+	output := executeComposeJSON(t,
+		"adr", "Define export ownership",
+		"--repo", backend.RepoRoot,
+		"--from-task", backend.TaskID,
+		"--target", "A00",
+		"--no-refresh",
+	)
+
+	assert.Equal(t, "docs/adr/0001-define-export-ownership.md", output.Path)
+	assert.FileExists(t, filepath.Join(backend.RepoRoot, filepath.FromSlash(output.Path)))
+	assert.NoFileExists(t, filepath.Join(workspaceRoot, filepath.FromSlash(output.Path)))
+	body, err := os.ReadFile(filepath.Join(backend.RepoRoot, filepath.FromSlash(output.Path)))
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "<!-- devspecs: task="+backend.TaskID+" target=A00 -->")
+}
+
+func TestScanRebuild_WithComposedADR_RediscoversAuthoritativeRepoDocument(t *testing.T) {
+	repoRoot := setupComposeCommandRepo(t)
+	output := executeComposeJSON(t, "adr", "Use PostgreSQL", "--no-refresh")
+	cmd := NewScanCmd()
+	cmd.SetArgs([]string{"--path", repoRoot, "--rebuild", "--json"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	db, err := store.Open(filepath.Join(filepath.Dir(repoRoot), "home", "devspecs.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, db.Close()) })
+	artifactID, err := db.FindSourceByIdentity(output.Path + "|adr")
+	require.NoError(t, err)
+	assert.NotEmpty(t, artifactID)
+	artifact, err := db.GetArtifact(artifactID)
+	require.NoError(t, err)
+	assert.Equal(t, config.KindDecision, artifact.Kind)
+	assert.Equal(t, config.SubtypeADR, artifact.Subtype)
+	var sourceCount int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM sources WHERE path = ?`, output.Path).Scan(&sourceCount))
+	assert.Equal(t, 1, sourceCount)
+}
+
+func TestScanRebuild_WithComposedADRInGenericDecisionDirectory_PreservesADRClassification(t *testing.T) {
+	repoRoot := setupComposeCommandRepo(t)
+	directory := filepath.Join(repoRoot, "docs", "decisions")
+	require.NoError(t, os.MkdirAll(directory, 0o755))
+	existing := "# ADR-0001: Existing choice\n\n## Status\nAccepted\n\n## Context\nProblem\n\n## Decision\nChoice\n\n## Consequences\nCost\n"
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "0001-existing-choice.md"), []byte(existing), 0o644))
+	output := executeComposeJSON(t, "adr", "Use PostgreSQL", "--no-refresh")
+	cmd := NewScanCmd()
+	cmd.SetArgs([]string{"--path", repoRoot, "--rebuild", "--json"})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	db, err := store.Open(filepath.Join(filepath.Dir(repoRoot), "home", "devspecs.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, db.Close()) })
+	artifactID, err := db.FindSourceByIdentity(output.Path + "|markdown")
+	require.NoError(t, err)
+	assert.NotEmpty(t, artifactID)
+	artifact, err := db.GetArtifact(artifactID)
+	require.NoError(t, err)
+	assert.Equal(t, config.KindDecision, artifact.Kind)
+	assert.Equal(t, config.SubtypeADR, artifact.Subtype)
 }
 
 func TestWriteComposeOutput_WithADRHumanOutput_RendersFormatConventionAndGuidance(t *testing.T) {
@@ -231,6 +314,37 @@ func TestConfiguredComposeDirectories_WithADRSource_ReturnsConfiguredDirectory(t
 
 	require.Len(t, directories, 1)
 	assert.Equal(t, "docs/architecture/decisions", directories[0])
+}
+
+func TestComposeCaptureSourceType_WithConfiguredADRPath_ReturnsADR(t *testing.T) {
+	cfg := config.DefaultRepoConfig()
+
+	sourceType := composeCaptureSourceType(cfg, "docs/adr/0001-choice.md", composeTypeADR)
+
+	assert.Equal(t, "adr", sourceType)
+}
+
+func TestComposeCaptureSourceType_WithDefaultADRPathAndNoConfig_ReturnsADR(t *testing.T) {
+	sourceType := composeCaptureSourceType(nil, "docs/adr/0001-choice.md", composeTypeADR)
+
+	assert.Equal(t, "adr", sourceType)
+}
+
+func TestComposeCaptureSourceType_WithGenericDecisionPath_ReturnsMarkdown(t *testing.T) {
+	cfg := config.DefaultRepoConfig()
+
+	sourceType := composeCaptureSourceType(cfg, "docs/decisions/0001-choice.md", composeTypeADR)
+
+	assert.Equal(t, "markdown", sourceType)
+}
+
+func TestAddComposeIndexMetadata_WithExistingFrontmatter_MergesADRMetadata(t *testing.T) {
+	body := "---\nstatus: proposed\ndate: 2026-08-12\n---\n\n# Choice\n"
+
+	actual := addComposeIndexMetadata(body, "docs/decisions/0001-choice.md", composeTypeADR, "markdown")
+
+	assert.Contains(t, actual, "---\nkind: decision\nsubtype: adr\nstatus: proposed")
+	assert.Equal(t, 2, strings.Count(actual, "---"))
 }
 
 func TestComposeArtifactMatchesType_WithADRSubtype_ReturnsTrue(t *testing.T) {

@@ -230,13 +230,16 @@ ds workspace slice create EAG-C001 --workspace . --repo backend --name "Backend 
 ds task show eag-c001-backend --repo ./enalytics-backend --json
 ds apply eag-c001-backend --repo ./enalytics-backend --json
 ds task checkpoint eag-c001-backend --repo ./enalytics-backend --target A01 --stage validated --decision promote --json
+ds compose adr "Define the export ownership boundary" --repo ./enalytics-backend --from-task eag-c001-backend --target A00 --json
 ds workspace trace EAG-C001 --workspace . --json
 ```
 
 Workspace files are written under the umbrella `devspecs/` directory. Repo-local
 task files are written under the selected child repo. The `--repo` flag is the
 explicit boundary between the current shell directory and the target repo for
-task/apply/checkpoint work.
+task, apply, checkpoint, and compose work. There is no `ds workspace compose`:
+durable documents belong to one versioned repository. Use the umbrella
+repository only when it is itself the canonical owner of a cross-repo document.
 
 `ds workspace trace` is for known workspace change or repo task IDs. Use
 `ds find` when you need to discover relevant source, tests, docs, or prior task
@@ -265,6 +268,13 @@ Use an ADR after a meaningful technical choice is settled, an RFC while a
 consequential proposal still needs review, and a PRD for a product problem,
 users, outcomes, and requirements spanning one or more tracks. Skip small,
 obvious, reversible choices.
+
+The Markdown document is the source of truth. Its index row is derived state:
+`ds prune` never deletes repository files, and `ds scan --rebuild` rediscovers
+documents in configured or conventional ADR/RFC/PRD paths. From an umbrella
+workspace, pass `--repo <child-repo>` to keep ownership explicit.
+When `--output` selects an unconventional directory, add that directory to
+`.devspecs/config.yaml` for deterministic rebuild discovery.
 
 ADR format defaults to `auto`: DevSpecs reuses a recognized repo convention and
 fails on ambiguous precedent. With no precedent it uses Nygard. Choose explicitly
@@ -346,6 +356,7 @@ flags. Use the `ds workspace ...` form for workspace coordination.
 | `.devspecs/config.yaml` | Repo discovery configuration. | Usually yes. |
 | `devspecs/tasks/<task-id>/` | Default generated task workspace. | Yes, when durable. |
 | `.devspecs/tasks/<task-id>/` | Legacy or explicitly local task workspace. | No, unless you chose it deliberately. |
+| Repository ADR/RFC/PRD paths, such as `docs/adr/`, `docs/rfcs/`, and `docs/prd/` | Canonical durable documents created or reused by `ds compose`. | Yes. |
 | `devspecs/workspace.yaml` | Experimental workspace manifest for umbrella repos. | Yes, when used by the team. |
 | `devspecs/changes/<change-id>-*.md` | Experimental workspace-level change records. | Yes, when used by the team. |
 
@@ -362,6 +373,8 @@ ds prune --vacuum
 `ds prune` only removes a logical repository when none of its recorded roots
 still exist. It also collapses consecutive capture revisions with identical
 content while preserving the current revision and distinct content transitions.
+It never removes source files, composed documents, task artifacts, or workspace
+records from disk.
 Normal pruning makes freed SQLite pages reusable. `--vacuum` also rewrites the
 database to return unused space to the filesystem, which can take time and
 require temporary free disk space on a large index. Long human-mode maintenance

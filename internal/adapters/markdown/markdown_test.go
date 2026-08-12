@@ -401,6 +401,32 @@ func TestDiscover_ExperimentalIntentDiscoverySkipsNestedOpenSpecRoots(t *testing
 
 }
 
+func TestDiscover_WithConventionalADRPath_LeavesFileToADRAdapter(t *testing.T) {
+	repoRoot := t.TempDir()
+	adrPath := filepath.Join(repoRoot, "docs", "adr", "0001-use-postgresql.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(adrPath), 0o755))
+	require.NoError(t, os.WriteFile(adrPath, []byte("# ADR-0001: Use PostgreSQL\n\n## Status\nAccepted\n"), 0o644))
+
+	candidates, err := (&Adapter{}).Discover(context.Background(), repoRoot, config.DefaultRepoConfig())
+
+	require.NoError(t, err)
+	assert.Empty(t, candidates)
+}
+
+func TestDiscover_WithConfiguredADRPath_LeavesFileToADRAdapter(t *testing.T) {
+	repoRoot := t.TempDir()
+	adrPath := filepath.Join(repoRoot, "docs", "decisions", "0001-use-postgresql.md")
+	require.NoError(t, os.MkdirAll(filepath.Dir(adrPath), 0o755))
+	require.NoError(t, os.WriteFile(adrPath, []byte("# ADR-0001: Use PostgreSQL\n\n## Status\nAccepted\n"), 0o644))
+	cfg := config.DefaultRepoConfig()
+	cfg.Sources[1].Paths = []string{"docs/decisions"}
+
+	candidates, err := (&Adapter{}).Discover(context.Background(), repoRoot, cfg)
+
+	require.NoError(t, err)
+	assert.Empty(t, candidates)
+}
+
 func TestParse_FrontmatterOverrides(t *testing.T) {
 	tmp := t.TempDir()
 	content := "---\ntitle: Custom Title\nkind: spec\nstatus: draft\n---\n# Ignored H1\n\nBody here.\n"

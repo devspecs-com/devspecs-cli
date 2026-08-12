@@ -44,17 +44,13 @@ func TestRootCmd_HelpMentionsTelemetryPrivacy(t *testing.T) {
 	require.NoError(t, cmd.Execute())
 
 	got := buf.String()
-	for _, want := range []string{
-		"Telemetry:",
-		"minimal anonymous usage counts",
-		"never sends repo names, file paths, git remotes",
-		"raw queries",
-		"DEVSPECS_TELEMETRY=0",
-	} {
-		assert.Contains(t, got, want,
-			"expected help output to contain %q, got %q", want, got)
-
-	}
+	assert.Contains(t, got, "Telemetry:")
+	assert.Contains(t, got, "minimal anonymous usage counts")
+	assert.Contains(t, got, "coarse command")
+	assert.Contains(t, got, "success and duration buckets")
+	assert.Contains(t, got, "never sends repo names, file paths, git")
+	assert.Contains(t, got, "remotes, document text, or raw queries")
+	assert.Contains(t, got, "DEVSPECS_TELEMETRY=0")
 }
 
 func TestRootCmd_HelpCentersTaskWorkflow(t *testing.T) {
@@ -76,6 +72,8 @@ func TestRootCmd_HelpCentersTaskWorkflow(t *testing.T) {
 		"Use ds find for a focused question",
 		"Human work setup:",
 		"use ds task for repo-local bounded work",
+		"ds compose for",
+		"repo-owned ADRs, RFCs, and PRDs",
 		"AI execution:",
 		"agents should consume bounded prompts with ds apply",
 		"Setup:",
@@ -186,6 +184,14 @@ func TestRootCmd_ComposeHelp_ExplainsTypeAndFormatBoundaries(t *testing.T) {
 	assert.Contains(t, help, "y-statement")
 	assert.Contains(t, help, "outcome-first")
 	assert.Contains(t, help, "iso-42010")
+}
+
+func TestRootCmd_ComposeHelp_ExplainsStoragePruneAndWorkspaceOwnership(t *testing.T) {
+	help := executeRootHelp(t, "compose", "--help")
+
+	assert.Contains(t, help, "Markdown file is authoritative")
+	assert.Contains(t, help, "ds prune")
+	assert.Contains(t, help, "--repo <child-repo>")
 }
 
 func TestRootCmd_FindHelp_DescribesFocusedContextRole(t *testing.T) {

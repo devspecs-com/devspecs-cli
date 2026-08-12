@@ -6,7 +6,11 @@
 
 - Added experimental `ds compose adr|rfc|prd` to create indexed, repo-owned
   durable drafts outside the DevSpecs task corpus while reusing established
-  document directories, numbering, and ADR conventions.
+  document directories, numbering, and ADR conventions. Composed files remain
+  authoritative through index rebuild/prune operations, and workspace callers
+  route ownership explicitly with `--repo` rather than a parallel workspace
+  compose command. Conventional ADR paths retain single-adapter ownership after
+  rebuild so retrieval does not return duplicate records for one file.
 - Added ADR templates for all formats compared by adr.zone: Nygard, MADR full
   and minimal, Y-Statement, Outcome-First, and the ISO 42010 Companion.
 - Added a one-time durability closeout after full task-track implementation

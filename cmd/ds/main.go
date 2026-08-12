@@ -47,8 +47,9 @@ Human orientation: start with ds recent to recover the local thread, active
 branches, and likely follow-up commands. Use ds find for a focused question and
 ds map when you need subsystem boundaries.
 
-Human work setup: use ds task for repo-local bounded work and ds workspace for
-explicit multi-repo coordination.
+Human work setup: use ds task for repo-local bounded work, ds compose for
+repo-owned ADRs, RFCs, and PRDs, and ds workspace for explicit multi-repo
+coordination.
 
 AI execution: agents should consume bounded prompts with ds apply and record
 evidence with ds task checkpoint, ds task evaluate, or ds task audit.
@@ -60,9 +61,9 @@ Diagnostic layer: start with ds recent when the target is unclear. Use ds find
 to pack focused evidence and ds map to verify subsystem boundaries before
 creating or continuing a task.
 
-Telemetry: DevSpecs sends minimal anonymous usage counts for install, init,
-scan, and query flows. It never sends repo names, file paths, git remotes,
-document text, or raw queries. Disable with DEVSPECS_TELEMETRY=0.`,
+Telemetry: DevSpecs sends minimal anonymous usage counts plus coarse command
+success and duration buckets. It never sends repo names, file paths, git
+remotes, document text, or raw queries. Disable with DEVSPECS_TELEMETRY=0.`,
 		Version: fmt.Sprintf("%s (commit: %s, built: %s)", version.Version, version.Commit, version.Date),
 	}
 

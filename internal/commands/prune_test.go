@@ -61,6 +61,42 @@ func TestPruneCommand_WithJSON_DeletesStaleData(t *testing.T) {
 	assert.Zero(t, count)
 }
 
+func TestPruneCommand_WithActiveComposedADR_PreservesRepoDocumentAndIndexArtifact(t *testing.T) {
+	repoRoot := setupComposeCommandRepo(t)
+	composed := executeComposeJSON(t, "adr", "Use PostgreSQL", "--no-refresh")
+	cmd := NewPruneCmd()
+	cmd.SetArgs([]string{"--json"})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var report store.PruneReport
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &report))
+	assert.Zero(t, report.RepositoriesPruned)
+	assert.FileExists(t, filepath.Join(repoRoot, filepath.FromSlash(composed.Path)))
+	db, err := store.Open(filepath.Join(filepath.Dir(repoRoot), "home", "devspecs.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, db.Close()) })
+	artifact, err := db.GetArtifact(composed.ArtifactID)
+	require.NoError(t, err)
+	assert.Equal(t, "Use PostgreSQL", artifact.Title)
+}
+
+func TestPruneHelp_ExplainsRepositoryFilesRemainAuthoritative(t *testing.T) {
+	cmd := NewPruneCmd()
+	cmd.SetArgs([]string{"--help"})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "Prune never deletes files from")
+	assert.Contains(t, stdout.String(), "ADRs, RFCs, PRDs, or DevSpecs task artifacts")
+}
+
 func setupPruneStaleIndex(t *testing.T) string {
 	t.Helper()
 	home := filepath.Join(t.TempDir(), "home")

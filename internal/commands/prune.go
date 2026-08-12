@@ -30,7 +30,8 @@ A logical repository is removed only when none of its recorded roots still
 exist. Consecutive capture revisions with identical content are collapsed while
 preserving the current revision and distinct content transitions. Deleted
 SQLite pages are reusable immediately; pass --vacuum to compact the database
-file and return unused space to the filesystem.`,
+file and return unused space to the filesystem. Prune never deletes files from
+a repository, including ADRs, RFCs, PRDs, or DevSpecs task artifacts.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runPrune(cmd, dryRun, vacuum, asJSON)
