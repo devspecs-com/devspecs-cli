@@ -35,6 +35,19 @@ func TestSanitizeProperties_WithSensitiveFields_KeepsOnlyAllowedCoarseFields(t *
 	assert.NotContains(t, properties, "repo_path")
 }
 
+func TestSanitizeProperties_WithComposeMetadata_KeepsDocumentTypeAndFormat(t *testing.T) {
+	input := map[string]any{
+		"document_type": "adr",
+		"format":        "outcome-first",
+	}
+
+	properties := sanitizeProperties(input)
+
+	require.Len(t, properties, 2)
+	assert.Equal(t, "adr", properties["document_type"])
+	assert.Equal(t, "outcome-first", properties["format"])
+}
+
 func TestCountBucket_WithZero_ReturnsZeroBucket(t *testing.T) {
 	actual := CountBucket(0)
 

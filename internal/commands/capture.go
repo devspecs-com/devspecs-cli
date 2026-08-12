@@ -48,6 +48,14 @@ func NewCaptureCmd() *cobra.Command {
 }
 
 func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON bool) error {
+	return runCaptureWithSubtype(cmd, path, kind, "", title, status, asJSON)
+}
+
+func runCaptureWithSubtype(cmd *cobra.Command, path, kind, subtype, title, status string, asJSON bool) error {
+	return runCaptureAsSource(cmd, path, kind, subtype, title, status, "capture", asJSON)
+}
+
+func runCaptureAsSource(cmd *cobra.Command, path, kind, subtype, title, status, sourceType string, asJSON bool) error {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("resolve path: %w", err)
@@ -103,6 +111,12 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 		}
 		art.Kind = kind
 	}
+	if subtype != "" {
+		if err := config.ValidateSubtype(art.Kind, subtype); err != nil {
+			return fmt.Errorf("--subtype: %w", err)
+		}
+		art.Subtype = subtype
+	}
 	if title != "" {
 		art.Title = title
 	}
@@ -110,7 +124,14 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 		art.Status = status
 	}
 
-	sourceIdentity := relPath + "|capture"
+	sourceType = strings.TrimSpace(sourceType)
+	if sourceType == "" {
+		sourceType = "capture"
+	}
+	if sourceType == "adr" {
+		art.FormatProfile = "adr"
+	}
+	sourceIdentity := relPath + "|" + sourceType
 	now := time.Now().UTC().Format(time.RFC3339)
 	ids := idgen.NewFactory()
 	info := repo.DetectIdentityContext(captureCtx, wd)
@@ -191,7 +212,7 @@ func runCapture(cmd *cobra.Command, path, kind, title, status string, asJSON boo
 	}
 	db.InsertArtifactDirect(artifactID, repoID, art.Kind, art.Subtype, art.Title, art.Status, revID, authoredAt, now)
 	db.InsertRevisionDirect(revID, artifactID, contentHash, art.Body, exStr, now)
-	db.InsertSourceDirect(ids.NewWithPrefix("src_"), artifactID, repoID, "capture", relPath, sourceIdentity, art.FormatProfile, art.LayoutGroup, now)
+	db.InsertSourceDirect(ids.NewWithPrefix("src_"), artifactID, repoID, sourceType, relPath, sourceIdentity, art.FormatProfile, art.LayoutGroup, now)
 
 	for _, td := range pr.Todos {
 		todoID := ids.NewWithPrefix("todo_")

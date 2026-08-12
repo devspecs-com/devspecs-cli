@@ -216,7 +216,7 @@ func allowedProperty(key string) bool {
 		"force", "hooks", "no_detect", "interactive",
 		"include_tests", "include_code_comments", "if_changed", "rebuild", "json", "quiet",
 		"artifact_count_bucket", "new_count_bucket", "updated_count_bucket", "unchanged_count_bucket", "source_count_bucket", "found_any",
-		"query_length_bucket", "result_count_bucket", "focused":
+		"query_length_bucket", "result_count_bucket", "focused", "document_type", "format":
 		return true
 	default:
 		return false

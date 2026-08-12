@@ -309,18 +309,23 @@ func TestApplyNextAfterBlockRequiresExplicitTarget(t *testing.T) {
 	assert.ErrorContains(t, err, "choose an explicit target")
 }
 
-func TestApplyNextReportsCompletedTrack(t *testing.T) {
+func TestApplyNextAfterCompletedSlicesReturnsDurabilityCloseout(t *testing.T) {
 	taskID := "apply-completed-track"
 	setupApplyTask(t, taskID, "A", "only slice")
 	decideApplyTestTarget(t, taskID, "A01", "promote")
 	cmd := NewApplyCmd()
 	cmd.SetArgs([]string{"next", "--json"})
-	cmd.SetOut(&bytes.Buffer{})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
 
 	err := cmd.Execute()
 
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "no non-terminal DevSpecs task targets found")
+	require.NoError(t, err)
+	var output applyPromptOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &output))
+	assert.Equal(t, "A00", output.Target)
+	assert.Contains(t, output.Prompt, "Choose exactly one disposition")
+	assert.Contains(t, output.Prompt, "--durable-record none")
 }
 
 func TestApplySeriesIndexRequiresUnambiguousTrack(t *testing.T) {

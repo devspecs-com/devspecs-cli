@@ -707,6 +707,20 @@ func TestTask_QuickCreatesOneOffWorkspaceWithCompactOutput(t *testing.T) {
 
 }
 
+func TestTaskQuickManifest_DoesNotRequireDurabilityCloseout(t *testing.T) {
+	repoDir := setupTaskCommandRepo(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"--quick", "--id", "quick-no-closeout", "--no-refresh", "--index=false", "fix small billing typo"})
+	cmd.SetOut(&bytes.Buffer{})
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	manifest, err := readTaskManifest(filepath.Join(repoDir, "devspecs", "tasks", "quick-no-closeout", taskManifestFilename))
+	require.NoError(t, err)
+	assert.False(t, manifest.Durability.Required)
+}
+
 func TestTaskHelpHidesQuickSubcommandAndTeachesQuickFlag(t *testing.T) {
 	setupTaskCommandRepo(t)
 	cmd := NewTaskCmd()
@@ -2545,7 +2559,7 @@ func TestTaskDecideCompletesSliceWithoutRewritingIndex(t *testing.T) {
 	assert.Equal(t, fixture.AuthoredIndexBody, mustReadFile(t, fixture.IndexPath))
 }
 
-func TestTaskDecideCompletesSeriesWithoutRewritingIndex(t *testing.T) {
+func TestTaskDecideSeriesRequiresCheckpointDurabilityReview(t *testing.T) {
 	fixture := setupLifecycleTask(t)
 	cmd := NewTaskCmd()
 	cmd.SetArgs([]string{
@@ -2560,19 +2574,26 @@ func TestTaskDecideCompletesSeriesWithoutRewritingIndex(t *testing.T) {
 
 	err := cmd.Execute()
 
-	require.NoError(t, err)
-	var out taskDecideOutput
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
-	assert.Equal(t, "B00", out.Target)
-	assert.Equal(t, "completed", out.Stage)
-	assert.Equal(t, "complete", out.Decision)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "task-series closeout requires `ds task checkpoint")
 	assert.Equal(t, fixture.AuthoredIndexBody, mustReadFile(t, fixture.IndexPath))
 }
 
 func TestTaskStatusReflectsCompletedSeriesAndSlice(t *testing.T) {
 	setupLifecycleTask(t)
 	decideTaskTarget(t, "lifecycle-add-test", "B01", "complete")
-	decideTaskTarget(t, "lifecycle-add-test", "B00", "complete")
+	checkpoint := NewTaskCmd()
+	checkpoint.SetArgs([]string{
+		"checkpoint", "lifecycle-add-test",
+		"--target", "B00",
+		"--stage", "completed",
+		"--decision", "complete",
+		"--durable-record", "none",
+		"--index=false",
+		"--json",
+	})
+	checkpoint.SetOut(&bytes.Buffer{})
+	require.NoError(t, checkpoint.Execute())
 	cmd := NewTaskCmd()
 	cmd.SetArgs([]string{"status", "lifecycle-add-test", "--json"})
 	buf := &bytes.Buffer{}
@@ -2585,6 +2606,8 @@ func TestTaskStatusReflectsCompletedSeriesAndSlice(t *testing.T) {
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
 	assert.Equal(t, "completed", out.Status)
 	assert.Equal(t, "complete", out.Decision)
+	require.NotNil(t, out.Durability)
+	assert.Equal(t, "none", out.Durability.Disposition)
 	completed := taskStatusSliceByID(out.Slices, "B01")
 	require.NotNil(t, completed)
 	assert.Equal(t, "completed", completed.Stage)

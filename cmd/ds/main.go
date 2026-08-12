@@ -80,6 +80,7 @@ document text, or raw queries. Disable with DEVSPECS_TELEMETRY=0.`,
 	rootCmd.AddCommand(commands.NewRecentCmd())
 	rootCmd.AddCommand(commands.NewMapCmd())
 	rootCmd.AddCommand(commands.NewTaskCmd())
+	rootCmd.AddCommand(commands.NewComposeCmd())
 	rootCmd.AddCommand(commands.NewApplyCmd())
 	rootCmd.AddCommand(commands.NewWorkspaceCmd())
 	addHiddenWorkspaceCompatibilityCommand(rootCmd, commands.NewChangeCmd(), "ds workspace change")
@@ -122,6 +123,7 @@ func assignRootCommandGroups(rootCmd *cobra.Command) {
 		"show":      rootGroupHumanOrientation,
 		"init":      rootGroupHumanWorkSetup,
 		"task":      rootGroupHumanWorkSetup,
+		"compose":   rootGroupHumanWorkSetup,
 		"workspace": rootGroupHumanWorkSetup,
 		"apply":     rootGroupAIExecution,
 		"tldr":      rootGroupAIExecution,

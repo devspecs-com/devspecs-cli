@@ -177,6 +177,17 @@ func TestRootCmd_ApplyRegistered(t *testing.T) {
 	}
 }
 
+func TestRootCmd_ComposeHelp_ExplainsTypeAndFormatBoundaries(t *testing.T) {
+	help := executeRootHelp(t, "compose", "adr", "--help")
+
+	assert.Contains(t, help, "Create an ADR after a meaningful technical direction is settled.")
+	assert.Contains(t, help, "nygard")
+	assert.Contains(t, help, "madr")
+	assert.Contains(t, help, "y-statement")
+	assert.Contains(t, help, "outcome-first")
+	assert.Contains(t, help, "iso-42010")
+}
+
 func TestRootCmd_FindHelp_DescribesFocusedContextRole(t *testing.T) {
 	help := executeRootHelp(t, "find", "--help")
 

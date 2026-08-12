@@ -34,6 +34,9 @@ tree:
       task:
         status: core
         purpose: Create and manage bounded task workspaces with packed context.
+      compose:
+        status: experimental
+        purpose: Create repo-owned ADR, RFC, and PRD drafts using existing repository conventions.
       apply:
         status: core
         usage: ds apply [task-id|target]
@@ -150,6 +153,23 @@ tree:
       iteration:
         status: hidden_compat
         purpose: Compatibility alias; prefer ds task slice add --after.
+
+  ds compose:
+    status: experimental
+    purpose: Create durable Markdown outside the prunable DevSpecs task corpus.
+    children:
+      adr:
+        status: experimental
+        usage: ds compose adr "<title>" [--format auto|nygard|madr|y-statement|outcome-first|iso-42010]
+        purpose: Draft a settled architecture decision in a recognized repository convention.
+      rfc:
+        status: experimental
+        usage: ds compose rfc "<title>"
+        purpose: Draft a consequential proposal that needs review before commitment.
+      prd:
+        status: experimental
+        usage: ds compose prd "<title>"
+        purpose: Draft a product problem, users, outcomes, and requirements for one or more tracks.
 
   ds task slice:
     purpose: Add sibling or follow-up slices to an existing task.

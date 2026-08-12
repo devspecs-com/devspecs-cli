@@ -133,36 +133,38 @@ type taskDecideOptions struct {
 }
 
 type taskCheckpointOptions struct {
-	Dir            string
-	Slice          string
-	Target         string
-	Stage          string
-	Decision       string
-	Note           string
-	Description    string
-	Goal           string
-	Resources      []string
-	FilesRead      []string
-	FilesEdited    []string
-	TestsRead      []string
-	TestsRun       []string
-	RunLogs        []string
-	MissedFiles    []string
-	NoiseFiles     []string
-	Tasks          []string
-	Learnings      []string
-	NextTarget     string
-	NextDecision   string
-	GitDiff        bool
-	FromGit        bool
-	GitDiffMax     int
-	TestOutput     bool
-	TestMax        int
-	Index          bool
-	Draft          bool
-	AsJSON         bool
-	gitEvidence    *taskGitDiffEvidence
-	runLogEvidence []taskCommandRunEvidence
+	Dir              string
+	Slice            string
+	Target           string
+	Stage            string
+	Decision         string
+	Note             string
+	Description      string
+	Goal             string
+	Resources        []string
+	FilesRead        []string
+	FilesEdited      []string
+	TestsRead        []string
+	TestsRun         []string
+	RunLogs          []string
+	MissedFiles      []string
+	NoiseFiles       []string
+	Tasks            []string
+	Learnings        []string
+	NextTarget       string
+	NextDecision     string
+	DurableRecord    string
+	DurableArtifacts []string
+	GitDiff          bool
+	FromGit          bool
+	GitDiffMax       int
+	TestOutput       bool
+	TestMax          int
+	Index            bool
+	Draft            bool
+	AsJSON           bool
+	gitEvidence      *taskGitDiffEvidence
+	runLogEvidence   []taskCommandRunEvidence
 }
 
 type taskStartOutput struct {
@@ -223,6 +225,7 @@ type taskStatusOutput struct {
 	LatestCheckpointJSON string                  `json:"latest_checkpoint_json,omitempty"`
 	Slices               []taskStatusSliceOutput `json:"slices,omitempty"`
 	ArtifactFreshness    []taskArtifactFreshness `json:"artifact_freshness,omitempty"`
+	Durability           *taskDurabilityReview   `json:"durability,omitempty"`
 }
 
 type taskStatusSliceOutput struct {
@@ -267,6 +270,8 @@ type taskCheckpointOutput struct {
 	LearningCount      int      `json:"learning_count,omitempty"`
 	FactIndexed        bool     `json:"fact_indexed,omitempty"`
 	TestEvidenceCount  int      `json:"test_evidence_count,omitempty"`
+	DurableRecord      string   `json:"durable_record,omitempty"`
+	DurableArtifacts   []string `json:"durable_artifacts,omitempty"`
 }
 
 type taskCheckpointDraftOutput struct {
@@ -396,6 +401,15 @@ type taskManifest struct {
 	FreshnessWarnings    []taskFreshnessWarning `json:"freshness_warnings,omitempty"`
 	RiskCards            []taskRiskCard         `json:"risk_cards,omitempty"`
 	Confidence           taskConfidence         `json:"confidence"`
+	Durability           taskDurabilityReview   `json:"durability,omitempty"`
+}
+
+type taskDurabilityReview struct {
+	Required       bool     `json:"required,omitempty"`
+	Disposition    string   `json:"disposition,omitempty"`
+	Artifacts      []string `json:"artifacts,omitempty"`
+	DeferredTarget string   `json:"deferred_target,omitempty"`
+	UpdatedAt      string   `json:"updated_at,omitempty"`
 }
 
 type taskWorkspaceLink struct {
@@ -544,6 +558,8 @@ type taskCheckpointRecord struct {
 	Evidence                 taskCheckpointEvidence           `json:"evidence,omitempty"`
 	Learnings                []taskCheckpointLearning         `json:"learnings,omitempty"`
 	Next                     taskCheckpointNextRecommendation `json:"next,omitempty"`
+	DurableRecord            string                           `json:"durable_record,omitempty"`
+	DurableArtifacts         []string                         `json:"durable_artifacts,omitempty"`
 }
 
 type taskCheckpointActualContext struct {
@@ -974,6 +990,8 @@ func newTaskCheckpointCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&opts.Learnings, "learning", nil, "Compact learning as type: summary or type|summary|confidence|applies_to|refs; may be repeated")
 	cmd.Flags().StringVar(&opts.NextTarget, "next-target", "", "Recommended next task target")
 	cmd.Flags().StringVar(&opts.NextDecision, "next-decision", "", "Recommended next decision gate")
+	cmd.Flags().StringVar(&opts.DurableRecord, "durable-record", "", "Track closeout disposition: none, recorded, or deferred")
+	cmd.Flags().StringArrayVar(&opts.DurableArtifacts, "durable-artifact", nil, "Repo-owned ADR, RFC, or PRD recorded by this track; may be repeated")
 	cmd.Flags().BoolVar(&opts.GitDiff, "git-diff", false, "Include bounded git diff stat and changed-file evidence in checkpoint JSON")
 	cmd.Flags().BoolVar(&opts.FromGit, "from-git", false, "Populate edited-file evidence from current git status and diff")
 	cmd.Flags().IntVar(&opts.GitDiffMax, "git-diff-max-bytes", opts.GitDiffMax, "Maximum bytes of git diff stat evidence to keep")
@@ -1081,6 +1099,7 @@ func createTaskWorkspace(cmd *cobra.Command, query string, opts taskStartOptions
 		FreshnessWarnings: preflight.FreshnessWarnings,
 		RiskCards:         preflight.RiskCards,
 		Confidence:        preflight.Confidence,
+		Durability:        taskDurabilityReview{Required: !opts.Quick},
 	}
 
 	paths := taskAbsoluteArtifactPaths(workspace, relArtifacts)
@@ -1516,6 +1535,10 @@ func taskStatusFromManifest(manifest taskManifest, repoPath string) taskStatusOu
 		LatestCheckpoint:     manifest.LatestCheckpoint,
 		LatestCheckpointJSON: manifest.LatestCheckpointJSON,
 	}
+	if manifest.Durability.Required {
+		durability := manifest.Durability
+		out.Durability = &durability
+	}
 	if next, err := taskNextSlice(manifest); err == nil {
 		out.NextTarget = next.ID
 		out.NextTitle = next.Title
@@ -1587,6 +1610,16 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 	}
 	if status.LatestCheckpointJSON != "" {
 		fmt.Fprintf(out, "Latest Checkpoint JSON: %s\n", status.LatestCheckpointJSON)
+	}
+	if status.Durability != nil && status.Durability.Required {
+		disposition := emptyAsDash(status.Durability.Disposition)
+		fmt.Fprintf(out, "Durable Record: %s\n", disposition)
+		for _, artifact := range status.Durability.Artifacts {
+			fmt.Fprintf(out, "  - %s\n", artifact)
+		}
+		if status.Durability.DeferredTarget != "" {
+			fmt.Fprintf(out, "Durable Record Deferred To: %s\n", status.Durability.DeferredTarget)
+		}
 	}
 	if len(status.ArtifactFreshness) > 0 {
 		writeTaskArtifactFreshnessHuman(out, status.TaskID, status.ArtifactFreshness)
@@ -1672,6 +1705,9 @@ func runTaskDecide(cmd *cobra.Command, taskID string, opts taskDecideOptions) er
 	}
 	targetID := target
 	if isTaskSeriesTarget(manifest, target) {
+		if manifest.Durability.Required {
+			return fmt.Errorf("task-series closeout requires `ds task checkpoint %s --target %s00 --stage completed --decision complete --durable-record <none|recorded|deferred>`", taskID, defaultTaskSeries(manifest.Series))
+		}
 		targetID = defaultTaskSeries(manifest.Series) + "00"
 	} else {
 		slice, err := taskSliceForCheckpoint(manifest, target)
@@ -1978,6 +2014,9 @@ func writeTaskTargetHuman(out io.Writer, title string, target taskTargetOutput, 
 }
 
 func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput, priorEvidence []taskAdvisoryFile) string {
+	if target.Kind == "closeout" {
+		return renderTaskCloseoutPrompt(ctx, target, priorEvidence)
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are working on DevSpecs task %s target %s only.\n\n", target.TaskID, target.Target)
 	fmt.Fprintln(&b, "Boundary:")
@@ -2023,6 +2062,28 @@ func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput, prior
 		fmt.Fprintln(&b)
 		fmt.Fprintln(&b, target.PlanBody)
 	}
+	return b.String()
+}
+
+func renderTaskCloseoutPrompt(ctx taskTargetContext, target taskTargetOutput, priorEvidence []taskAdvisoryFile) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are closing DevSpecs task %s at track target %s. Do not implement more product work.\n\n", target.TaskID, target.Target)
+	fmt.Fprintln(&b, "Review the completed slice receipts once for institutional knowledge that should survive task pruning.")
+	fmt.Fprintln(&b, "A durable record is warranted when the track settled a cross-system boundary or contract, a costly-to-reverse choice, a dependency/protocol/storage/security/privacy/performance policy, real alternatives with rationale, or context a future track will need to understand why.")
+	fmt.Fprintln(&b, "Skip local, obvious, reversible implementation details.")
+	fmt.Fprintln(&b)
+	writeTaskPromptPriorSliceEvidence(&b, priorEvidence)
+	repoArg := ""
+	if strings.TrimSpace(ctx.RepoArg) != "" {
+		repoArg = " --repo " + commandArg(ctx.RepoArg)
+	}
+	fmt.Fprintln(&b, "Choose exactly one disposition:")
+	fmt.Fprintf(&b, "- none: `ds task checkpoint %s --target %s --stage completed --decision complete --durable-record none%s`\n", target.TaskID, target.Target, repoArg)
+	fmt.Fprintf(&b, "- recorded: create or finish repo-owned ADR/RFC/PRD files, then run `ds task checkpoint %s --target %s --stage completed --decision complete --durable-record recorded --durable-artifact <path>%s`\n", target.TaskID, target.Target, repoArg)
+	fmt.Fprintf(&b, "- deferred: `ds task checkpoint %s --target %s --stage completed --decision complete --durable-record deferred --next-target <target>%s`\n", target.TaskID, target.Target, repoArg)
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "Use `ds compose adr|rfc|prd \"<title>\" --from-task "+target.TaskID+" --target "+target.Target+repoArg+"` when a new durable draft is needed. Complete its placeholders before recording it.")
+	fmt.Fprintln(&b, "ADR formats: Nygard for compact records; MADR for explicit option comparison; Y-Statement for the shortest reviewable choice; Outcome-First for async alignment; ISO 42010 Companion for stakeholders, concerns, views, and traceability.")
 	return b.String()
 }
 
@@ -2110,7 +2171,36 @@ func taskNextSlice(manifest taskManifest) (taskSliceArtifact, error) {
 	if len(slices) == 0 {
 		return taskSliceArtifact{}, fmt.Errorf("task has no slice targets")
 	}
+	if manifest.Durability.Required && !taskDurabilityReviewComplete(manifest) {
+		return taskSeriesCloseoutTarget(manifest), nil
+	}
 	return taskSliceArtifact{}, fmt.Errorf("all task targets are terminal")
+}
+
+func taskSeriesCloseoutTarget(manifest taskManifest) taskSliceArtifact {
+	series := defaultTaskSeries(manifest.Series)
+	return taskSliceArtifact{
+		ID:                   series + "00",
+		Title:                "Review durable records and close the task track",
+		Plan:                 manifest.Artifacts.Index,
+		Result:               manifest.Artifacts.Index,
+		Kind:                 "closeout",
+		Stage:                manifest.Status,
+		Decision:             manifest.Decision,
+		UpdatedAt:            manifest.UpdatedAt,
+		LatestCheckpointID:   manifest.LatestCheckpointID,
+		LatestCheckpoint:     manifest.LatestCheckpoint,
+		LatestCheckpointJSON: manifest.LatestCheckpointJSON,
+	}
+}
+
+func taskDurabilityReviewComplete(manifest taskManifest) bool {
+	disposition := strings.ToLower(strings.TrimSpace(manifest.Durability.Disposition))
+	if disposition != "none" && disposition != "recorded" && disposition != "deferred" {
+		return false
+	}
+	decision := strings.ToLower(strings.TrimSpace(manifest.Decision))
+	return decision == "complete" || decision == "completed"
 }
 
 func taskSliceProgressionGroups(manifest taskManifest) [][]taskSliceArtifact {
@@ -2696,6 +2786,9 @@ func taskSliceForCheckpoint(manifest taskManifest, selector string) (taskSliceAr
 	first := firstTaskSliceArtifact(manifest.Artifacts)
 	if selector == "" {
 		return first, nil
+	}
+	if isTaskSeriesTarget(manifest, selector) {
+		return taskSeriesCloseoutTarget(manifest), nil
 	}
 	for _, slice := range manifest.Artifacts.Slices {
 		if taskSliceMatchesSelector(slice, selector) {
@@ -4086,6 +4179,9 @@ func renderTaskIndex(manifest taskManifest) string {
 			fmt.Fprintln(&b, "- [ ] Record files actually read, edited, tests run, misses, and noise in the slice result or `ds task checkpoint`.")
 		}
 	}
+	if manifest.Durability.Required {
+		fmt.Fprintf(&b, "- [ ] After all slices are terminal, complete the one-time durable record review at `%s00`; record none, recorded artifacts, or a deferred target.\n", defaultTaskSeries(manifest.Series))
+	}
 	return b.String()
 }
 
@@ -4636,6 +4732,10 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	if err != nil {
 		return err
 	}
+	opts, err = validateTaskDurabilityCheckpoint(repoRoot, workspace, manifest, selectedSlice, opts)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(selectedSlice.Result) == "" {
 		return fmt.Errorf("selected task slice %q has no result artifact", selectedSlice.ID)
 	}
@@ -4670,6 +4770,7 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 		return err
 	}
 	applyTaskTargetState(&manifest, selectedSlice.ID, opts.Stage, opts.Decision, now)
+	applyTaskDurabilityReview(&manifest, selectedSlice, opts, now)
 	applyTaskTargetCheckpointRefs(&manifest, selectedSlice.ID, checkpointID, taskRelativePath(workspace, checkpointPath), jsonRel)
 	if err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), manifest); err != nil {
 		return err
@@ -4714,6 +4815,8 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 		LearningCount:      len(record.Learnings),
 		FactIndexed:        factIndexed,
 		TestEvidenceCount:  len(record.Evidence.TestCommands),
+		DurableRecord:      record.DurableRecord,
+		DurableArtifacts:   record.DurableArtifacts,
 	}
 	if record.Evidence.GitDiff != nil {
 		out.GitDiffFiles = record.Evidence.GitDiff.ChangedFiles
@@ -4795,6 +4898,8 @@ func normalizeTaskCheckpointOptions(opts taskCheckpointOptions) taskCheckpointOp
 	opts.Learnings = normalizeList(opts.Learnings)
 	opts.NextTarget = strings.TrimSpace(opts.NextTarget)
 	opts.NextDecision = strings.TrimSpace(opts.NextDecision)
+	opts.DurableRecord = strings.ToLower(strings.TrimSpace(opts.DurableRecord))
+	opts.DurableArtifacts = normalizePathList(opts.DurableArtifacts)
 	if opts.GitDiffMax <= 0 {
 		opts.GitDiffMax = 12000
 	}
@@ -5070,6 +5175,8 @@ func buildTaskCheckpointRecord(manifest taskManifest, opts taskCheckpointOptions
 			RecommendedTarget:   opts.NextTarget,
 			RecommendedDecision: opts.NextDecision,
 		},
+		DurableRecord:    opts.DurableRecord,
+		DurableArtifacts: opts.DurableArtifacts,
 	}
 	record.Evidence.PlanRefs = appendUniqueValues(nil, record.Resources...)
 	if opts.gitEvidence != nil {
@@ -5597,6 +5704,7 @@ func renderTaskCheckpoint(manifest taskManifest, slice taskSliceArtifact, opts t
 	writeMarkdownList(&b, "Tests Actually Run", opts.TestsRun)
 	writeMarkdownList(&b, "Critical Files DevSpecs Missed", opts.MissedFiles)
 	writeMarkdownList(&b, "Distracting Files DevSpecs Included", opts.NoiseFiles)
+	writeTaskCheckpointDurabilityReview(&b, opts)
 	writeTaskCheckpointCompletionContract(&b, slice, opts)
 	fmt.Fprintln(&b, "## Success Criteria")
 	fmt.Fprintln(&b, "- [ ] Checkpoint records actual context used.")
@@ -5629,6 +5737,26 @@ func writeTaskCheckpointCompletionContract(b *strings.Builder, slice taskSliceAr
 	fmt.Fprintf(b, "- Evidence for decision: %s\n", taskCheckpointEvidenceSummary(opts))
 	fmt.Fprintf(b, "- What remains: %s\n", taskCheckpointRemainingSummary(opts))
 	fmt.Fprintf(b, "- Next iteration: %s\n", taskCheckpointNextSummary(slice, opts))
+	fmt.Fprintln(b)
+}
+
+func writeTaskCheckpointDurabilityReview(b *strings.Builder, opts taskCheckpointOptions) {
+	if opts.DurableRecord == "" {
+		return
+	}
+	fmt.Fprintln(b, "## Durable Record Review")
+	fmt.Fprintf(b, "- Disposition: `%s`\n", opts.DurableRecord)
+	if len(opts.DurableArtifacts) == 0 {
+		fmt.Fprintln(b, "- Artifacts: -")
+	} else {
+		fmt.Fprintln(b, "- Artifacts:")
+		for _, artifact := range opts.DurableArtifacts {
+			fmt.Fprintf(b, "  - `%s`\n", artifact)
+		}
+	}
+	if opts.DurableRecord == "deferred" {
+		fmt.Fprintf(b, "- Deferred target: `%s`\n", opts.NextTarget)
+	}
 	fmt.Fprintln(b)
 }
 
@@ -5748,6 +5876,10 @@ func renderTaskCheckpointResultAppend(checkpointPath, checkpointJSONPath, worksp
 	writeIndentedResultList(&b, "Tests run", opts.TestsRun)
 	writeIndentedResultList(&b, "Missed files", opts.MissedFiles)
 	writeIndentedResultList(&b, "Noise files", opts.NoiseFiles)
+	if opts.DurableRecord != "" {
+		fmt.Fprintf(&b, "- Durable record: %s\n", opts.DurableRecord)
+		writeIndentedResultList(&b, "Durable artifacts", opts.DurableArtifacts)
+	}
 	return b.String()
 }
 

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Added experimental `ds compose adr|rfc|prd` to create indexed, repo-owned
+  durable drafts outside the DevSpecs task corpus while reusing established
+  document directories, numbering, and ADR conventions.
+- Added ADR templates for all formats compared by adr.zone: Nygard, MADR full
+  and minimal, Y-Statement, Outcome-First, and the ISO 42010 Companion.
+- Added a one-time durability closeout after full task-track implementation
+  slices finish. New full tracks must explicitly record that no durable document
+  is needed, link completed ADR/RFC/PRD artifacts, or defer the record to a
+  named target; compact `--quick` tasks and existing manifests keep their prior
+  lifecycle behavior.
+
 ## v1.4.0 - 2026-08-09
 
 - Changed concurrent index mutations to queue behind one bounded writer lease so

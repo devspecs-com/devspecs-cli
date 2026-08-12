@@ -93,6 +93,7 @@ ds init
 | Coordinate multi-repo work | `ds workspace init .` | You have an umbrella workspace with several child repos. Experimental. |
 | Continue one slice | `ds apply` | A task already exists and the agent needs the current target only. |
 | Record the receipt | `ds task checkpoint A01 --decision promote` | You need to capture what changed, what ran, what missed, and what comes next. |
+| Preserve a durable decision | `ds compose adr "title"` | A track settled a consequential technical choice that should outlive task history. Experimental. |
 | Inspect exact context | `ds context <artifact-id>` | You want one indexed artifact as paste-ready agent context. |
 
 ## Why DevSpecs Exists
@@ -187,6 +188,20 @@ What you get:
 - a durable record of what changed, what ran, what missed, and what should
   happen next.
 
+After the implementation slices finish, new full task tracks expose one closeout
+target. Record whether the work needs a durable repo document; this happens once
+per track, not once per slice. Compact `--quick` tasks skip this review:
+
+```bash
+ds compose adr "Keep one writer lease per index" --from-task index-reliability --target A
+ds task checkpoint index-reliability --target A00 --stage completed --decision complete \
+  --durable-record recorded --durable-artifact docs/adr/0007-keep-one-writer-lease-per-index.md
+```
+
+Use `--durable-record none` for local, obvious, reversible implementation
+details. Use `deferred --next-target <target>` only when the durable record has
+a named owner or follow-up.
+
 For a smaller one-off:
 
 ```bash
@@ -234,6 +249,28 @@ receipts.
 | Discover evidence | `ds find "topic"` | Pack likely source, tests, docs, receipts, and exclusions for a focused question. |
 | Check task progress | `ds task status/show` + `ds apply` | Read lifecycle state, inspect one target, then emit the bounded prompt. |
 | Follow workspace links | `ds workspace trace <id>` | Trace a known workspace change or repo task to linked repo-local slices. |
+
+## Durable Documents
+
+`ds compose` creates a Markdown draft in the repository, captures it into the
+index, and keeps it separate from prunable task receipts:
+
+```bash
+ds compose adr "Use an append-only event log"
+ds compose rfc "Coordinate concurrent index writers"
+ds compose prd "Reliable cold activation"
+```
+
+Use an ADR after a meaningful technical choice is settled, an RFC while a
+consequential proposal still needs review, and a PRD for a product problem,
+users, outcomes, and requirements spanning one or more tracks. Skip small,
+obvious, reversible choices.
+
+ADR format defaults to `auto`: DevSpecs reuses a recognized repo convention and
+fails on ambiguous precedent. With no precedent it uses Nygard. Choose explicitly
+with `--format nygard|madr|y-statement|outcome-first|iso-42010`; MADR also accepts
+`--variant full|minimal`. Run `ds compose adr --help` for the compact format
+selection guide.
 
 `ds workspace trace` reports both lifecycle `status` and index-capture
 `index_status`. Keep them separate: `index_missing` means an artifact is not
@@ -287,6 +324,7 @@ instead of indexing every worktree as a new repository.
 | `ds task status/show` | Inspect task lifecycle state and target context. |
 | `ds apply [task-id\|target]` | Emit the next bounded one-slice agent prompt without mutating task state; omit the argument for the unambiguous next slice. |
 | `ds task checkpoint <task-id\|target>` | Record files, tests, misses, noise, learnings, decision evidence, and next iteration. |
+| `ds compose adr\|rfc\|prd "<title>"` | Create and index a repo-owned durable draft using established repository conventions. Experimental. |
 | `ds task slice add <task-id> "<title>" --after A01 --reason improve` | Add an A01-1-style follow-up slice after an improve/rework gate. |
 | `ds task refresh <task-id>` | Recapture edited task artifacts into the local index without rewriting task docs. |
 | `ds workspace init/show/change/slice/trace` | Coordinate experimental workspace-level changes, repo-local task slices, and known change/task traces. |
