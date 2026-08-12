@@ -2557,6 +2557,11 @@ func TestTaskDecideCompletesSliceWithoutRewritingIndex(t *testing.T) {
 	assert.Equal(t, "completed", out.Stage)
 	assert.Equal(t, "complete", out.Decision)
 	assert.Equal(t, fixture.AuthoredIndexBody, mustReadFile(t, fixture.IndexPath))
+	events, err := readTaskCheckpointEvents(fixture.Workspace, "lifecycle-add-test")
+	require.NoError(t, err)
+	assert.Len(t, events, 1)
+	assert.Equal(t, taskCheckpointEventKind, events[0].Record.EventKind)
+	assert.Equal(t, "B01", events[0].Record.Target)
 }
 
 func TestTaskDecideSeriesRequiresCheckpointDurabilityReview(t *testing.T) {
@@ -2928,7 +2933,7 @@ func TestTaskStatusHumanReportsEditedArtifactCapture(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "Task artifact capture refresh needed:")
-	assert.Contains(t, buf.String(), "task.json lifecycle state is still usable")
+	assert.Contains(t, buf.String(), "checkpoint events remain lifecycle authority")
 	assert.Contains(t, buf.String(), "ds task refresh sync-freshness-test")
 	assert.NotContains(t, buf.String(), "changed after task state")
 }
@@ -3434,8 +3439,10 @@ func TestTask_CheckpointAppendsResultAndIndexesCheckpoint(t *testing.T) {
 
 	assert.Equalf(t, "A01", record.Slice,
 		"checkpoint record slice = %q", record.Slice)
-	assert.Equalf(t, 2, record.SchemaVersion,
+	assert.Equalf(t, 3, record.SchemaVersion,
 		"checkpoint record schema version = %d", record.SchemaVersion)
+	assert.Equal(t, taskCheckpointEventKind, record.EventKind)
+	assert.Empty(t, record.SupersedesCheckpointIDs)
 	assert.Equal(t, out.CheckpointID, record.CheckpointID)
 	assert.Equal(t, "A01", record.Target)
 	assert.Equal(t, "A01", record.ParentSlice)

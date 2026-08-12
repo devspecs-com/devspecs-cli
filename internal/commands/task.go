@@ -156,6 +156,7 @@ type taskCheckpointOptions struct {
 	NextDecision     string
 	DurableRecord    string
 	DurableArtifacts []string
+	Supersedes       []string
 	GitDiff          bool
 	FromGit          bool
 	GitDiffMax       int
@@ -227,6 +228,8 @@ type taskStatusOutput struct {
 	Slices               []taskStatusSliceOutput `json:"slices,omitempty"`
 	ArtifactFreshness    []taskArtifactFreshness `json:"artifact_freshness,omitempty"`
 	Durability           *taskDurabilityReview   `json:"durability,omitempty"`
+	LifecycleDiagnostics []string                `json:"lifecycle_diagnostics,omitempty"`
+	LifecycleConflicts   []taskLifecycleConflict `json:"lifecycle_conflicts,omitempty"`
 }
 
 type taskStatusSliceOutput struct {
@@ -379,30 +382,32 @@ type taskAuditOutput struct {
 }
 
 type taskManifest struct {
-	TaskID               string                 `json:"task_id"`
-	Series               string                 `json:"series,omitempty"`
-	Profile              string                 `json:"profile,omitempty"`
-	WorkspaceID          string                 `json:"workspace_id,omitempty"`
-	WorkspaceRoot        string                 `json:"workspace_root,omitempty"`
-	ParentChange         string                 `json:"parent_change,omitempty"`
-	RepoAlias            string                 `json:"repo_alias,omitempty"`
-	Query                string                 `json:"query"`
-	Status               string                 `json:"status"`
-	Decision             string                 `json:"decision,omitempty"`
-	CreatedAt            string                 `json:"created_at"`
-	UpdatedAt            string                 `json:"updated_at,omitempty"`
-	LatestCheckpointID   string                 `json:"latest_checkpoint_id,omitempty"`
-	LatestCheckpoint     string                 `json:"latest_checkpoint,omitempty"`
-	LatestCheckpointJSON string                 `json:"latest_checkpoint_json,omitempty"`
-	RepoRoot             string                 `json:"repo_root"`
-	Workspace            string                 `json:"workspace"`
-	Artifacts            taskArtifactPaths      `json:"artifacts"`
-	Predicted            taskPredictedContext   `json:"predicted_context"`
-	AdvisoryFiles        []taskAdvisoryFile     `json:"advisory_files,omitempty"`
-	FreshnessWarnings    []taskFreshnessWarning `json:"freshness_warnings,omitempty"`
-	RiskCards            []taskRiskCard         `json:"risk_cards,omitempty"`
-	Confidence           taskConfidence         `json:"confidence"`
-	Durability           taskDurabilityReview   `json:"durability,omitempty"`
+	TaskID               string                  `json:"task_id"`
+	Series               string                  `json:"series,omitempty"`
+	Profile              string                  `json:"profile,omitempty"`
+	WorkspaceID          string                  `json:"workspace_id,omitempty"`
+	WorkspaceRoot        string                  `json:"workspace_root,omitempty"`
+	ParentChange         string                  `json:"parent_change,omitempty"`
+	RepoAlias            string                  `json:"repo_alias,omitempty"`
+	Query                string                  `json:"query"`
+	Status               string                  `json:"status"`
+	Decision             string                  `json:"decision,omitempty"`
+	CreatedAt            string                  `json:"created_at"`
+	UpdatedAt            string                  `json:"updated_at,omitempty"`
+	LatestCheckpointID   string                  `json:"latest_checkpoint_id,omitempty"`
+	LatestCheckpoint     string                  `json:"latest_checkpoint,omitempty"`
+	LatestCheckpointJSON string                  `json:"latest_checkpoint_json,omitempty"`
+	RepoRoot             string                  `json:"repo_root"`
+	Workspace            string                  `json:"workspace"`
+	Artifacts            taskArtifactPaths       `json:"artifacts"`
+	Predicted            taskPredictedContext    `json:"predicted_context"`
+	AdvisoryFiles        []taskAdvisoryFile      `json:"advisory_files,omitempty"`
+	FreshnessWarnings    []taskFreshnessWarning  `json:"freshness_warnings,omitempty"`
+	RiskCards            []taskRiskCard          `json:"risk_cards,omitempty"`
+	Confidence           taskConfidence          `json:"confidence"`
+	Durability           taskDurabilityReview    `json:"durability,omitempty"`
+	LifecycleDiagnostics []string                `json:"-"`
+	LifecycleConflicts   []taskLifecycleConflict `json:"-"`
 }
 
 type taskDurabilityReview struct {
@@ -527,7 +532,9 @@ type taskConfidence struct {
 
 type taskCheckpointRecord struct {
 	SchemaVersion            int                              `json:"schema_version"`
+	EventKind                string                           `json:"event_kind,omitempty"`
 	CheckpointID             string                           `json:"checkpoint_id,omitempty"`
+	SupersedesCheckpointIDs  []string                         `json:"supersedes_checkpoint_ids,omitempty"`
 	TaskID                   string                           `json:"task_id"`
 	WorkspaceID              string                           `json:"workspace_id,omitempty"`
 	WorkspaceRoot            string                           `json:"workspace_root,omitempty"`
@@ -993,6 +1000,7 @@ func newTaskCheckpointCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.NextDecision, "next-decision", "", "Recommended next decision gate")
 	cmd.Flags().StringVar(&opts.DurableRecord, "durable-record", "", "Track closeout disposition: none, recorded, or deferred")
 	cmd.Flags().StringArrayVar(&opts.DurableArtifacts, "durable-artifact", nil, "Repo-owned ADR, RFC, or PRD recorded by this track; may be repeated")
+	cmd.Flags().StringArrayVar(&opts.Supersedes, "supersedes", nil, "Conflicting checkpoint event ID resolved by this checkpoint; repeat for every current head")
 	cmd.Flags().BoolVar(&opts.GitDiff, "git-diff", false, "Include bounded git diff stat and changed-file evidence in checkpoint JSON")
 	cmd.Flags().BoolVar(&opts.FromGit, "from-git", false, "Populate edited-file evidence from current git status and diff")
 	cmd.Flags().IntVar(&opts.GitDiffMax, "git-diff-max-bytes", opts.GitDiffMax, "Maximum bytes of git diff stat evidence to keep")
@@ -1245,6 +1253,10 @@ func loadTaskWorkspaceManifestForRepo(baseDir, taskID, repoPath string) (string,
 		manifestPath := filepath.Join(workspace, taskManifestFilename)
 		manifest, err := readTaskManifest(manifestPath)
 		if err == nil {
+			manifest, err = reconcileTaskManifestLifecycle(workspace, manifest)
+			if err != nil {
+				return "", "", taskManifest{}, fmt.Errorf("reconcile task checkpoint events: %w", err)
+			}
 			return repoRoot, workspace, manifest, nil
 		}
 		if firstErr == nil {
@@ -1545,6 +1557,8 @@ func taskStatusFromManifest(manifest taskManifest, repoPath string) taskStatusOu
 		LatestCheckpointID:   manifest.LatestCheckpointID,
 		LatestCheckpoint:     manifest.LatestCheckpoint,
 		LatestCheckpointJSON: manifest.LatestCheckpointJSON,
+		LifecycleDiagnostics: manifest.LifecycleDiagnostics,
+		LifecycleConflicts:   manifest.LifecycleConflicts,
 	}
 	if manifest.Durability.Required {
 		durability := manifest.Durability
@@ -1632,6 +1646,12 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 			fmt.Fprintf(out, "Durable Record Deferred To: %s\n", status.Durability.DeferredTarget)
 		}
 	}
+	for _, diagnostic := range status.LifecycleDiagnostics {
+		fmt.Fprintf(out, "Lifecycle diagnostic: %s\n", diagnostic)
+	}
+	for _, conflict := range status.LifecycleConflicts {
+		fmt.Fprintf(out, "Lifecycle conflict: %s heads=%s\n", conflict.Target, strings.Join(conflict.HeadCheckpointIDs, ","))
+	}
 	if len(status.ArtifactFreshness) > 0 {
 		writeTaskArtifactFreshnessHuman(out, status.TaskID, status.ArtifactFreshness)
 	}
@@ -1675,7 +1695,7 @@ func writeTaskArtifactFreshnessHuman(out io.Writer, taskID string, warnings []ta
 			fmt.Fprintf(out, " (%s)", warning.StateUpdatedAt)
 		}
 		fmt.Fprintln(out, ".")
-		fmt.Fprintf(out, "    task.json lifecycle state is still usable; run `%s` to recapture edited docs without rewriting them.\n", next)
+		fmt.Fprintf(out, "    checkpoint events remain lifecycle authority; run `%s` to recapture edited docs without rewriting them.\n", next)
 	}
 }
 
@@ -1710,7 +1730,7 @@ func runTaskDecide(cmd *cobra.Command, taskID string, opts taskDecideOptions) er
 		return fmt.Errorf("invalid stage %q; valid values: %s", stage, strings.Join(taskLifecycleStages, ", "))
 	}
 
-	repoRoot, workspace, manifest, err := loadTaskWorkspaceManifest(cmd, opts.Dir, taskID)
+	repoRoot, _, manifest, err := loadTaskWorkspaceManifest(cmd, opts.Dir, taskID)
 	if err != nil {
 		return err
 	}
@@ -1727,32 +1747,37 @@ func runTaskDecide(cmd *cobra.Command, taskID string, opts taskDecideOptions) er
 		}
 		targetID = slice.ID
 	}
-	if opts.Index {
-		if err := preflightTaskIndexMutation(cmd); err != nil {
-			return err
+	if stage == "" {
+		stage, _ = taskStateForTarget(manifest, targetID)
+		if stage == "" {
+			stage = "implemented"
 		}
 	}
-
-	now := time.Now().UTC()
-	applyTaskTargetState(&manifest, targetID, stage, decision, now)
-	stage, decision = taskStateForTarget(manifest, targetID)
-
-	manifestPath := filepath.Join(workspace, taskManifestFilename)
-	if err := writeTaskManifest(manifestPath, manifest); err != nil {
+	originalOutput := cmd.OutOrStdout()
+	cmd.SetOut(io.Discard)
+	err = runTaskCheckpoint(cmd, taskID, taskCheckpointOptions{
+		Dir:         opts.Dir,
+		Target:      targetID,
+		Stage:       stage,
+		Decision:    decision,
+		Goal:        fmt.Sprintf("Record compatibility lifecycle update for `%s`.", targetID),
+		Description: "Lifecycle state recorded through a compatibility command.",
+		Index:       opts.Index,
+	})
+	cmd.SetOut(originalOutput)
+	if err != nil {
 		return err
 	}
+	_, workspace, manifest, err := loadTaskWorkspaceManifest(cmd, opts.Dir, taskID)
+	if err != nil {
+		return err
+	}
+	stage, decision = taskStateForTarget(manifest, targetID)
+	manifestPath := filepath.Join(workspace, taskManifestFilename)
 	indexPath := filepath.Join(workspace, manifest.Artifacts.Index)
-
 	var indexed []string
 	if opts.Index {
-		indexed, err = captureTaskArtifacts(cmd, repoRoot, []taskCaptureRequest{{
-			Path:   indexPath,
-			Title:  "Task " + taskID + " preflight",
-			Status: taskArtifactStatus(stage, decision),
-		}})
-		if err != nil {
-			return fmt.Errorf("task target %s state was written to %s, but index capture failed; do not retry blindly: %w", targetID, manifestPath, err)
-		}
+		indexed = []string{taskRelativePath(repoRoot, indexPath)}
 	}
 
 	out := taskDecideOutput{
@@ -1773,9 +1798,6 @@ func runTaskDecide(cmd *cobra.Command, taskID string, opts taskDecideOptions) er
 	fmt.Fprintf(cmd.OutOrStdout(), "Updated %s: stage=%s decision=%s\n", targetID, emptyAsDash(stage), decision)
 	fmt.Fprintf(cmd.OutOrStdout(), "Manifest: %s\n", manifestPath)
 	fmt.Fprintf(cmd.OutOrStdout(), "Index: %s\n", indexPath)
-	if len(indexed) > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "Indexed: %s\n", strings.Join(indexed, ", "))
-	}
 	return nil
 }
 
@@ -2159,6 +2181,10 @@ func firstNonEmptyTaskString(values ...string) string {
 }
 
 func taskNextSlice(manifest taskManifest) (taskSliceArtifact, error) {
+	if len(manifest.LifecycleConflicts) > 0 {
+		conflict := manifest.LifecycleConflicts[0]
+		return taskSliceArtifact{}, fmt.Errorf("task target %s has conflicting checkpoint heads (%s); record a resolving checkpoint with repeatable --supersedes", conflict.Target, strings.Join(conflict.HeadCheckpointIDs, ", "))
+	}
 	slices := taskSyncSlices(manifest)
 	for _, slice := range slices {
 		if strings.EqualFold(strings.TrimSpace(slice.Stage), "started") && !taskTargetTerminal(slice) {
@@ -4764,6 +4790,40 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 			return err
 		}
 	}
+	mutationLease, err := acquireTaskMutation(cmd.Context(), workspace)
+	if err != nil {
+		return err
+	}
+	mutationLocked := true
+	defer func() {
+		if mutationLocked {
+			_ = mutationLease.Release()
+		}
+	}()
+	manifest, err = readTaskManifest(filepath.Join(workspace, taskManifestFilename))
+	if err != nil {
+		return err
+	}
+	manifest, err = reconcileTaskManifestLifecycle(workspace, manifest)
+	if err != nil {
+		return fmt.Errorf("reconcile task checkpoint events: %w", err)
+	}
+	selectedSlice, err = taskSliceForCheckpoint(manifest, opts.Slice)
+	if err != nil {
+		return err
+	}
+	opts, err = validateTaskDurabilityCheckpoint(repoRoot, workspace, manifest, selectedSlice, opts)
+	if err != nil {
+		return err
+	}
+	events, err := readTaskCheckpointEvents(workspace, manifest.TaskID)
+	if err != nil {
+		return err
+	}
+	opts.Supersedes, err = checkpointSupersedesForWrite(events, selectedSlice.ID, opts.Supersedes)
+	if err != nil {
+		return err
+	}
 	checkpointDir := filepath.Join(workspace, "checkpoints")
 	if err := os.MkdirAll(checkpointDir, 0o755); err != nil {
 		return fmt.Errorf("create checkpoint dir: %w", err)
@@ -4780,22 +4840,26 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	record := buildTaskCheckpointRecord(manifest, opts, selectedSlice, checkpointID, now, repoRoot)
 	jsonRel := taskRelativePath(workspace, checkpointJSONPath)
 	body := renderTaskCheckpoint(manifest, selectedSlice, opts, now, checkpointID, jsonRel)
-	if err := writeNewTaskArtifactFile(checkpointPath, body); err != nil {
-		return fmt.Errorf("write checkpoint: %w", err)
-	}
 	if err := writeTaskCheckpointRecord(checkpointJSONPath, record); err != nil {
 		return err
 	}
+	if err := writeNewAtomicFile(checkpointPath, []byte(body), 0o644); err != nil {
+		return fmt.Errorf("checkpoint event %s was published, but Markdown projection failed; do not retry blindly: %w", checkpointID, err)
+	}
 	resultPath := filepath.Join(workspace, selectedSlice.Result)
 	if err := appendTaskCheckpointToResult(resultPath, checkpointPath, checkpointJSONPath, workspace, selectedSlice, opts, now); err != nil {
-		return err
+		return fmt.Errorf("checkpoint event %s was published, but result projection failed; do not retry blindly: %w", checkpointID, err)
 	}
 	applyTaskTargetState(&manifest, selectedSlice.ID, opts.Stage, opts.Decision, now)
 	applyTaskDurabilityReview(&manifest, selectedSlice, opts, now)
 	applyTaskTargetCheckpointRefs(&manifest, selectedSlice.ID, checkpointID, taskRelativePath(workspace, checkpointPath), jsonRel)
 	if err := writeTaskManifest(filepath.Join(workspace, taskManifestFilename), manifest); err != nil {
-		return err
+		return fmt.Errorf("checkpoint event %s was published, but task.json projection failed; do not retry blindly: %w", checkpointID, err)
 	}
+	if err := mutationLease.Release(); err != nil {
+		return fmt.Errorf("release task mutation lock: %w", err)
+	}
+	mutationLocked = false
 	indexPath := filepath.Join(workspace, manifest.Artifacts.Index)
 
 	var indexed []string
@@ -4921,6 +4985,7 @@ func normalizeTaskCheckpointOptions(opts taskCheckpointOptions) taskCheckpointOp
 	opts.NextDecision = strings.TrimSpace(opts.NextDecision)
 	opts.DurableRecord = strings.ToLower(strings.TrimSpace(opts.DurableRecord))
 	opts.DurableArtifacts = normalizePathList(opts.DurableArtifacts)
+	opts.Supersedes = normalizeList(opts.Supersedes)
 	if opts.GitDiffMax <= 0 {
 		opts.GitDiffMax = 12000
 	}
@@ -5161,8 +5226,10 @@ func buildTaskCheckpointRecord(manifest taskManifest, opts taskCheckpointOptions
 		DistractingIncluded: opts.NoiseFiles,
 	}
 	record := taskCheckpointRecord{
-		SchemaVersion:            2,
+		SchemaVersion:            taskCheckpointSchemaVersion,
+		EventKind:                taskCheckpointEventKind,
 		CheckpointID:             checkpointID,
+		SupersedesCheckpointIDs:  append([]string(nil), opts.Supersedes...),
 		TaskID:                   manifest.TaskID,
 		WorkspaceID:              manifest.WorkspaceID,
 		WorkspaceRoot:            manifest.WorkspaceRoot,
@@ -5280,6 +5347,8 @@ func normalizeTaskCheckpointRecord(record *taskCheckpointRecord) {
 	if record == nil {
 		return
 	}
+	record.EventKind = strings.ToLower(strings.TrimSpace(record.EventKind))
+	record.SupersedesCheckpointIDs = normalizeList(record.SupersedesCheckpointIDs)
 	if record.Target == "" {
 		record.Target = record.Slice
 	}
@@ -5288,9 +5357,6 @@ func normalizeTaskCheckpointRecord(record *taskCheckpointRecord) {
 	}
 	if record.ParentSlice == "" {
 		record.ParentSlice = record.Slice
-	}
-	if record.CheckpointID == "" {
-		record.CheckpointID = taskCheckpointID(firstNonEmptyTaskString(record.Target, record.Slice), record.Stage, parseTaskCheckpointCreatedAt(record.CreatedAt))
 	}
 	if len(record.ActualContext.FilesRead)+len(record.ActualContext.FilesEdited)+len(record.ActualContext.TestsRead)+len(record.ActualContext.TestsRun) == 0 {
 		record.ActualContext = taskCheckpointActualContext{
@@ -5426,7 +5492,7 @@ func writeTaskCheckpointRecord(path string, record taskCheckpointRecord) error {
 		return err
 	}
 	data = append(data, '\n')
-	if err := writeNewTaskArtifactFile(path, string(data)); err != nil {
+	if err := writeNewAtomicFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("write checkpoint JSON: %w", err)
 	}
 	return nil
@@ -6170,7 +6236,7 @@ func writeTaskManifest(path string, manifest taskManifest) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := writeAtomicFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("write manifest: %w", err)
 	}
 	return nil

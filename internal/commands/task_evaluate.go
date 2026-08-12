@@ -162,6 +162,9 @@ func readTaskCheckpointRecord(path string) (taskCheckpointRecord, error) {
 		return record, fmt.Errorf("parse checkpoint JSON %s: %w", path, err)
 	}
 	normalizeTaskCheckpointRecord(&record)
+	if record.CheckpointID == "" && record.SchemaVersion < taskCheckpointSchemaVersion {
+		record.CheckpointID = checkpointEntryStem(filepath.Base(path))
+	}
 	return record, nil
 }
 
