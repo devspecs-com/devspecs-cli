@@ -38,14 +38,14 @@ type taskMutationLease struct {
 	lock *flock.Flock
 }
 
-func acquireTaskMutation(ctx context.Context, workspace string) (*taskMutationLease, error) {
-	home, err := config.HomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("resolve DevSpecs home for task mutation: %w", err)
-	}
+type taskMutationLeaseSet struct {
+	leases []*taskMutationLease
+}
+
+func taskMutationIdentity(workspace string) (string, error) {
 	absoluteWorkspace, err := filepath.Abs(workspace)
 	if err != nil {
-		return nil, fmt.Errorf("resolve task workspace for mutation: %w", err)
+		return "", fmt.Errorf("resolve task workspace for mutation: %w", err)
 	}
 	identity := filepath.Clean(absoluteWorkspace)
 	if resolvedWorkspace, resolveErr := filepath.EvalSymlinks(identity); resolveErr == nil {
@@ -53,6 +53,22 @@ func acquireTaskMutation(ctx context.Context, workspace string) (*taskMutationLe
 	}
 	if runtime.GOOS == "windows" {
 		identity = strings.ToLower(identity)
+	}
+	return identity, nil
+}
+
+func acquireTaskMutation(ctx context.Context, workspace string) (*taskMutationLease, error) {
+	identity, err := taskMutationIdentity(workspace)
+	if err != nil {
+		return nil, err
+	}
+	return acquireTaskMutationIdentity(ctx, identity)
+}
+
+func acquireTaskMutationIdentity(ctx context.Context, identity string) (*taskMutationLease, error) {
+	home, err := config.HomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve DevSpecs home for task mutation: %w", err)
 	}
 	digest := sha256.Sum256([]byte(identity))
 	lockDir := filepath.Join(home, "locks", "tasks")
@@ -73,6 +89,32 @@ func acquireTaskMutation(ctx context.Context, workspace string) (*taskMutationLe
 	return &taskMutationLease{lock: fileLock}, nil
 }
 
+func acquireTaskMutations(ctx context.Context, workspaces []string) (*taskMutationLeaseSet, error) {
+	identities := make([]string, 0, len(workspaces))
+	seen := make(map[string]bool, len(workspaces))
+	for _, workspace := range workspaces {
+		identity, err := taskMutationIdentity(workspace)
+		if err != nil {
+			return nil, err
+		}
+		if seen[identity] {
+			continue
+		}
+		seen[identity] = true
+		identities = append(identities, identity)
+	}
+	sort.Strings(identities)
+	set := &taskMutationLeaseSet{leases: make([]*taskMutationLease, 0, len(identities))}
+	for _, identity := range identities {
+		lease, err := acquireTaskMutationIdentity(ctx, identity)
+		if err != nil {
+			return nil, errors.Join(err, set.Release())
+		}
+		set.leases = append(set.leases, lease)
+	}
+	return set, nil
+}
+
 func (lease *taskMutationLease) Release() error {
 	if lease == nil || lease.lock == nil {
 		return nil
@@ -81,6 +123,18 @@ func (lease *taskMutationLease) Release() error {
 	closeErr := lease.lock.Close()
 	lease.lock = nil
 	return errors.Join(unlockErr, closeErr)
+}
+
+func (set *taskMutationLeaseSet) Release() error {
+	if set == nil {
+		return nil
+	}
+	var releaseErr error
+	for index := len(set.leases) - 1; index >= 0; index-- {
+		releaseErr = errors.Join(releaseErr, set.leases[index].Release())
+	}
+	set.leases = nil
+	return releaseErr
 }
 
 func readTaskCheckpointEvents(workspace, taskID string) ([]taskCheckpointEvent, error) {

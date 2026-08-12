@@ -152,6 +152,91 @@ func TestDeriveThreadStatus_WhenProjectionSourcesAreFresh_UsesProjectedState(t *
 	assert.Equal(t, threadStateReady, out.Threads[1].State)
 }
 
+func TestDeriveThreadStatus_WhenProjectionIsStale_RefreshesFromDurableEvents(t *testing.T) {
+	// Arrange
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	_, taskWorkspace, location := writeRepoThreadFixture(t, "thread-task")
+	snapshot, _, snapshotErr := loadThreadOwnerSnapshot(location, nil)
+	require.NoError(t, snapshotErr)
+	projection, projectionErr := threadProjectionFromSnapshot(snapshot)
+	require.NoError(t, projectionErr)
+	database, databaseErr := store.Open(filepath.Join(home, "devspecs.db"))
+	require.NoError(t, databaseErr)
+	require.NoError(t, database.ReplaceThreadProjection(projection))
+	require.NoError(t, database.Close())
+	writeThreadCheckpointFixture(t, taskWorkspace, "thread-task", "cp_f01", "F01", "validated", "promote")
+	cmd := &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	// Act
+	out, err := deriveThreadStatus(cmd, location)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, "artifact_reconstruction", out.StateSource)
+	assert.Equal(t, "refreshed", out.ProjectionFreshness)
+	assert.True(t, out.ProjectionRefreshed)
+	assert.Len(t, out.Threads, 2)
+	assert.Equal(t, threadStateCompleted, out.Threads[0].State)
+	assert.Equal(t, threadStateReady, out.Threads[1].State)
+	require.NotNil(t, out.Threads[1].CurrentTarget)
+	assert.Equal(t, "F02", out.Threads[1].CurrentTarget.Target)
+}
+
+func TestDeriveThreadStatus_WhenSQLiteIsUnavailable_PreservesDurableSchedulerQuality(t *testing.T) {
+	// Arrange
+	homeFile := filepath.Join(t.TempDir(), "home-file")
+	require.NoError(t, os.WriteFile(homeFile, []byte("not a directory"), 0o644))
+	t.Setenv("DEVSPECS_HOME", homeFile)
+	_, taskWorkspace, location := writeRepoThreadFixture(t, "thread-task")
+	writeThreadCheckpointFixture(t, taskWorkspace, "thread-task", "cp_f01", "F01", "validated", "promote")
+	cmd := &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	// Act
+	out, err := deriveThreadStatus(cmd, location)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, "artifact_reconstruction", out.StateSource)
+	assert.Equal(t, "unavailable", out.ProjectionFreshness)
+	assert.False(t, out.ProjectionRefreshed)
+	assert.NotEmpty(t, out.ProjectionWarning)
+	assert.Len(t, out.Threads, 2)
+	assert.Equal(t, threadStateCompleted, out.Threads[0].State)
+	assert.Equal(t, threadStateReady, out.Threads[1].State)
+	require.NotNil(t, out.Threads[1].CurrentTarget)
+	assert.Equal(t, "F02", out.Threads[1].CurrentTarget.Target)
+}
+
+func TestLoadThreadOwnerSnapshot_WhenManifestDisagreesWithCheckpointEvent_UsesDurableEvent(t *testing.T) {
+	// Arrange
+	_, taskWorkspace, location := writeRepoThreadFixture(t, "thread-task")
+	manifestPath := filepath.Join(taskWorkspace, taskManifestFilename)
+	manifest, manifestErr := readTaskManifest(manifestPath)
+	require.NoError(t, manifestErr)
+	manifest.Artifacts.Slices[0].Stage = "blocked"
+	manifest.Artifacts.Slices[0].Decision = "block"
+	require.NoError(t, writeTaskManifest(manifestPath, manifest))
+	writeThreadCheckpointFixture(t, taskWorkspace, "thread-task", "cp_f01", "F01", "validated", "promote")
+
+	// Act
+	snapshot, _, snapshotErr := loadThreadOwnerSnapshot(location, nil)
+	require.NoError(t, snapshotErr)
+	status, err := buildThreadStatus(snapshot)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Len(t, status.Threads, 2)
+	assert.Equal(t, threadStateCompleted, status.Threads[0].State)
+	assert.Equal(t, threadStateReady, status.Threads[1].State)
+	require.NotNil(t, status.Threads[1].CurrentTarget)
+	assert.Equal(t, "F02", status.Threads[1].CurrentTarget.Target)
+}
+
 func TestResolveThreadOwnerLocation_WhenTaskIsUnlinkedInsideWorkspace_KeepsRepoAuthority(t *testing.T) {
 	// Arrange
 	workspaceRoot := t.TempDir()
@@ -311,6 +396,30 @@ func TestWriteThreadStatus_WhenJSONRequested_IsDeterministicAcrossCalls(t *testi
 	// Act
 	firstErr := writeThreadStatus(firstCmd, out, true)
 	secondErr := writeThreadStatus(secondCmd, out, true)
+
+	// Assert
+	require.NoError(t, firstErr)
+	require.NoError(t, secondErr)
+	assert.Equal(t, first.String(), second.String())
+}
+
+func TestWriteThreadStatus_WhenHumanOutputRequested_IsDeterministicAcrossCalls(t *testing.T) {
+	// Arrange
+	_, _, location := writeRepoThreadFixture(t, "thread-task")
+	snapshot, _, snapshotErr := loadThreadOwnerSnapshot(location, nil)
+	require.NoError(t, snapshotErr)
+	out, statusErr := buildThreadStatus(snapshot)
+	require.NoError(t, statusErr)
+	first := &bytes.Buffer{}
+	firstCmd := &cobra.Command{}
+	firstCmd.SetOut(first)
+	second := &bytes.Buffer{}
+	secondCmd := &cobra.Command{}
+	secondCmd.SetOut(second)
+
+	// Act
+	firstErr := writeThreadStatus(firstCmd, out, false)
+	secondErr := writeThreadStatus(secondCmd, out, false)
 
 	// Assert
 	require.NoError(t, firstErr)

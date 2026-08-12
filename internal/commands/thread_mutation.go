@@ -92,39 +92,39 @@ func runThreadSet(cmd *cobra.Command, owner, key string, targets []string, paren
 	if err != nil {
 		return err
 	}
-	authority, err := loadThreadMutationAuthority(location)
-	if err != nil {
-		return err
-	}
-	references, err := resolveThreadTargetReferences(authority, targets)
-	if err != nil {
-		return err
-	}
-	definition, err := readOrCreateThreadDefinition(authority)
-	if err != nil {
-		return err
-	}
-	lane := threadDefinitionLane{
-		Key:     strings.TrimSpace(key),
-		Name:    strings.TrimSpace(opts.Name),
-		Targets: references,
-		After:   normalizeList(opts.After),
-	}
-	replaced := false
-	for index := range definition.Threads {
-		if strings.EqualFold(definition.Threads[index].Key, lane.Key) {
-			definition.Threads[index] = lane
-			replaced = true
-			break
+	laneKey := strings.TrimSpace(key)
+	authority, definition, err := mutateThreadDefinition(cmd, location, func(authority threadMutationAuthority) (threadDefinition, error) {
+		references, err := resolveThreadTargetReferences(authority, targets)
+		if err != nil {
+			return threadDefinition{}, err
 		}
-	}
-	if !replaced {
-		definition.Threads = append(definition.Threads, lane)
-	}
-	if err := publishThreadMutation(cmd, authority, definition); err != nil {
+		definition, err := readOrCreateThreadDefinition(authority)
+		if err != nil {
+			return threadDefinition{}, err
+		}
+		lane := threadDefinitionLane{
+			Key:     laneKey,
+			Name:    strings.TrimSpace(opts.Name),
+			Targets: references,
+			After:   normalizeList(opts.After),
+		}
+		replaced := false
+		for index := range definition.Threads {
+			if strings.EqualFold(definition.Threads[index].Key, lane.Key) {
+				definition.Threads[index] = lane
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			definition.Threads = append(definition.Threads, lane)
+		}
+		return definition, nil
+	})
+	if err != nil {
 		return err
 	}
-	out := newThreadMutationOutput(authority.Location, "set", lane.Key, definition.Revision)
+	out := newThreadMutationOutput(authority.Location, "set", laneKey, definition.Revision)
 	out.ProjectionWarning = refreshThreadProjection(authority.Location)
 	if out.ProjectionWarning == "" {
 		out.ProjectionStatus = "refreshed"
@@ -139,32 +139,32 @@ func runThreadRemove(cmd *cobra.Command, owner, key string, parent threadStatusO
 	if err != nil {
 		return err
 	}
-	authority, err := loadThreadMutationAuthority(location)
-	if err != nil {
-		return err
-	}
-	definition, err := readThreadDefinition(location.DefinitionPath)
-	if err != nil {
-		return err
-	}
-	removed := false
-	remaining := make([]threadDefinitionLane, 0, len(definition.Threads)-1)
-	for _, lane := range definition.Threads {
-		if strings.EqualFold(lane.Key, strings.TrimSpace(key)) {
-			removed = true
-			continue
+	laneKey := strings.TrimSpace(key)
+	authority, definition, err := mutateThreadDefinition(cmd, location, func(authority threadMutationAuthority) (threadDefinition, error) {
+		definition, err := readThreadDefinition(authority.Location.DefinitionPath)
+		if err != nil {
+			return threadDefinition{}, err
 		}
-		remaining = append(remaining, lane)
-	}
-	if !removed {
-		return fmt.Errorf("thread %q not found", strings.TrimSpace(key))
-	}
-	definition.Revision++
-	definition.Threads = remaining
-	if err := publishThreadMutation(cmd, authority, definition); err != nil {
+		removed := false
+		remaining := make([]threadDefinitionLane, 0, len(definition.Threads)-1)
+		for _, lane := range definition.Threads {
+			if strings.EqualFold(lane.Key, laneKey) {
+				removed = true
+				continue
+			}
+			remaining = append(remaining, lane)
+		}
+		if !removed {
+			return threadDefinition{}, fmt.Errorf("thread %q not found", laneKey)
+		}
+		definition.Revision++
+		definition.Threads = remaining
+		return definition, nil
+	})
+	if err != nil {
 		return err
 	}
-	out := newThreadMutationOutput(authority.Location, "remove", strings.TrimSpace(key), definition.Revision)
+	out := newThreadMutationOutput(authority.Location, "remove", laneKey, definition.Revision)
 	out.ProjectionWarning = refreshThreadProjection(authority.Location)
 	if out.ProjectionWarning == "" {
 		out.ProjectionStatus = "refreshed"
@@ -322,15 +322,82 @@ func uniqueWorkspaceThreadTask(links []workspaceChangeRepoSlice, repoAlias strin
 	return taskID, nil
 }
 
-func publishThreadMutation(cmd *cobra.Command, authority threadMutationAuthority, definition threadDefinition) error {
+func mutateThreadDefinition(cmd *cobra.Command, location threadOwnerLocation, mutate func(threadMutationAuthority) (threadDefinition, error)) (authority threadMutationAuthority, definition threadDefinition, err error) {
+	preliminary, err := loadThreadMutationAuthority(location)
+	if err != nil {
+		return authority, definition, err
+	}
+	leases, err := acquireTaskMutations(cmd.Context(), threadMutationLockWorkspaces(preliminary))
+	if err != nil {
+		return authority, definition, err
+	}
+	defer func() { err = errors.Join(err, leases.Release()) }()
+	authority, err = loadThreadMutationAuthority(location)
+	if err != nil {
+		return authority, definition, err
+	}
+	if !sameThreadMutationLockWorkspaces(preliminary, authority) {
+		return authority, definition, fmt.Errorf("thread owner links changed during mutation; retry the command")
+	}
+	definition, err = mutate(authority)
+	if err != nil {
+		return authority, definition, err
+	}
+	if err = publishThreadMutationLocked(authority, definition); err != nil {
+		return authority, definition, err
+	}
+	return authority, definition, nil
+}
+
+func threadMutationLockWorkspaces(authority threadMutationAuthority) []string {
+	workspaces := []string{authority.Location.TaskWorkspace}
+	if authority.Location.Kind == threadOwnerWorkspaceChange {
+		workspaces[0] = filepath.Dir(authority.Location.DefinitionPath)
+		for _, task := range authority.Tasks {
+			workspaces = append(workspaces, task.Workspace)
+		}
+	}
+	return workspaces
+}
+
+func sameThreadMutationLockWorkspaces(left, right threadMutationAuthority) bool {
+	leftWorkspaces := threadMutationLockWorkspaces(left)
+	rightWorkspaces := threadMutationLockWorkspaces(right)
+	if len(leftWorkspaces) != len(rightWorkspaces) {
+		return false
+	}
+	leftIdentities := make(map[string]bool, len(leftWorkspaces))
+	for _, workspace := range leftWorkspaces {
+		identity, err := taskMutationIdentity(workspace)
+		if err != nil {
+			return false
+		}
+		leftIdentities[identity] = true
+	}
+	for _, workspace := range rightWorkspaces {
+		identity, err := taskMutationIdentity(workspace)
+		if err != nil || !leftIdentities[identity] {
+			return false
+		}
+	}
+	return true
+}
+
+func publishThreadMutationLocked(authority threadMutationAuthority, definition threadDefinition) error {
 	history, err := checkpointedThreadTargets(authority.Location.Kind, authority.Tasks)
 	if err != nil {
 		return err
 	}
 	if authority.Location.Kind == threadOwnerTask {
-		return publishRepoThreadDefinition(cmd.Context(), authority.Location.TaskWorkspace, definition, authority.RepoManifest, history)
+		if err := validateRepoThreadDefinition(definition, authority.RepoManifest); err != nil {
+			return err
+		}
+		return publishThreadDefinitionRevision(authority.Location.DefinitionPath, definition, history)
 	}
-	return publishWorkspaceThreadDefinition(cmd.Context(), authority.Location.WorkspaceRoot, definition, authority.WorkspaceValidation, history)
+	if err := validateWorkspaceThreadDefinition(definition, authority.WorkspaceValidation); err != nil {
+		return err
+	}
+	return publishThreadDefinitionRevision(authority.Location.DefinitionPath, definition, history)
 }
 
 func checkpointedThreadTargets(ownerKind string, tasks []threadTaskSnapshot) (map[string]bool, error) {

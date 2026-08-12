@@ -2,10 +2,12 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -155,4 +157,92 @@ func TestThreadSet_WhenWorkspaceUsesRepoTarget_ResolvesLinkedTask(t *testing.T) 
 	assert.Equal(t, "web", definition.Threads[0].Targets[1].Repo)
 	assert.Equal(t, "web-task", definition.Threads[0].Targets[1].Task)
 	assert.Equal(t, "B01", definition.Threads[0].Targets[1].Target)
+}
+
+func TestThreadRemove_WhenLinkedCheckpointPublishesConcurrently_ReloadsHistoryBeforeMutation(t *testing.T) {
+	// Arrange
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	workspaceRoot, _, apiWorkspace, _, _ := writeWorkspaceThreadFixture(t)
+	workspaceManifest, manifestErr := readWorkspaceManifest(workspaceRoot)
+	require.NoError(t, manifestErr)
+	definitionPath := workspaceThreadDefinitionPath(workspaceRoot, workspaceManifest, "COM-C014")
+	definition := threadDefinition{
+		SchemaVersion: threadDefinitionSchemaVersion,
+		Revision:      1,
+		Owner: threadDefinitionOwner{
+			Kind: threadOwnerWorkspaceChange, WorkspaceID: "umbrella", ChangeID: "COM-C014",
+		},
+		Threads: []threadDefinitionLane{
+			{Key: "api", Targets: []threadTargetReference{{Repo: "api", Task: "api-task", Target: "A01"}}},
+			{Key: "web", Targets: []threadTargetReference{{Repo: "web", Task: "web-task", Target: "B01"}}},
+		},
+	}
+	require.NoError(t, writeThreadDefinition(definitionPath, definition))
+	checkpointLease, leaseErr := acquireTaskMutation(context.Background(), apiWorkspace)
+	require.NoError(t, leaseErr)
+	cmd := NewThreadCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"remove", "change:COM-C014", "api", "--workspace", workspaceRoot, "--json"})
+	result := make(chan error, 1)
+
+	// Act
+	go func() { result <- cmd.Execute() }()
+	select {
+	case earlyErr := <-result:
+		require.Failf(t, "thread mutation completed before linked checkpoint lock was released", "error: %v", earlyErr)
+	case <-time.After(250 * time.Millisecond):
+	}
+	writeThreadCheckpointFixture(t, apiWorkspace, "api-task", "cp_api_a01", "A01", "validated", "promote")
+	require.NoError(t, checkpointLease.Release())
+	err := <-result
+
+	// Assert
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "checkpoint history")
+	definition, definitionErr := readThreadDefinition(definitionPath)
+	require.NoError(t, definitionErr)
+	assert.Equal(t, 1, definition.Revision)
+	assert.Len(t, definition.Threads, 2)
+	assert.Equal(t, "api", definition.Threads[0].Key)
+	assert.Equal(t, "web", definition.Threads[1].Key)
+}
+
+func TestThreadSet_WhenDefinitionChangesWhileWaitingForLock_PreservesBothUpdates(t *testing.T) {
+	// Arrange
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	repoRoot, taskWorkspace, location := writeRepoThreadFixture(t, "thread-task")
+	definitionLease, leaseErr := acquireTaskMutation(context.Background(), taskWorkspace)
+	require.NoError(t, leaseErr)
+	cmd := NewThreadCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"set", "task:thread-task", "agent-b", "F03", "--repo", repoRoot, "--json"})
+	result := make(chan error, 1)
+
+	// Act
+	go func() { result <- cmd.Execute() }()
+	select {
+	case earlyErr := <-result:
+		require.Failf(t, "thread mutation completed before definition lock was released", "error: %v", earlyErr)
+	case <-time.After(250 * time.Millisecond):
+	}
+	definition, readErr := readThreadDefinition(location.DefinitionPath)
+	require.NoError(t, readErr)
+	definition.Revision++
+	definition.Threads[0].Name = "Human updated"
+	require.NoError(t, writeThreadDefinition(location.DefinitionPath, definition))
+	require.NoError(t, definitionLease.Release())
+	err := <-result
+
+	// Assert
+	require.NoError(t, err)
+	updated, updatedErr := readThreadDefinition(location.DefinitionPath)
+	require.NoError(t, updatedErr)
+	assert.Equal(t, 3, updated.Revision)
+	assert.Len(t, updated.Threads, 3)
+	assert.Equal(t, "Human updated", updated.Threads[0].Name)
+	assert.Equal(t, "agent-b", updated.Threads[2].Key)
 }

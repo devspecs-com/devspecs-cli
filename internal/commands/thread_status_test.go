@@ -69,7 +69,7 @@ func TestBuildThreadStatus_WhenTargetNeedsImprovementWithoutFollowUp_BlocksLane(
 	require.NoError(t, err)
 	assert.Equal(t, threadStateBlocked, status.Threads[0].State)
 	assert.Len(t, status.Threads[0].Reasons, 1)
-	assert.Equal(t, "F01 ended with improve", status.Threads[0].Reasons[0])
+	assert.Equal(t, "F01 ended with improve; add a follow-up with `ds task slice add threaded-task \"<title>\" --after F01 --reason improve`", status.Threads[0].Reasons[0])
 	assert.Equal(t, threadStateWaiting, status.Threads[1].State)
 	assert.Empty(t, status.ReadyThreads)
 }
@@ -105,6 +105,24 @@ func TestBuildThreadStatus_WhenPromotedFollowUpResolvesImprovement_CompletesLane
 	assert.Equal(t, "F01", status.Threads[0].Targets[0].DefinitionTarget)
 }
 
+func TestBuildThreadStatus_WhenTargetIsRolledBack_BlocksLaneWithResolvingCheckpoint(t *testing.T) {
+	// Arrange
+	snapshot := repoThreadSnapshotFixture()
+	event := checkpointEventFixture(3, "cp-f01", "2026-08-12T11:00:00Z", nil)
+	event.Record.Stage = "rolled_back"
+	event.Record.Decision = "rollback"
+	snapshot.Tasks[0].Events = []taskCheckpointEvent{event}
+
+	// Act
+	status, err := buildThreadStatus(snapshot)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, threadStateBlocked, status.Threads[0].State)
+	assert.Len(t, status.Threads[0].Reasons, 1)
+	assert.Equal(t, "F01 ended with rollback; resolve the gate with `ds task checkpoint threaded-task --target F01 --decision promote`", status.Threads[0].Reasons[0])
+}
+
 func TestBuildThreadStatus_WhenCheckpointHeadsConflict_BlocksLaneWithoutChoosingWinner(t *testing.T) {
 	// Arrange
 	snapshot := repoThreadSnapshotFixture()
@@ -124,6 +142,8 @@ func TestBuildThreadStatus_WhenCheckpointHeadsConflict_BlocksLaneWithoutChoosing
 	assert.Len(t, status.Threads[0].CurrentTarget.ConflictHeads, 2)
 	assert.Equal(t, "cp-agent-a", status.Threads[0].CurrentTarget.ConflictHeads[0])
 	assert.Equal(t, "cp-agent-b", status.Threads[0].CurrentTarget.ConflictHeads[1])
+	assert.Len(t, status.Threads[0].Reasons, 1)
+	assert.Equal(t, "F01 has conflicting checkpoint heads: cp-agent-a, cp-agent-b; resolve with `ds task checkpoint threaded-task --target F01 --supersedes cp-agent-a --supersedes cp-agent-b`", status.Threads[0].Reasons[0])
 	assert.Equal(t, threadStateWaiting, status.Threads[1].State)
 }
 
@@ -138,6 +158,25 @@ func TestBuildThreadStatus_WhenWorkspaceTargetsSpanRepos_UsesQualifiedAddresses(
 	require.NoError(t, err)
 	assert.Equal(t, threadOwnerWorkspaceChange, status.Owner.Kind)
 	assert.Equal(t, "change-1", status.Owner.ChangeID)
+	assert.Len(t, status.Threads, 1)
+	assert.Equal(t, threadStateReady, status.Threads[0].State)
+	assert.Len(t, status.Threads[0].Targets, 2)
+	assert.Equal(t, "api", status.Threads[0].Targets[0].RepoAlias)
+	assert.Equal(t, "A01", status.Threads[0].Targets[0].Target)
+	assert.Equal(t, "web", status.Threads[0].Targets[1].RepoAlias)
+	assert.Equal(t, "W01", status.Threads[0].Targets[1].Target)
+}
+
+func TestBuildThreadStatus_WhenWorkspaceTaskSnapshotsAreReordered_PreservesDefinitionOrder(t *testing.T) {
+	// Arrange
+	snapshot := workspaceThreadSnapshotFixture()
+	snapshot.Tasks[0], snapshot.Tasks[1] = snapshot.Tasks[1], snapshot.Tasks[0]
+
+	// Act
+	status, err := buildThreadStatus(snapshot)
+
+	// Assert
+	require.NoError(t, err)
 	assert.Len(t, status.Threads, 1)
 	assert.Equal(t, threadStateReady, status.Threads[0].State)
 	assert.Len(t, status.Threads[0].Targets, 2)

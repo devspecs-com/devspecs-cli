@@ -367,12 +367,12 @@ func deriveThreadLaneOwnState(lane *threadStatusLane) {
 		lane.CurrentTarget = target
 		if target.Conflicted {
 			lane.State = threadStateBlocked
-			lane.Reasons = []string{fmt.Sprintf("%s has conflicting checkpoint heads: %s", threadStatusTargetAddress(*target), strings.Join(target.ConflictHeads, ", "))}
+			lane.Reasons = []string{threadConflictReason(*target)}
 			return
 		}
 		if target.Blocked {
 			lane.State = threadStateBlocked
-			lane.Reasons = []string{fmt.Sprintf("%s ended with %s", threadStatusTargetAddress(*target), firstNonEmptyTaskString(target.Decision, target.Stage, "an unresolved gate"))}
+			lane.Reasons = []string{threadUnresolvedGateReason(*target)}
 			return
 		}
 		if threadTargetIsActive(*target) {
@@ -383,6 +383,31 @@ func deriveThreadLaneOwnState(lane *threadStatusLane) {
 		return
 	}
 	lane.State = threadStateCompleted
+}
+
+func threadConflictReason(target threadStatusTarget) string {
+	command := fmt.Sprintf("ds task checkpoint %s --target %s", target.TaskID, target.Target)
+	for _, head := range target.ConflictHeads {
+		command += " --supersedes " + head
+	}
+	if target.RepoAlias != "" {
+		command += " --repo <" + target.RepoAlias + "-repo>"
+	}
+	return fmt.Sprintf("%s has conflicting checkpoint heads: %s; resolve with `%s`", threadStatusTargetAddress(target), strings.Join(target.ConflictHeads, ", "), command)
+}
+
+func threadUnresolvedGateReason(target threadStatusTarget) string {
+	decision := firstNonEmptyTaskString(target.Decision, target.Stage, "an unresolved gate")
+	command := fmt.Sprintf("ds task checkpoint %s --target %s --decision promote", target.TaskID, target.Target)
+	action := "resolve the gate with"
+	if decision == "improve" || decision == "rework" {
+		command = fmt.Sprintf("ds task slice add %s \"<title>\" --after %s --reason %s", target.TaskID, target.Target, decision)
+		action = "add a follow-up with"
+	}
+	if target.RepoAlias != "" {
+		command += " --repo <" + target.RepoAlias + "-repo>"
+	}
+	return fmt.Sprintf("%s ended with %s; %s `%s`", threadStatusTargetAddress(target), decision, action, command)
 }
 
 func threadTargetIsActive(target threadStatusTarget) bool {

@@ -138,6 +138,15 @@ change, and new unstarted targets or downstream threads may be appended. A
 guarded remove is allowed only when the removed thread has no checkpointed
 members and no started dependent thread.
 
+Graph mutations coordinate with checkpoint publication through canonical
+owner locks. A repo graph locks its task workspace. A workspace graph locks
+the change definition plus every linked child-task workspace in sorted order,
+then reloads definitions, links, manifests, and checkpoint events before
+validation. Child checkpoints use the same task-workspace lock, so a graph
+edit cannot miss newly published history or remove a lane while its checkpoint
+is committing. SQLite projection refresh happens after durable locks are
+released and remains best-effort.
+
 ## Owner and target resolution
 
 Bare owner IDs preserve repo-first behavior:
