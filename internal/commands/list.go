@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -117,6 +118,14 @@ func openDB() (*store.DB, error) {
 
 func openDBAtPath(dbPath string) (*store.DB, error) {
 	db, err := store.Open(dbPath)
+	if err != nil {
+		return nil, friendlyDBOpenError(dbPath, err)
+	}
+	return db, nil
+}
+
+func openDBAtPathWithWriterLease(ctx context.Context, dbPath string) (*store.DB, error) {
+	db, err := store.OpenWithWriterLeaseContext(ctx, dbPath)
 	if err != nil {
 		return nil, friendlyDBOpenError(dbPath, err)
 	}

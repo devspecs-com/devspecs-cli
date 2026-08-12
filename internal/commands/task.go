@@ -5580,7 +5580,7 @@ func indexTaskCheckpointFact(ctx context.Context, repoRoot string, manifest task
 		return indexOperationError("task checkpoint writer wait", autoIndexDeadlineLabel, err)
 	}
 	defer func() { _ = lease.Release() }()
-	db, err := openDBAtPath(dbPath)
+	db, err := openDBAtPathWithWriterLease(waitCtx, dbPath)
 	if err != nil {
 		return err
 	}
@@ -6927,7 +6927,7 @@ func preflightTaskIndexMutation(cmd *cobra.Command) error {
 		return taskIndexPreflightError(dbPath, indexOperationError("task index preflight writer wait", autoIndexDeadlineLabel, err))
 	}
 	defer func() { _ = lease.Release() }()
-	db, err := openDBAtPath(dbPath)
+	db, err := openDBAtPathWithWriterLease(waitCtx, dbPath)
 	if err != nil {
 		return taskIndexPreflightError(dbPath, err)
 	}

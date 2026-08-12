@@ -161,6 +161,44 @@ func TestDoctorCommand_WithMalformedIndex_PreservesIndependentRuntimeEvidence(t 
 	assert.Contains(t, output.String(), `"id": "index.unreadable"`)
 }
 
+func TestDoctorCommand_WithInterruptedRecoveryJournal_ReportsExactRestoreAction(t *testing.T) {
+	home := t.TempDir()
+	repoRoot := t.TempDir()
+	t.Setenv("DEVSPECS_HOME", home)
+	activePath := filepath.Join(home, "devspecs.db")
+	database, err := store.Open(activePath)
+	require.NoError(t, err)
+	require.NoError(t, database.Close())
+	backupPath := filepath.Join(home, "backups", "index", "rollback.db")
+	journal := store.IndexRecoveryJournal{
+		Version:     1,
+		OperationID: "interrupted",
+		Operation:   store.IndexBackupReasonRestore,
+		ActivePath:  activePath,
+		BackupPath:  backupPath,
+		Phase:       "active_preserved",
+	}
+	body, err := json.Marshal(journal)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(store.IndexRecoveryJournalPath(activePath), body, 0o600))
+	cmd := NewDoctorCmd()
+	output := &bytes.Buffer{}
+	cmd.SetOut(output)
+	cmd.SetArgs([]string{"--repo", repoRoot, "--json"})
+
+	err = cmd.Execute()
+
+	require.Error(t, err)
+	var report doctorReport
+	require.NoError(t, json.Unmarshal(output.Bytes(), &report))
+	assert.True(t, report.Index.RecoveryPending)
+	assert.Equal(t, "active_preserved", report.Index.RecoveryPhase)
+	assert.Equal(t, store.IndexRecoveryJournalPath(activePath), report.Index.RecoveryJournal)
+	assert.Equal(t, backupPath, report.Index.RecoveryBackup)
+	assert.Contains(t, output.String(), `"id": "index.recovery_incomplete"`)
+	assert.Contains(t, output.String(), "ds index restore")
+}
+
 func TestDoctorCommand_WithHomePathThatIsFile_ReturnsCompleteJSONError(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home-file")
 	repoRoot := t.TempDir()

@@ -67,7 +67,7 @@ func NewScanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress human scan summary and empty-scan hints (redundant when --json is set)")
 	cmd.Flags().BoolVar(&ifChanged, "if-changed", false, "Only scan if source paths were touched in the last commit")
-	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "Remove the global index database and create a fresh index (requires re-scan)")
+	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "Safely rebuild the global index from a full repository scan")
 	cmd.Flags().BoolVar(&experimentalIntentDiscovery, "experimental-intent-discovery", false, "Deprecated: broad scored markdown intent candidate discovery is enabled by default")
 	cmd.Flags().BoolVar(&experimentalGitEvidence, "experimental-git-evidence", false, "Index bounded local git history facts as diagnostic evidence")
 	cmd.Flags().BoolVar(&experimentalWorkstreamEvidence, "experimental-workstream-evidence", false, "Index bounded local workstream anchors as diagnostic evidence (implies --experimental-git-evidence)")
@@ -90,6 +90,10 @@ func NewScanCmd() *cobra.Command {
 }
 
 func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, experimentalSourceManifest, includeTests, includeCodeComments, noGitignore, phaseTiming bool) error {
+	return runScanWithRecovery(cmd, path, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, experimentalSourceManifest, includeTests, includeCodeComments, noGitignore, phaseTiming, nil)
+}
+
+func runScanWithRecovery(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged, rebuild, experimentalIntentDiscovery, experimentalGitEvidence, experimentalWorkstreamEvidence, experimentalRichTypedIndex, experimentalSupportDocs, experimentalRecentSource, experimentalFirstPartySource, experimentalSourceManifest, includeTests, includeCodeComments, noGitignore, phaseTiming bool, recoveryResult **store.IndexReplacement) error {
 	start := time.Now()
 	success := false
 	props := map[string]any{
@@ -112,6 +116,9 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	defer func() {
 		telemetry.RecordCommand("scan", success, time.Since(start), props)
 	}()
+	if rebuild && !asJSON && !quiet {
+		fmt.Fprintln(cmd.ErrOrStderr(), "Deprecated: use `ds index rebuild`; this compatibility flag uses the same safe staged rebuild.")
+	}
 
 	repoRoot, err := resolveRepoRoot(path)
 	if err != nil {
@@ -161,20 +168,31 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	}
 	defer func() { _ = lease.Release() }()
 
+	workingDBPath := dbPath
 	if rebuild {
-		if err := os.Remove(dbPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("remove database for --rebuild: %w", err)
+		if err := store.RequireIndexRebuildSpace(scanCtx, dbPath); err != nil {
+			return fmt.Errorf("prepare staged rebuild: %w", err)
 		}
+		workingDBPath, err = store.NewIndexStagePath(dbPath)
+		if err != nil {
+			return fmt.Errorf("prepare staged rebuild: %w", err)
+		}
+		defer removeScanStage(workingDBPath)
 		if verbose && !quiet {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Removed existing index for rebuild: %s\n", dbPath)
+			fmt.Fprintln(cmd.ErrOrStderr(), "Building and validating a replacement index before publishing it")
 		}
 	}
 
-	db, err := openDBAtPath(dbPath)
+	db, err := store.OpenWithWriterLeaseContext(scanCtx, workingDBPath)
 	if err != nil {
-		return fmt.Errorf("open database: %w", err)
+		return fmt.Errorf("open database: %w", friendlyDBOpenError(workingDBPath, err))
 	}
-	defer db.Close()
+	dbClosed := false
+	defer func() {
+		if !dbClosed {
+			_ = db.Close()
+		}
+	}()
 	db.SetMaxOpenConns(1)
 
 	ids := idgen.NewFactory()
@@ -217,6 +235,22 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	result, err := scanner.RunWithOptions(scanCtx, repoRoot, cfg, scanOpts)
 	if err != nil {
 		return indexOperationError("scan", explicitScanDeadlineLabel, scanTraversalError(repoRoot, err))
+	}
+	if rebuild {
+		if err := db.Close(); err != nil {
+			return fmt.Errorf("close staged rebuild: %w", err)
+		}
+		dbClosed = true
+		replacement, err := store.ReplaceIndexWithStage(scanCtx, dbPath, workingDBPath, store.IndexBackupReasonRebuild, store.SchemaVersion)
+		if err != nil {
+			return indexOperationError("rebuild", explicitScanDeadlineLabel, err)
+		}
+		if recoveryResult != nil {
+			*recoveryResult = &replacement
+		}
+		if verbose && !quiet && replacement.DisplacedIndexBackup != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Previous index preserved: %s\n", replacement.DisplacedIndexBackup.Path)
+		}
 	}
 	result.RootWarning = rootWarning
 
@@ -290,6 +324,12 @@ func runScan(cmd *cobra.Command, path string, verbose, asJSON, quiet, ifChanged,
 	}
 	fmt.Fprintln(out, "\nRun:\n  ds find \"<topic>\"\n  ds recent")
 	return nil
+}
+
+func removeScanStage(path string) {
+	_ = os.Remove(path)
+	_ = os.Remove(path + "-wal")
+	_ = os.Remove(path + "-shm")
 }
 
 const scanProgressInventoryThreshold = 200

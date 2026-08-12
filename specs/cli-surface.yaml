@@ -86,6 +86,9 @@ tree:
       doctor:
         status: diagnostic
         purpose: Inspect executable precedence, installation inference, local index compatibility, writer state, and repository identity without mutation.
+      index:
+        status: maintenance
+        purpose: Back up, safely rebuild, or exactly restore the local rebuildable SQLite index.
       config:
         status: maintenance
         purpose: Inspect or edit DevSpecs discovery config.
@@ -172,6 +175,23 @@ tree:
       iteration:
         status: hidden_compat
         purpose: Compatibility alias; prefer ds task slice add --after.
+
+  ds index:
+    status: maintenance
+    purpose: Manage the rebuildable local SQLite substrate without changing repository files.
+    children:
+      backup:
+        status: maintenance
+        usage: ds index backup [--output <file>] [--json]
+        purpose: Create a verified schema-agnostic snapshot with SQLite online backup.
+      rebuild:
+        status: maintenance
+        usage: ds index rebuild [--path <repo>] [--json]
+        purpose: Full-scan and validate a staged current-schema index before replacing the active one.
+      restore:
+        status: maintenance
+        usage: ds index restore <backup-file> [--json]
+        purpose: Restore an exact snapshot while preserving the displaced active index.
 
   ds compose:
     status: experimental

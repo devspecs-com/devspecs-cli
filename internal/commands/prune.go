@@ -69,9 +69,11 @@ func runPrune(cmd *cobra.Command, dryRun, vacuum, asJSON bool) error {
 		return fmt.Errorf("inspect index: %w", err)
 	}
 	var lease *store.IndexWriterLease
+	operationCtx := cmd.Context()
 	if !dryRun {
-		waitCtx, cancel := context.WithTimeout(cmd.Context(), autoIndexDeadline)
+		waitCtx, cancel := context.WithTimeout(operationCtx, autoIndexDeadline)
 		defer cancel()
+		operationCtx = waitCtx
 		var noticeCmd *cobra.Command
 		if !asJSON {
 			noticeCmd = cmd
@@ -83,7 +85,12 @@ func runPrune(cmd *cobra.Command, dryRun, vacuum, asJSON bool) error {
 		defer func() { _ = lease.Release() }()
 	}
 	progress.setPhase("inspect")
-	db, err := openDBAtPath(dbPath)
+	var db *store.DB
+	if dryRun {
+		db, err = openDBAtPath(dbPath)
+	} else {
+		db, err = openDBAtPathWithWriterLease(operationCtx, dbPath)
+	}
 	if err != nil {
 		return err
 	}

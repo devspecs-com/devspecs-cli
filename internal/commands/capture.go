@@ -86,7 +86,7 @@ func runCaptureAsSource(cmd *cobra.Command, path, kind, subtype, title, status, 
 		return indexOperationError("capture writer wait", autoIndexDeadlineLabel, err)
 	}
 	defer func() { _ = lease.Release() }()
-	db, err := store.Open(dbPath)
+	db, err := store.OpenWithWriterLeaseContext(captureCtx, dbPath)
 	if err != nil {
 		return fmt.Errorf("open db: %w", store.FriendlySQLiteBusyError(err))
 	}

@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	doctorReportSchemaVersion = 1
+	doctorReportSchemaVersion = 2
 	doctorRepoTimeout         = 5 * time.Second
 	doctorPathCandidateLimit  = 8
 
@@ -84,6 +84,10 @@ type doctorIndexReport struct {
 	WriterState       string `json:"writer_state"`
 	WriterObservedAt  string `json:"writer_observed_at,omitempty"`
 	WriterObservation string `json:"writer_observation,omitempty"`
+	RecoveryPending   bool   `json:"recovery_pending"`
+	RecoveryPhase     string `json:"recovery_phase,omitempty"`
+	RecoveryJournal   string `json:"recovery_journal,omitempty"`
+	RecoveryBackup    string `json:"recovery_backup,omitempty"`
 }
 
 type doctorRepositoryReport struct {
@@ -332,6 +336,25 @@ func collectDoctorIndex(ctx context.Context, report *doctorReport) {
 	} else {
 		classifyDoctorIndex(&indexReport, report)
 	}
+	journal, journalErr := store.InspectIndexRecovery(dbPath)
+	if journalErr != nil {
+		indexReport.Status = doctorStatusError
+		report.addFinding("index.recovery_journal_unreadable", doctorStatusError,
+			"The index recovery journal could not be read.", journalErr.Error())
+	} else if journal != nil {
+		indexReport.Status = doctorStatusError
+		indexReport.RecoveryPending = true
+		indexReport.RecoveryPhase = journal.Phase
+		indexReport.RecoveryJournal = store.IndexRecoveryJournalPath(dbPath)
+		indexReport.RecoveryBackup = journal.BackupPath
+		remediation := doctorRemediation{Safety: "mutating", Reason: "Restore the verified backup recorded by the interrupted operation."}
+		if strings.TrimSpace(journal.BackupPath) != "" {
+			remediation.Command = "ds index restore " + commandArg(journal.BackupPath)
+		}
+		report.addFinding("index.recovery_incomplete", doctorStatusError,
+			"An index replacement was interrupted and normal indexed commands are blocked.",
+			fmt.Sprintf("phase: %s; journal: %s", journal.Phase, indexReport.RecoveryJournal), remediation)
+	}
 
 	indexReport.WriterObservedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	indexReport.WriterObservation = "instantaneous; ownership may change after this report"
@@ -373,13 +396,16 @@ func classifyDoctorIndex(indexReport *doctorIndexReport, report *doctorReport) {
 		report.addFinding("index.schema_older", doctorStatusWarning,
 			"The local index schema is older than this CLI supports.",
 			fmt.Sprintf("database schema v%d; CLI supports v%d", indexReport.DatabaseSchema, indexReport.SupportedSchema),
-			doctorRemediation{Safety: "mutating", Reason: "Apply supported forward migrations while scanning repository evidence.", Command: doctorScanCommand(report.Repository.RootPath)})
+			doctorRemediation{Safety: "mutating", Reason: "Run a normal current-CLI command to create a verified backup and migrate forward.", Command: doctorScanCommand(report.Repository.RootPath)},
+			doctorRemediation{Safety: "mutating", Reason: "Create an explicit snapshot before any other index action.", Command: "ds index backup"})
 	case store.IndexCompatibilityNewer:
 		indexReport.Status = doctorStatusError
 		report.addFinding("index.schema_newer", doctorStatusError,
 			"The local index schema is newer than this CLI supports.",
 			fmt.Sprintf("database schema v%d; CLI supports v%d", indexReport.DatabaseSchema, indexReport.SupportedSchema),
-			doctorRemediation{Safety: "read_only", Reason: "Inspect installation-specific update guidance before using the index.", Command: "ds update --no-check"})
+			doctorRemediation{Safety: "read_only", Reason: "Inspect installation-specific update guidance before using the index.", Command: "ds update --no-check"},
+			doctorRemediation{Safety: "mutating", Reason: "Preserve the newer index before changing installations.", Command: "ds index backup"},
+			doctorRemediation{Safety: "mutating", Reason: "Intentionally rebuild at this CLI's schema from full repository evidence.", Command: doctorIndexRebuildCommand(report.Repository.RootPath)})
 	default:
 		indexReport.Status = doctorStatusUnknown
 	}
@@ -500,6 +526,13 @@ func doctorScanCommand(repoRoot string) string {
 	return "ds scan --path " + commandArg(repoRoot)
 }
 
+func doctorIndexRebuildCommand(repoRoot string) string {
+	if strings.TrimSpace(repoRoot) == "" {
+		return "ds index rebuild"
+	}
+	return "ds index rebuild --path " + commandArg(repoRoot)
+}
+
 func redactDoctorReport(report doctorReport) doctorReport {
 	homePath := report.Home.Path
 	repoPath := report.Repository.RootPath
@@ -513,6 +546,8 @@ func redactDoctorReport(report doctorReport) doctorReport {
 	report.Runtime.PathCandidates = nil
 	report.Home.Path = redactDoctorPath(report.Home.Path, homePath, repoPath)
 	report.Index.Path = redactDoctorPath(report.Index.Path, homePath, repoPath)
+	report.Index.RecoveryJournal = redactDoctorPath(report.Index.RecoveryJournal, homePath, repoPath)
+	report.Index.RecoveryBackup = redactDoctorPath(report.Index.RecoveryBackup, homePath, repoPath)
 	report.Repository.RequestedPath = redactDoctorPath(report.Repository.RequestedPath, homePath, repoPath)
 	report.Repository.RootPath = redactDoctorPath(report.Repository.RootPath, homePath, repoPath)
 	if report.Repository.Branch != "" {
@@ -646,6 +681,9 @@ func outputDoctorReport(cmd *cobra.Command, report doctorReport, asJSON bool) er
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "  Schema: %d (CLI supports %d; %s)\n", report.Index.DatabaseSchema, report.Index.SupportedSchema, report.Index.Compatibility)
 	fmt.Fprintf(out, "  Writer: %s (%s)\n", report.Index.WriterState, report.Index.WriterObservation)
+	if report.Index.RecoveryPending {
+		fmt.Fprintf(out, "  Recovery: pending (%s; %s)\n", report.Index.RecoveryPhase, doctorDisplayValue(report.Index.RecoveryJournal))
+	}
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Repository")
 	fmt.Fprintf(out, "  Root: %s\n", doctorDisplayValue(report.Repository.RootPath))

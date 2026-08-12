@@ -119,6 +119,14 @@ func InspectIndexWriter(dbPath string) (string, error) {
 }
 
 func readOnlyIndexDSN(dbPath string) string {
+	return readOnlyIndexDSNWithOptions(dbPath, false)
+}
+
+func immutableIndexDSN(dbPath string) string {
+	return readOnlyIndexDSNWithOptions(dbPath, true)
+}
+
+func readOnlyIndexDSNWithOptions(dbPath string, immutable bool) string {
 	absolute, err := filepath.Abs(dbPath)
 	if err != nil {
 		absolute = dbPath
@@ -127,10 +135,14 @@ func readOnlyIndexDSN(dbPath string) string {
 	if filepath.VolumeName(absolute) != "" && !strings.HasPrefix(uriPath, "/") {
 		uriPath = "/" + uriPath
 	}
+	query := "mode=ro&_pragma=query_only(ON)&_pragma=busy_timeout(0)"
+	if immutable {
+		query = "mode=ro&immutable=1&_pragma=query_only(ON)&_pragma=busy_timeout(0)"
+	}
 	uri := &url.URL{
 		Scheme:   "file",
 		Path:     uriPath,
-		RawQuery: "mode=ro&_pragma=query_only(ON)&_pragma=busy_timeout(0)",
+		RawQuery: query,
 	}
 	return uri.String()
 }

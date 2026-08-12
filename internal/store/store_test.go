@@ -193,7 +193,7 @@ func TestMigrate_FromV3ToV4(t *testing.T) {
 	assert.Equal(t, 2, columns)
 }
 
-func TestOpen_WithOldSchemaVersion_ReturnsRebuildGuidance(t *testing.T) {
+func TestOpen_WithUnsupportedOldSchemaVersion_ReturnsSafeRecoveryGuidance(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "devspecs.db")
 	db, err := Open(dbPath)
 	require.NoError(t, err)
@@ -204,7 +204,9 @@ func TestOpen_WithOldSchemaVersion_ReturnsRebuildGuidance(t *testing.T) {
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "schema v2")
-	assert.ErrorContains(t, err, "scan --rebuild")
+	assert.ErrorContains(t, err, "ds index backup")
+	assert.ErrorContains(t, err, "ds index rebuild")
+	assert.NotContains(t, err.Error(), "delete")
 }
 
 func TestOpen_WithNewerSchemaVersion_ReturnsTypedCompatibilityError(t *testing.T) {

@@ -112,6 +112,7 @@ func TestRootCmd_HelpGroupsCommandsByActor(t *testing.T) {
 		"Advanced and maintenance",
 		"  scan        Rescan repository intent docs, source, tests, and git evidence",
 		"  prune       Remove stale and redundant data from the local index",
+		"  index       Back up, rebuild, or restore the local index",
 	} {
 		require.Contains(t, got, want,
 			"expected grouped help to contain %q, got:\n%s", want, got)
