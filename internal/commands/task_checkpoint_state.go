@@ -348,6 +348,8 @@ func reconcileTaskManifestLifecycle(workspace string, manifest taskManifest) (ta
 	if err != nil || len(events) == 0 {
 		return manifest, err
 	}
+	latestUpdatedAt, latestUpdatedErr := time.Parse(time.RFC3339, strings.TrimSpace(manifest.UpdatedAt))
+	latestUpdatedText := manifest.UpdatedAt
 	resolved, err := resolveTaskCheckpointHeads(events)
 	if err != nil {
 		return manifest, err
@@ -381,6 +383,11 @@ func reconcileTaskManifestLifecycle(workspace string, manifest taskManifest) (ta
 			)
 		}
 		createdAt := parseTaskCheckpointCreatedAt(record.CreatedAt)
+		if latestUpdatedErr != nil || createdAt.After(latestUpdatedAt) {
+			latestUpdatedAt = createdAt
+			latestUpdatedText = createdAt.Format(time.RFC3339)
+			latestUpdatedErr = nil
+		}
 		applyTaskTargetState(&manifest, targetID, record.Stage, record.Decision, createdAt)
 		jsonRel := taskRelativePath(workspace, event.JSONPath)
 		markdownRel := ""
@@ -394,6 +401,9 @@ func reconcileTaskManifestLifecycle(workspace string, manifest taskManifest) (ta
 			)
 		}
 		applyTaskTargetCheckpointRefs(&manifest, targetID, record.CheckpointID, markdownRel, jsonRel)
+	}
+	if latestUpdatedErr == nil {
+		manifest.UpdatedAt = latestUpdatedText
 	}
 	return manifest, nil
 }

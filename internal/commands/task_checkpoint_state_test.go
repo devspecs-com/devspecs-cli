@@ -122,6 +122,25 @@ func TestReconcileTaskManifestLifecycle_WhenEventDisagrees_EventBecomesAuthorita
 	assert.Contains(t, reconciled.LifecycleDiagnostics[1], "no Markdown projection")
 }
 
+func TestReconcileTaskManifestLifecycle_WhenManifestWasRefreshedAfterCheckpoint_PreservesRefreshTimestamp(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	checkpointDir := filepath.Join(workspace, "checkpoints")
+	require.NoError(t, writeTaskCheckpointRecord(
+		filepath.Join(checkpointDir, "20260812-110000-validated.json"),
+		checkpointRecordFixture(3, "cp-current", "2026-08-12T11:00:00Z", nil),
+	))
+	manifest := validThreadTaskManifest()
+	manifest.UpdatedAt = "2026-08-12T12:00:00Z"
+
+	// Act
+	reconciled, err := reconcileTaskManifestLifecycle(workspace, manifest)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, "2026-08-12T12:00:00Z", reconciled.UpdatedAt)
+}
+
 func TestReconcileTaskManifestLifecycle_WhenHeadsConflict_ReportsConflictWithoutChoosingWinner(t *testing.T) {
 	// Arrange
 	workspace := t.TempDir()

@@ -72,6 +72,9 @@
   binary is not reported as Homebrew without stronger Homebrew path evidence.
 - Changed top-level command failure rendering to print actionable errors once
   without an unrelated usage dump.
+- Fixed `ds task refresh` after checkpointed work so lifecycle reconciliation
+  preserves the newer capture timestamp and status does not immediately report
+  the refreshed artifacts as stale again.
 
 ## v1.3.0 - 2026-07-12
 
