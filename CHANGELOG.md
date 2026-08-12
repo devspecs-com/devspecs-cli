@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.4.0 - 2026-08-09
+
 - Added experimental `ds compose adr|rfc|prd` to create indexed, repo-owned
   durable drafts outside the DevSpecs task corpus while reusing established
   document directories, numbering, and ADR conventions.
@@ -12,8 +14,6 @@
   is needed, link completed ADR/RFC/PRD artifacts, or defer the record to a
   named target; compact `--quick` tasks and existing manifests keep their prior
   lifecycle behavior.
-
-## v1.4.0 - 2026-08-09
 
 - Changed concurrent index mutations to queue behind one bounded writer lease so
   overlapping `scan`, `map`, `find`, `recent`, and `task` operations do not fail
