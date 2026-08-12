@@ -2,231 +2,179 @@
 
 ## Status
 
-Accepted
+Reopened
+
+The original repo-task-only proposal was accepted on 2026-08-12, then reopened
+before implementation after dogfood exposed two incorrect assumptions: threads
+may span repositories, and mutable lifecycle state should not depend on repeated
+`task.json` rewrites.
 
 ## Summary
 
-Add repo-local named execution threads to DevSpecs task manifests. A thread is
-an ordered lane of existing slice IDs with optional dependencies on other
-threads. The scheduler derives all thread state from slice checkpoints and can
-therefore expose parallel work, joins, and later splits without creating a
-second lifecycle system.
+Add named execution threads as ordered lanes of existing DevSpecs targets with
+optional dependencies between lanes. Preserve repo-first behavior for ordinary
+tasks. When a task is explicitly linked to a workspace change through its
+existing `workspace_id`, `parent_change`, and `repo_alias` metadata, the
+workspace change owns any cross-repository thread graph.
+
+Keep durable lifecycle authority in immutable per-checkpoint JSON records.
+Build thread readiness and current target state as a rebuildable SQLite
+projection, with direct file reconstruction available when the projection is
+missing or stale. A remote service such as Kleio may aggregate the same local
+records later, but is never required for mutation or scheduling.
 
 ## Motivation
 
 `ds task next` currently walks task slices in manifest order and returns one
-global target. That model is useful for bounded serial work but cannot represent
-two independent lanes, a target that waits for both, or another split after the
-join. Humans and agents must carry that orchestration outside DevSpecs, which
-makes the generated next recommendation misleading precisely when work becomes
-architecturally interesting.
+global target. It cannot represent two independent lanes, a target that waits
+for both, or another split after the join.
 
-The v1.4 task surface already has the right sources of truth: slices define
-bounded work, checkpoints define lifecycle state, `ds apply` emits one bounded
-prompt, and the final track closeout reviews durable knowledge. Threads should
-compose those mechanisms rather than replace them.
+The first proposal placed `threads` directly in one task's `task.json` and
+serialized concurrent task mutations around that file. That would work for one
+repository, but it gives the wrong owner to lanes that include targets from
+multiple workspace child repositories. It also deepens an existing storage
+problem: `task.json` currently mixes comparatively static task definition with
+frequently updated lifecycle state and checkpoint pointers.
 
 ## Goals
 
-- Represent serial lanes, parallel splits, joins, and later splits with a small
-  deterministic manifest graph.
-- Let humans and agents discover every currently runnable lane without an
+- Represent serial lanes, parallel splits, joins, and later splits without an
   arbitrary global priority.
-- Keep one-target prompts and checkpoint gates intact.
-- Preserve legacy task behavior when no threads are configured.
-- Make concurrent checkpoint writes loss-safe before advertising parallel use.
+- Default to a repo-local task owner when no workspace change link exists.
+- Let an existing workspace change own a graph that addresses targets across
+  linked child repositories.
+- Keep checkpoint gates as the source of completion truth.
+- Make SQLite status and scheduling fast while remaining fully rebuildable from
+  local artifacts.
+- Make concurrent checkpoint creation append-only and loss-safe.
+- Preserve legacy task behavior when no thread graph exists.
 
 ## Non-goals
 
+- Requiring users to initialize a workspace for ordinary repository work.
 - Launching, assigning, claiming, monitoring, or terminating agent processes.
+- Making the global SQLite index or a remote service authoritative.
 - Adding thread-specific plans, results, checkpoints, stages, or decisions.
-- Coordinating targets across different repo tasks; umbrella work remains a
-  workspace concern.
-- Replacing slice follow-ups or the once-per-track durable record closeout.
+- Replacing follow-up slices or the once-per-track durable record closeout.
 
-## Proposal
+## Proposed authority model
 
-### Manifest model
+### Repo-first scope resolution
 
-```json
-"threads": [
-  {"key": "agent-a", "name": "Agent A", "targets": ["F02", "F03"]},
-  {"key": "human-a", "name": "Human A", "targets": ["F04"]},
-  {
-    "key": "both-a",
-    "name": "Both A",
-    "targets": ["F05"],
-    "after": ["agent-a", "human-a"]
-  },
-  {"key": "agent-b", "targets": ["F06"], "after": ["both-a"]},
-  {"key": "human-b", "targets": ["F07"], "after": ["both-a"]}
-]
-```
+1. A task without `parent_change` uses a repo-local thread definition owned by
+   that task.
+2. A task linked to a workspace change resolves thread ownership through the
+   existing workspace ID, parent change ID, and repo alias.
+3. A workspace merely containing a repository does not take ownership of plain
+   repo tasks. The explicit task-to-change link is the boundary.
+4. Repo and workspace definitions may not both own the same target.
+5. No workspace is created implicitly to support threads.
 
-Keys and target membership are unique. Dependencies must reference existing
-threads, self-dependencies and cycles are invalid, and series closeout targets
-cannot be assigned. A follow-up such as `F02-1` inherits `F02`'s thread and runs
-before the lane advances.
+The exact companion-file layout and cross-repo target-address syntax are
+reopened F01 decisions. Thread definitions remain small, declarative local
+artifacts rather than mutable scheduler state.
+
+### Durable lifecycle events
+
+Each checkpoint JSON file is one immutable lifecycle event containing its
+checkpoint ID, task and target identity, stage, decision, evidence, and
+workspace link when present. Writers create uniquely named files with exclusive
+publication; they do not append to one shared event file.
+
+A shared JSONL file is not the authoritative format. Concurrent appends can
+interleave or truncate, one corrupt line complicates recovery, and Git merges
+become a shared hotspot. JSONL may be offered later as a deterministic export
+or ingestion stream assembled from the individual event files.
+
+Legacy lifecycle fields in `task.json` remain readable during migration. The
+reopened design must define precedence, dual-write duration, and diagnostics
+for disagreement before implementation proceeds.
+
+### SQLite projection
+
+The local DevSpecs database projects task definitions, checkpoint events,
+workspace links, thread definitions, and derived readiness. It supports fast
+status and discovery across repositories, but every projected row can be
+reconstructed from local artifacts. `ds prune`, index rebuilds, a different
+`DEVSPECS_HOME`, or database loss must not erase scheduling authority.
+
+Commands may incrementally ingest newly written events. On a cold or stale
+index, they must reconstruct enough state from the owning repo task or workspace
+change to return the same result before updating the projection.
+
+### Thread semantics
+
+A thread contains ordered target references and may depend on other threads
+with `after`. Keys and target membership are unique within one owner,
+dependencies must exist, self-dependencies and cycles are invalid, and series
+closeout targets cannot be assigned. Follow-ups inherit their parent target's
+thread and run before the lane advances.
 
 Thread state is derived as `ready`, `active`, `waiting`, `blocked`, or
-`completed`. Completion requires every lane target to end with an
-advance-allowing gate. Improve, rework, block, and rollback remain unresolved;
-they do not satisfy a join. Explicitly configured tasks report unassigned
-nonterminal slices and refuse implicit scheduling rather than running them by
-accident.
+`completed`. Improve, rework, block, and rollback remain unresolved and do not
+satisfy a join. Definition order controls deterministic presentation only; it
+is never a global priority.
 
-Manifest order controls presentation only; it is never a global priority.
-Within one thread, target order is authoritative. A thread is `waiting` while
-an `after` dependency is unresolved, `ready` when its dependencies allow
-advance and its next target has not started, `active` when its next target has
-started, `blocked` when that target has a non-advancing decision, and
-`completed` when every target allows advance. A dependency blocked on improve,
-rework, block, or rollback keeps downstream threads waiting and reports that
-reason explicitly.
-
-### CLI
+## Proposed CLI
 
 ```text
-ds thread [task-id]
-ds thread set <task-id> <key> <target>... [--name <label>] [--after <key>]...
-ds thread remove <task-id> <key>
+ds thread [owner]
+ds thread set <owner> <key> <target>... [--name <label>] [--after <key>]...
+ds thread remove <owner> <key>
 ds apply [task-id] --thread <key>
 ```
 
-The status form reports every ready/active lane and why other lanes wait.
-`set` declaratively creates or replaces one definition after full graph
-validation. `remove` is limited to definitions without started or terminal
-history. Thread keys such as `agent-a` are labels only; output must not imply
-that DevSpecs owns an agent process.
+`owner` resolves to a repo task by default or an explicitly linked workspace
+change. F01 must settle how cross-repo targets are addressed and how commands
+behave when invoked from a child repository. No duplicate `ds workspace thread`
+surface is proposed.
 
-Replacing a definition may reorder or reassign only targets without started or
-terminal lifecycle history. Removing a thread never deletes targets or task
-artifacts, and removal is rejected while another thread depends on it. These
-guards keep graph edits from rewriting the meaning of recorded checkpoints.
+Status reports all ready lanes and explains why other lanes wait. Apply without
+a selector continues only when a legacy linear task or exactly one runnable
+lane makes the choice unambiguous. Explicit targets may not bypass dependencies.
 
-`ds apply --thread` selects the next runnable target within one lane. Apply by
-explicit target still validates thread dependencies. Apply without a selector
-continues to work when a legacy task or exactly one runnable lane makes the
-choice unambiguous.
+## Compatibility
 
-Human status output follows this shape:
-
-```text
-Task: checkout-redesign
-
-Ready threads
-  agent-a  A01  Add the server boundary
-  human-a  A03  Confirm migration policy
-
-Waiting threads
-  both-a   A05  after agent-a, human-a
-
-Unassigned targets: none
-
-Run: ds apply checkout-redesign --thread agent-a
-```
-
-JSON status exposes readiness as a set and preserves wait reasons:
-
-```json
-{
-  "task_id": "checkout-redesign",
-  "threads": [
-    {
-      "key": "agent-a",
-      "name": "Agent A",
-      "state": "ready",
-      "targets": ["A01", "A02"],
-      "next_target": "A01"
-    },
-    {
-      "key": "human-a",
-      "name": "Human A",
-      "state": "ready",
-      "targets": ["A03"],
-      "next_target": "A03"
-    },
-    {
-      "key": "both-a",
-      "name": "Both A",
-      "state": "waiting",
-      "targets": ["A05"],
-      "after": ["agent-a", "human-a"],
-      "wait_reason": "waiting for agent-a, human-a"
-    }
-  ],
-  "ready_threads": ["agent-a", "human-a"],
-  "unassigned_targets": []
-}
-```
-
-The JSON arrays follow manifest order for deterministic output. Consumers must
-still treat `ready_threads` as a set, not as a recommendation to pick its first
-member.
-
-### Compatibility and ownership
-
-Legacy manifests have an implicit linear lane and need no migration. `ds task
-next` remains a hidden compatibility path for legacy or unambiguous tasks, but
-must never pick arbitrarily among multiple ready threads. `ds task status`
-includes thread summaries and exposes a singular `next_target` only when one
-exists.
-
-Reading a legacy manifest does not write an implicit thread back to disk.
-Adding the first explicit definition switches that task to graph scheduling;
-until all nonterminal implementation slices are assigned, status reports the
-unassigned targets and implicit apply/next selection refuses to proceed. A
-follow-up inherits its parent's thread without being copied into the manifest.
-Series closeout remains outside every thread and becomes eligible only after
-all implementation threads complete with advance-allowing gates.
-
-Task inference follows the existing apply rule: `ds thread` may omit the task
-ID only when the current repository has one unambiguous active task. Otherwise
-it returns candidate task IDs and asks for an explicit selection.
-
-Threads live only in the repo task's `task.json`. Workspace callers use the
-existing `--repo` routing boundary; no `ds workspace thread` is added. Compose
-documents and prune/index storage retain their existing ownership contracts.
-
-### Concurrent mutation
-
-Parallel lanes make concurrent checkpoints expected behavior. All task
-read-modify-write operations therefore acquire a crash-safe cross-process lease
-keyed by canonical task workspace path, re-read the manifest under that lease,
-and publish JSON atomically. Expensive evidence collection stays outside the
-critical section. The lock lives in local DevSpecs state, not in the repository.
+- Legacy manifests require no eager migration.
+- A task with no explicit thread definition keeps linear scheduling.
+- `ds task next` remains a compatibility path for legacy or unambiguous work,
+  but never chooses arbitrarily among multiple ready lanes.
+- Missing SQLite state triggers local reconstruction rather than weaker output.
+- Existing workspace slice links are reused; plain repo tasks stay repo-local.
+- Compose documents and prune/index maintenance retain their ownership.
 
 ## Alternatives
 
-- Keep one global priority or `next` pointer: simple, but it hides legitimately
-  parallel work and cannot express joins.
-- Add dependencies directly to every slice: expressive, but verbose for common
-  lanes and less readable for humans returning to a task.
-- Use separate task tracks for every lane: avoids a schema change but loses one
-  shared closeout and makes joins external again.
-- Put thread orchestration under `ds workspace`: incorrect for parallel work
-  inside one repo task and would duplicate repo task lifecycle semantics.
-- Add assignee/claim/heartbeat fields: useful for an orchestration service, but
-  misleading in a local CLI that does not own agent processes.
+- Global SQLite as authority: transactionally convenient, but database rebuild,
+  prune, home isolation, or corruption would erase durable orchestration.
+- One task-local mutable JSON manifest: inspectable, but a concurrency hotspot
+  and unable to naturally own cross-repo lanes.
+- One shared JSONL event log: stream-friendly, but still a shared append and Git
+  merge hotspot.
+- Task-local SQLite authority: transactional and local, but opaque to Git and
+  awkward for workspace graphs spanning several repositories.
+- Mandatory workspace ownership: one graph model, but needless ceremony for
+  ordinary repo work and inconsistent with current repo-first behavior.
+- Remote Kleio authority: useful aggregation, but violates offline local-first
+  operation. Optional replication remains compatible with this proposal.
 
 ## Risks and rollout
 
-The main risk is promising parallel use before shared manifest mutation is
-safe. Cross-process lost-update tests are a release gate, not follow-up polish.
-The second risk is surface expansion: status-by-default, `set`, and guarded
-`remove` are the maximum proposed management surface, while `ds apply` remains
-the only prompt command.
+The largest risk is dual authority during migration. F01 must define one
+deterministic precedence rule and a diagnostic for disagreement. The second
+risk is making cold reconstruction materially slower or weaker than the SQLite
+projection; equivalent first-result semantics are a release gate.
 
-Rollout is additive for manifests and initially documented as experimental.
-Legacy tasks and scripts retain linear behavior. `ds task next` is hidden only
-after compatibility and ambiguity tests pass. Rollback consists of leaving the
-optional `threads` field unread; slice and checkpoint history remains valid.
+The command remains experimental for v1.4. Rollout must prove standalone repo
+tasks and linked cross-repo changes independently before hiding `ds task next`.
 
-## Resolved release decisions
+## Reopened decisions
 
-- v1.4 includes guarded `remove`. It is useful for correcting an unstarted
-  graph and cannot erase or reinterpret started or terminal history.
-- The command and documentation label threads experimental in v1.4. The
-  optional manifest shape remains additive and forward-compatible.
+- Repo-local companion-file location and schema.
+- Workspace-change companion-file location and schema.
+- Cross-repo target-address syntax and child-repo command inference.
+- Migration from mutable `task.json` lifecycle fields to checkpoint authority.
+- SQLite projection schema, freshness rules, and cold reconstruction budget.
+- Guarded graph mutation once checkpoint history exists.
 
 <!-- devspecs: task=threaded-task-orchestration target=F01 -->
