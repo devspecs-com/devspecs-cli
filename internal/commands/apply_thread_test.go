@@ -358,6 +358,77 @@ func TestApply_WhenWorkspaceLaneAdvancesAcrossRepos_ResolvesCurrentRepoPrompt(t 
 	assert.Contains(t, output.Prompt, "- Current target: web:B01")
 }
 
+func TestApply_WhenWorkspaceThreadsCompleteAndChildTaskIsRequested_SelectsRepoDurabilityCloseout(t *testing.T) {
+	// Arrange
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	workspaceRoot, apiRoot, apiWorkspace, _, webWorkspace := writeWorkspaceThreadFixture(t)
+	prepareCompletedWorkspaceThreadApply(t, apiWorkspace, webWorkspace)
+	cmd := NewApplyCmd()
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"api-task", "--repo", apiRoot, "--json"})
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	output := decodeApplyPromptOutput(t, stdout)
+	assert.Equal(t, "api-task", output.TaskID)
+	assert.Equal(t, "A00", output.Target)
+	assert.Contains(t, output.Command, "ds apply api-task --repo ")
+	require.NotNil(t, output.ThreadContext)
+	assert.Equal(t, threadOwnerWorkspaceChange, output.ThreadContext.Owner.Kind)
+	assert.Equal(t, "COM-C014", output.ThreadContext.Owner.ChangeID)
+	assert.Equal(t, threadStateCompleted, output.ThreadContext.State)
+	assert.Contains(t, output.Prompt, "You are closing DevSpecs task api-task")
+	assert.Contains(t, output.Prompt, workspaceRoot)
+}
+
+func TestApply_WhenWorkspaceThreadsCompleteAndChildCloseoutIsExplicit_AcceptsSeriesTarget(t *testing.T) {
+	// Arrange
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	_, apiRoot, apiWorkspace, _, webWorkspace := writeWorkspaceThreadFixture(t)
+	prepareCompletedWorkspaceThreadApply(t, apiWorkspace, webWorkspace)
+	cmd := NewApplyCmd()
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"task:api-task", "--target", "A00", "--repo", apiRoot, "--json"})
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	output := decodeApplyPromptOutput(t, stdout)
+	assert.Equal(t, "api-task", output.TaskID)
+	assert.Equal(t, "A00", output.Target)
+	assert.Equal(t, "ds apply task:api-task --target A00 --repo "+apiRoot, output.Command)
+}
+
+func TestApply_WhenWorkspaceThreadsCompleteAndChangeIsRequested_ReportsTerminalChange(t *testing.T) {
+	// Arrange
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	workspaceRoot, _, apiWorkspace, _, webWorkspace := writeWorkspaceThreadFixture(t)
+	prepareCompletedWorkspaceThreadApply(t, apiWorkspace, webWorkspace)
+	cmd := NewApplyCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"change:COM-C014", "--workspace", workspaceRoot, "--json"})
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.Error(t, err)
+	assert.EqualError(t, err, "workspace change \"COM-C014\" has completed all assigned threads")
+}
+
 func TestApply_WhenImplicitSelectionAlsoHasLegacyTask_RejectsAmbiguity(t *testing.T) {
 	// Arrange
 	home := filepath.Join(t.TempDir(), "home")
@@ -485,4 +556,25 @@ func prepareWorkspaceThreadApplyTarget(t *testing.T, taskWorkspace, target strin
 	require.NoError(t, writeTaskManifest(manifestPath, manifest))
 	require.NoError(t, os.WriteFile(filepath.Join(taskWorkspace, manifest.Artifacts.Slices[0].Plan), []byte("# Plan\n"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(taskWorkspace, manifest.Artifacts.Slices[0].Result), []byte("# Result\n"), 0o644))
+}
+
+func prepareCompletedWorkspaceThreadApply(t *testing.T, apiWorkspace, webWorkspace string) {
+	t.Helper()
+	prepareWorkspaceThreadApplyTarget(t, apiWorkspace, "A01")
+	prepareWorkspaceThreadApplyTarget(t, webWorkspace, "B01")
+	prepareWorkspaceThreadCloseout(t, apiWorkspace, "A00-index.md")
+	prepareWorkspaceThreadCloseout(t, webWorkspace, "B00-index.md")
+	writeThreadCheckpointFixture(t, apiWorkspace, "api-task", "cp_api_a01", "A01", "validated", "promote")
+	writeThreadCheckpointFixture(t, webWorkspace, "web-task", "cp_web_b01", "B01", "validated", "promote")
+}
+
+func prepareWorkspaceThreadCloseout(t *testing.T, taskWorkspace, indexName string) {
+	t.Helper()
+	manifestPath := filepath.Join(taskWorkspace, taskManifestFilename)
+	manifest, err := readTaskManifest(manifestPath)
+	require.NoError(t, err)
+	manifest.Artifacts.Index = indexName
+	manifest.Durability.Required = true
+	require.NoError(t, writeTaskManifest(manifestPath, manifest))
+	require.NoError(t, os.WriteFile(filepath.Join(taskWorkspace, indexName), []byte("# Task closeout\n"), 0o644))
 }

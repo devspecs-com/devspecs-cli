@@ -234,6 +234,9 @@ A task escalates to workspace-change ownership only when its manifest explicitly
 links that change. Merely living inside an umbrella directory does not change
 ownership. Cross-repo graphs use the same root `ds thread` and `ds apply`
 commands with `change:<id>` and `--workspace`; there is no `ds workspace thread`.
+After every cross-repo lane completes, the workspace change is terminal. Run
+`ds apply <linked-task> --repo <child-repo>` for each repo that still needs its
+one-time `A00`-style durable-record closeout.
 
 ## Workspace Coordination
 

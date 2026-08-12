@@ -32,8 +32,10 @@ func main() {
 
 func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "ds",
-		Short: "DevSpecs - start bounded AI coding tasks from repo intent",
+		Use:           "ds",
+		Short:         "DevSpecs - start bounded AI coding tasks from repo intent",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Long: `DevSpecs indexes planning and specification artifacts in your repository,
 assigns stable IDs, and makes them easy to reference from agents, PRs,
 issues, and future workflows.

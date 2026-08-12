@@ -396,6 +396,25 @@ func TestRootCmd_ListNotRegistered(t *testing.T) {
 
 }
 
+func TestRootCmd_WhenCommandFails_LeavesErrorRenderingToMain(t *testing.T) {
+	// Arrange
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"not-a-command"})
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unknown command")
+	assert.Empty(t, stdout.String())
+	assert.Empty(t, stderr.String())
+}
+
 func TestRootCmd_LiveSurfaceMatchesCLISurfaceSpec(t *testing.T) {
 	spec := readCLISurfaceSpec(t)
 	root := newRootCmd()

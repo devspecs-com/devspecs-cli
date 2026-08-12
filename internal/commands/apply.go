@@ -168,6 +168,16 @@ func resolveThreadApply(cmd *cobra.Command, identifier string, opts applyOptions
 	if selector == "" {
 		selector = resolvedSelector
 	}
+	if location.Kind == threadOwnerWorkspaceChange && strings.TrimSpace(opts.Thread) == "" &&
+		allThreadLanesCompleted(status.Threads) && len(status.UnassignedTargets) == 0 {
+		closeout, found, closeoutErr := resolveWorkspaceTaskCloseout(identifier, opts, location, status)
+		if closeoutErr != nil {
+			return resolvedThreadApply{}, true, closeoutErr
+		}
+		if found {
+			return closeout, true, nil
+		}
+	}
 	lane, closeout, err := selectThreadApplyLane(status, opts.Thread, selector)
 	if err != nil {
 		return resolvedThreadApply{}, true, err
@@ -203,6 +213,30 @@ func resolveThreadApply(cmd *cobra.Command, identifier string, opts applyOptions
 	}
 	return resolvedThreadApply{
 		Context: ctx, Command: threadApplyCommand(identifier, lane.Key, opts), Thread: thread,
+	}, true, nil
+}
+
+func resolveWorkspaceTaskCloseout(identifier string, opts applyOptions, location threadOwnerLocation, status threadStatusOutput) (resolvedThreadApply, bool, error) {
+	kind, taskID := splitThreadOwnerSelector(strings.TrimSpace(identifier))
+	if kind == threadOwnerWorkspaceChange || taskID == "" {
+		return resolvedThreadApply{}, false, nil
+	}
+	ctx, err := loadResolvedTaskTargetContextForRepo(opts.Dir, taskID, opts.Target, opts.Repo)
+	if err != nil {
+		if kind == threadOwnerTask {
+			return resolvedThreadApply{}, false, err
+		}
+		return resolvedThreadApply{}, false, nil
+	}
+	if !isTaskSeriesTarget(ctx.Manifest, ctx.Slice.ID) ||
+		!strings.EqualFold(ctx.Manifest.ParentChange, location.ChangeID) ||
+		!strings.EqualFold(ctx.Manifest.WorkspaceID, location.WorkspaceID) ||
+		!samePath(ctx.Manifest.WorkspaceRoot, location.WorkspaceRoot) {
+		return resolvedThreadApply{}, false, nil
+	}
+	thread := &applyThreadContext{Owner: status.Owner, State: threadStateCompleted}
+	return resolvedThreadApply{
+		Context: ctx, Command: threadApplyCommand(identifier, "", opts), Thread: thread,
 	}, true, nil
 }
 

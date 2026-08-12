@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## v1.4.0 - 2026-08-09
+## v1.4.0 - 2026-08-12
 
 - Added experimental repo-first named execution threads with `ds thread set`,
   `ds thread remove`, owner-wide status, dependency joins, and explicit `ds
@@ -16,6 +16,13 @@
   named-thread scheduling, with YAML graph definitions and a rebuildable SQLite
   projection that reconstructs equivalent cold status after prune. No JSONL or
   remote service is required.
+- Serialized thread graph mutations with repo and linked child-task checkpoint
+  publication, preserving every event and preventing a workspace graph edit
+  from overlooking newly started work. Blocked lanes now print an exact
+  follow-up or conflict-resolution command.
+- Preserved repo-owned durability closeout after a cross-repo graph completes:
+  `ds apply <linked-task> --repo <child-repo>` returns that task's `A00`-style
+  closeout, while applying the completed workspace change remains terminal.
 - Added experimental `ds compose adr|rfc|prd` to create indexed, repo-owned
   durable drafts outside the DevSpecs task corpus while reusing established
   document directories, numbering, and ADR conventions. Composed files remain
@@ -63,6 +70,8 @@
   without appending another revision.
 - Changed `ds update` detection so a manually installed `/usr/local/bin/ds`
   binary is not reported as Homebrew without stronger Homebrew path evidence.
+- Changed top-level command failure rendering to print actionable errors once
+  without an unrelated usage dump.
 
 ## v1.3.0 - 2026-07-12
 
