@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,7 +58,147 @@ func TestApply_WhenMultipleThreadsAreRunnable_RequiresThreadSelection(t *testing
 	// Assert
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "multiple threads are runnable")
-	assert.ErrorContains(t, err, "--thread <key>")
+	assert.ErrorContains(t, err, "ds thread task:thread-apply --repo")
+	assert.ErrorContains(t, err, "ds apply task:thread-apply --thread agent-a --repo")
+	assert.ErrorContains(t, err, "ds apply task:thread-apply --thread both-a --repo")
+}
+
+func TestTaskNext_WhenMultipleThreadsAreRunnable_RejectsArbitrarySelection(t *testing.T) {
+	// Arrange
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	repoRoot := setupApplyTask(t, "thread-apply", "F", "first lane", "second lane")
+	definition := validRepoThreadDefinitionForApply("thread-apply")
+	definition.Threads[1].After = nil
+	writeApplyThreadDefinition(t, repoRoot, "thread-apply", definition)
+	cmd := NewTaskCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"next", "thread-apply", "--json"})
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "multiple threads are runnable: agent-a, both-a")
+	assert.ErrorContains(t, err, "ds apply task:thread-apply --thread agent-a --repo")
+	assert.ErrorContains(t, err, "ds apply task:thread-apply --thread both-a --repo")
+}
+
+func TestTaskStatus_WhenMultipleThreadsAreRunnable_OmitsSingularNextTarget(t *testing.T) {
+	// Arrange
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	repoRoot := setupApplyTask(t, "thread-apply", "F", "first lane", "second lane")
+	definition := validRepoThreadDefinitionForApply("thread-apply")
+	definition.Threads[1].After = nil
+	writeApplyThreadDefinition(t, repoRoot, "thread-apply", definition)
+	cmd := NewTaskCmd()
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"status", "thread-apply", "--json"})
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	var output taskStatusOutput
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &output))
+	assert.Empty(t, output.NextTarget)
+	assert.Contains(t, output.ThreadStatusCommand, "ds thread task:thread-apply --repo")
+	require.Len(t, output.ThreadApplyCommands, 2)
+	assert.Contains(t, output.ThreadApplyCommands[0], "ds apply task:thread-apply --thread agent-a --repo")
+	assert.Contains(t, output.ThreadApplyCommands[1], "ds apply task:thread-apply --thread both-a --repo")
+}
+
+func TestTaskStatus_WhenOneThreadIsRunnable_ReportsExactThreadCommand(t *testing.T) {
+	// Arrange
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	repoRoot := setupApplyTask(t, "thread-apply", "F", "first lane", "joined lane")
+	writeApplyThreadDefinition(t, repoRoot, "thread-apply", validRepoThreadDefinitionForApply("thread-apply"))
+	cmd := NewTaskCmd()
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"status", "thread-apply", "--json"})
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	var output taskStatusOutput
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &output))
+	assert.Equal(t, "F01", output.NextTarget)
+	assert.Contains(t, output.NextCommand, "ds apply task:thread-apply --thread agent-a --repo")
+	require.Len(t, output.ThreadApplyCommands, 1)
+	assert.Equal(t, output.NextCommand, output.ThreadApplyCommands[0])
+}
+
+func TestTaskShow_WhenThreadSelectsLaterSlice_UsesRunnableLaneTarget(t *testing.T) {
+	// Arrange
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	repoRoot := setupApplyTask(t, "thread-apply", "F", "first manifest slice", "runnable thread slice")
+	definition := threadDefinition{
+		SchemaVersion: threadDefinitionSchemaVersion,
+		Revision:      1,
+		Owner:         threadDefinitionOwner{Kind: threadOwnerTask, TaskID: "thread-apply"},
+		Threads: []threadDefinitionLane{{
+			Key: "agent-a", Targets: []threadTargetReference{{Target: "F02"}},
+		}},
+	}
+	writeApplyThreadDefinition(t, repoRoot, "thread-apply", definition)
+	cmd := NewTaskCmd()
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"show", "thread-apply", "--json"})
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	var output taskTargetOutput
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &output))
+	assert.Equal(t, "F02", output.Target)
+	assert.Equal(t, "runnable thread slice", output.Title)
+}
+
+func TestTaskCheckpoint_WhenThreadSelectsLaterSlice_RecordsRunnableLaneTarget(t *testing.T) {
+	// Arrange
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("DEVSPECS_HOME", home)
+	repoRoot := setupApplyTask(t, "thread-apply", "F", "first manifest slice", "runnable thread slice")
+	definition := threadDefinition{
+		SchemaVersion: threadDefinitionSchemaVersion,
+		Revision:      1,
+		Owner:         threadDefinitionOwner{Kind: threadOwnerTask, TaskID: "thread-apply"},
+		Threads: []threadDefinitionLane{{
+			Key: "agent-a", Targets: []threadTargetReference{{Target: "F02"}},
+		}},
+	}
+	writeApplyThreadDefinition(t, repoRoot, "thread-apply", definition)
+	cmd := NewTaskCmd()
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"checkpoint", "thread-apply", "--stage", "validated", "--decision", "promote", "--index=false", "--json"})
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	var output taskCheckpointOutput
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &output))
+	assert.Equal(t, "F02", output.Slice)
+	assert.Contains(t, output.ResultPath, "F02-runnable-thread-slice-result.md")
 }
 
 func TestApply_WhenSelectedThreadDependencyIsIncomplete_RejectsSelection(t *testing.T) {

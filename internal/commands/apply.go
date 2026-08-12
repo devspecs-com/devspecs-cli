@@ -60,7 +60,12 @@ func NewApplyCmd() *cobra.Command {
 
 This command is prompt-only: it resolves the next or requested slice and prints
 the bounded instruction an agent should follow. It does not launch an agent,
-mark the target started, or advance lifecycle state.`,
+mark the target started, or advance lifecycle state.
+
+For a task with named threads, argument-free apply continues only when exactly
+one lane is runnable. If several lanes are runnable, inspect ds thread <owner>
+and select one with ds apply <owner> --thread <key>. Ordinary tasks are
+repo-owned; explicitly linked workspace changes use the same commands.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			start := time.Now()
@@ -222,7 +227,12 @@ func rejectImplicitThreadLegacyAmbiguity(status threadStatusOutput, opts applyOp
 		return nil
 	}
 	sort.Strings(legacy)
-	return fmt.Errorf("implicit apply is ambiguous between a named thread and legacy targets %s; pass a task owner or --thread explicitly", strings.Join(legacy, ", "))
+	commands := threadRunnableApplyCommands(status)
+	guidance := threadOwnerStatusCommand(status.Owner)
+	if len(commands) > 0 {
+		guidance += "\nRun a named lane explicitly:\n  " + strings.Join(commands, "\n  ")
+	}
+	return fmt.Errorf("implicit apply is ambiguous between a named thread and legacy targets %s\nInspect named threads: %s", strings.Join(legacy, ", "), guidance)
 }
 
 func resolveDefinedThreadApplyOwner(cmd *cobra.Command, identifier string, opts applyOptions, implicitNext bool, statusOpts threadStatusOptions) (threadOwnerLocation, string, bool, error) {
@@ -326,7 +336,12 @@ func selectThreadApplyLane(status threadStatusOutput, key, selector string) (thr
 			keys = append(keys, lane.Key)
 		}
 		sort.Strings(keys)
-		return threadStatusLane{}, false, fmt.Errorf("multiple threads are runnable: %s; pass --thread <key>", strings.Join(keys, ", "))
+		return threadStatusLane{}, false, fmt.Errorf(
+			"multiple threads are runnable: %s\nInspect: %s\nRun one:\n  %s",
+			strings.Join(keys, ", "),
+			threadOwnerStatusCommand(status.Owner),
+			strings.Join(threadRunnableApplyCommands(status), "\n  "),
+		)
 	}
 }
 

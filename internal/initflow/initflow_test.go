@@ -235,6 +235,31 @@ func TestGenerateAgentToolFilesPreservesExistingWithoutForce(t *testing.T) {
 	assert.Equal(t, "created", generatedStatus(files, ".cursor/commands/ds-apply.md"))
 }
 
+func TestApplyAdapterBody_WhenNamedLanesAreAmbiguous_GuidesExplicitThreadSelection(t *testing.T) {
+	// Arrange
+	targetPhrase := "the user's requested target"
+
+	// Act
+	body := applyAdapterBody(targetPhrase, "ds apply")
+
+	// Assert
+	assert.Contains(t, body, "ds thread <owner>")
+	assert.Contains(t, body, "ds apply <owner> --thread <key>")
+	assert.Contains(t, body, "exactly one lane")
+}
+
+func TestTaskAdapterBody_WhenNoWorkspaceLinkExists_DefaultsToRepoOwnership(t *testing.T) {
+	// Arrange
+	goalPhrase := "the user's requested goal"
+
+	// Act
+	body := taskAdapterBody(goalPhrase, "ds task")
+
+	// Assert
+	assert.Contains(t, body, "Keep ownership repo-local")
+	assert.Contains(t, body, "already explicitly linked to a workspace change")
+}
+
 func TestGenerateAgentToolFilesForceOverwritesExisting(t *testing.T) {
 	root := t.TempDir()
 	custom := filepath.Join(root, ".cursor", "commands", "ds-task.md")

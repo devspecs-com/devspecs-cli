@@ -111,9 +111,9 @@ tree:
       purpose: Create a sliced task workspace from a grounded goal.
     children:
       next:
-        status: support
+        status: hidden_compat
         usage: ds task next <task-id>
-        purpose: Show the next bounded target in a task.
+        purpose: Compatibility path for legacy linear tasks or one unambiguous named lane; never choose among runnable lanes.
       show:
         status: support
         usage: ds task show <task-id|target>
@@ -332,6 +332,7 @@ planned_simplification:
       - init
       - recent
       - task
+      - thread
       - compose
       - apply
       - find
@@ -347,7 +348,6 @@ planned_simplification:
     ds_task:
       - checkpoint
       - status
-      - next
       - show
       - audit
       - refresh
@@ -363,12 +363,13 @@ planned_simplification:
       reason: Follow-up work is a slice with newer information, not a separate user noun.
   keep_until_replacement_is_proven:
     ds_task_next:
-      status: replacement_behavior_implemented
-      reason: ds apply now defaults to next and status now presents next_target, but keep ds task next public until dogfood proves the simpler path is enough.
+      status: hidden_compatibility
+      reason: ds apply and ds thread now own visible target selection; retain callable compatibility only for legacy linear tasks and one unambiguous named lane.
       replacement_tests:
         - "implemented: ds apply defaults to next only when unambiguous."
-        - "implemented: ds task status shows Next in human output."
-        - "implemented: ds task status JSON includes next_target."
+        - "implemented: ds task status exposes next_target only when one task target is singular."
+        - "implemented: ambiguous named lanes return exact ds thread and ds apply --thread commands."
+        - "implemented: ds task next never chooses the first runnable lane."
   workspace_surface_backlog:
     ds_workspace_change:
       target: ds workspace plan create <title>

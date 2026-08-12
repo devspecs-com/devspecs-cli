@@ -70,6 +70,8 @@ func buildTLDRGuide() tldrOutput {
 			"Use ds task --quick for small work and full ds task slices for multi-step work.",
 			"Use ds recent, ds find, ds map, and ds context as diagnostic/evidence tools around a task when scope, owner artifacts, or trust are unclear.",
 			"Command roles: ds find discovers and packs evidence; ds task status/show reports lifecycle; ds apply emits the current bounded prompt; ds workspace trace follows known workspace change or repo task links.",
+			"If ds apply reports multiple runnable lanes, inspect ds thread <owner> and continue exactly one with ds apply <owner> --thread <key>.",
+			"Tasks and threads are repo-owned by default. A workspace change owns cross-repo threads only when child tasks are explicitly linked to that change.",
 			"Record the completion contract with checkpoint: attempted slice, gate tested, changes, evidence, remaining work, and next iteration.",
 			"Use ds task slice add <task-id> \"<title>\" --after A01 --reason improve to turn an improve/rework gate into A01-1 instead of widening the current slice.",
 			"Do not claim DevSpecs found every relevant file; verify source and tests.",
@@ -83,7 +85,7 @@ func buildTLDRGuide() tldrOutput {
 					"ds init",
 					"ds init --tool codex,cursor,claude,windsurf",
 					`/ds-task "goal"`,
-					"/ds-apply [task-id|target]",
+					"/ds-apply [task-id|change-id|target] [--thread <key>]",
 				},
 				AgentRule: "Initialize once, then use generated adapter commands as thin wrappers over ds task and ds apply. If adapters are unavailable, use the plain CLI commands directly.",
 				Notes: []string{
@@ -111,10 +113,12 @@ func buildTLDRGuide() tldrOutput {
 					"ds task status <task-id>",
 					"ds task show <target>",
 					"ds apply <task-id>",
+					"ds thread task:<task-id>",
+					"ds apply task:<task-id> --thread <key>",
 					"ds task checkpoint <task-id> --target <target> --stage validated --decision promote",
 					`ds task slice add <task-id> "<follow-up>" --after A01 --reason improve`,
 				},
-				AgentRule: "Implement only the current slice. End with promote, improve, rework, rollback, block, or complete.",
+				AgentRule: "Implement only the current slice. Use thread selection only when apply reports multiple runnable lanes. End with promote, improve, rework, rollback, block, or complete.",
 			},
 			{
 				ID:      "incident",
@@ -156,9 +160,10 @@ func buildTLDRGuide() tldrOutput {
 				Commands: []string{
 					"ds task status <task-id>",
 					"ds apply <task-id>",
+					"ds thread task:<task-id>",
 					"ds task show <target>",
 				},
-				AgentRule: "Resume from lifecycle state, not broad rediscovery. Use status/show/apply for task progress, find only for missing evidence, and workspace trace only for known workspace links.",
+				AgentRule: "Resume from lifecycle state, not broad rediscovery. If apply is ambiguous, inspect the owner with thread and select one lane explicitly. Use find only for missing evidence and workspace trace only for known workspace links.",
 			},
 			{
 				ID:      "deep-dive",

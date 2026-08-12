@@ -4,6 +4,18 @@
 
 ## v1.4.0 - 2026-08-09
 
+- Added experimental repo-first named execution threads with `ds thread set`,
+  `ds thread remove`, owner-wide status, dependency joins, and explicit `ds
+  apply <owner> --thread <key>` prompts. Tasks remain repo-owned by default;
+  only tasks explicitly linked to a workspace change join its cross-repo graph.
+- Hid `ds task next` from normal help while retaining callable compatibility
+  for legacy linear tasks and one unambiguous lane. Multi-lane status and apply
+  paths never choose the first runnable lane and instead print exact thread and
+  apply commands.
+- Made immutable checkpoint JSON events the durable lifecycle authority for
+  named-thread scheduling, with YAML graph definitions and a rebuildable SQLite
+  projection that reconstructs equivalent cold status after prune. No JSONL or
+  remote service is required.
 - Added experimental `ds compose adr|rfc|prd` to create indexed, repo-owned
   durable drafts outside the DevSpecs task corpus while reusing established
   document directories, numbering, and ADR conventions. Composed files remain

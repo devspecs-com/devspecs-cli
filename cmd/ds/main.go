@@ -49,10 +49,12 @@ ds map when you need subsystem boundaries.
 
 Human work setup: use ds task for repo-local bounded work, ds compose for
 repo-owned ADRs, RFCs, and PRDs, and ds workspace for explicit multi-repo
-coordination.
+coordination. Use ds thread only when one task or linked workspace change has
+multiple runnable execution lanes.
 
 AI execution: agents should consume bounded prompts with ds apply and record
-evidence with ds task checkpoint, ds task evaluate, or ds task audit.
+evidence with ds task checkpoint, ds task evaluate, or ds task audit. If apply
+is ambiguous, inspect ds thread and select one lane with ds apply --thread.
 
 Setup: run ds init once per repo to create local config and optional Codex,
 Cursor, Claude, or Windsurf adapter files for ds task and ds apply.

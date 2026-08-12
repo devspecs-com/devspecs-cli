@@ -232,6 +232,30 @@ that target. Use `ds find` when you need to discover source/docs/tests for a
 question. Use `ds workspace trace` only when you already know a workspace change
 or repo task ID and need linked repo slices.
 
+## Split Work Into Named Threads
+
+Most tasks stay linear and need no thread setup. When two slices can proceed
+independently and a later slice must wait for both, keep the task repo-owned and
+define the lanes explicitly:
+
+```bash
+ds thread set task:weekly-digest agent-a A01
+ds thread set task:weekly-digest human-a A02
+ds thread set task:weekly-digest both-a A03 --after agent-a --after human-a
+ds thread task:weekly-digest
+```
+
+If both first lanes are runnable, `ds apply weekly-digest` returns an ambiguity
+error instead of choosing one. Continue with an exact command printed by status:
+
+```bash
+ds apply task:weekly-digest --thread agent-a
+```
+
+No workspace is required. Only tasks created as explicit child slices of a
+workspace change use a `change:<id>` thread owner and cross-repo target aliases.
+The command family remains `ds thread` plus `ds apply --thread` in both cases.
+
 ## Close A Full Task Track
 
 After every implementation slice is terminal, a full task exposes one `A00`

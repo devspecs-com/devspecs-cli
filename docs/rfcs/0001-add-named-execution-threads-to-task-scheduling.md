@@ -244,10 +244,10 @@ and names the reconstruction phase.
 ## CLI
 
 ```text
-ds thread [<task-id|change-id>]
+ds thread [task:<task-id>|change:<change-id>]
 ds thread set <owner> <key> <target>... [--name <label>] [--after <key>]...
 ds thread remove <owner> <key>
-ds apply [<task-id|change-id>] --thread <key>
+ds apply [task:<task-id>|change:<change-id>] --thread <key>
 ```
 
 `ds thread` reports every ready/active lane and why other lanes wait. `set`
@@ -278,7 +278,9 @@ Ready threads
   human-a  A03  Confirm migration policy
 Waiting threads
   both-a   A04  after agent-a, human-a
-Run: ds apply checkout-redesign --thread agent-a
+Run one:
+  ds apply task:checkout-redesign --thread agent-a
+  ds apply task:checkout-redesign --thread human-a
 ```
 
 Workspace status qualifies targets:
@@ -290,7 +292,9 @@ Ready threads
   human-a  web:B01  Confirm browser migration
 Waiting threads
   both-a   api:A03  after agent-a, human-a
-Run: ds apply COM-C014 --thread agent-a
+Run one:
+  ds apply change:COM-C014 --thread agent-a --workspace <workspace-root>
+  ds apply change:COM-C014 --thread human-a --workspace <workspace-root>
 ```
 
 JSON returns canonical owner and target objects, ordered thread arrays,

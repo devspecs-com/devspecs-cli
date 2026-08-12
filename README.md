@@ -92,6 +92,7 @@ ds init
 | Create a bounded handoff | `ds task "goal"` | You know the work and want packed repo context plus a stop line. |
 | Coordinate multi-repo work | `ds workspace init .` | You have an umbrella workspace with several child repos. Experimental. |
 | Continue one slice | `ds apply` | A task already exists and the agent needs the current target only. |
+| Coordinate parallel lanes | `ds thread task:<task-id>` | One task has several independently runnable slices or an explicit join. Experimental. |
 | Record the receipt | `ds task checkpoint A01 --decision promote` | You need to capture what changed, what ran, what missed, and what comes next. |
 | Preserve a durable decision | `ds compose adr "title"` | A track settled a consequential technical choice that should outlive task history. Experimental. |
 | Inspect exact context | `ds context <artifact-id>` | You want one indexed artifact as paste-ready agent context. |
@@ -210,6 +211,29 @@ ds task "Fix discount rounding in invoice totals" --quick
 
 Use full `ds task` when you want durable slices and handoff receipts. Add
 `--quick` when the ceremony would outweigh the change.
+
+## Named Execution Threads
+
+Named threads are experimental scheduling lanes over existing task slices.
+Ordinary tasks own their threads in the repository; no workspace is required:
+
+```bash
+ds thread set task:checkout-redesign agent-a A01 A02
+ds thread set task:checkout-redesign human-a A03
+ds thread set task:checkout-redesign both-a A04 --after agent-a --after human-a
+ds thread task:checkout-redesign
+ds apply task:checkout-redesign --thread agent-a
+```
+
+Argument-free `ds apply` still works for a legacy linear task or when exactly
+one named lane is runnable. When several lanes are runnable, DevSpecs does not
+pick the first one: `ds thread` shows every lane and prints exact `ds apply
+--thread` commands.
+
+A task escalates to workspace-change ownership only when its manifest explicitly
+links that change. Merely living inside an umbrella directory does not change
+ownership. Cross-repo graphs use the same root `ds thread` and `ds apply`
+commands with `change:<id>` and `--workspace`; there is no `ds workspace thread`.
 
 ## Workspace Coordination
 
@@ -332,7 +356,8 @@ instead of indexing every worktree as a new repository.
 | `ds task <query>` | Create a bounded task workspace with slice artifacts. |
 | `ds task <query> --quick` | Create a compact one-off task workspace. |
 | `ds task status/show` | Inspect task lifecycle state and target context. |
-| `ds apply [task-id\|target]` | Emit the next bounded one-slice agent prompt without mutating task state; omit the argument for the unambiguous next slice. |
+| `ds thread [task:<task-id>\|change:<change-id>]` | Inspect named lanes, joins, runnable targets, and exact apply commands. Experimental. |
+| `ds apply [task-id\|change-id\|target] [--thread <key>]` | Emit one bounded prompt without mutating task state; omit lane selection only when the next target is unambiguous. |
 | `ds task checkpoint <task-id\|target>` | Record files, tests, misses, noise, learnings, decision evidence, and next iteration. |
 | `ds compose adr\|rfc\|prd "<title>"` | Create and index a repo-owned durable draft using established repository conventions. Experimental. |
 | `ds task slice add <task-id> "<title>" --after A01 --reason improve` | Add an A01-1-style follow-up slice after an improve/rework gate. |
@@ -356,9 +381,23 @@ flags. Use the `ds workspace ...` form for workspace coordination.
 | `.devspecs/config.yaml` | Repo discovery configuration. | Usually yes. |
 | `devspecs/tasks/<task-id>/` | Default generated task workspace. | Yes, when durable. |
 | `.devspecs/tasks/<task-id>/` | Legacy or explicitly local task workspace. | No, unless you chose it deliberately. |
+| `devspecs/tasks/<task-id>/threads.yaml` | Repo-owned named thread definition. | Yes. |
+| `devspecs/tasks/<task-id>/checkpoints/*.json` | Immutable task lifecycle events; current thread state is derived from event heads. | Yes, when the task is durable. |
 | Repository ADR/RFC/PRD paths, such as `docs/adr/`, `docs/rfcs/`, and `docs/prd/` | Canonical durable documents created or reused by `ds compose`. | Yes. |
 | `devspecs/workspace.yaml` | Experimental workspace manifest for umbrella repos. | Yes, when used by the team. |
 | `devspecs/changes/<change-id>-*.md` | Experimental workspace-level change records. | Yes, when used by the team. |
+| `devspecs/changes/<change-id>.threads.yaml` | Cross-repo thread definition for one explicitly linked workspace change. | Yes, when used by the team. |
+
+Checkpoint JSON and thread-definition YAML are durable authority. `task.json`
+keeps the task definition plus compatibility lifecycle fields, while SQLite is
+a rebuildable local projection for fast reads. DevSpecs does not currently
+write a JSONL thread stream; a future JSONL export may be generated from the
+immutable events, but would not become authoritative.
+
+The product boundaries are deliberate: tasks hold bounded execution evidence,
+threads schedule existing targets, compose creates durable ADR/RFC/PRD files,
+workspaces optionally coordinate explicitly linked repositories, and prune
+maintains derived index state without deleting those repository artifacts.
 
 The global index records every physical root observed for a logical Git
 repository. This lets temporary agent worktrees reuse the repository's index.

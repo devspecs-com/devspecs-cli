@@ -766,7 +766,24 @@ func TestTaskHelpHidesLegacyLifecycleCommandsAndShowsSupportedCommands(t *testin
 	assert.Contains(t, buf.String(), "\n  checkpoint  ")
 	assert.Contains(t, buf.String(), "\n  refresh     ")
 	assert.Contains(t, buf.String(), "\n  status      ")
-	assert.Contains(t, buf.String(), "\n  next        ")
+	assert.NotContains(t, buf.String(), "\n  next        ")
+}
+
+func TestTaskNextCompatibilityHelpPointsToApplyAndThread(t *testing.T) {
+	// Arrange
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"next", "--help"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Prefer `ds apply <task-id>`")
+	assert.Contains(t, buf.String(), "`ds thread task:<task-id>`")
+	assert.Contains(t, buf.String(), "never chooses among multiple runnable threads")
 }
 
 func TestTaskPromptCompatibilityHelpPointsToApply(t *testing.T) {

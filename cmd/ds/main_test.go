@@ -416,6 +416,23 @@ func TestRootCmd_LiveSurfaceMatchesCLISurfaceSpec(t *testing.T) {
 	assertCommandSurface(t, "ds config", config, spec.Tree["ds config"].Children, nil, nil)
 }
 
+func TestRootCmd_NamedThreadsHaveNoTaskOrWorkspaceCommandDuplicate(t *testing.T) {
+	// Arrange
+	root := newRootCmd()
+	task := mustFindCommand(t, root, "task")
+	workspace := mustFindCommand(t, root, "workspace")
+
+	// Act
+	rootThread := findCommand(root, "thread")
+	taskThread := findCommand(task, "thread")
+	workspaceThread := findCommand(workspace, "thread")
+
+	// Assert
+	require.NotNil(t, rootThread)
+	assert.Nil(t, taskThread)
+	assert.Nil(t, workspaceThread)
+}
+
 func executeRootJSON(t *testing.T, args ...string) map[string]any {
 	t.Helper()
 	out := executeRoot(t, args...)

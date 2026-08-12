@@ -222,6 +222,8 @@ type taskStatusOutput struct {
 	NextTitle            string                  `json:"next_title,omitempty"`
 	NextKind             string                  `json:"next_kind,omitempty"`
 	NextCommand          string                  `json:"next_command,omitempty"`
+	ThreadStatusCommand  string                  `json:"thread_status_command,omitempty"`
+	ThreadApplyCommands  []string                `json:"thread_apply_commands,omitempty"`
 	LatestCheckpointID   string                  `json:"latest_checkpoint_id,omitempty"`
 	LatestCheckpoint     string                  `json:"latest_checkpoint,omitempty"`
 	LatestCheckpointJSON string                  `json:"latest_checkpoint_json,omitempty"`
@@ -808,9 +810,11 @@ func newTaskNextCmd() *cobra.Command {
 	var opts taskTargetOptions
 	opts.Dir = defaultTaskWorkspaceDir
 	cmd := &cobra.Command{
-		Use:   "next <task-id>",
-		Short: "Show the next bounded task target",
-		Args:  cobra.ExactArgs(1),
+		Use:    "next <task-id>",
+		Short:  "Compatibility path for one unambiguous next target",
+		Long:   "Hidden compatibility path. Prefer `ds apply <task-id>` to emit a bounded prompt or `ds thread task:<task-id>` to inspect named lanes. This command never chooses among multiple runnable threads.",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTaskNext(cmd, args[0], opts)
 		},
@@ -1408,7 +1412,7 @@ func runTaskSync(cmd *cobra.Command, taskID string, opts taskSyncOptions) error 
 }
 
 func runTaskNext(cmd *cobra.Command, taskID string, opts taskTargetOptions) error {
-	ctx, err := loadTaskTargetContext(cmd, opts.Dir, taskID, "")
+	ctx, err := loadTaskNextCompatibilityContext(cmd, taskID, opts)
 	if err != nil {
 		return err
 	}
@@ -1421,8 +1425,71 @@ func runTaskNext(cmd *cobra.Command, taskID string, opts taskTargetOptions) erro
 	return writeTaskTargetHuman(cmd.OutOrStdout(), "Next task target", out, false)
 }
 
+func loadTaskNextCompatibilityContext(cmd *cobra.Command, taskID string, opts taskTargetOptions) (taskTargetContext, error) {
+	return loadThreadAwareResolvedTaskTargetContext(cmd, opts.Dir, taskID, "")
+}
+
+func loadThreadAwareResolvedTaskTargetContext(cmd *cobra.Command, baseDir, taskIDOrTarget, selector string) (taskTargetContext, error) {
+	if strings.TrimSpace(selector) != "" {
+		return loadResolvedTaskTargetContext(cmd, baseDir, taskIDOrTarget, selector)
+	}
+	target, found, err := resolveTaskThreadTarget(cmd, baseDir, taskIDOrTarget)
+	if err != nil {
+		return taskTargetContext{}, err
+	}
+	if !found {
+		return loadResolvedTaskTargetContext(cmd, baseDir, taskIDOrTarget, selector)
+	}
+	return loadResolvedTaskTargetContext(cmd, baseDir, taskIDOrTarget, target)
+}
+
+func resolveTaskThreadTarget(cmd *cobra.Command, baseDir, taskID string) (string, bool, error) {
+	location, found, err := findRepoThreadOwnerLocationMode(cmd, strings.TrimSpace(taskID), baseDir, false)
+	if err != nil {
+		return "", true, err
+	}
+	if !found {
+		return "", false, nil
+	}
+	if _, err := os.Stat(location.DefinitionPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", true, err
+	}
+	status, err := deriveThreadStatus(cmd, location)
+	if err != nil {
+		return "", true, err
+	}
+	lane, closeout, err := selectThreadApplyLane(status, "", "")
+	if err != nil {
+		return "", true, err
+	}
+	if closeout {
+		if location.Kind != threadOwnerTask {
+			return "", true, fmt.Errorf("workspace change %q has completed all assigned threads", location.ChangeID)
+		}
+		manifest, manifestErr := readTaskManifest(filepath.Join(location.TaskWorkspace, taskManifestFilename))
+		if manifestErr != nil {
+			return "", true, manifestErr
+		}
+		return defaultTaskSeries(manifest.Series) + "00", true, nil
+	}
+	target := *lane.CurrentTarget
+	if !strings.EqualFold(target.TaskID, strings.TrimSpace(taskID)) {
+		return "", true, fmt.Errorf(
+			"task %q has no singular runnable target in its workspace thread graph; current target %s belongs to task %q\nInspect: %s",
+			taskID,
+			threadStatusTargetAddress(target),
+			target.TaskID,
+			threadOwnerStatusCommand(status.Owner),
+		)
+	}
+	return target.Target, true, nil
+}
+
 func runTaskShow(cmd *cobra.Command, taskID string, opts taskTargetOptions) error {
-	ctx, err := loadResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
+	ctx, err := loadThreadAwareResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1436,7 +1503,7 @@ func runTaskShow(cmd *cobra.Command, taskID string, opts taskTargetOptions) erro
 }
 
 func runTaskPrompt(cmd *cobra.Command, taskID string, opts taskTargetOptions) error {
-	ctx, err := loadResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
+	ctx, err := loadThreadAwareResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1461,7 +1528,7 @@ func runTaskPrompt(cmd *cobra.Command, taskID string, opts taskTargetOptions) er
 }
 
 func runTaskStartTarget(cmd *cobra.Command, taskID string, opts taskTargetStateOptions) error {
-	ctx, err := loadResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
+	ctx, err := loadThreadAwareResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1476,7 +1543,7 @@ func runTaskStartTarget(cmd *cobra.Command, taskID string, opts taskTargetStateO
 }
 
 func runTaskFinish(cmd *cobra.Command, taskID string, opts taskTargetStateOptions) error {
-	ctx, err := loadResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
+	ctx, err := loadThreadAwareResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1509,7 +1576,7 @@ func runTaskFinish(cmd *cobra.Command, taskID string, opts taskTargetStateOption
 }
 
 func runTaskAudit(cmd *cobra.Command, taskID string, opts taskAuditOptions) error {
-	ctx, err := loadResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
+	ctx, err := loadThreadAwareResolvedTaskTargetContext(cmd, opts.Dir, taskID, opts.Target)
 	if err != nil {
 		return err
 	}
@@ -1536,12 +1603,71 @@ func runTaskStatus(cmd *cobra.Command, taskID string, opts taskStatusOptions) er
 	}
 	out := taskStatusFromManifest(manifest, commandRepoTarget(cmd))
 	out.ArtifactFreshness = taskArtifactFreshnessWarnings(workspace, manifest)
+	if err := applyTaskStatusThreadSelection(cmd, opts, manifest, &out); err != nil {
+		return err
+	}
 	if opts.AsJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)
 	}
 	return writeTaskStatusHuman(cmd.OutOrStdout(), out)
+}
+
+func applyTaskStatusThreadSelection(cmd *cobra.Command, opts taskStatusOptions, manifest taskManifest, out *taskStatusOutput) error {
+	location, found, err := findRepoThreadOwnerLocationMode(cmd, manifest.TaskID, opts.Dir, false)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	if _, err := os.Stat(location.DefinitionPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	status, err := deriveThreadStatus(cmd, location)
+	if err != nil {
+		return err
+	}
+	out.ThreadStatusCommand = threadOwnerStatusCommand(status.Owner)
+	out.ThreadApplyCommands = threadRunnableApplyCommands(status)
+
+	var matching []threadStatusLane
+	for _, lane := range status.Threads {
+		if lane.CurrentTarget == nil || (lane.State != threadStateReady && lane.State != threadStateActive) {
+			continue
+		}
+		if strings.EqualFold(lane.CurrentTarget.TaskID, manifest.TaskID) {
+			matching = append(matching, lane)
+		}
+	}
+	if len(matching) == 1 {
+		target := *matching[0].CurrentTarget
+		slice, sliceErr := taskSliceForCheckpoint(manifest, target.Target)
+		if sliceErr != nil {
+			return sliceErr
+		}
+		out.NextTarget = target.Target
+		out.NextTitle = target.Title
+		out.NextKind = slice.Kind
+		out.NextCommand = threadOwnerApplyCommand(status.Owner, matching[0].Key)
+		return nil
+	}
+	if location.Kind == threadOwnerTask && allThreadLanesCompleted(status.Threads) && len(status.UnassignedTargets) == 0 {
+		return nil
+	}
+	clearTaskStatusNext(out)
+	return nil
+}
+
+func clearTaskStatusNext(out *taskStatusOutput) {
+	out.NextTarget = ""
+	out.NextTitle = ""
+	out.NextKind = ""
+	out.NextCommand = ""
 }
 
 func taskStatusFromManifest(manifest taskManifest, repoPath string) taskStatusOutput {
@@ -1627,6 +1753,18 @@ func writeTaskStatusHuman(out io.Writer, status taskStatusOutput) error {
 		fmt.Fprintln(out)
 		if status.NextCommand != "" {
 			fmt.Fprintf(out, "Run: %s\n", status.NextCommand)
+		}
+	}
+	if status.ThreadStatusCommand != "" {
+		if status.NextTarget == "" {
+			fmt.Fprintln(out, "Named threads: no singular next target")
+		}
+		fmt.Fprintf(out, "Inspect: %s\n", status.ThreadStatusCommand)
+		if status.NextTarget == "" && len(status.ThreadApplyCommands) > 0 {
+			fmt.Fprintln(out, "Run one:")
+			for _, command := range status.ThreadApplyCommands {
+				fmt.Fprintf(out, "  %s\n", command)
+			}
 		}
 	}
 	if status.LatestCheckpoint != "" {
@@ -1945,10 +2083,6 @@ func findTaskTargetAddressMatchesForRepo(baseDir, selector, repoPath string) ([]
 		return matches[i].TaskID < matches[j].TaskID
 	})
 	return matches, nil
-}
-
-func loadTaskTargetContext(cmd *cobra.Command, baseDir, taskID, selector string) (taskTargetContext, error) {
-	return loadTaskTargetContextForRepo(baseDir, taskID, selector, commandRepoTarget(cmd))
 }
 
 func loadTaskTargetContextForRepo(baseDir, taskID, selector, repoPath string) (taskTargetContext, error) {
@@ -4739,6 +4873,15 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	target, err := checkpointTargetFromOptions(opts)
 	if err != nil {
 		return err
+	}
+	if target == "" {
+		threadTarget, found, threadErr := resolveTaskThreadTarget(cmd, opts.Dir, taskID)
+		if threadErr != nil {
+			return threadErr
+		}
+		if found {
+			target = threadTarget
+		}
 	}
 	resolvedTaskID, resolvedSlice, err := resolveTaskTargetArgument(cmd, opts.Dir, taskID, target)
 	if err != nil {

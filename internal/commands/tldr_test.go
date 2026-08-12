@@ -42,8 +42,8 @@ func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 		"tldr output missing %q:\n%s", "Run ds init once per repo", out)
 	assert.Contains(t, out, `/ds-task "goal"`,
 		"tldr output missing %q:\n%s", `/ds-task "goal"`, out)
-	assert.Contains(t, out, "/ds-apply [task-id|target]",
-		"tldr output missing %q:\n%s", "/ds-apply [task-id|target]", out)
+	assert.Contains(t, out, "/ds-apply [task-id|change-id|target] [--thread <key>]",
+		"tldr output missing updated apply adapter signature:\n%s", out)
 	assert.Contains(t, out, "Human front door: run ds recent",
 		"tldr output missing %q:\n%s", "Human front door: run ds recent", out)
 	assert.Contains(t, out, "Workflow commands refresh the local index by default",
@@ -77,6 +77,22 @@ func TestTLDR_HumanOutputGroupsWorkflows(t *testing.T) {
 	assert.GreaterOrEqual(t, taskIndex, 0, "brownfield workflow should put ds recent before bounded execution:\n%s", brownfield)
 	assert.LessOrEqual(t, recentIndex, taskIndex, "brownfield workflow should put ds recent before bounded execution:\n%s", brownfield)
 
+}
+
+func TestTLDR_WhenApplyIsAmbiguous_GuidesOneNamedThread(t *testing.T) {
+	// Arrange
+	cmd := NewTLDRCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "inspect ds thread <owner>")
+	assert.Contains(t, buf.String(), "ds apply <owner> --thread <key>")
+	assert.Contains(t, buf.String(), "repo-owned by default")
 }
 
 func TestTLDR_FilterAndJSON(t *testing.T) {

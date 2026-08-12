@@ -31,10 +31,14 @@ func NewThreadCmd() *cobra.Command {
 		Short: "Show runnable named task threads and joins",
 		Long: `Show named execution threads for a repo task or linked workspace change.
 
-Threads schedule existing task slices. A standalone task is repo-owned; a task
-explicitly linked to a workspace change resolves that change's cross-repo
-thread graph. SQLite accelerates status, but durable YAML and checkpoint JSON
-artifacts remain authoritative and reconstruct the same result after prune.`,
+Threads schedule existing task slices. Ordinary tasks own repo-local threads
+without requiring a workspace. Only a task explicitly linked to a workspace
+change joins that change's cross-repo thread graph; merely living below a
+workspace does not change ownership.
+
+Use this command to inspect runnable lanes, then use ds apply <owner> --thread
+<key> to emit one bounded prompt. The same root commands work for repo and
+workspace owners; there is no separate workspace thread command family.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			owner := ""
@@ -316,17 +320,64 @@ func inferThreadOwnerLocation(cmd *cobra.Command, opts threadStatusOptions) (thr
 	case 1:
 		return candidates[0], nil
 	default:
-		var labels []string
+		var commands []string
 		for _, candidate := range candidates {
-			if candidate.Kind == threadOwnerTask {
-				labels = append(labels, "task:"+candidate.TaskID)
-			} else {
-				labels = append(labels, "change:"+candidate.ChangeID)
-			}
+			commands = append(commands, threadOwnerStatusCommand(threadStatusOwnerFromLocation(candidate)))
 		}
-		sort.Strings(labels)
-		return threadOwnerLocation{}, fmt.Errorf("multiple thread owners are available: %s; pass one explicitly", strings.Join(labels, ", "))
+		sort.Strings(commands)
+		return threadOwnerLocation{}, fmt.Errorf("multiple thread owners are available; inspect one explicitly:\n  %s", strings.Join(commands, "\n  "))
 	}
+}
+
+func threadStatusOwnerFromLocation(location threadOwnerLocation) threadStatusOwner {
+	return threadStatusOwner{
+		Kind:          location.Kind,
+		TaskID:        location.TaskID,
+		WorkspaceID:   location.WorkspaceID,
+		ChangeID:      location.ChangeID,
+		RepoRoot:      location.RepoRoot,
+		WorkspaceRoot: location.WorkspaceRoot,
+	}
+}
+
+func threadOwnerSelector(owner threadStatusOwner) string {
+	if owner.Kind == threadOwnerWorkspaceChange {
+		return "change:" + owner.ChangeID
+	}
+	return "task:" + owner.TaskID
+}
+
+func threadOwnerStatusCommand(owner threadStatusOwner) string {
+	command := "ds thread " + commandArg(threadOwnerSelector(owner))
+	if owner.Kind == threadOwnerWorkspaceChange && strings.TrimSpace(owner.WorkspaceRoot) != "" {
+		return command + " --workspace " + commandArg(owner.WorkspaceRoot)
+	}
+	if strings.TrimSpace(owner.RepoRoot) != "" {
+		return command + " --repo " + commandArg(owner.RepoRoot)
+	}
+	return command
+}
+
+func threadOwnerApplyCommand(owner threadStatusOwner, key string) string {
+	command := "ds apply " + commandArg(threadOwnerSelector(owner)) + " --thread " + commandArg(key)
+	if owner.Kind == threadOwnerWorkspaceChange && strings.TrimSpace(owner.WorkspaceRoot) != "" {
+		return command + " --workspace " + commandArg(owner.WorkspaceRoot)
+	}
+	if strings.TrimSpace(owner.RepoRoot) != "" {
+		return command + " --repo " + commandArg(owner.RepoRoot)
+	}
+	return command
+}
+
+func threadRunnableApplyCommands(status threadStatusOutput) []string {
+	commands := make([]string, 0, len(status.Threads))
+	for _, lane := range status.Threads {
+		if lane.State == threadStateReady || lane.State == threadStateActive {
+			commands = append(commands, threadOwnerApplyCommand(status.Owner, lane.Key))
+		}
+	}
+	sort.Strings(commands)
+	return commands
 }
 
 func threadStatusHasOpenWork(status threadStatusOutput) bool {
@@ -455,12 +506,14 @@ func writeThreadStatus(cmd *cobra.Command, out threadStatusOutput, asJSON bool) 
 			fmt.Fprintf(cmd.OutOrStdout(), "  %-16s %s\n", threadStatusTargetAddress(target), target.Title)
 		}
 	}
-	if len(out.ReadyThreads) == 1 {
-		owner := "task:" + out.Owner.TaskID
-		if out.Owner.Kind == threadOwnerWorkspaceChange {
-			owner = "change:" + out.Owner.ChangeID
+	commands := threadRunnableApplyCommands(out)
+	if len(commands) == 1 {
+		fmt.Fprintf(cmd.OutOrStdout(), "Run: %s\n", commands[0])
+	} else if len(commands) > 1 {
+		fmt.Fprintln(cmd.OutOrStdout(), "Run one:")
+		for _, command := range commands {
+			fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", command)
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Run: ds apply %s --thread %s\n", commandArg(owner), commandArg(out.ReadyThreads[0]))
 	}
 	return nil
 }
