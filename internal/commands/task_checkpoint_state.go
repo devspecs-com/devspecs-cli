@@ -104,31 +104,8 @@ func readTaskCheckpointEvents(workspace, taskID string) ([]taskCheckpointEvent, 
 		if err != nil {
 			return nil, err
 		}
-		if record.SchemaVersion > taskCheckpointSchemaVersion {
-			return nil, fmt.Errorf("checkpoint event %s uses unsupported schema_version %d", jsonPath, record.SchemaVersion)
-		}
-		if record.SchemaVersion == taskCheckpointSchemaVersion && record.EventKind != taskCheckpointEventKind {
-			return nil, fmt.Errorf("checkpoint event %s has invalid event_kind %q", jsonPath, record.EventKind)
-		}
-		if record.SchemaVersion == taskCheckpointSchemaVersion {
-			if strings.TrimSpace(record.CheckpointID) == "" {
-				return nil, fmt.Errorf("checkpoint event %s has no checkpoint_id", jsonPath)
-			}
-			if strings.TrimSpace(firstNonEmptyTaskString(record.Target, record.Slice)) == "" {
-				return nil, fmt.Errorf("checkpoint event %s has no target", jsonPath)
-			}
-			if !isAllowedValue(record.Stage, taskLifecycleStages) {
-				return nil, fmt.Errorf("checkpoint event %s has invalid stage %q", jsonPath, record.Stage)
-			}
-			if record.Decision != "" && !isAllowedValue(record.Decision, taskDecisions) {
-				return nil, fmt.Errorf("checkpoint event %s has invalid decision %q", jsonPath, record.Decision)
-			}
-			if _, parseErr := time.Parse(time.RFC3339, record.CreatedAt); parseErr != nil {
-				return nil, fmt.Errorf("checkpoint event %s has invalid created_at %q", jsonPath, record.CreatedAt)
-			}
-		}
-		if !strings.EqualFold(strings.TrimSpace(record.TaskID), strings.TrimSpace(taskID)) {
-			return nil, fmt.Errorf("checkpoint event %s belongs to task %q, expected %q", jsonPath, record.TaskID, taskID)
+		if err := validateTaskCheckpointEventRecord(jsonPath, taskID, record); err != nil {
+			return nil, err
 		}
 		checkpointKey := strings.ToLower(strings.TrimSpace(record.CheckpointID))
 		if previousPath, exists := seenIDs[checkpointKey]; exists {
@@ -143,6 +120,36 @@ func readTaskCheckpointEvents(workspace, taskID string) ([]taskCheckpointEvent, 
 		})
 	}
 	return events, nil
+}
+
+func validateTaskCheckpointEventRecord(path, taskID string, record taskCheckpointRecord) error {
+	if record.SchemaVersion > taskCheckpointSchemaVersion {
+		return fmt.Errorf("checkpoint event %s uses unsupported schema_version %d", path, record.SchemaVersion)
+	}
+	if record.SchemaVersion == taskCheckpointSchemaVersion && record.EventKind != taskCheckpointEventKind {
+		return fmt.Errorf("checkpoint event %s has invalid event_kind %q", path, record.EventKind)
+	}
+	if record.SchemaVersion == taskCheckpointSchemaVersion {
+		if strings.TrimSpace(record.CheckpointID) == "" {
+			return fmt.Errorf("checkpoint event %s has no checkpoint_id", path)
+		}
+		if strings.TrimSpace(firstNonEmptyTaskString(record.Target, record.Slice)) == "" {
+			return fmt.Errorf("checkpoint event %s has no target", path)
+		}
+		if !isAllowedValue(record.Stage, taskLifecycleStages) {
+			return fmt.Errorf("checkpoint event %s has invalid stage %q", path, record.Stage)
+		}
+		if record.Decision != "" && !isAllowedValue(record.Decision, taskDecisions) {
+			return fmt.Errorf("checkpoint event %s has invalid decision %q", path, record.Decision)
+		}
+		if _, err := time.Parse(time.RFC3339, record.CreatedAt); err != nil {
+			return fmt.Errorf("checkpoint event %s has invalid created_at %q", path, record.CreatedAt)
+		}
+	}
+	if !strings.EqualFold(strings.TrimSpace(record.TaskID), strings.TrimSpace(taskID)) {
+		return fmt.Errorf("checkpoint event %s belongs to task %q, expected %q", path, record.TaskID, taskID)
+	}
+	return nil
 }
 
 func resolveTaskCheckpointHeads(events []taskCheckpointEvent) (map[string][]taskCheckpointEvent, error) {

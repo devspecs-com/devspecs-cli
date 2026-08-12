@@ -17,7 +17,7 @@ import (
 var schemaDDL string
 
 // SchemaVersion is the current schema version. Bump when schema.sql changes.
-const SchemaVersion = 15
+const SchemaVersion = 16
 
 // SQLiteBusyTimeoutMS is the fallback for short writes that contend outside the
 // process-level index writer queue. Command contexts own longer operation limits.
@@ -189,6 +189,11 @@ func (db *DB) migrate() error {
 				return err
 			}
 			maxVersion = 15
+		case 15:
+			if err := db.migrate15To16(now); err != nil {
+				return err
+			}
+			maxVersion = 16
 		default:
 			return fmt.Errorf(
 				"index was created with schema v%d but this CLI requires v%d. Run 'ds scan --rebuild' or delete ~/.devspecs/devspecs.db and run 'ds scan' to rebuild",
@@ -504,4 +509,86 @@ func (db *DB) migrate14To15(now string) error {
 	}
 	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 15, now)
 	return err
+}
+
+func (db *DB) migrate15To16(now string) error {
+	if err := createThreadProjectionSchema(db.DB); err != nil {
+		return fmt.Errorf("migrate v15->v16 thread projections: %w", err)
+	}
+	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 16, now)
+	return err
+}
+
+func createThreadProjectionSchema(db *sql.DB) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS thread_projections (
+			owner_id            TEXT PRIMARY KEY,
+			owner_kind          TEXT NOT NULL,
+			task_id             TEXT NOT NULL DEFAULT '',
+			workspace_id        TEXT NOT NULL DEFAULT '',
+			change_id           TEXT NOT NULL DEFAULT '',
+			repo_root           TEXT NOT NULL DEFAULT '',
+			workspace_root      TEXT NOT NULL DEFAULT '',
+			definition_path     TEXT NOT NULL,
+			definition_revision INTEGER NOT NULL,
+			definition_json     TEXT NOT NULL,
+			projected_at        TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS thread_projection_links (
+			owner_id       TEXT NOT NULL,
+			position       INTEGER NOT NULL,
+			repo_alias     TEXT NOT NULL DEFAULT '',
+			task_id        TEXT NOT NULL,
+			target         TEXT NOT NULL,
+			name           TEXT NOT NULL DEFAULT '',
+			status         TEXT NOT NULL DEFAULT '',
+			repo_root      TEXT NOT NULL,
+			task_workspace TEXT NOT NULL,
+			PRIMARY KEY (owner_id, position),
+			FOREIGN KEY (owner_id) REFERENCES thread_projections(owner_id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS thread_projection_tasks (
+			owner_id       TEXT NOT NULL,
+			repo_alias     TEXT NOT NULL DEFAULT '',
+			task_id        TEXT NOT NULL,
+			repo_root      TEXT NOT NULL,
+			task_workspace TEXT NOT NULL,
+			manifest_path  TEXT NOT NULL,
+			manifest_json  TEXT NOT NULL,
+			PRIMARY KEY (owner_id, repo_alias, task_id),
+			FOREIGN KEY (owner_id) REFERENCES thread_projections(owner_id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS thread_projection_events (
+			owner_id       TEXT NOT NULL,
+			repo_alias     TEXT NOT NULL DEFAULT '',
+			task_id        TEXT NOT NULL,
+			checkpoint_id  TEXT NOT NULL,
+			target         TEXT NOT NULL,
+			json_path      TEXT NOT NULL,
+			markdown_path  TEXT NOT NULL DEFAULT '',
+			record_json    TEXT NOT NULL,
+			PRIMARY KEY (owner_id, repo_alias, task_id, checkpoint_id),
+			FOREIGN KEY (owner_id) REFERENCES thread_projections(owner_id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS thread_projection_sources (
+			owner_id      TEXT NOT NULL,
+			source_kind   TEXT NOT NULL,
+			source_key    TEXT NOT NULL,
+			path          TEXT NOT NULL,
+			size_bytes    INTEGER NOT NULL,
+			modified_ns   INTEGER NOT NULL,
+			content_hash  TEXT NOT NULL,
+			PRIMARY KEY (owner_id, source_kind, source_key),
+			FOREIGN KEY (owner_id) REFERENCES thread_projections(owner_id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_thread_projection_tasks_owner ON thread_projection_tasks(owner_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_thread_projection_events_owner_target ON thread_projection_events(owner_id, task_id, target)`,
+		`CREATE INDEX IF NOT EXISTS idx_thread_projection_sources_owner_path ON thread_projection_sources(owner_id, path)`,
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -81,6 +81,7 @@ remotes, document text, or raw queries. Disable with DEVSPECS_TELEMETRY=0.`,
 	rootCmd.AddCommand(commands.NewRecentCmd())
 	rootCmd.AddCommand(commands.NewMapCmd())
 	rootCmd.AddCommand(commands.NewTaskCmd())
+	rootCmd.AddCommand(commands.NewThreadCmd())
 	rootCmd.AddCommand(commands.NewComposeCmd())
 	rootCmd.AddCommand(commands.NewApplyCmd())
 	rootCmd.AddCommand(commands.NewWorkspaceCmd())
@@ -124,6 +125,7 @@ func assignRootCommandGroups(rootCmd *cobra.Command) {
 		"show":      rootGroupHumanOrientation,
 		"init":      rootGroupHumanWorkSetup,
 		"task":      rootGroupHumanWorkSetup,
+		"thread":    rootGroupHumanWorkSetup,
 		"compose":   rootGroupHumanWorkSetup,
 		"workspace": rootGroupHumanWorkSetup,
 		"apply":     rootGroupAIExecution,

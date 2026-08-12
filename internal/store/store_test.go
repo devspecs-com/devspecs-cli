@@ -42,9 +42,40 @@ func TestOpen_CreatesCurrentSchema(t *testing.T) {
 	assertTableExists(t, db, "source_manifest_imports")
 	assertTableExists(t, db, "source_manifest_fts")
 	assertTableExists(t, db, "task_checkpoint_facts")
+	assertTableExists(t, db, "thread_projections")
+	assertTableExists(t, db, "thread_projection_links")
+	assertTableExists(t, db, "thread_projection_tasks")
+	assertTableExists(t, db, "thread_projection_events")
+	assertTableExists(t, db, "thread_projection_sources")
 	assert.True(t, indexExists(t, db, "idx_repos_git_identity"))
 	assert.True(t, indexExists(t, db, "idx_sources_artifact_repo"))
 	assert.True(t, indexExists(t, db, "idx_sources_repo"))
+}
+
+func TestMigrate_V15ToV16CreatesThreadProjectionTables(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "devspecs.db")
+	db, err := Open(dbPath)
+	require.NoError(t, err)
+	mustExecStoreTestSQL(t, db, `DROP TABLE thread_projection_sources`)
+	mustExecStoreTestSQL(t, db, `DROP TABLE thread_projection_events`)
+	mustExecStoreTestSQL(t, db, `DROP TABLE thread_projection_tasks`)
+	mustExecStoreTestSQL(t, db, `DROP TABLE thread_projection_links`)
+	mustExecStoreTestSQL(t, db, `DROP TABLE thread_projections`)
+	mustExecStoreTestSQL(t, db, `UPDATE schema_migrations SET version = 15`)
+	require.NoError(t, db.Close())
+
+	db, err = Open(dbPath)
+
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	assertTableExists(t, db, "thread_projections")
+	assertTableExists(t, db, "thread_projection_links")
+	assertTableExists(t, db, "thread_projection_tasks")
+	assertTableExists(t, db, "thread_projection_events")
+	assertTableExists(t, db, "thread_projection_sources")
+	var version int
+	require.NoError(t, db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version))
+	assert.Equal(t, 16, version)
 }
 
 func TestMigrate_V14ToV15BackfillsRepositoryRoots(t *testing.T) {

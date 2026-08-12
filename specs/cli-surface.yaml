@@ -36,6 +36,10 @@ tree:
       task:
         status: core
         purpose: Create and manage bounded task workspaces with packed context.
+      thread:
+        status: experimental
+        usage: ds thread [task-id|change-id]
+        purpose: Show named execution lanes, runnable targets, waits, and joins for a repo task or linked workspace change.
       compose:
         status: experimental
         purpose: Create repo-owned ADR, RFC, and PRD drafts using existing repository conventions.
