@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Summary
 
@@ -75,6 +75,15 @@ they do not satisfy a join. Explicitly configured tasks report unassigned
 nonterminal slices and refuse implicit scheduling rather than running them by
 accident.
 
+Manifest order controls presentation only; it is never a global priority.
+Within one thread, target order is authoritative. A thread is `waiting` while
+an `after` dependency is unresolved, `ready` when its dependencies allow
+advance and its next target has not started, `active` when its next target has
+started, `blocked` when that target has a non-advancing decision, and
+`completed` when every target allows advance. A dependency blocked on improve,
+rework, block, or rollback keeps downstream threads waiting and reports that
+reason explicitly.
+
 ### CLI
 
 ```text
@@ -90,10 +99,70 @@ validation. `remove` is limited to definitions without started or terminal
 history. Thread keys such as `agent-a` are labels only; output must not imply
 that DevSpecs owns an agent process.
 
+Replacing a definition may reorder or reassign only targets without started or
+terminal lifecycle history. Removing a thread never deletes targets or task
+artifacts, and removal is rejected while another thread depends on it. These
+guards keep graph edits from rewriting the meaning of recorded checkpoints.
+
 `ds apply --thread` selects the next runnable target within one lane. Apply by
 explicit target still validates thread dependencies. Apply without a selector
 continues to work when a legacy task or exactly one runnable lane makes the
 choice unambiguous.
+
+Human status output follows this shape:
+
+```text
+Task: checkout-redesign
+
+Ready threads
+  agent-a  A01  Add the server boundary
+  human-a  A03  Confirm migration policy
+
+Waiting threads
+  both-a   A05  after agent-a, human-a
+
+Unassigned targets: none
+
+Run: ds apply checkout-redesign --thread agent-a
+```
+
+JSON status exposes readiness as a set and preserves wait reasons:
+
+```json
+{
+  "task_id": "checkout-redesign",
+  "threads": [
+    {
+      "key": "agent-a",
+      "name": "Agent A",
+      "state": "ready",
+      "targets": ["A01", "A02"],
+      "next_target": "A01"
+    },
+    {
+      "key": "human-a",
+      "name": "Human A",
+      "state": "ready",
+      "targets": ["A03"],
+      "next_target": "A03"
+    },
+    {
+      "key": "both-a",
+      "name": "Both A",
+      "state": "waiting",
+      "targets": ["A05"],
+      "after": ["agent-a", "human-a"],
+      "wait_reason": "waiting for agent-a, human-a"
+    }
+  ],
+  "ready_threads": ["agent-a", "human-a"],
+  "unassigned_targets": []
+}
+```
+
+The JSON arrays follow manifest order for deterministic output. Consumers must
+still treat `ready_threads` as a set, not as a recommendation to pick its first
+member.
 
 ### Compatibility and ownership
 
@@ -102,6 +171,18 @@ next` remains a hidden compatibility path for legacy or unambiguous tasks, but
 must never pick arbitrarily among multiple ready threads. `ds task status`
 includes thread summaries and exposes a singular `next_target` only when one
 exists.
+
+Reading a legacy manifest does not write an implicit thread back to disk.
+Adding the first explicit definition switches that task to graph scheduling;
+until all nonterminal implementation slices are assigned, status reports the
+unassigned targets and implicit apply/next selection refuses to proceed. A
+follow-up inherits its parent's thread without being copied into the manifest.
+Series closeout remains outside every thread and becomes eligible only after
+all implementation threads complete with advance-allowing gates.
+
+Task inference follows the existing apply rule: `ds thread` may omit the task
+ID only when the current repository has one unambiguous active task. Otherwise
+it returns candidate task IDs and asks for an explicit selection.
 
 Threads live only in the repo task's `task.json`. Workspace callers use the
 existing `--repo` routing boundary; no `ds workspace thread` is added. Compose
@@ -141,11 +222,11 @@ Legacy tasks and scripts retain linear behavior. `ds task next` is hidden only
 after compatibility and ambiguity tests pass. Rollback consists of leaving the
 optional `threads` field unread; slice and checkpoint history remains valid.
 
-## Open questions
+## Resolved release decisions
 
-- Should `remove` ship in v1.4, or should the first release allow only
-  declarative replacement through `set`?
-- Should the CLI label threads experimental while keeping the manifest format
-  forward-compatible?
+- v1.4 includes guarded `remove`. It is useful for correcting an unstarted
+  graph and cannot erase or reinterpret started or terminal history.
+- The command and documentation label threads experimental in v1.4. The
+  optional manifest shape remains additive and forward-compatible.
 
 <!-- devspecs: task=threaded-task-orchestration target=F01 -->
