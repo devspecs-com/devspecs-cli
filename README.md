@@ -178,14 +178,45 @@ ds doctor --json --redact
 Use `--redact` before sharing a report. If doctor finds a shadowed binary,
 correct PATH and restart the shell or IDE. For an older index schema, run the
 current CLI normally to migrate forward. For a newer schema, update the CLI
-instead of rebuilding the index. A held writer is an instantaneous observation;
-wait for the active operation and retry. For index growth, inspect
-`ds prune --dry-run` before choosing `ds prune` or `ds prune --vacuum`.
+before deciding whether to rebuild the local index. A held writer is an
+instantaneous observation; wait for the active operation and retry. For index
+growth, inspect `ds prune --dry-run` before choosing `ds prune` or
+`ds prune --vacuum`.
 
 An unreadable index is not a reason to delete it blindly. Preserve it while
-collecting the redacted report; automated backup and rollback recovery are not
-part of `ds doctor`. Repository identity probing is bounded at five seconds; a
-timeout leaves the other diagnostic evidence intact and reports a warning.
+collecting the redacted report, then use the explicit index recovery commands
+below. Recovery is not part of `ds doctor`. Repository identity probing is
+bounded at five seconds; a timeout leaves the other diagnostic evidence intact
+and reports a warning.
+
+## Back Up And Recover The Index
+
+DevSpecs keeps the SQLite index rebuildable, but recovery is backup-first. A
+supported forward migration creates and verifies a rollback snapshot before it
+publishes the new schema. The explicit maintenance commands are:
+
+```bash
+ds index backup
+ds index rebuild --path .
+ds index restore <backup-file>
+```
+
+`backup` also works when the database schema is newer than the running CLI.
+`rebuild` performs the same full cold scan as normal indexing, validates the
+replacement, and preserves the displaced index. `restore` publishes the exact
+selected snapshot without migrating it and backs up the index it replaces.
+
+To return to an older CLI, restore a snapshot created by that CLI generation as
+your final current-CLI index action, then launch the older binary. Running a
+newer indexed command again may migrate the snapshot forward. Backups are local
+under `~/.devspecs/backups/index/`; manual backups are not automatically
+removed.
+
+The backup-first guarantee starts with the release that includes `ds index`.
+DevSpecs v1.4.0's compatibility `ds scan --rebuild` deleted the active index
+before rescanning. If v1.4.0 is still installed, update first or copy
+`~/.devspecs/devspecs.db` while DevSpecs is idle before using that old rebuild
+path.
 
 ## Task-First Workflow
 
@@ -396,6 +427,7 @@ instead of indexing every worktree as a new repository.
 | `ds find <query>` | Build agent-readable packed context. |
 | `ds context <id>` | Export one artifact as paste-ready agent context. |
 | `ds scan` | Manually refresh or rebuild configured intent-artifact paths. |
+| `ds index backup\|rebuild\|restore` | Back up, safely rebuild, or exactly restore the local SQLite index. |
 | `ds prune [--dry-run] [--vacuum]` | Remove stale repository data and redundant capture revisions; compact the database explicitly with `--vacuum`. |
 | `ds doctor [--redact] [--json]` | Inspect binary precedence, local index compatibility, writer state, and repository identity without mutating state. |
 | `ds config show` | Inspect effective repo discovery config. |
@@ -408,6 +440,7 @@ flags. Use the `ds workspace ...` form for workspace coordination.
 | Location | Role | Commit? |
 | --- | --- | --- |
 | `~/.devspecs/devspecs.db` | Local SQLite index and cache. | No. |
+| `~/.devspecs/backups/index/` | Verified manual and automatic index recovery snapshots. | No. |
 | `.devspecs/config.yaml` | Repo discovery configuration. | Usually yes. |
 | `devspecs/tasks/<task-id>/` | Default generated task workspace. | Yes, when durable. |
 | `.devspecs/tasks/<task-id>/` | Legacy or explicitly local task workspace. | No, unless you chose it deliberately. |

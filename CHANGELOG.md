@@ -8,6 +8,18 @@
   `--redact` support for shareable reports.
 - Added focused Linux, macOS, and Windows CI coverage for doctor executable
   discovery and read-only SQLite inspection.
+- Added advanced `ds index backup|rebuild|restore` maintenance commands.
+  Backups are schema-agnostic and WAL-consistent, rebuilds stage and validate a
+  full cold index before publication, and restores preserve the displaced index
+  while publishing the selected snapshot exactly.
+- Changed supported index migrations to copy-on-write, backup-first upgrades.
+  The active database is replaced only after the staged migration and rollback
+  snapshot validate; interrupted recovery remains explicit and visible to
+  `ds doctor`.
+- Added real v1.3.0 schema-14 migration and rollback validation, synthetic
+  WAL-backed future-schema refusal/backup/rebuild coverage, and three-platform
+  file-swap recovery checks. The five-repository full-history activation corpus
+  remains exact after recovery.
 
 ## v1.4.0 - 2026-08-12
 

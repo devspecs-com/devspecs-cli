@@ -54,8 +54,8 @@ jobs:
           name: coverage
           path: coverage.out
 
-  doctor-platform:
-    name: Doctor (${{ matrix.os }})
+  maintenance-platform:
+    name: Doctor & index recovery (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
@@ -70,5 +70,5 @@ jobs:
         with:
           go-version: '1.25'
 
-      - name: Test doctor platform behavior
-        run: go test ./internal/store ./internal/commands -run "^(TestInspectIndex|TestDoctorCommand|TestFindDoctorExecutableCandidates|TestSameDoctorExecutable)" -count=1
+      - name: Test doctor and index recovery platform behavior
+        run: go test ./internal/store ./internal/commands -run "^(TestInspectIndex|TestDoctorCommand|TestFindDoctorExecutableCandidates|TestSameDoctorExecutable|TestCreateIndexBackup|TestOpen_WithSupportedOlderSchema_PreservesVerifiedRollbackBackup|TestRestoreIndex|TestReplaceIndexWithStage|TestIndexBackupCommand|TestIndexRebuildCommand|TestScanRebuild)" -count=1
