@@ -193,6 +193,7 @@ func TestArtifactCandidate_WithSourceAndTodo_RendersCandidate(t *testing.T) {
 	assert.Equal(t, "artifact-1", candidate.ID)
 	assert.Equal(t, "docs/plan.md", candidate.Path)
 	assert.Equal(t, "docs/plan.md", candidate.Source)
+	assert.Contains(t, candidate.Body, "Source: docs/plan.md")
 	assert.Contains(t, candidate.Body, "- [x] Ship it")
 	assert.Contains(t, candidate.Body, "Body")
 }
