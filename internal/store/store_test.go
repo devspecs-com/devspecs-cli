@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -173,6 +174,50 @@ func TestOpen_WithOldSchemaVersion_ReturnsRebuildGuidance(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "schema v2")
 	assert.ErrorContains(t, err, "scan --rebuild")
+}
+
+func TestOpen_WithNewerSchemaVersion_ReturnsTypedCompatibilityError(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "devspecs.db")
+	db, err := Open(dbPath)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+	raw, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	_, err = raw.Exec("UPDATE schema_migrations SET version = ?", SchemaVersion+1)
+	require.NoError(t, err)
+	require.NoError(t, raw.Close())
+
+	_, err = Open(dbPath)
+
+	require.Error(t, err)
+	var newer *NewerSchemaError
+	require.True(t, errors.As(err, &newer))
+	assert.Equal(t, SchemaVersion+1, newer.DatabaseVersion)
+	assert.Equal(t, SchemaVersion, newer.SupportedVersion)
+}
+
+func TestOpen_WithNewerSchemaVersion_DoesNotApplySchemaDDL(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "devspecs.db")
+	db, err := Open(dbPath)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+	raw, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	_, err = raw.Exec("DROP INDEX idx_sources_repo")
+	require.NoError(t, err)
+	_, err = raw.Exec("UPDATE schema_migrations SET version = ?", SchemaVersion+1)
+	require.NoError(t, err)
+	require.NoError(t, raw.Close())
+
+	_, err = Open(dbPath)
+
+	require.Error(t, err)
+	raw, err = sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, raw.Close()) })
+	var indexCount int
+	require.NoError(t, raw.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_sources_repo'").Scan(&indexCount))
+	assert.Zero(t, indexCount)
 }
 
 func TestOpen_WithNestedDatabasePath_CreatesParentDirectory(t *testing.T) {

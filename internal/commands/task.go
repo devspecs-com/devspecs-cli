@@ -23,6 +23,7 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/repo"
 	"github.com/devspecs-com/devspecs-cli/internal/retrieval"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
+	"github.com/devspecs-com/devspecs-cli/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -1066,6 +1067,11 @@ func createTaskWorkspace(cmd *cobra.Command, query string, opts taskStartOptions
 	if err := validateTaskWorkspaceTarget(workspace, opts.Force); err != nil {
 		return taskStartOutput{}, taskConfidence{}, err
 	}
+	if opts.Index {
+		if err := preflightTaskIndexMutation(cmd); err != nil {
+			return taskStartOutput{}, taskConfidence{}, err
+		}
+	}
 
 	preflight, err := buildTaskPreflight(cmd, repoRoot, query, opts.NoRefresh)
 	if err != nil {
@@ -1255,6 +1261,11 @@ func loadTaskWorkspaceManifestForRepo(baseDir, taskID, repoPath string) (string,
 }
 
 func writeAddedTaskArtifact(cmd *cobra.Command, repoRoot, workspace string, manifest taskManifest, slice taskSliceArtifact, opts taskArtifactAddOptions) error {
+	if opts.Index {
+		if err := preflightTaskIndexMutation(cmd); err != nil {
+			return err
+		}
+	}
 	indexPath := filepath.Join(workspace, manifest.Artifacts.Index)
 	planPath := filepath.Join(workspace, slice.Plan)
 	resultPath := filepath.Join(workspace, slice.Result)
@@ -1280,7 +1291,7 @@ func writeAddedTaskArtifact(cmd *cobra.Command, repoRoot, workspace string, mani
 			{Path: planPath, Title: "Task " + manifest.TaskID + " " + slice.ID + " plan: " + slice.Title, Status: "implementing"},
 		})
 		if err != nil {
-			return err
+			return fmt.Errorf("task slice %s files were written at %s, but index capture failed; do not retry blindly: %w", slice.ID, workspace, err)
 		}
 	}
 
@@ -1716,6 +1727,11 @@ func runTaskDecide(cmd *cobra.Command, taskID string, opts taskDecideOptions) er
 		}
 		targetID = slice.ID
 	}
+	if opts.Index {
+		if err := preflightTaskIndexMutation(cmd); err != nil {
+			return err
+		}
+	}
 
 	now := time.Now().UTC()
 	applyTaskTargetState(&manifest, targetID, stage, decision, now)
@@ -1735,7 +1751,7 @@ func runTaskDecide(cmd *cobra.Command, taskID string, opts taskDecideOptions) er
 			Status: taskArtifactStatus(stage, decision),
 		}})
 		if err != nil {
-			return err
+			return fmt.Errorf("task target %s state was written to %s, but index capture failed; do not retry blindly: %w", targetID, manifestPath, err)
 		}
 	}
 
@@ -4743,6 +4759,11 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	if opts.Draft {
 		return runTaskCheckpointDraft(cmd, taskID, repoRoot, workspace, manifest, selectedSlice, opts, now)
 	}
+	if opts.Index {
+		if err := preflightTaskIndexMutation(cmd); err != nil {
+			return err
+		}
+	}
 	checkpointDir := filepath.Join(workspace, "checkpoints")
 	if err := os.MkdirAll(checkpointDir, 0o755); err != nil {
 		return fmt.Errorf("create checkpoint dir: %w", err)
@@ -4793,10 +4814,10 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 			},
 		})
 		if err != nil {
-			return err
+			return fmt.Errorf("task checkpoint %s files were written at %s, but index capture failed; do not retry blindly: %w", checkpointID, workspace, err)
 		}
 		if err := indexTaskCheckpointFact(cmd.Context(), repoRoot, manifest, record, checkpointPath, checkpointJSONPath, workspace, now); err != nil {
-			return err
+			return fmt.Errorf("task checkpoint %s files were written at %s, but checkpoint fact indexing failed; do not retry blindly: %w", checkpointID, workspace, err)
 		}
 		factIndexed = true
 	}
@@ -6649,6 +6670,42 @@ type taskCaptureRequest struct {
 	Path   string
 	Title  string
 	Status string
+}
+
+func preflightTaskIndexMutation(cmd *cobra.Command) error {
+	dbPath, err := config.DBPath()
+	if err != nil {
+		return taskIndexPreflightError("", err)
+	}
+	waitCtx, cancel := context.WithTimeout(cmd.Context(), autoIndexDeadline)
+	defer cancel()
+	lease, err := store.AcquireIndexWriter(waitCtx, dbPath, indexWaitNotice(cmd, "Task index preflight"))
+	if err != nil {
+		return taskIndexPreflightError(dbPath, indexOperationError("task index preflight writer wait", autoIndexDeadlineLabel, err))
+	}
+	defer func() { _ = lease.Release() }()
+	db, err := openDBAtPath(dbPath)
+	if err != nil {
+		return taskIndexPreflightError(dbPath, err)
+	}
+	if err := db.Close(); err != nil {
+		return taskIndexPreflightError(dbPath, fmt.Errorf("close local index: %w", err))
+	}
+	return nil
+}
+
+func taskIndexPreflightError(dbPath string, err error) error {
+	executable, executableErr := os.Executable()
+	if executableErr != nil {
+		executable = "unknown"
+	}
+	var newer *store.NewerSchemaError
+	if errors.As(err, &newer) {
+		return fmt.Errorf("cannot safely update task files because the local DevSpecs index is newer than this CLI\nDatabase: %s\nDatabase schema: v%d\nCLI: %s (supports schema v%d)\nExecutable: %s\nRepository files written: no\nRun `ds update` and install a CLI that supports schema v%d. To continue without index capture, rerun with `--index=false`: %w",
+			firstNonEmptyTaskString(dbPath, "unknown"), newer.DatabaseVersion, version.Version, newer.SupportedVersion, executable, newer.DatabaseVersion, err)
+	}
+	return fmt.Errorf("task index preflight failed before repository mutation\nDatabase: %s\nExecutable: %s\nRepository files written: no: %w",
+		firstNonEmptyTaskString(dbPath, "unknown"), executable, err)
 }
 
 func captureTaskArtifacts(cmd *cobra.Command, repoRoot string, requests []taskCaptureRequest) ([]string, error) {

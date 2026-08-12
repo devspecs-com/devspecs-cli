@@ -29,6 +29,17 @@ type DB struct {
 	path string
 }
 
+// NewerSchemaError reports that an older CLI cannot safely open an index
+// written by a newer DevSpecs schema.
+type NewerSchemaError struct {
+	DatabaseVersion  int
+	SupportedVersion int
+}
+
+func (err *NewerSchemaError) Error() string {
+	return fmt.Sprintf("database schema v%d is newer than this CLI (v%d)", err.DatabaseVersion, err.SupportedVersion)
+}
+
 // Open opens or creates the SQLite database at the given path.
 // It ensures the parent directory exists and applies migrations.
 func Open(dbPath string) (*DB, error) {
@@ -44,11 +55,35 @@ func Open(dbPath string) (*DB, error) {
 	}
 
 	db := &DB{DB: sqlDB, path: dbPath}
+	maxVersion, err := existingSchemaVersion(sqlDB)
+	if err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("inspect schema version: %w", err)
+	}
+	if maxVersion > SchemaVersion {
+		sqlDB.Close()
+		return nil, &NewerSchemaError{DatabaseVersion: maxVersion, SupportedVersion: SchemaVersion}
+	}
 	if err := db.migrate(); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return db, nil
+}
+
+func existingSchemaVersion(db *sql.DB) (int, error) {
+	var tableCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'").Scan(&tableCount); err != nil {
+		return 0, err
+	}
+	if tableCount == 0 {
+		return 0, nil
+	}
+	var maxVersion int
+	if err := db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&maxVersion); err != nil {
+		return 0, err
+	}
+	return maxVersion, nil
 }
 
 // IsSQLiteBusyError reports whether err looks like SQLite write contention.
@@ -163,7 +198,7 @@ func (db *DB) migrate() error {
 	}
 
 	if maxVersion > SchemaVersion {
-		return fmt.Errorf("database schema v%d is newer than this CLI (v%d)", maxVersion, SchemaVersion)
+		return &NewerSchemaError{DatabaseVersion: maxVersion, SupportedVersion: SchemaVersion}
 	}
 	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_repos_git_identity
 		ON repos(git_identity)

@@ -29,6 +29,11 @@
   atomic publication. Interrupted preflight no longer leaves an empty final
   task directory, forced retries safely replace remnants, and failed success
   output now returns nonzero with the durable task ID and path in the error.
+- Changed indexed task creation, slice addition, checkpoints, and legacy
+  lifecycle mutations to verify local database compatibility before writing
+  repository files. An older CLI against a newer derived index now reports the
+  database, schema, executable, recovery, and that no repository files were
+  written instead of leaving partial task state that retries can duplicate.
 - Added `ds prune`, with `--dry-run`, JSON output, and explicit `--vacuum`
   compaction, to remove index data for repository roots that no longer exist
   and collapse redundant consecutive capture revisions without losing content
