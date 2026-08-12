@@ -89,6 +89,7 @@ ds init
 | --- | --- | --- |
 | Recover the thread | `ds recent` | You came back cold and need the current local work thread. |
 | Ground the change | `ds map` / `ds find "topic"` | Git and rg found code, but you still need intent, boundaries, and exclusions. |
+| Diagnose local state | `ds doctor` | A binary, index, or repository check is failing and you need shareable evidence before changing anything. |
 | Create a bounded handoff | `ds task "goal"` | You know the work and want packed repo context plus a stop line. |
 | Coordinate multi-repo work | `ds workspace init .` | You have an umbrella workspace with several child repos. Experimental. |
 | Continue one slice | `ds apply` | A task already exists and the agent needs the current target only. |
@@ -160,6 +161,31 @@ ds update
 
 `ds update` is guidance-only. It shows the active binary, likely install source,
 latest release status, and the update command to run.
+
+## Diagnose Local State
+
+`ds doctor` inspects the active binary, PATH precedence, DevSpecs home, index
+schema and writer state, and repository identity. It is offline and read-only:
+it does not create local state, migrate or repair the index, or contact the
+network.
+
+```bash
+ds doctor
+ds doctor --redact
+ds doctor --json --redact
+```
+
+Use `--redact` before sharing a report. If doctor finds a shadowed binary,
+correct PATH and restart the shell or IDE. For an older index schema, run the
+current CLI normally to migrate forward. For a newer schema, update the CLI
+instead of rebuilding the index. A held writer is an instantaneous observation;
+wait for the active operation and retry. For index growth, inspect
+`ds prune --dry-run` before choosing `ds prune` or `ds prune --vacuum`.
+
+An unreadable index is not a reason to delete it blindly. Preserve it while
+collecting the redacted report; automated backup and rollback recovery are not
+part of `ds doctor`. Repository identity probing is bounded at five seconds; a
+timeout leaves the other diagnostic evidence intact and reports a warning.
 
 ## Task-First Workflow
 
@@ -371,6 +397,7 @@ instead of indexing every worktree as a new repository.
 | `ds context <id>` | Export one artifact as paste-ready agent context. |
 | `ds scan` | Manually refresh or rebuild configured intent-artifact paths. |
 | `ds prune [--dry-run] [--vacuum]` | Remove stale repository data and redundant capture revisions; compact the database explicitly with `--vacuum`. |
+| `ds doctor [--redact] [--json]` | Inspect binary precedence, local index compatibility, writer state, and repository identity without mutating state. |
 | `ds config show` | Inspect effective repo discovery config. |
 
 Most read commands support `--json`. Run `ds <command> --help` for the current

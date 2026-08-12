@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added read-only `ds doctor` diagnostics for active binary and PATH
+  precedence, inferred install source, DevSpecs home, index size/schema/writer
+  state, and repository identity, with complete JSON output and structural
+  `--redact` support for shareable reports.
+- Added focused Linux, macOS, and Windows CI coverage for doctor executable
+  discovery and read-only SQLite inspection.
+
 ## v1.4.0 - 2026-08-12
 
 - Added experimental repo-first named execution threads with `ds thread set`,
