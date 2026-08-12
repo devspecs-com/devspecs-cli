@@ -173,6 +173,20 @@ func TestRootCmd_ApplyRegistered(t *testing.T) {
 	assert.Contains(t, got, "--thread string")
 }
 
+func TestRootCmd_DoctorRegisteredInAdvancedGroup(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"--help"})
+	output := &bytes.Buffer{}
+	cmd.SetOut(output)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	assert.Contains(t, output.String(), "Advanced and maintenance")
+	assert.Contains(t, output.String(), "doctor")
+	assert.Contains(t, output.String(), "Diagnose the active CLI")
+}
+
 func TestRootCmd_ComposeHelp_ExplainsTypeAndFormatBoundaries(t *testing.T) {
 	help := executeRootHelp(t, "compose", "adr", "--help")
 

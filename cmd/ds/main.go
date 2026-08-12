@@ -95,6 +95,7 @@ remotes, document text, or raw queries. Disable with DEVSPECS_TELEMETRY=0.`,
 	rootCmd.AddCommand(commands.NewTLDRCmd())
 	rootCmd.AddCommand(commands.NewUpdateCmd())
 	rootCmd.AddCommand(commands.NewPruneCmd())
+	rootCmd.AddCommand(commands.NewDoctorCmd())
 	rootCmd.AddCommand(commands.NewResolveCmd())
 	rootCmd.AddCommand(commands.NewContextCmd())
 	rootCmd.AddCommand(commands.NewTodosCmd())
@@ -141,6 +142,7 @@ func assignRootCommandGroups(rootCmd *cobra.Command) {
 		"config":    rootGroupAdvanced,
 		"update":    rootGroupAdvanced,
 		"prune":     rootGroupAdvanced,
+		"doctor":    rootGroupAdvanced,
 		"version":   rootGroupAdvanced,
 	}
 	for _, cmd := range rootCmd.Commands() {

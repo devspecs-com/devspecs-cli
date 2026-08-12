@@ -11,6 +11,7 @@ metadata:
     - go run ./cmd/ds workspace --help
     - go run ./cmd/ds compose --help
     - go run ./cmd/ds prune --help
+    - go run ./cmd/ds doctor --help
     - cmd/ds/main.go
     - internal/commands
   intent: >
@@ -82,6 +83,9 @@ tree:
       prune:
         status: maintenance
         purpose: Remove missing-repository data and redundant capture history, and optionally compact the SQLite database.
+      doctor:
+        status: diagnostic
+        purpose: Inspect executable precedence, installation inference, local index compatibility, writer state, and repository identity without mutation.
       config:
         status: maintenance
         purpose: Inspect or edit DevSpecs discovery config.
