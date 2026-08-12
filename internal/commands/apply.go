@@ -14,20 +14,32 @@ import (
 )
 
 type applyOptions struct {
-	Dir    string
-	Repo   string
-	Target string
-	AsJSON bool
+	Dir       string
+	Repo      string
+	Workspace string
+	Target    string
+	Thread    string
+	AsJSON    bool
 }
 
 type applyPromptOutput struct {
-	Command            string             `json:"command"`
-	TaskID             string             `json:"task_id"`
-	Target             string             `json:"target"`
-	Prompt             string             `json:"prompt"`
-	TargetContext      taskTargetOutput   `json:"target_context"`
-	SiblingTargets     []string           `json:"sibling_targets,omitempty"`
-	PriorSliceEvidence []taskAdvisoryFile `json:"prior_slice_evidence,omitempty"`
+	Command            string              `json:"command"`
+	TaskID             string              `json:"task_id"`
+	Target             string              `json:"target"`
+	Prompt             string              `json:"prompt"`
+	TargetContext      taskTargetOutput    `json:"target_context"`
+	SiblingTargets     []string            `json:"sibling_targets,omitempty"`
+	PriorSliceEvidence []taskAdvisoryFile  `json:"prior_slice_evidence,omitempty"`
+	ThreadContext      *applyThreadContext `json:"thread_context,omitempty"`
+}
+
+type applyThreadContext struct {
+	Owner         threadStatusOwner   `json:"owner"`
+	Key           string              `json:"key,omitempty"`
+	Name          string              `json:"name,omitempty"`
+	State         string              `json:"state"`
+	TargetAddress string              `json:"target_address,omitempty"`
+	Target        *threadStatusTarget `json:"target,omitempty"`
 }
 
 type applyTaskCandidate struct {
@@ -42,7 +54,7 @@ func NewApplyCmd() *cobra.Command {
 	opts.Dir = defaultTaskWorkspaceDir
 
 	cmd := &cobra.Command{
-		Use:   "apply [task-id|target]",
+		Use:   "apply [task-id|change-id|target]",
 		Short: "Emit a one-slice DevSpecs apply prompt",
 		Long: `Emit an agent prompt for exactly one DevSpecs task target.
 
@@ -64,6 +76,7 @@ mark the target started, or advance lifecycle state.`,
 				"next":          strings.EqualFold(strings.TrimSpace(identifier), "next"),
 				"implicit_next": implicitNext,
 				"repo":          opts.Repo != "",
+				"thread":        opts.Thread != "",
 			})
 			return err
 		},
@@ -71,12 +84,24 @@ mark the target started, or advance lifecycle state.`,
 
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
 	cmd.Flags().StringVar(&opts.Repo, repoTargetFlagName, "", "Target repository path for repo-local DevSpecs artifacts and context")
+	cmd.Flags().StringVar(&opts.Workspace, "workspace", "", "Workspace root path for a workspace-owned thread")
 	cmd.Flags().StringVar(&opts.Target, "target", "", "Slice or follow-up target; useful when the first argument is a task id")
+	cmd.Flags().StringVar(&opts.Thread, "thread", "", "Named execution thread to apply")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	return cmd
 }
 
 func runApply(cmd *cobra.Command, identifier string, opts applyOptions, implicitNext bool) error {
+	if strings.EqualFold(strings.TrimSpace(identifier), "next") && strings.TrimSpace(opts.Target) != "" {
+		return fmt.Errorf("ds apply next does not accept --target; use ds apply <task-id> --target <target>")
+	}
+	threaded, found, err := resolveThreadApply(cmd, identifier, opts, implicitNext)
+	if err != nil {
+		return err
+	}
+	if found {
+		return writeApplyPrompt(cmd, threaded.Context, threaded.Command, opts.AsJSON, threaded.Thread)
+	}
 	ctx, command, err := resolveApplyTargetContext(opts.Dir, identifier, opts.Target, opts.Repo)
 	if err != nil {
 		return err
@@ -84,9 +109,22 @@ func runApply(cmd *cobra.Command, identifier string, opts applyOptions, implicit
 	if implicitNext {
 		command = applyCommandLabel("", "", opts.Repo)
 	}
+	return writeApplyPrompt(cmd, ctx, command, opts.AsJSON, nil)
+}
+
+type resolvedThreadApply struct {
+	Context taskTargetContext
+	Command string
+	Thread  *applyThreadContext
+}
+
+func writeApplyPrompt(cmd *cobra.Command, ctx taskTargetContext, command string, asJSON bool, thread *applyThreadContext) error {
 	target := taskTargetOutputFromContext(ctx, true)
 	priorEvidence := taskPriorSliceEvidenceForPrompt(ctx.RepoRoot, ctx.Manifest.TaskID, ctx.Slice.ID)
 	prompt := renderTaskAgentPrompt(ctx, target, priorEvidence)
+	if thread != nil {
+		prompt = renderThreadApplyContext(*thread) + prompt
+	}
 	out := applyPromptOutput{
 		Command:            command,
 		TaskID:             target.TaskID,
@@ -95,14 +133,306 @@ func runApply(cmd *cobra.Command, identifier string, opts applyOptions, implicit
 		TargetContext:      target,
 		SiblingTargets:     target.SiblingTargets,
 		PriorSliceEvidence: priorEvidence,
+		ThreadContext:      thread,
 	}
-	if opts.AsJSON {
+	if asJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)
 	}
-	_, err = fmt.Fprint(cmd.OutOrStdout(), prompt)
+	_, err := fmt.Fprint(cmd.OutOrStdout(), prompt)
 	return err
+}
+
+func resolveThreadApply(cmd *cobra.Command, identifier string, opts applyOptions, implicitNext bool) (resolvedThreadApply, bool, error) {
+	statusOpts := threadStatusOptions{Dir: opts.Dir, Workspace: opts.Workspace}
+	location, resolvedSelector, found, err := resolveDefinedThreadApplyOwner(cmd, identifier, opts, implicitNext, statusOpts)
+	if err != nil || !found {
+		return resolvedThreadApply{}, found, err
+	}
+	status, err := deriveThreadStatus(cmd, location)
+	if err != nil {
+		return resolvedThreadApply{}, true, err
+	}
+	if implicitNext && strings.TrimSpace(opts.Thread) == "" {
+		if err := rejectImplicitThreadLegacyAmbiguity(status, opts); err != nil {
+			return resolvedThreadApply{}, true, err
+		}
+	}
+	selector := strings.TrimSpace(opts.Target)
+	if selector == "" {
+		selector = resolvedSelector
+	}
+	lane, closeout, err := selectThreadApplyLane(status, opts.Thread, selector)
+	if err != nil {
+		return resolvedThreadApply{}, true, err
+	}
+	if closeout {
+		if location.Kind != threadOwnerTask {
+			return resolvedThreadApply{}, true, fmt.Errorf("workspace change %q has completed all assigned threads", location.ChangeID)
+		}
+		repoPath := threadApplyRepoPath(location, opts)
+		ctx, err := loadTaskTargetContextForRepo(opts.Dir, location.TaskID, "", repoPath)
+		if err != nil {
+			return resolvedThreadApply{}, true, err
+		}
+		thread := &applyThreadContext{Owner: status.Owner, State: threadStateCompleted}
+		return resolvedThreadApply{Context: ctx, Command: threadApplyCommand(identifier, "", opts), Thread: thread}, true, nil
+	}
+	target := *lane.CurrentTarget
+	repoRoot, err := threadTargetRepoRoot(location, target)
+	if err != nil {
+		return resolvedThreadApply{}, true, err
+	}
+	repoPath := repoRoot
+	if location.Kind == threadOwnerTask && strings.TrimSpace(opts.Repo) != "" {
+		repoPath = opts.Repo
+	}
+	ctx, err := loadTaskTargetContextForRepo(opts.Dir, target.TaskID, target.Target, repoPath)
+	if err != nil {
+		return resolvedThreadApply{}, true, err
+	}
+	thread := &applyThreadContext{
+		Owner: status.Owner, Key: lane.Key, Name: lane.Name, State: lane.State,
+		TargetAddress: threadStatusTargetAddress(target), Target: &target,
+	}
+	return resolvedThreadApply{
+		Context: ctx, Command: threadApplyCommand(identifier, lane.Key, opts), Thread: thread,
+	}, true, nil
+}
+
+func rejectImplicitThreadLegacyAmbiguity(status threadStatusOutput, opts applyOptions) error {
+	candidates, _, err := findApplyNextTaskCandidates(opts.Dir, opts.Repo)
+	if err != nil {
+		return err
+	}
+	threadTasks := make(map[string]bool)
+	for _, lane := range status.Threads {
+		for _, target := range lane.Targets {
+			threadTasks[strings.ToLower(target.TaskID)] = true
+		}
+	}
+	var legacy []string
+	for _, candidate := range candidates {
+		if !threadTasks[strings.ToLower(candidate.TaskID)] {
+			legacy = append(legacy, candidate.TaskID+":"+candidate.Target)
+		}
+	}
+	if len(legacy) == 0 {
+		return nil
+	}
+	sort.Strings(legacy)
+	return fmt.Errorf("implicit apply is ambiguous between a named thread and legacy targets %s; pass a task owner or --thread explicitly", strings.Join(legacy, ", "))
+}
+
+func resolveDefinedThreadApplyOwner(cmd *cobra.Command, identifier string, opts applyOptions, implicitNext bool, statusOpts threadStatusOptions) (threadOwnerLocation, string, bool, error) {
+	identifier = strings.TrimSpace(identifier)
+	if implicitNext || strings.EqualFold(identifier, "next") {
+		location, err := inferThreadOwnerLocation(cmd, statusOpts)
+		if err != nil {
+			if strings.Contains(err.Error(), "no task with a thread definition is active") {
+				if opts.Thread != "" {
+					return threadOwnerLocation{}, "", false, err
+				}
+				return threadOwnerLocation{}, "", false, nil
+			}
+			return threadOwnerLocation{}, "", false, err
+		}
+		return location, "", true, nil
+	}
+	location, err := resolveThreadOwnerArtifactLocation(cmd, identifier, statusOpts)
+	if err != nil {
+		if opts.Thread != "" || strings.HasPrefix(strings.ToLower(identifier), "change:") {
+			return threadOwnerLocation{}, "", false, err
+		}
+		if strings.Contains(err.Error(), "is ambiguous") {
+			return threadOwnerLocation{}, "", false, err
+		}
+		return resolveThreadApplyOwnerFromTarget(identifier, opts)
+	}
+	if _, err := os.Stat(location.DefinitionPath); err != nil {
+		if os.IsNotExist(err) && opts.Thread == "" {
+			return resolveThreadApplyOwnerFromTarget(identifier, opts)
+		}
+		return threadOwnerLocation{}, "", false, err
+	}
+	return location, "", true, nil
+}
+
+func resolveThreadApplyOwnerFromTarget(identifier string, opts applyOptions) (threadOwnerLocation, string, bool, error) {
+	ctx, err := loadResolvedTaskTargetContextForRepo(opts.Dir, identifier, opts.Target, opts.Repo)
+	if err != nil {
+		return threadOwnerLocation{}, "", false, nil
+	}
+	var location threadOwnerLocation
+	if strings.TrimSpace(ctx.Manifest.ParentChange) != "" {
+		location, err = linkedWorkspaceThreadOwnerLocation(ctx.Manifest)
+	} else {
+		location = repoThreadOwnerLocation(ctx.RepoRoot, ctx.Workspace, ctx.Manifest)
+		_, err = os.Stat(location.DefinitionPath)
+	}
+	if err != nil {
+		if os.IsNotExist(err) || strings.Contains(err.Error(), "has no thread definition") {
+			return threadOwnerLocation{}, "", false, nil
+		}
+		return threadOwnerLocation{}, "", false, err
+	}
+	return location, ctx.Slice.ID, true, nil
+}
+
+func selectThreadApplyLane(status threadStatusOutput, key, selector string) (threadStatusLane, bool, error) {
+	key = strings.TrimSpace(key)
+	selector = strings.TrimSpace(selector)
+	if key != "" {
+		for _, lane := range status.Threads {
+			if strings.EqualFold(lane.Key, key) {
+				return validateSelectedThreadLane(lane, selector)
+			}
+		}
+		return threadStatusLane{}, false, fmt.Errorf("thread %q not found", key)
+	}
+	if selector != "" {
+		var matched []threadStatusLane
+		for _, lane := range status.Threads {
+			if threadLaneMatchesCurrentTarget(lane, selector) {
+				matched = append(matched, lane)
+			}
+		}
+		if len(matched) == 1 {
+			return validateSelectedThreadLane(matched[0], selector)
+		}
+		if len(matched) == 0 {
+			return threadStatusLane{}, false, fmt.Errorf("target %q is not the current target of any thread; dependencies and lane order cannot be bypassed", selector)
+		}
+		return threadStatusLane{}, false, fmt.Errorf("target %q matches multiple threads", selector)
+	}
+	var runnable []threadStatusLane
+	for _, lane := range status.Threads {
+		if lane.State == threadStateReady || lane.State == threadStateActive {
+			runnable = append(runnable, lane)
+		}
+	}
+	switch len(runnable) {
+	case 0:
+		if allThreadLanesCompleted(status.Threads) && len(status.UnassignedTargets) == 0 {
+			return threadStatusLane{}, true, nil
+		}
+		return threadStatusLane{}, false, fmt.Errorf("no thread is runnable; inspect `ds thread` for waiting, blocked, or unassigned work")
+	case 1:
+		return runnable[0], false, nil
+	default:
+		keys := make([]string, 0, len(runnable))
+		for _, lane := range runnable {
+			keys = append(keys, lane.Key)
+		}
+		sort.Strings(keys)
+		return threadStatusLane{}, false, fmt.Errorf("multiple threads are runnable: %s; pass --thread <key>", strings.Join(keys, ", "))
+	}
+}
+
+func validateSelectedThreadLane(lane threadStatusLane, selector string) (threadStatusLane, bool, error) {
+	if lane.State != threadStateReady && lane.State != threadStateActive {
+		reason := strings.Join(lane.Reasons, "; ")
+		if reason != "" {
+			reason = ": " + reason
+		}
+		return threadStatusLane{}, false, fmt.Errorf("thread %q is %s%s", lane.Key, lane.State, reason)
+	}
+	if lane.CurrentTarget == nil {
+		return threadStatusLane{}, false, fmt.Errorf("thread %q has no current target", lane.Key)
+	}
+	if selector != "" && !threadTargetMatchesSelector(*lane.CurrentTarget, selector) {
+		return threadStatusLane{}, false, fmt.Errorf("target %q is not thread %q's current target %q; lane order cannot be bypassed", selector, lane.Key, threadStatusTargetAddress(*lane.CurrentTarget))
+	}
+	return lane, false, nil
+}
+
+func threadLaneMatchesCurrentTarget(lane threadStatusLane, selector string) bool {
+	return lane.CurrentTarget != nil && threadTargetMatchesSelector(*lane.CurrentTarget, selector)
+}
+
+func threadTargetMatchesSelector(target threadStatusTarget, selector string) bool {
+	return strings.EqualFold(target.Target, selector) ||
+		strings.EqualFold(target.DefinitionTarget, selector) ||
+		strings.EqualFold(threadStatusTargetAddress(target), selector) ||
+		strings.EqualFold(target.TaskID+":"+target.Target, selector) ||
+		strings.EqualFold(target.TaskID+":"+target.DefinitionTarget, selector) ||
+		(target.RepoAlias != "" && (strings.EqualFold(target.RepoAlias+":"+target.Target, selector) ||
+			strings.EqualFold(target.RepoAlias+":"+target.DefinitionTarget, selector) ||
+			strings.EqualFold(target.RepoAlias+":"+target.TaskID+":"+target.Target, selector) ||
+			strings.EqualFold(target.RepoAlias+":"+target.TaskID+":"+target.DefinitionTarget, selector)))
+}
+
+func threadApplyRepoPath(location threadOwnerLocation, opts applyOptions) string {
+	if location.Kind == threadOwnerTask && strings.TrimSpace(opts.Repo) != "" {
+		return opts.Repo
+	}
+	return location.RepoRoot
+}
+
+func allThreadLanesCompleted(lanes []threadStatusLane) bool {
+	if len(lanes) == 0 {
+		return false
+	}
+	for _, lane := range lanes {
+		if lane.State != threadStateCompleted {
+			return false
+		}
+	}
+	return true
+}
+
+func threadTargetRepoRoot(location threadOwnerLocation, target threadStatusTarget) (string, error) {
+	if location.Kind == threadOwnerTask {
+		return location.RepoRoot, nil
+	}
+	manifest, err := readWorkspaceManifest(location.WorkspaceRoot)
+	if err != nil {
+		return "", err
+	}
+	repo, exists := manifest.Repos[target.RepoAlias]
+	if !exists {
+		return "", fmt.Errorf("workspace thread target references unknown repo %q", target.RepoAlias)
+	}
+	return workspaceRelativeAbs(location.WorkspaceRoot, repo.Path), nil
+}
+
+func threadApplyCommand(identifier, key string, opts applyOptions) string {
+	command := "ds apply"
+	if strings.TrimSpace(identifier) != "" && !strings.EqualFold(strings.TrimSpace(identifier), "next") {
+		command += " " + commandArg(identifier)
+	}
+	if strings.TrimSpace(key) != "" {
+		command += " --thread " + commandArg(key)
+	}
+	if strings.TrimSpace(opts.Target) != "" {
+		command += " --target " + commandArg(opts.Target)
+	}
+	if strings.TrimSpace(opts.Repo) != "" {
+		command += " --repo " + commandArg(opts.Repo)
+	}
+	if strings.TrimSpace(opts.Workspace) != "" {
+		command += " --workspace " + commandArg(opts.Workspace)
+	}
+	return command
+}
+
+func renderThreadApplyContext(thread applyThreadContext) string {
+	owner := "task:" + thread.Owner.TaskID
+	if thread.Owner.Kind == threadOwnerWorkspaceChange {
+		owner = "change:" + thread.Owner.ChangeID
+	}
+	var b strings.Builder
+	fmt.Fprintln(&b, "Execution thread:")
+	fmt.Fprintf(&b, "- Owner: %s\n", owner)
+	if thread.Key != "" {
+		fmt.Fprintf(&b, "- Thread: %s\n", thread.Key)
+	}
+	if thread.TargetAddress != "" {
+		fmt.Fprintf(&b, "- Current target: %s\n", thread.TargetAddress)
+	}
+	fmt.Fprintf(&b, "- State: %s\n\n", thread.State)
+	return b.String()
 }
 
 func resolveApplyTargetContext(baseDir, identifier, selector, repoPath string) (taskTargetContext, string, error) {

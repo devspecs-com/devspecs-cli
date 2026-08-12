@@ -246,6 +246,11 @@ func TestInferThreadOwnerLocation_WhenCompletedDefinitionAndActiveDefinitionExis
 	completed.Artifacts.Slices[2].Stage = "validated"
 	completed.Artifacts.Slices[2].Decision = "promote"
 	require.NoError(t, writeTaskManifest(completedPath, completed))
+	definitionPath := repoThreadDefinitionPath(completedWorkspace)
+	definition, definitionErr := readThreadDefinition(definitionPath)
+	require.NoError(t, definitionErr)
+	definition.Threads[1].Targets = append(definition.Threads[1].Targets, threadTargetReference{Target: "F03"})
+	require.NoError(t, writeThreadDefinition(definitionPath, definition))
 	_, _, activeLocation := writeRepoThreadFixtureAt(t, repoRoot, "active-task")
 	cmd := NewThreadCmd()
 	cmd.SetContext(t.Context())

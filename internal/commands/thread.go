@@ -27,7 +27,7 @@ type threadStatusOptions struct {
 func NewThreadCmd() *cobra.Command {
 	opts := threadStatusOptions{Dir: defaultTaskWorkspaceDir}
 	cmd := &cobra.Command{
-		Use:   "thread [<task-id|change-id>]",
+		Use:   "thread [task:<task-id>|change:<change-id>]",
 		Short: "Show runnable named task threads and joins",
 		Long: `Show named execution threads for a repo task or linked workspace change.
 
@@ -52,9 +52,11 @@ artifacts remain authoritative and reconstruct the same result after prune.`,
 		},
 	}
 	addRepoTargetPersistentFlag(cmd)
-	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
-	cmd.Flags().StringVar(&opts.Workspace, "workspace", "", "Workspace root path")
+	cmd.PersistentFlags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
+	cmd.PersistentFlags().StringVar(&opts.Workspace, "workspace", "", "Workspace root path")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
+	cmd.AddCommand(newThreadSetCmd(&opts))
+	cmd.AddCommand(newThreadRemoveCmd(&opts))
 	return cmd
 }
 
@@ -71,8 +73,22 @@ func runThreadStatus(cmd *cobra.Command, owner string, opts threadStatusOptions)
 }
 
 func resolveThreadOwnerLocation(cmd *cobra.Command, owner string, opts threadStatusOptions) (threadOwnerLocation, error) {
+	return resolveThreadOwnerLocationMode(cmd, owner, opts, true)
+}
+
+func resolveThreadOwnerArtifactLocation(cmd *cobra.Command, owner string, opts threadStatusOptions) (threadOwnerLocation, error) {
+	if strings.TrimSpace(owner) == "" {
+		return threadOwnerLocation{}, fmt.Errorf("thread owner is required; pass task:<task-id> or change:<change-id>")
+	}
+	return resolveThreadOwnerLocationMode(cmd, owner, opts, false)
+}
+
+func resolveThreadOwnerLocationMode(cmd *cobra.Command, owner string, opts threadStatusOptions, requireDefinition bool) (threadOwnerLocation, error) {
 	owner = strings.TrimSpace(owner)
 	if owner == "" {
+		if !requireDefinition {
+			return threadOwnerLocation{}, fmt.Errorf("thread owner is required; pass task:<task-id> or change:<change-id>")
+		}
 		return inferThreadOwnerLocation(cmd, opts)
 	}
 	kind, id := splitThreadOwnerSelector(owner)
@@ -80,7 +96,7 @@ func resolveThreadOwnerLocation(cmd *cobra.Command, owner string, opts threadSta
 	var taskFound bool
 	var taskErr error
 	if kind != threadOwnerWorkspaceChange {
-		taskLocation, taskFound, taskErr = findRepoThreadOwnerLocation(cmd, id, opts.Dir)
+		taskLocation, taskFound, taskErr = findRepoThreadOwnerLocationMode(cmd, id, opts.Dir, requireDefinition)
 		if taskErr != nil && (kind == threadOwnerTask || !errors.Is(taskErr, os.ErrNotExist)) {
 			return threadOwnerLocation{}, taskErr
 		}
@@ -92,7 +108,7 @@ func resolveThreadOwnerLocation(cmd *cobra.Command, owner string, opts threadSta
 	var changeFound bool
 	var changeErr error
 	if kind != threadOwnerTask {
-		changeLocation, changeFound, changeErr = findWorkspaceThreadOwnerLocation(id, opts.Workspace)
+		changeLocation, changeFound, changeErr = findWorkspaceThreadOwnerLocationMode(id, opts.Workspace, requireDefinition)
 		if kind == threadOwnerWorkspaceChange && changeErr != nil {
 			return threadOwnerLocation{}, changeErr
 		}
@@ -133,7 +149,7 @@ func splitThreadOwnerSelector(owner string) (string, string) {
 	}
 }
 
-func findRepoThreadOwnerLocation(cmd *cobra.Command, taskID, baseDir string) (threadOwnerLocation, bool, error) {
+func findRepoThreadOwnerLocationMode(cmd *cobra.Command, taskID, baseDir string, requireDefinition bool) (threadOwnerLocation, bool, error) {
 	repoRoot, err := resolveTargetRepoRootContext(cmd.Context(), commandRepoTarget(cmd))
 	if err != nil {
 		return threadOwnerLocation{}, false, err
@@ -146,10 +162,13 @@ func findRepoThreadOwnerLocation(cmd *cobra.Command, taskID, baseDir string) (th
 		return threadOwnerLocation{}, false, err
 	}
 	if strings.TrimSpace(manifest.ParentChange) != "" {
-		location, linkedErr := linkedWorkspaceThreadOwnerLocation(manifest)
+		location, linkedErr := linkedWorkspaceThreadOwnerLocationMode(manifest, requireDefinition)
 		return location, linkedErr == nil, linkedErr
 	}
 	location := repoThreadOwnerLocation(repoRoot, taskWorkspace, manifest)
+	if !requireDefinition {
+		return location, true, nil
+	}
 	if _, err := os.Stat(location.DefinitionPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return threadOwnerLocation{}, false, fmt.Errorf("task %q has no thread definition at %s", taskID, location.DefinitionPath)
@@ -178,6 +197,10 @@ func readThreadTaskManifestWithBase(repoRoot, baseDir, taskID string) (string, t
 }
 
 func linkedWorkspaceThreadOwnerLocation(task taskManifest) (threadOwnerLocation, error) {
+	return linkedWorkspaceThreadOwnerLocationMode(task, true)
+}
+
+func linkedWorkspaceThreadOwnerLocationMode(task taskManifest, requireDefinition bool) (threadOwnerLocation, error) {
 	workspaceRoot := strings.TrimSpace(task.WorkspaceRoot)
 	if workspaceRoot == "" {
 		return threadOwnerLocation{}, fmt.Errorf("task %q links change %q without workspace_root", task.TaskID, task.ParentChange)
@@ -193,10 +216,10 @@ func linkedWorkspaceThreadOwnerLocation(task taskManifest) (threadOwnerLocation,
 	if task.WorkspaceID != "" && !strings.EqualFold(task.WorkspaceID, manifest.ID) {
 		return threadOwnerLocation{}, fmt.Errorf("task %q workspace_id %q does not match workspace %q", task.TaskID, task.WorkspaceID, manifest.ID)
 	}
-	return requireWorkspaceThreadOwnerLocation(workspaceRoot, manifest, task.ParentChange)
+	return requireWorkspaceThreadOwnerLocationMode(workspaceRoot, manifest, task.ParentChange, requireDefinition)
 }
 
-func findWorkspaceThreadOwnerLocation(changeID, workspacePath string) (threadOwnerLocation, bool, error) {
+func findWorkspaceThreadOwnerLocationMode(changeID, workspacePath string, requireDefinition bool) (threadOwnerLocation, bool, error) {
 	workspaceRoot, err := resolveWorkspaceRoot(workspacePath)
 	if err != nil {
 		return threadOwnerLocation{}, false, err
@@ -205,19 +228,22 @@ func findWorkspaceThreadOwnerLocation(changeID, workspacePath string) (threadOwn
 	if err != nil {
 		return threadOwnerLocation{}, false, err
 	}
-	location, err := requireWorkspaceThreadOwnerLocation(workspaceRoot, manifest, changeID)
+	location, err := requireWorkspaceThreadOwnerLocationMode(workspaceRoot, manifest, changeID, requireDefinition)
 	if err != nil {
 		return threadOwnerLocation{}, false, err
 	}
 	return location, true, nil
 }
 
-func requireWorkspaceThreadOwnerLocation(workspaceRoot string, manifest workspaceManifest, changeID string) (threadOwnerLocation, error) {
+func requireWorkspaceThreadOwnerLocationMode(workspaceRoot string, manifest workspaceManifest, changeID string, requireDefinition bool) (threadOwnerLocation, error) {
 	_, change, _, err := findWorkspaceChange(workspaceRoot, manifest, changeID)
 	if err != nil {
 		return threadOwnerLocation{}, err
 	}
 	location := workspaceThreadOwnerLocation(workspaceRoot, manifest, change.ID)
+	if !requireDefinition {
+		return location, nil
+	}
 	if _, err := os.Stat(location.DefinitionPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return threadOwnerLocation{}, fmt.Errorf("workspace change %q has no thread definition at %s", change.ID, location.DefinitionPath)
@@ -309,12 +335,7 @@ func threadStatusHasOpenWork(status threadStatusOutput) bool {
 			return true
 		}
 	}
-	for _, target := range status.UnassignedTargets {
-		if !target.Completed {
-			return true
-		}
-	}
-	return false
+	return len(status.UnassignedTargets) > 0
 }
 
 func deriveThreadStatus(cmd *cobra.Command, location threadOwnerLocation) (threadStatusOutput, error) {
@@ -435,9 +456,9 @@ func writeThreadStatus(cmd *cobra.Command, out threadStatusOutput, asJSON bool) 
 		}
 	}
 	if len(out.ReadyThreads) == 1 {
-		owner := out.Owner.TaskID
+		owner := "task:" + out.Owner.TaskID
 		if out.Owner.Kind == threadOwnerWorkspaceChange {
-			owner = out.Owner.ChangeID
+			owner = "change:" + out.Owner.ChangeID
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "Run: ds apply %s --thread %s\n", commandArg(owner), commandArg(out.ReadyThreads[0]))
 	}

@@ -38,15 +38,24 @@ tree:
         purpose: Create and manage bounded task workspaces with packed context.
       thread:
         status: experimental
-        usage: ds thread [task-id|change-id]
+        usage: ds thread [task:<task-id>|change:<change-id>]
         purpose: Show named execution lanes, runnable targets, waits, and joins for a repo task or linked workspace change.
+        children:
+          set:
+            status: experimental
+            usage: ds thread set <owner> <key> <target>... [--after <key>]
+            purpose: Create or replace one validated lane in the owner's durable thread graph.
+          remove:
+            status: experimental
+            usage: ds thread remove <owner> <key>
+            purpose: Remove a lane only while checkpoint history still permits the graph mutation.
       compose:
         status: experimental
         purpose: Create repo-owned ADR, RFC, and PRD drafts using existing repository conventions.
       apply:
         status: core
-        usage: ds apply [task-id|target]
-        purpose: Emit one bounded one-slice prompt for an agent; omit the argument for the unambiguous next slice.
+        usage: ds apply [task-id|change-id|target] [--thread <key>]
+        purpose: Emit one bounded prompt for an unambiguous legacy target or runnable named thread.
       tldr:
         status: core
         purpose: Show LLM-oriented workflow quickstarts.

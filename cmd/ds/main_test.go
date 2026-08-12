@@ -156,23 +156,21 @@ func TestRootCmd_TLDRRegistered(t *testing.T) {
 }
 
 func TestRootCmd_ApplyRegistered(t *testing.T) {
+	// Arrange
 	cmd := newRootCmd()
 	cmd.SetArgs([]string{"apply", "--help"})
-
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
 
-	require.NoError(t, cmd.Execute())
+	// Act
+	err := cmd.Execute()
 
+	// Assert
+	require.NoError(t, err)
 	got := buf.String()
-	for _, want := range []string{
-		"Emit an agent prompt for exactly one DevSpecs task target.",
-		"apply [task-id|target]",
-	} {
-		require.Contains(t, got, want,
-			"expected apply help to contain %q, got:\n%s", want, got)
-
-	}
+	assert.Contains(t, got, "Emit an agent prompt for exactly one DevSpecs task target.")
+	assert.Contains(t, got, "apply [task-id|change-id|target]")
+	assert.Contains(t, got, "--thread string")
 }
 
 func TestRootCmd_ComposeHelp_ExplainsTypeAndFormatBoundaries(t *testing.T) {

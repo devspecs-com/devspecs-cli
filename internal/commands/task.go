@@ -276,6 +276,8 @@ type taskCheckpointOutput struct {
 	TestEvidenceCount  int      `json:"test_evidence_count,omitempty"`
 	DurableRecord      string   `json:"durable_record,omitempty"`
 	DurableArtifacts   []string `json:"durable_artifacts,omitempty"`
+	ThreadProjection   string   `json:"thread_projection,omitempty"`
+	ThreadWarning      string   `json:"thread_warning,omitempty"`
 }
 
 type taskCheckpointDraftOutput struct {
@@ -4885,6 +4887,7 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 		}
 		factIndexed = true
 	}
+	threadProjection, threadWarning := refreshCheckpointThreadProjection(repoRoot, workspace, manifest)
 
 	out := taskCheckpointOutput{
 		TaskID:             taskID,
@@ -4902,6 +4905,8 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 		TestEvidenceCount:  len(record.Evidence.TestCommands),
 		DurableRecord:      record.DurableRecord,
 		DurableArtifacts:   record.DurableArtifacts,
+		ThreadProjection:   threadProjection,
+		ThreadWarning:      threadWarning,
 	}
 	if record.Evidence.GitDiff != nil {
 		out.GitDiffFiles = record.Evidence.GitDiff.ChangedFiles
@@ -4917,7 +4922,36 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	if len(indexed) > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "Indexed: %s\n", strings.Join(indexed, ", "))
 	}
+	if threadWarning != "" {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Thread projection warning: checkpoint is durable; projection refresh was deferred (%s)\n", threadWarning)
+	}
 	return nil
+}
+
+func refreshCheckpointThreadProjection(repoRoot, taskWorkspace string, manifest taskManifest) (string, string) {
+	var location threadOwnerLocation
+	if strings.TrimSpace(manifest.ParentChange) != "" {
+		resolved, err := linkedWorkspaceThreadOwnerLocation(manifest)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), "has no thread definition") {
+				return "", ""
+			}
+			return "deferred", err.Error()
+		}
+		location = resolved
+	} else {
+		location = repoThreadOwnerLocation(repoRoot, taskWorkspace, manifest)
+		if _, err := os.Stat(location.DefinitionPath); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return "", ""
+			}
+			return "deferred", err.Error()
+		}
+	}
+	if warning := refreshThreadProjection(location); warning != "" {
+		return "deferred", warning
+	}
+	return "refreshed", ""
 }
 
 func runTaskCheckpointDraft(cmd *cobra.Command, taskID, repoRoot, workspace string, manifest taskManifest, selectedSlice taskSliceArtifact, opts taskCheckpointOptions, now time.Time) error {
