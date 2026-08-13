@@ -262,7 +262,10 @@ func extractSourceManifestCandidate(repoID string, candidate sourceManifestCandi
 	var imports []store.SourceManifestImportInput
 	var symbolValues, testValues, importValues []string
 	if language == "shell" {
-		semantics, _ := sourcecontext.ExtractShellSemantics(candidate.rel, candidate.role, bodyText)
+		semantics, semanticErr := sourcecontext.ExtractShellSemantics(candidate.rel, candidate.role, bodyText)
+		if semanticErr != nil {
+			semantics.Imports = nil
+		}
 		symbols, symbolValues = shellManifestSymbols(fileID, semantics.Symbols)
 		tests, testValues = shellManifestTests(fileID, semantics.Tests)
 		imports, importValues = shellManifestImports(fileID, semantics.Imports)

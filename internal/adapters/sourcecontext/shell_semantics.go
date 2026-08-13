@@ -41,6 +41,7 @@ func ExtractShellSemantics(rel, role, body string) (ShellSemantics, error) {
 	file, err := parser.Parse(strings.NewReader(body), filepath.ToSlash(rel))
 	if err != nil {
 		semantics.Tests = shellFileTestFallback(rel, role, body)
+		semantics.Imports = shellImportLineFallbacks(body)
 		return semantics, fmt.Errorf("parse shell source: %w", err)
 	}
 
@@ -53,6 +54,58 @@ func ExtractShellSemantics(rel, role, body string) (ShellSemantics, error) {
 	semantics.Tests = shellTestAnchors(file, rel, role, body)
 	semantics.Imports = shellImportAnchors(file, body)
 	return semantics, nil
+}
+
+func shellImportLineFallbacks(body string) []ShellSemanticAnchor {
+	var anchors []ShellSemanticAnchor
+	for index, line := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
+		value := strings.TrimSpace(line)
+		var ref string
+		for _, prefix := range []string{"source ", `\. `, ". "} {
+			if strings.HasPrefix(value, prefix) {
+				ref = shellImportFallbackToken(strings.TrimSpace(strings.TrimPrefix(value, prefix)))
+				break
+			}
+		}
+		if ref == "" {
+			continue
+		}
+		anchors = append(anchors, ShellSemanticAnchor{Name: ref, Kind: "source", Line: index + 1, EndLine: index + 1})
+		if len(anchors) >= maxShellImports {
+			break
+		}
+	}
+	return compactShellAnchors(anchors, maxShellImports)
+}
+
+func shellImportFallbackToken(value string) string {
+	if value == "" {
+		return ""
+	}
+	quote := byte(0)
+	if value[0] == '\'' || value[0] == '"' {
+		quote = value[0]
+		value = value[1:]
+	}
+	end := len(value)
+	for index := 0; index < len(value); index++ {
+		if quote != 0 {
+			if value[index] == quote {
+				end = index
+				break
+			}
+			continue
+		}
+		if value[index] == ' ' || value[index] == '\t' || value[index] == ';' || value[index] == '|' || value[index] == '&' {
+			end = index
+			break
+		}
+	}
+	value = strings.TrimSpace(value[:end])
+	if value == "" || strings.ContainsAny(value, "\r\n\t ") {
+		return ""
+	}
+	return value
 }
 
 func shellLanguageVariant(rel string) syntax.LangVariant {

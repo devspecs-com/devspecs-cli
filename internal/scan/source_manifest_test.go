@@ -161,6 +161,21 @@ func TestScan_SourceManifestPersistsShellImportRanges(t *testing.T) {
 	assert.Contains(t, ftsImports, "$ROOT/lib/core.sh (line 1)")
 }
 
+func TestScan_SourceManifestWithInvalidShell_DoesNotPersistFallbackImports(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, "bin/tool.sh", "source ./lib/core.sh\nif then\n")
+	db := openScanManifestTestDB(t)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
+
+	_, scanErr := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{UseTransaction: true, SourceManifest: true})
+	var importCount int
+	queryErr := db.QueryRow(`SELECT COUNT(*) FROM source_manifest_imports`).Scan(&importCount)
+
+	require.NoError(t, scanErr)
+	require.NoError(t, queryErr)
+	assert.Zero(t, importCount)
+}
+
 func TestScan_SourceManifestAdmitsTrackedExecutableShellEntrypoint(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git executable not available")

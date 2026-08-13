@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/devspecs-com/devspecs-cli/internal/adapters/sourcecontext"
 	"github.com/devspecs-com/devspecs-cli/internal/config"
 	"github.com/devspecs-com/devspecs-cli/internal/freshness"
 	"github.com/devspecs-com/devspecs-cli/internal/scan"
@@ -1974,6 +1975,7 @@ type mapPathBoundaryCandidate struct {
 	Subareas          map[string]bool
 	EvidenceCounts    map[string]int
 	EvidenceSources   map[string]bool
+	ImportedModules   map[string]bool
 	Artifacts         []mapArtifact
 	TraceReceipts     []mapTraceReceipt
 }
@@ -2221,6 +2223,10 @@ func buildPathBoundaryAreas(repoRoot, repoName string, files []string, commits [
 }
 
 func buildPathBoundaryAreasContext(ctx context.Context, repoRoot, repoName string, files []string, commits []parsedFindGitCommit, maxAreas int, packabilityArg ...*mapPackabilityIndex) ([]mapArea, mapEvidenceAvailability, int) {
+	return buildPathBoundaryAreasContextWithRelationships(ctx, repoRoot, repoName, files, commits, maxAreas, true, packabilityArg...)
+}
+
+func buildPathBoundaryAreasContextWithRelationships(ctx context.Context, repoRoot, repoName string, files []string, commits []parsedFindGitCommit, maxAreas int, expandRelationships bool, packabilityArg ...*mapPackabilityIndex) ([]mapArea, mapEvidenceAvailability, int) {
 	var packability *mapPackabilityIndex
 	if len(packabilityArg) > 0 {
 		packability = packabilityArg[0]
@@ -2247,7 +2253,10 @@ func buildPathBoundaryAreasContext(ctx context.Context, repoRoot, repoName strin
 	}
 	applyMapBoundaryConceptualParents(candidates, repoName, files, repoShape)
 	applyMapBoundaryDynamicConceptParents(candidates, repoName, files, commits, repoShape)
-	applyMapBoundaryImportEvidence(repoRoot, repoName, files, candidates)
+	applyMapBoundaryImportEvidenceForMode(repoRoot, repoName, files, candidates, expandRelationships)
+	if expandRelationships {
+		applyMapBoundaryImportedModuleTestCompanions(files, candidates)
+	}
 	applyMapBoundaryRecentCommits(candidates, repoName, commits)
 	if len(commits) > 0 {
 		evidence.Trace = true
@@ -2808,7 +2817,7 @@ func mapPathHasSegmentSequence(pathValue, needlePath string) bool {
 	return false
 }
 
-func applyMapBoundaryImportEvidence(repoRoot, repoName string, files []string, candidates map[string]*mapPathBoundaryCandidate) {
+func applyMapBoundaryImportEvidenceForMode(repoRoot, repoName string, files []string, candidates map[string]*mapPathBoundaryCandidate, expandRelationships bool) {
 	if len(files) == 0 || len(candidates) == 0 {
 		return
 	}
@@ -2817,6 +2826,7 @@ func applyMapBoundaryImportEvidence(repoRoot, repoName string, files []string, c
 		fileSet[normalizeMapPath(path)] = true
 	}
 	suffixIndex := buildMapBoundarySuffixIndex(files)
+	shellResolver := sourcecontext.NewShellImportResolver(files)
 	pathKeys := map[string][]string{}
 	for _, path := range files {
 		family := mapBoundaryPathFamily(path)
@@ -2838,7 +2848,8 @@ func applyMapBoundaryImportEvidence(repoRoot, repoName string, files []string, c
 		if family != "source" && family != "test" {
 			continue
 		}
-		if len(pathKeys[sourcePath]) == 0 {
+		isShell := mapBoundaryShellImportCandidate(sourcePath)
+		if len(pathKeys[sourcePath]) == 0 && !(expandRelationships && isShell) {
 			continue
 		}
 		body := readMapBoundaryImportBody(filepath.Join(repoRoot, filepath.FromSlash(sourcePath)))
@@ -2846,13 +2857,22 @@ func applyMapBoundaryImportEvidence(repoRoot, repoName string, files []string, c
 			continue
 		}
 		sourceRead++
-		for _, spec := range extractMapBoundaryImports(sourcePath, body) {
-			targetPath := resolveMapBoundaryImport(sourcePath, spec, fileSet, suffixIndex)
+		for _, spec := range extractMapBoundaryImportsForMode(sourcePath, body, expandRelationships) {
+			targetPath := resolveMapBoundaryImport(sourcePath, spec, fileSet, suffixIndex, shellResolver)
 			if targetPath == "" || targetPath == sourcePath || !fileSet[targetPath] {
 				continue
 			}
-			addMapBoundaryImportEdge(candidates, pathKeys, sourcePath, targetPath)
+			addMapBoundaryImportEdgeForMode(candidates, pathKeys, sourcePath, targetPath, expandRelationships)
 		}
+	}
+}
+
+func mapBoundaryShellImportCandidate(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case "", ".sh", ".bash", ".zsh", ".bats":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -2872,16 +2892,23 @@ func mapBoundaryCandidateKeysForPath(path, repoName string) []string {
 }
 
 func addMapBoundaryImportEdge(candidates map[string]*mapPathBoundaryCandidate, pathKeys map[string][]string, sourcePath, targetPath string) {
+	addMapBoundaryImportEdgeForMode(candidates, pathKeys, sourcePath, targetPath, true)
+}
+
+func addMapBoundaryImportEdgeForMode(candidates map[string]*mapPathBoundaryCandidate, pathKeys map[string][]string, sourcePath, targetPath string, expandRelationships bool) {
 	sourceKeys := pathKeys[sourcePath]
 	targetKeys := pathKeys[targetPath]
+	sourceFamily := mapBoundaryPathFamily(sourcePath)
+	targetFamily := mapBoundaryPathFamily(targetPath)
+	if expandRelationships {
+		addMapBoundaryImportedModuleEdge(candidates, sourcePath, targetPath, sourceFamily, targetFamily)
+	}
 	if len(sourceKeys) == 0 || len(targetKeys) == 0 {
 		return
 	}
 	sourceKeySet := mapStringSet(sourceKeys)
-	sourceFamily := mapBoundaryPathFamily(sourcePath)
-	targetFamily := mapBoundaryPathFamily(targetPath)
 	for _, key := range targetKeys {
-		if !sourceKeySet[key] {
+		if !expandRelationships && !sourceKeySet[key] {
 			continue
 		}
 		candidate := candidates[key]
@@ -2891,7 +2918,11 @@ func addMapBoundaryImportEdge(candidates map[string]*mapPathBoundaryCandidate, p
 		candidate.EvidenceCounts["import"]++
 		candidate.EvidenceSources["import"] = true
 		if candidate.EvidenceCounts["import"] <= mapBoundaryImportScoreCap {
-			candidate.Score += 0.65
+			if sourceKeySet[key] {
+				candidate.Score += 0.65
+			} else {
+				candidate.Score += 0.9
+			}
 		}
 		if sourceFamily == "test" && targetFamily == "source" {
 			candidate.EvidenceCounts["test_import"]++
@@ -2899,6 +2930,134 @@ func addMapBoundaryImportEdge(candidates map[string]*mapPathBoundaryCandidate, p
 				candidate.Score += 1.4
 			}
 		}
+		if expandRelationships && !sourceKeySet[key] {
+			if !candidate.PathSet[sourcePath] {
+				candidate.PathSet[sourcePath] = true
+				candidate.FileCount++
+				candidate.EvidenceCounts[sourceFamily]++
+			}
+			artifact := mapArtifactForBoundaryPath(sourcePath, sourceFamily)
+			artifact.Rank = mapPathBoundaryArtifactRank(key, sourcePath, sourceFamily) + 2
+			appendMapBoundaryArtifactCandidate(candidate, artifact, mapBoundaryMaxArtifacts*3)
+		}
+	}
+}
+
+func addMapBoundaryImportedModuleEdge(candidates map[string]*mapPathBoundaryCandidate, sourcePath, targetPath, sourceFamily, targetFamily string) {
+	if targetFamily != "source" || sourceFamily == "" || !mapBoundaryShellModulePath(targetPath) || mapBoundaryImportedModuleParentOwnsTarget(targetPath) {
+		return
+	}
+	key, label := mapBoundaryImportedModuleIdentity(targetPath)
+	if key == "" {
+		return
+	}
+	candidate := candidates[key]
+	if candidate == nil {
+		candidate = &mapPathBoundaryCandidate{
+			Key:             key,
+			Label:           label,
+			PathSet:         map[string]bool{},
+			BoundaryPaths:   map[string]bool{},
+			Subareas:        map[string]bool{},
+			EvidenceCounts:  map[string]int{},
+			EvidenceSources: map[string]bool{"path_boundary": true, "imported_module": true},
+			ImportedModules: map[string]bool{},
+		}
+		candidates[key] = candidate
+	}
+	if candidate.ImportedModules == nil {
+		candidate.ImportedModules = map[string]bool{}
+	}
+	candidate.ImportedModules[targetPath] = true
+	addPath := func(filePath, family string, rankBonus int) {
+		if candidate.PathSet[filePath] {
+			return
+		}
+		candidate.PathSet[filePath] = true
+		candidate.FileCount++
+		candidate.EvidenceCounts[family]++
+		candidate.Score += mapBoundaryFamilyScore(family)
+		artifact := mapArtifactForBoundaryPath(filePath, family)
+		artifact.Rank = mapPathBoundaryArtifactRank(key, filePath, family) + rankBonus
+		appendMapBoundaryArtifactCandidate(candidate, artifact, mapBoundaryMaxArtifacts*3)
+	}
+	addPath(targetPath, targetFamily, 140)
+	addPath(sourcePath, sourceFamily, 60)
+	candidate.EvidenceCounts["import"]++
+	candidate.EvidenceSources["import"] = true
+	candidate.Score += 1.2
+	if sourceFamily == "test" {
+		candidate.EvidenceCounts["test_import"]++
+		candidate.Score += 1.8
+	}
+	if dir := pathpkg.Dir(normalizeMapPath(targetPath)); dir != "." && dir != "" {
+		appendMapBoundaryPathCandidate(candidate, dir)
+	}
+}
+
+func mapBoundaryShellModulePath(targetPath string) bool {
+	switch strings.ToLower(filepath.Ext(targetPath)) {
+	case ".sh", ".bash", ".zsh":
+		return true
+	default:
+		return false
+	}
+}
+
+func mapBoundaryImportedModuleIdentity(targetPath string) (string, string) {
+	targetPath = normalizeMapPath(targetPath)
+	if targetPath == "" {
+		return "", ""
+	}
+	return "shell-runtime", "Shell Runtime"
+}
+
+func applyMapBoundaryImportedModuleTestCompanions(files []string, candidates map[string]*mapPathBoundaryCandidate) {
+	for _, file := range files {
+		pathValue := normalizeMapPath(file)
+		if mapBoundaryPathFamily(pathValue) != "test" || mapConceptualPathNoisy(pathValue) {
+			continue
+		}
+		for _, candidate := range candidates {
+			if candidate == nil || !candidate.EvidenceSources["imported_module"] || !mapBoundaryTestMatchesImportedModule(pathValue, candidate.ImportedModules) || candidate.PathSet[pathValue] {
+				continue
+			}
+			candidate.PathSet[pathValue] = true
+			candidate.FileCount++
+			candidate.EvidenceCounts["test"]++
+			candidate.Score += mapBoundaryFamilyScore("test")
+			artifact := mapArtifactForBoundaryPath(pathValue, "test")
+			artifact.Rank = mapPathBoundaryArtifactRank(candidate.Key, pathValue, "test") + 520
+			appendMapBoundaryArtifactCandidate(candidate, artifact, mapBoundaryMaxArtifacts*3)
+		}
+	}
+}
+
+func mapBoundaryTestMatchesImportedModule(testPath string, importedModules map[string]bool) bool {
+	testStem := strings.TrimSuffix(filepath.Base(testPath), filepath.Ext(testPath))
+	testKey := normalizeMapKey(testStem)
+	if testKey == "" {
+		return false
+	}
+	for modulePath := range importedModules {
+		if !strings.Contains(normalizeMapPath(modulePath), "/") {
+			continue
+		}
+		moduleStem := strings.TrimSuffix(filepath.Base(modulePath), filepath.Ext(modulePath))
+		if moduleKey := normalizeMapKey(moduleStem); moduleKey != "" && scoreMapKeyMatch(testKey, moduleKey) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func mapBoundaryImportedModuleParentOwnsTarget(targetPath string) bool {
+	parent := strings.ToLower(filepath.Base(filepath.Dir(normalizeMapPath(targetPath))))
+	switch parent {
+	case "adapters", "drivers", "handlers", "plugins", "providers":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -2915,9 +3074,33 @@ func readMapBoundaryImportBody(path string) string {
 }
 
 func extractMapBoundaryImports(path, body string) []string {
+	return extractMapBoundaryImportsForMode(path, body, true)
+}
+
+func extractMapBoundaryImportsForMode(path, body string, expandRelationships bool) []string {
 	ext := strings.ToLower(filepath.Ext(path))
 	var specs []string
 	switch ext {
+	case ".sh", ".bash", ".zsh", ".bats":
+		if !expandRelationships {
+			return nil
+		}
+		semantics, _ := sourcecontext.ExtractShellSemantics(path, "", body)
+		for _, shellImport := range semantics.Imports {
+			specs = appendUniqueString(specs, shellImport.Name)
+		}
+		return specs
+	case "":
+		if !expandRelationships {
+			return nil
+		}
+		if mapBoundaryLooksShellSource(body) {
+			semantics, _ := sourcecontext.ExtractShellSemantics(path, "", body)
+			for _, shellImport := range semantics.Imports {
+				specs = appendUniqueString(specs, shellImport.Name)
+			}
+		}
+		return specs
 	case ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte":
 		for _, re := range mapBoundaryJSImportRegexes {
 			specs = appendMapBoundaryRegexSpecs(specs, re, body)
@@ -2945,6 +3128,18 @@ func extractMapBoundaryImports(path, body string) []string {
 		out = appendUniqueString(out, spec)
 	}
 	return out
+}
+
+func mapBoundaryLooksShellSource(body string) bool {
+	firstLine := body
+	if newline := strings.IndexByte(firstLine, '\n'); newline >= 0 {
+		firstLine = firstLine[:newline]
+	}
+	firstLine = strings.ToLower(strings.TrimSpace(firstLine))
+	if !strings.HasPrefix(firstLine, "#!") {
+		return false
+	}
+	return strings.Contains(firstLine, "/sh") || strings.Contains(firstLine, "/bash") || strings.Contains(firstLine, "/zsh") || strings.Contains(firstLine, "env sh") || strings.Contains(firstLine, "env bash") || strings.Contains(firstLine, "env zsh")
 }
 
 func appendMapBoundaryRegexSpecs(out []string, re *regexp.Regexp, body string) []string {
@@ -2984,7 +3179,12 @@ func mapBoundaryLocalImportSpec(spec string) bool {
 	return true
 }
 
-func resolveMapBoundaryImport(fromPath, spec string, fileSet map[string]bool, suffixIndex map[string]string) string {
+func resolveMapBoundaryImport(fromPath, spec string, fileSet map[string]bool, suffixIndex map[string]string, shellResolver sourcecontext.ShellImportResolver) string {
+	if ext := strings.ToLower(filepath.Ext(fromPath)); ext == ".sh" || ext == ".bash" || ext == ".zsh" || ext == ".bats" || ext == "" {
+		if resolved := shellResolver.Resolve(fromPath, spec); resolved != "" {
+			return resolved
+		}
+	}
 	fromDir := pathpkg.Dir(normalizeMapPath(fromPath))
 	spec = strings.TrimSpace(spec)
 	switch {
@@ -3074,7 +3274,7 @@ func addMapBoundarySuffixes(index map[string]string, file string) {
 }
 
 func applyMapBoundaryRecentCommits(candidates map[string]*mapPathBoundaryCandidate, repoName string, commits []parsedFindGitCommit) {
-	for _, commit := range commits {
+	for commitIndex, commit := range commits {
 		touched := map[string]bool{}
 		for _, path := range commit.paths {
 			path = normalizeMapPath(path)
@@ -3083,22 +3283,41 @@ func applyMapBoundaryRecentCommits(candidates map[string]*mapPathBoundaryCandida
 			}
 			for _, labelCandidate := range mapBoundaryLabelCandidatesForPath(path, repoName) {
 				candidate := candidates[labelCandidate.Key]
-				if candidate == nil || touched[candidate.Key] {
+				if candidate == nil {
 					continue
 				}
-				touched[candidate.Key] = true
-				candidate.RecentCount++
-				candidate.EvidenceCounts["trace"]++
-				candidate.EvidenceSources["git"] = true
-				candidate.Score += 8
-				if len(candidate.TraceReceipts) < mapMaxTraceReceipts {
-					candidate.TraceReceipts = append(candidate.TraceReceipts, mapTraceReceipt{
-						SHA:     shortFindGitSHA(commit.sha),
-						Subject: limitRunes(commit.subject, 120),
-					})
+				applyMapBoundaryRecentCommitEvidence(candidate, path, commit, commitIndex, touched, false)
+			}
+			for _, candidate := range candidates {
+				if candidate == nil || !candidate.EvidenceSources["imported_module"] || !candidate.PathSet[path] || (!candidate.ImportedModules[path] && mapBoundaryPathFamily(path) != "test") {
+					continue
 				}
+				applyMapBoundaryRecentCommitEvidence(candidate, path, commit, commitIndex, touched, true)
 			}
 		}
+	}
+}
+
+func applyMapBoundaryRecentCommitEvidence(candidate *mapPathBoundaryCandidate, path string, commit parsedFindGitCommit, commitIndex int, touched map[string]bool, includeArtifact bool) {
+	if includeArtifact {
+		family := mapBoundaryPathFamily(path)
+		artifact := mapArtifactForBoundaryPath(path, family)
+		artifact.Rank = mapPathBoundaryArtifactRank(candidate.Key, path, family) + maxInt(20, 140-commitIndex*4)
+		appendMapBoundaryArtifactCandidate(candidate, artifact, mapBoundaryMaxArtifacts*3)
+	}
+	if touched[candidate.Key] {
+		return
+	}
+	touched[candidate.Key] = true
+	candidate.RecentCount++
+	candidate.EvidenceCounts["trace"]++
+	candidate.EvidenceSources["git"] = true
+	candidate.Score += 8
+	if len(candidate.TraceReceipts) < mapMaxTraceReceipts {
+		candidate.TraceReceipts = append(candidate.TraceReceipts, mapTraceReceipt{
+			SHA:     shortFindGitSHA(commit.sha),
+			Subject: limitRunes(commit.subject, 120),
+		})
 	}
 }
 
@@ -3347,6 +3566,9 @@ func mapBoundaryCandidateDisplayable(candidate *mapPathBoundaryCandidate) bool {
 	if candidate.FileCount >= 2 && families >= 2 {
 		return true
 	}
+	if candidate.EvidenceSources["imported_module"] && candidate.EvidenceCounts["import"] >= 2 && sourceish >= 2 {
+		return true
+	}
 	if candidate.RecentCount > 0 && candidate.FileCount >= 2 {
 		return true
 	}
@@ -3522,6 +3744,9 @@ func mapBoundaryAreaScore(area *mapAreaInternal, repoName, repoShape string) flo
 		if area.Key == "framework-runtime-module-platform" {
 			score += 10
 		}
+	}
+	if area.EvidenceSources["imported_module"] {
+		score += 12
 	}
 	if area.EvidenceCounts["source"] > 0 && area.EvidenceCounts["test"] > 0 {
 		score += 5
@@ -4408,7 +4633,7 @@ func applyMapRecentBoundaryQuality(ctx context.Context, repoRoot string, commits
 	var areas []mapArea
 	if len(files) > 0 {
 		repoName := filepath.Base(filepath.Clean(repoRoot))
-		areas, _, _ = buildPathBoundaryAreasContext(ctx, repoRoot, repoName, files, commits, mapRecentMaxTopics*3)
+		areas, _, _ = buildPathBoundaryAreasContextWithRelationships(ctx, repoRoot, repoName, files, commits, mapRecentMaxTopics*3, false)
 	}
 	for i := range topics {
 		if topics[i].EvidenceCounts["source"] > 0 || topics[i].EvidenceCounts["test"] > 0 {

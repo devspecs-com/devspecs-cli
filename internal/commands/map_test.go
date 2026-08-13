@@ -872,6 +872,88 @@ func TestPathBoundaryMapAddsImportStructureReceipts(t *testing.T) {
 
 }
 
+func TestExtractMapBoundaryImports_ShellEntrypoint_ReturnsParserBackedReferences(t *testing.T) {
+	body := "#!/usr/bin/env bash\nsource \"$TOOL_LIB/core.sh\"\n. ../shared.sh\n"
+
+	got := extractMapBoundaryImports("bin/tool", body)
+
+	require.Len(t, got, 2)
+	assert.Equal(t, "$TOOL_LIB/core.sh", got[0])
+	assert.Equal(t, "../shared.sh", got[1])
+}
+
+func TestAddMapBoundaryImportEdge_CrossBoundaryImport_AddsEntrypointEvidenceToTarget(t *testing.T) {
+	candidates := map[string]*mapPathBoundaryCandidate{
+		"core": {
+			Key:             "core",
+			PathSet:         map[string]bool{"lib/core.sh": true},
+			EvidenceCounts:  map[string]int{"source": 1},
+			EvidenceSources: map[string]bool{"path_boundary": true},
+		},
+		"tool": {
+			Key:             "tool",
+			PathSet:         map[string]bool{"bin/tool": true},
+			EvidenceCounts:  map[string]int{"source": 1},
+			EvidenceSources: map[string]bool{"path_boundary": true},
+		},
+	}
+	pathKeys := map[string][]string{
+		"bin/tool":    {"tool"},
+		"lib/core.sh": {"core"},
+	}
+
+	addMapBoundaryImportEdge(candidates, pathKeys, "bin/tool", "lib/core.sh")
+
+	coreCandidate := candidates["core"]
+	require.NotNil(t, coreCandidate)
+	assert.Equal(t, 1, coreCandidate.EvidenceCounts["import"])
+	require.Len(t, coreCandidate.Artifacts, 1)
+	assert.Equal(t, "bin/tool", coreCandidate.Artifacts[0].Path)
+}
+
+func TestAddMapBoundaryImportEdge_ShellModule_CreatesImportedModuleBoundary(t *testing.T) {
+	candidates := map[string]*mapPathBoundaryCandidate{}
+	pathKeys := map[string][]string{}
+
+	addMapBoundaryImportEdge(candidates, pathKeys, "bin/tool", "lib/selection.sh")
+
+	runtimeCandidate := candidates["shell-runtime"]
+	require.NotNil(t, runtimeCandidate)
+	assert.True(t, runtimeCandidate.EvidenceSources["imported_module"])
+	assert.True(t, runtimeCandidate.ImportedModules["lib/selection.sh"])
+	assert.Equal(t, 1, runtimeCandidate.EvidenceCounts["import"])
+	require.Len(t, runtimeCandidate.Artifacts, 2)
+	assert.Equal(t, "lib/selection.sh", runtimeCandidate.Artifacts[0].Path)
+	assert.Equal(t, "bin/tool", runtimeCandidate.Artifacts[1].Path)
+}
+
+func TestApplyMapBoundaryImportedModuleTestCompanions_MatchingBehaviorTest_AddsTestEvidence(t *testing.T) {
+	candidates := map[string]*mapPathBoundaryCandidate{
+		"shell-runtime": {
+			Key:             "shell-runtime",
+			PathSet:         map[string]bool{"lib/formatter.bash": true},
+			EvidenceCounts:  map[string]int{"source": 1, "import": 2},
+			EvidenceSources: map[string]bool{"imported_module": true},
+			ImportedModules: map[string]bool{"lib/formatter.bash": true},
+		},
+	}
+
+	applyMapBoundaryImportedModuleTestCompanions([]string{"test/formatter.bats"}, candidates)
+
+	runtimeCandidate := candidates["shell-runtime"]
+	require.NotNil(t, runtimeCandidate)
+	assert.Equal(t, 1, runtimeCandidate.EvidenceCounts["test"])
+	require.Len(t, runtimeCandidate.Artifacts, 1)
+	assert.Equal(t, "test/formatter.bats", runtimeCandidate.Artifacts[0].Path)
+}
+
+func TestMapBoundaryImportedModuleIdentity_RootShellModule_ReturnsShellRuntime(t *testing.T) {
+	key, label := mapBoundaryImportedModuleIdentity("nvm.sh")
+
+	assert.Equal(t, "shell-runtime", key)
+	assert.Equal(t, "Shell Runtime", label)
+}
+
 func TestPathBoundaryMapSuppressesWrapperAndDomainShellLabels(t *testing.T) {
 	repoRoot := filepath.Join(t.TempDir(), "dub")
 	files := []string{

@@ -105,6 +105,18 @@ func TestExtractShellSemantics_WithInvalidVerificationScript_RetainsWholeFileTes
 	assert.Equal(t, 3, semantics.Tests[0].EndLine)
 }
 
+func TestExtractShellSemantics_WithInvalidTestAndLiteralSource_RetainsImportFallback(t *testing.T) {
+	body := "#!/bin/sh\n\\. ../../../nvm.sh\nif then\n"
+
+	semantics, err := ExtractShellSemantics("test/fast/validation", "test", body)
+
+	require.Error(t, err)
+	require.Len(t, semantics.Imports, 1)
+	assert.Equal(t, "../../../nvm.sh", semantics.Imports[0].Name)
+	assert.Equal(t, 2, semantics.Imports[0].Line)
+	assert.Equal(t, 2, semantics.Imports[0].EndLine)
+}
+
 func TestExtractShellSemantics_WithEscapedDotCommand_ExtractsSourcedFile(t *testing.T) {
 	body := "#!/bin/sh\n\\. ../../../nvm.sh\n"
 
