@@ -99,9 +99,66 @@ func TestScan_SourceManifestAdmitsShellExtensionsFromFirstPartyRoots(t *testing.
 	assert.Contains(t, snapshot[0], "lib/providers/adapter.sh\x00")
 	assert.Contains(t, snapshot[0], "\x00shell\x00lib\x00implementation\x00")
 	assert.Contains(t, snapshot[1], "scripts/verify.bash\x00")
-	assert.Contains(t, snapshot[1], "\x00shell\x00scripts\x00implementation\x00")
+	assert.Contains(t, snapshot[1], "\x00shell\x00scripts\x00test\x00")
 	assert.Contains(t, snapshot[2], "tests/smoke.zsh\x00")
 	assert.Contains(t, snapshot[2], "\x00shell\x00tests\x00test\x00")
+}
+
+func TestScan_SourceManifestAdmitsBatsAsShellBehaviorTest(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, "test/formatter.bats", "@test \"formats TAP output\" {\n  true\n}\n")
+	db := openScanManifestTestDB(t)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
+
+	_, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{UseTransaction: true, SourceManifest: true})
+	require.NoError(t, err)
+	snapshot := sourceManifestSnapshot(t, db)
+
+	require.Len(t, snapshot, 1)
+	assert.Contains(t, snapshot[0], "test/formatter.bats\x00")
+	assert.Contains(t, snapshot[0], "\x00shell\x00test\x00test\x00")
+	assert.Contains(t, snapshot[0], "formats TAP output")
+}
+
+func TestScan_SourceManifestPersistsShellSemanticRelationshipsAndRanges(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, "bin/tool.sh", "source \"$ROOT/lib/core.sh\"\ncmd_spawn() { true; }\ncase \"$1\" in\n  spawn) cmd_spawn \"$@\" ;;\nesac\n")
+	db := openScanManifestTestDB(t)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
+
+	_, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{UseTransaction: true, SourceManifest: true})
+	require.NoError(t, err)
+	var symbol, kind, parent, ftsSymbols string
+	var line, endLine int
+	require.NoError(t, db.QueryRow(`SELECT s.symbol, s.kind, s.parent, s.line, s.end_line, f.symbols
+		FROM source_manifest_symbols s
+		JOIN source_manifest_fts f ON f.file_id = s.file_id
+		WHERE s.kind = 'dispatch'`).Scan(&symbol, &kind, &parent, &line, &endLine, &ftsSymbols))
+	assert.Equal(t, "spawn", symbol)
+	assert.Equal(t, "dispatch", kind)
+	assert.Equal(t, "cmd_spawn", parent)
+	assert.Equal(t, 4, line)
+	assert.Equal(t, 4, endLine)
+	assert.Contains(t, ftsSymbols, "spawn -> cmd_spawn (line 4)")
+}
+
+func TestScan_SourceManifestPersistsShellImportRanges(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, "bin/tool.sh", "source \"$ROOT/lib/core.sh\"\n")
+	db := openScanManifestTestDB(t)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
+
+	_, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{UseTransaction: true, SourceManifest: true})
+	require.NoError(t, err)
+	var importRef, ftsImports string
+	var line, endLine int
+	require.NoError(t, db.QueryRow(`SELECT i.import_ref, i.line, i.end_line, f.imports
+		FROM source_manifest_imports i
+		JOIN source_manifest_fts f ON f.file_id = i.file_id`).Scan(&importRef, &line, &endLine, &ftsImports))
+	assert.Equal(t, "$ROOT/lib/core.sh", importRef)
+	assert.Equal(t, 1, line)
+	assert.Equal(t, 1, endLine)
+	assert.Contains(t, ftsImports, "$ROOT/lib/core.sh (line 1)")
 }
 
 func TestScan_SourceManifestAdmitsTrackedExecutableShellEntrypoint(t *testing.T) {

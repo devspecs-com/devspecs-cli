@@ -19,7 +19,7 @@ import (
 var schemaDDL string
 
 // SchemaVersion is the current schema version. Bump when schema.sql changes.
-const SchemaVersion = 16
+const SchemaVersion = 17
 
 // SQLiteBusyTimeoutMS is the fallback for short writes that contend outside the
 // process-level index writer queue. Command contexts own longer operation limits.
@@ -254,6 +254,11 @@ func (db *DB) migrate() error {
 				return err
 			}
 			maxVersion = 16
+		case 16:
+			if err := db.migrate16To17(now); err != nil {
+				return err
+			}
+			maxVersion = 17
 		default:
 			return fmt.Errorf(
 				"index was created with schema v%d but this CLI requires v%d. Run 'ds index backup', then 'ds index rebuild --path <repo>' to rebuild safely",
@@ -576,6 +581,25 @@ func (db *DB) migrate15To16(now string) error {
 		return fmt.Errorf("migrate v15->v16 thread projections: %w", err)
 	}
 	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 16, now)
+	return err
+}
+
+func (db *DB) migrate16To17(now string) error {
+	statements := []struct {
+		label string
+		sql   string
+	}{
+		{label: "source symbol parent", sql: `ALTER TABLE source_manifest_symbols ADD COLUMN parent TEXT NOT NULL DEFAULT ''`},
+		{label: "source symbol end line", sql: `ALTER TABLE source_manifest_symbols ADD COLUMN end_line INTEGER NOT NULL DEFAULT 0`},
+		{label: "source test end line", sql: `ALTER TABLE source_manifest_tests ADD COLUMN end_line INTEGER NOT NULL DEFAULT 0`},
+		{label: "source import end line", sql: `ALTER TABLE source_manifest_imports ADD COLUMN end_line INTEGER NOT NULL DEFAULT 0`},
+	}
+	for _, statement := range statements {
+		if err := tryAlterTable(db.DB, statement.sql); err != nil {
+			return fmt.Errorf("migrate v16->v17 %s: %w", statement.label, err)
+		}
+	}
+	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 17, now)
 	return err
 }
 

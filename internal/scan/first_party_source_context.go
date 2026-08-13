@@ -310,7 +310,7 @@ func firstPartySourceLooksSourcePath(path string) bool {
 		".java", ".kt", ".kts", ".cs", ".vue", ".svelte", ".c", ".cc", ".cpp",
 		".cxx", ".h", ".hpp", ".mjs", ".cjs", ".mts", ".cts", ".sql", ".lua",
 		".dart", ".swift", ".scala", ".clj", ".cljs", ".ex", ".exs", ".erl",
-		".hrl", ".zig", ".nim", ".jl", ".r", ".sh", ".bash", ".zsh", ".ps1",
+		".hrl", ".zig", ".nim", ".jl", ".r", ".sh", ".bash", ".zsh", ".bats", ".ps1",
 		".proto", ".graphql", ".gql":
 		return true
 	default:
@@ -327,6 +327,11 @@ func firstPartySourceLooksTestPath(path string) bool {
 		return true
 	}
 	switch {
+	case ext == ".bats":
+		return true
+	case (ext == ".sh" || ext == ".bash" || ext == ".zsh" || ext == "") &&
+		(strings.HasPrefix(name, "test") || strings.HasPrefix(name, "verify") || strings.HasSuffix(name, "_test")):
+		return true
 	case ext == ".go" && strings.HasSuffix(base, "_test.go"):
 		return true
 	case ext == ".py" && (strings.HasPrefix(base, "test_") || strings.HasSuffix(name, "_test")):
