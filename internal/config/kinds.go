@@ -157,5 +157,22 @@ func ValidateRepoConfig(cfg *RepoConfig) error {
 			return fmt.Errorf("sources[%d]: %w", si, err)
 		}
 	}
+	provider := strings.TrimSpace(cfg.Integrations.Orchestration.Provider)
+	if provider != "" && !validIntegrationProvider(provider) {
+		return fmt.Errorf("integrations.orchestration.provider %q must use lowercase letters, digits, and hyphens", provider)
+	}
 	return nil
+}
+
+func validIntegrationProvider(provider string) bool {
+	for i, r := range provider {
+		if r >= 'a' && r <= 'z' {
+			continue
+		}
+		if i > 0 && ((r >= '0' && r <= '9') || r == '-') {
+			continue
+		}
+		return false
+	}
+	return provider != "" && provider[len(provider)-1] != '-'
 }

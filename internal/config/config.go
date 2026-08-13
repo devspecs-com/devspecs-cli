@@ -11,41 +11,56 @@ import (
 
 // RepoConfig represents the .devspecs/config.yaml file in a repository.
 type RepoConfig struct {
-	Version     int              `yaml:"version"`
-	Sources     []SourceConfig   `yaml:"sources"`
-	Artifacts   ArtifactConfig   `yaml:"artifacts,omitempty"`
-	Experiments ExperimentConfig `yaml:"experiments,omitempty"`
+	Version      int               `yaml:"version" json:"version"`
+	Sources      []SourceConfig    `yaml:"sources" json:"sources"`
+	Artifacts    ArtifactConfig    `yaml:"artifacts,omitempty" json:"artifacts,omitempty"`
+	Experiments  ExperimentConfig  `yaml:"experiments,omitempty" json:"experiments,omitempty"`
+	Integrations IntegrationConfig `yaml:"integrations,omitempty" json:"integrations,omitempty"`
+}
+
+// IntegrationConfig holds opt-in integrations that consume DevSpecs output.
+// DevSpecs preserves and exposes this configuration but does not execute the
+// selected integration.
+type IntegrationConfig struct {
+	Orchestration OrchestrationConfig `yaml:"orchestration,omitempty" json:"orchestration,omitempty"`
+}
+
+// OrchestrationConfig selects one external orchestration adapter. Options are
+// owned and validated by that adapter.
+type OrchestrationConfig struct {
+	Provider string         `yaml:"provider,omitempty" json:"provider,omitempty"`
+	Options  map[string]any `yaml:"options,omitempty" json:"options,omitempty"`
 }
 
 // ArtifactConfig holds canonical opt-in artifact sources that can be expensive
 // or noisy on large repositories.
 type ArtifactConfig struct {
-	TestCases    *bool `yaml:"test_cases,omitempty"`
-	CodeComments *bool `yaml:"code_comments,omitempty"`
+	TestCases    *bool `yaml:"test_cases,omitempty" json:"test_cases,omitempty"`
+	CodeComments *bool `yaml:"code_comments,omitempty" json:"code_comments,omitempty"`
 }
 
 // ExperimentConfig holds legacy opt-in scan/indexing experiments. New callers
 // should prefer ArtifactConfig; these fields remain for config compatibility.
 type ExperimentConfig struct {
-	IntentCandidateDiscovery *bool `yaml:"intent_candidate_discovery,omitempty"`
-	TestCaseArtifacts        *bool `yaml:"test_case_artifacts,omitempty"`
-	SupportDocDiscovery      *bool `yaml:"support_doc_discovery,omitempty"`
+	IntentCandidateDiscovery *bool `yaml:"intent_candidate_discovery,omitempty" json:"intent_candidate_discovery,omitempty"`
+	TestCaseArtifacts        *bool `yaml:"test_case_artifacts,omitempty" json:"test_case_artifacts,omitempty"`
+	SupportDocDiscovery      *bool `yaml:"support_doc_discovery,omitempty" json:"support_doc_discovery,omitempty"`
 }
 
 // SourceConfig defines a source type and its discovery paths.
 type SourceConfig struct {
-	Type  string       `yaml:"type"`
-	Path  string       `yaml:"path,omitempty"`
-	Paths []string     `yaml:"paths,omitempty"`
-	Rules []SourceRule `yaml:"rules,omitempty"`
+	Type  string       `yaml:"type" json:"type"`
+	Path  string       `yaml:"path,omitempty" json:"path,omitempty"`
+	Paths []string     `yaml:"paths,omitempty" json:"paths,omitempty"`
+	Rules []SourceRule `yaml:"rules,omitempty" json:"rules,omitempty"`
 }
 
 // SourceRule maps a glob (relative to configured markdown paths) to kind/subtype/tags.
 type SourceRule struct {
-	Match   string   `yaml:"match"`
-	Kind    string   `yaml:"kind"`
-	Subtype string   `yaml:"subtype,omitempty"`
-	Tags    []string `yaml:"tags,omitempty"`
+	Match   string   `yaml:"match" json:"match"`
+	Kind    string   `yaml:"kind" json:"kind"`
+	Subtype string   `yaml:"subtype,omitempty" json:"subtype,omitempty"`
+	Tags    []string `yaml:"tags,omitempty" json:"tags,omitempty"`
 }
 
 // DefaultRepoConfig returns sensible defaults per spec §10.
@@ -131,6 +146,7 @@ func CloneRepoConfig(cfg *RepoConfig) *RepoConfig {
 	if cfg.Artifacts.CodeComments != nil {
 		out.Artifacts.CodeComments = boolPtr(*cfg.Artifacts.CodeComments)
 	}
+	out.Integrations.Orchestration.Options = cloneConfigMap(cfg.Integrations.Orchestration.Options)
 	out.Sources = make([]SourceConfig, len(cfg.Sources))
 	for i, src := range cfg.Sources {
 		out.Sources[i] = src
@@ -142,6 +158,32 @@ func CloneRepoConfig(cfg *RepoConfig) *RepoConfig {
 		}
 	}
 	return &out
+}
+
+func cloneConfigMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]any, len(input))
+	for key, value := range input {
+		out[key] = cloneConfigValue(value)
+	}
+	return out
+}
+
+func cloneConfigValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneConfigMap(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = cloneConfigValue(item)
+		}
+		return out
+	default:
+		return value
+	}
 }
 
 func (e ExperimentConfig) IntentCandidateDiscoveryEnabled(defaultValue bool) bool {

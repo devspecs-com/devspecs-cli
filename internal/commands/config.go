@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -26,13 +28,16 @@ func NewConfigCmd() *cobra.Command {
 }
 
 func newConfigShowCmd() *cobra.Command {
-	return &cobra.Command{
+	var jsonOutput bool
+	cmd := &cobra.Command{
 		Use:   "show",
 		Short: "Print the effective configuration",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runConfigShow(cmd)
+			return runConfigShow(cmd, jsonOutput)
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output configuration as JSON")
+	return cmd
 }
 
 func newConfigPathsCmd() *cobra.Command {
@@ -67,7 +72,7 @@ func newConfigSetCmd() *cobra.Command {
 	}
 }
 
-func runConfigShow(cmd *cobra.Command) error {
+func runConfigShow(cmd *cobra.Command, jsonOutput bool) error {
 	wd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -82,8 +87,14 @@ func runConfigShow(cmd *cobra.Command) error {
 	out := cmd.OutOrStdout()
 	if cfg == nil {
 		cfg = config.DefaultRepoConfig()
+		if jsonOutput {
+			return writeConfigJSON(out, cfg)
+		}
 		fmt.Fprintln(out, "(defaults — no .devspecs/config.yaml found)")
 		fmt.Fprintln(out)
+	}
+	if jsonOutput {
+		return writeConfigJSON(out, cfg)
 	}
 
 	data, err := yaml.Marshal(cfg)
@@ -92,6 +103,12 @@ func runConfigShow(cmd *cobra.Command) error {
 	}
 	fmt.Fprint(out, string(data))
 	return nil
+}
+
+func writeConfigJSON(out io.Writer, cfg *config.RepoConfig) error {
+	encoder := json.NewEncoder(out)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(cfg)
 }
 
 func runConfigPaths(cmd *cobra.Command) error {

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added a provider-neutral `integrations.orchestration` repository setting and
+  `ds config show --json` so explicitly selected external orchestrators can
+  consume DevSpecs handoffs without adding provider commands or runtime state to
+  DevSpecs. Configuration alone never launches work or promotes a task.
 - Added read-only `ds doctor` diagnostics for active binary and PATH
   precedence, inferred install source, DevSpecs home, index size/schema/writer
   state, and repository identity, with complete JSON output and structural

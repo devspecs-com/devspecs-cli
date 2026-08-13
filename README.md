@@ -366,6 +366,23 @@ with `--format nygard|madr|y-statement|outcome-first|iso-42010`; MADR also accep
 `--variant full|minimal`. Run `ds compose adr --help` for the compact format
 selection guide.
 
+External orchestration is repository opt-in and provider-neutral:
+
+```yaml
+version: 1
+integrations:
+  orchestration:
+    provider: waspflow
+    options:
+      executable: waspflow
+```
+
+`ds config show --json` exposes the effective selection to an external adapter.
+DevSpecs preserves this configuration but does not launch providers, store their
+runtime state, or turn a provider receipt into a task checkpoint. Each adapter
+strictly validates its own `options`; another orchestrator can implement the
+same handoff contract under a different provider key.
+
 `ds workspace trace` reports both lifecycle `status` and index-capture
 `index_status`. Keep them separate: `index_missing` means an artifact is not
 currently captured in the local index; it is not the same as `missing_result`.
@@ -430,7 +447,7 @@ instead of indexing every worktree as a new repository.
 | `ds index backup\|rebuild\|restore` | Back up, safely rebuild, or exactly restore the local SQLite index. |
 | `ds prune [--dry-run] [--vacuum]` | Remove stale repository data and redundant capture revisions; compact the database explicitly with `--vacuum`. |
 | `ds doctor [--redact] [--json]` | Inspect binary precedence, local index compatibility, writer state, and repository identity without mutating state. |
-| `ds config show` | Inspect effective repo discovery config. |
+| `ds config show [--json]` | Inspect effective repository configuration, including opt-in integrations. |
 
 Most read commands support `--json`. Run `ds <command> --help` for the current
 flags. Use the `ds workspace ...` form for workspace coordination.

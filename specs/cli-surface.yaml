@@ -4,7 +4,7 @@ kind: cli_surface_tree
 metadata:
   product: devspecs-cli
   binary: ds
-  audited_at: "2026-08-12"
+  audited_at: "2026-08-13"
   source:
     - go run ./cmd/ds --help
     - go run ./cmd/ds task --help
@@ -276,8 +276,8 @@ tree:
     children:
       show:
         status: maintenance
-        usage: ds config show
-        purpose: Print effective configuration.
+        usage: ds config show [--json]
+        purpose: Print effective configuration, including opaque opt-in integration settings.
       paths:
         status: maintenance
         usage: ds config paths
