@@ -6,12 +6,12 @@ metadata:
   binary: ds
   audited_at: "2026-08-13"
   source:
-    - go run ./cmd/ds --help
-    - go run ./cmd/ds task --help
-    - go run ./cmd/ds workspace --help
-    - go run ./cmd/ds compose --help
-    - go run ./cmd/ds prune --help
-    - go run ./cmd/ds doctor --help
+    - bash scripts/dev.sh --worktree -- go run ./cmd/ds --help
+    - bash scripts/dev.sh --worktree -- go run ./cmd/ds task --help
+    - bash scripts/dev.sh --worktree -- go run ./cmd/ds workspace --help
+    - bash scripts/dev.sh --worktree -- go run ./cmd/ds compose --help
+    - bash scripts/dev.sh --worktree -- go run ./cmd/ds prune --help
+    - bash scripts/dev.sh --worktree -- go run ./cmd/ds doctor --help
     - cmd/ds/main.go
     - internal/commands
   intent: >

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Added repository-owned Git Bash and PowerShell development launchers with
+  deterministic named-channel or source-worktree homes under
+  `~/.devspecs-dev`. Local builds and cross-repo agent sessions can now avoid
+  the stable `~/.devspecs` database without adding public CLI surface or
+  inferring behavior from executable paths.
+- Changed activation evals, scan benchmarks, local pre-commit tests, and CI
+  jobs to use isolated DevSpecs homes with telemetry disabled. Disposable
+  benchmark homes no longer create production anonymous installation IDs.
 - Added a provider-neutral `integrations.orchestration` repository setting and
   `ds config show --json` so explicitly selected external orchestrators can
   consume DevSpecs handoffs without adding provider commands or runtime state to

@@ -14,6 +14,11 @@ for var in $(git rev-parse --local-env-vars); do
 done
 cd "$REPO_ROOT"
 
+DEVSPECS_PRECOMMIT_HOME=$(mktemp -d "${TMPDIR:-/tmp}/devspecs-precommit.XXXXXX")
+trap 'rm -rf "$DEVSPECS_PRECOMMIT_HOME"' EXIT
+export DEVSPECS_HOME="$DEVSPECS_PRECOMMIT_HOME"
+export DEVSPECS_TELEMETRY=0
+
 echo "pre-commit: go vet ./..."
 go vet ./...
 

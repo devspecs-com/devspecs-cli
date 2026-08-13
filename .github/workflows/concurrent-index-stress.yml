@@ -17,6 +17,9 @@ jobs:
     name: Repeated shared-index contention
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      DEVSPECS_HOME: ${{ runner.temp }}/devspecs-concurrency-home
+      DEVSPECS_TELEMETRY: '0'
     steps:
       - uses: actions/checkout@v4
 

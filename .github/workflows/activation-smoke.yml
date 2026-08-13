@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
+      DEVSPECS_HOME: ${{ runner.temp }}/devspecs-activation-smoke-home
+      DEVSPECS_TELEMETRY: '0'
       SMOKE_MANIFEST: testdata/activation/smoke-5/manifest.json
       SMOKE_GOLDENS: testdata/activation/smoke-5/goldens
     steps:

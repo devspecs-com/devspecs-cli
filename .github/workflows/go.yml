@@ -10,6 +10,9 @@ jobs:
   test:
     name: Lint & Test
     runs-on: ubuntu-latest
+    env:
+      DEVSPECS_HOME: ${{ runner.temp }}/devspecs-test-home
+      DEVSPECS_TELEMETRY: '0'
     steps:
       - uses: actions/checkout@v4
 
@@ -58,6 +61,9 @@ jobs:
     name: Doctor & index recovery (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
+    env:
+      DEVSPECS_HOME: ${{ runner.temp }}/devspecs-maintenance-home
+      DEVSPECS_TELEMETRY: '0'
     strategy:
       fail-fast: false
       matrix:
