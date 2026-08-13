@@ -149,6 +149,7 @@ irm https://raw.githubusercontent.com/devspecs-com/devspecs-cli/main/install.ps1
 
 ```bash
 go install github.com/devspecs-com/devspecs-cli/cmd/ds@latest
+go install github.com/devspecs-com/devspecs-cli/cmd/ds-orchestrate@latest
 ```
 
 After installing or upgrading, restart your shell or IDE terminal if `ds` is

@@ -110,6 +110,25 @@ func TestWaspflowDriverWait_WhenContextExpires_PreservesProviderLane(t *testing.
 	assert.Equal(t, "600", runner.calls[0].args[3])
 }
 
+func TestWaspflowDriverWait_WhenContextIsCanceled_PreservesProviderLane(t *testing.T) {
+	// Arrange
+	runner := &waspflowRunner{results: []waspflowRun{{err: context.Canceled}}}
+	driver := newTestWaspflowDriver(t, runner)
+	handle := testWaspflowHandle(t, "devspecs-w09")
+
+	// Act
+	err := driver.Wait(context.Background(), handle, 600)
+
+	// Assert
+	require.Error(t, err)
+	assert.ErrorContains(t, err, `waspflow wait interrupted; lane "devspecs-w09" was not cancelled or reaped`)
+	assert.ErrorIs(t, err, context.Canceled)
+	require.Len(t, runner.calls, 1)
+	require.Len(t, runner.calls[0].args, 4)
+	assert.Equal(t, "wait", runner.calls[0].args[0])
+	assert.Equal(t, "devspecs-w09", runner.calls[0].args[1])
+}
+
 func TestWaspflowDriverFinalize_WithMissingRequiredReport_DoesNotReapLane(t *testing.T) {
 	// Arrange
 	executionRepo := t.TempDir()
@@ -189,6 +208,87 @@ func TestWaspflowDriverFinalize_WithSuccessfulStockReceipt_NormalizesAndReaps(t 
 	require.Len(t, runner.calls, 8)
 	assert.Equal(t, "reap", runner.calls[7].args[0])
 	assert.Equal(t, "devspecs-w09", runner.calls[7].args[1])
+}
+
+func TestWaspflowDriverFinalize_WithVerificationFailure_ReturnsFailedReceipt(t *testing.T) {
+	// Arrange
+	home := t.TempDir()
+	executionRepo := t.TempDir()
+	laneDir := filepath.Join(home, "lanes", "devspecs-w09")
+	require.NoError(t, os.MkdirAll(laneDir, 0o700))
+	nativeReceipt := `{
+  "lane_uuid": "lane-uuid",
+  "waspflow_version": "0.8.0",
+  "result": "verify_failed",
+  "verify": {"state": "failed", "failure_class": "tests", "verify_strength": "declared:suite"},
+  "timestamps": {"spawn_epoch": 1786651200, "finalize_epoch": 1786651260}
+}`
+	require.NoError(t, os.WriteFile(filepath.Join(laneDir, "receipt.json"), []byte(nativeReceipt), 0o600))
+	status := `{"lane_uuid":"lane-uuid","cwd":"` + filepath.ToSlash(executionRepo) + `","verify_state":"failed","verify_strength":"declared:suite"}`
+	runner := &waspflowRunner{results: []waspflowRun{
+		{result: CommandResult{Stdout: []byte(status)}},
+		{result: CommandResult{ExitCode: 2, Stdout: []byte(`{"state":"failed"}`)}},
+		{result: CommandResult{Stdout: []byte(status)}},
+		{result: CommandResult{Stdout: []byte("result-commit\n")}},
+		{},
+		{},
+		{},
+		{result: CommandResult{ExitCode: 2}},
+	}}
+	driver := newTestWaspflowDriver(t, runner)
+	driver.home = home
+	request := HandoffRequest{Requirements: Requirements{
+		Verification: VerifyRequirement{Required: true, Command: "go test ./..."},
+	}}
+
+	// Act
+	result, err := driver.Finalize(context.Background(), testWaspflowHandle(t, "devspecs-w09"), request, t.TempDir())
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, "failed", result.ExecutionState)
+	require.NotNil(t, result.Failure)
+	assert.Equal(t, "provider_result", result.Failure.Class)
+	assert.Equal(t, "verify_failed", result.Failure.Detail)
+	assert.Equal(t, "failed", result.VerificationState)
+	assert.Equal(t, "tests", result.VerificationFailureClass)
+	require.Len(t, runner.calls, 8)
+	assert.Equal(t, "verify", runner.calls[1].args[0])
+	assert.Equal(t, "reap", runner.calls[7].args[0])
+}
+
+func TestWaspflowDriverFinalize_WhenCleanupFailsWithoutReceipt_PreservesInspectableLane(t *testing.T) {
+	// Arrange
+	executionRepo := t.TempDir()
+	status := `{"lane_uuid":"lane-uuid","cwd":"` + filepath.ToSlash(executionRepo) + `"}`
+	runner := &waspflowRunner{results: []waspflowRun{
+		{result: CommandResult{Stdout: []byte(status)}},
+		{result: CommandResult{Stdout: []byte(status)}},
+		{result: CommandResult{Stdout: []byte("result-commit\n")}},
+		{},
+		{},
+		{},
+		{result: CommandResult{ExitCode: 3, Stderr: []byte("cleanup refused")}},
+	}}
+	driver := newTestWaspflowDriver(t, runner)
+	driver.home = t.TempDir()
+
+	// Act
+	result, err := driver.Finalize(
+		context.Background(),
+		testWaspflowHandle(t, "devspecs-w09"),
+		HandoffRequest{},
+		t.TempDir(),
+	)
+
+	// Assert
+	assert.Equal(t, ProviderResult{}, result)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, `waspflow reap exited 3 without a readable native receipt`)
+	assert.ErrorContains(t, err, `inspect lane "devspecs-w09": cleanup refused`)
+	require.Len(t, runner.calls, 7)
+	assert.Equal(t, "reap", runner.calls[6].args[0])
+	assert.Equal(t, "devspecs-w09", runner.calls[6].args[1])
 }
 
 func TestClassifyWaspflowResult_WithProviderFailure_ReturnsBoundedFailure(t *testing.T) {

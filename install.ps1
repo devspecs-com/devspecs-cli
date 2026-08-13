@@ -4,7 +4,7 @@
 $ErrorActionPreference = "Stop"
 
 $Repo = "devspecs-com/devspecs-cli"
-$BinaryName = "ds"
+$BinaryNames = @("ds", "ds-orchestrate")
 $InstallDir = if ($env:DEVSPECS_INSTALL_DIR) { $env:DEVSPECS_INSTALL_DIR } else { "$env:LOCALAPPDATA\DevSpecs\bin" }
 
 function Get-LatestVersion {
@@ -67,12 +67,20 @@ function Install-DevSpecs {
     Write-Host "[INFO] Extracting..." -ForegroundColor Green
     Expand-Archive -Path "$TmpDir\$Filename" -DestinationPath $TmpDir -Force
 
+    foreach ($BinaryName in $BinaryNames) {
+        if (-not (Test-Path "$TmpDir\$BinaryName.exe")) {
+            throw "Release archive is missing $BinaryName.exe"
+        }
+    }
+
     if (-not (Test-Path $InstallDir)) {
         New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
     }
 
     Write-Host "[INFO] Installing to $InstallDir..." -ForegroundColor Green
-    Copy-Item "$TmpDir\$BinaryName.exe" "$InstallDir\$BinaryName.exe" -Force
+    foreach ($BinaryName in $BinaryNames) {
+        Copy-Item "$TmpDir\$BinaryName.exe" "$InstallDir\$BinaryName.exe" -Force
+    }
 
     Remove-Item $TmpDir -Recurse -Force
 

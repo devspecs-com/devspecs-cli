@@ -30,9 +30,32 @@ builds:
       - -X github.com/devspecs-com/devspecs-cli/internal/version.Version={{.Version}}
       - -X github.com/devspecs-com/devspecs-cli/internal/version.Commit={{.Commit}}
       - -X github.com/devspecs-com/devspecs-cli/internal/version.Date={{.Date}}
+  - id: ds-orchestrate
+    main: ./cmd/ds-orchestrate
+    binary: ds-orchestrate
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X github.com/devspecs-com/devspecs-cli/internal/version.Version={{.Version}}
+      - -X github.com/devspecs-com/devspecs-cli/internal/version.Commit={{.Commit}}
+      - -X github.com/devspecs-com/devspecs-cli/internal/version.Date={{.Date}}
 
 archives:
   - id: default
+    ids:
+      - ds
+      - ds-orchestrate
     formats:
       - tar.gz
     format_overrides:
@@ -75,6 +98,9 @@ release:
 
 nfpms:
   - id: devspecs
+    ids:
+      - ds
+      - ds-orchestrate
     package_name: devspecs
     vendor: devspecs-com
     homepage: "https://github.com/devspecs-com/devspecs-cli"
@@ -99,8 +125,10 @@ brews:
     skip_upload: false
     test: |
       system "#{bin}/ds", "--version"
+      system "#{bin}/ds-orchestrate", "--version"
     install: |
       bin.install "ds"
+      bin.install "ds-orchestrate"
 
 scoops:
   - name: devspecs

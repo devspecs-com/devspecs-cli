@@ -1,6 +1,7 @@
 .PHONY: build test test-policy lint cover cover-check snapshot clean hooks
 
 BINARY := ds
+ORCHESTRATION_BINARY := ds-orchestrate
 MODULE := github.com/devspecs-com/devspecs-cli
 VERSION_PKG := $(MODULE)/internal/version
 COVERAGE_FLOOR ?= 80.0
@@ -12,6 +13,7 @@ LDFLAGS := -s -w \
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/ds
+	go build -ldflags "$(LDFLAGS)" -o $(ORCHESTRATION_BINARY) ./cmd/ds-orchestrate
 
 ifeq ($(shell go env CGO_ENABLED),1)
 RACE := -race
@@ -48,5 +50,5 @@ snapshot:
 	goreleaser release --snapshot --clean
 
 clean:
-	rm -f $(BINARY) coverage.out coverage.html
+	rm -f $(BINARY) $(ORCHESTRATION_BINARY) coverage.out coverage.html
 	rm -rf dist/
