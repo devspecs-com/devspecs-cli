@@ -59,7 +59,7 @@ type sourceManifestExtractResult struct {
 	role          string
 }
 
-func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, now string, phaseTiming bool, workerCount int) (*SourceManifestDiagnostics, error) {
+func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, now string, inventory []fileInventoryEntry, phaseTiming bool, workerCount int) (*SourceManifestDiagnostics, error) {
 	diagnostics := &SourceManifestDiagnostics{
 		Enabled:         true,
 		IgnoredByReason: map[string]int{},
@@ -75,15 +75,8 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 			diagnostics.PhaseMS[name] = time.Since(started).Milliseconds()
 		}
 	}
-	phaseStarted := time.Now()
-	inventoryResult, err := collectFileInventory(ctx, repoRoot)
-	recordPhase("inventory", phaseStarted)
-	if err != nil {
-		return diagnostics, err
-	}
-	inventory := inventoryResult.files
 	diagnostics.InventoryFiles = len(inventory)
-	phaseStarted = time.Now()
+	phaseStarted := time.Now()
 	roots := detectFirstPartySourceRoots(inventory)
 	recordPhase("root_detection", phaseStarted)
 	phaseStarted = time.Now()
@@ -100,7 +93,7 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 			return diagnostics, err
 		}
 		rel := normalizeFirstPartySourceRel(file.relPath)
-		if rel == "" || !firstPartySourceLooksSourcePath(rel) {
+		if rel == "" || !firstPartyInventoryLooksSource(file) {
 			continue
 		}
 		diagnostics.SourceLikeFiles++
@@ -116,7 +109,7 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 			diagnostics.IgnoredByReason["no_source_root"]++
 			continue
 		}
-		role := firstPartySourceRole(rel)
+		role := firstPartySourceRoleForInventory(file)
 		if role == "" {
 			diagnostics.IgnoredByReason["missing_role"]++
 			continue
@@ -250,6 +243,9 @@ func extractSourceManifestCandidate(repoID string, candidate sourceManifestCandi
 	}
 	fileID := sourceManifestFileID(repoID, candidate.rel)
 	language := sourcecontext.LanguageForPath(candidate.rel)
+	if candidate.file.shellEntry {
+		language = "shell"
+	}
 	if language == "" {
 		language = strings.TrimPrefix(strings.ToLower(filepath.Ext(filepath.Base(candidate.rel))), ".")
 	}

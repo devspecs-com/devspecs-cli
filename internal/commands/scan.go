@@ -75,7 +75,7 @@ func NewScanCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&experimentalSupportDocs, "experimental-support-docs", false, "Index bounded support docs as diagnostic context")
 	cmd.Flags().BoolVar(&experimentalRecentSource, "experimental-recent-source-context", false, "Index bounded recently changed source files as experimental implementation context")
 	cmd.Flags().BoolVar(&experimentalFirstPartySource, "experimental-first-party-source-context", false, "Index broad first-party source/test files as experimental implementation context")
-	cmd.Flags().BoolVar(&experimentalSourceManifest, "experimental-source-manifest", false, "Index compact first-party source/test metadata as experimental manifest substrate")
+	cmd.Flags().BoolVar(&experimentalSourceManifest, "experimental-source-manifest", false, "Show compact first-party source/test manifest diagnostics")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Index executable test cases as behavioral intent artifacts")
 	cmd.Flags().BoolVar(&includeTests, "experimental-test-cases", false, "Deprecated alias for --include-tests")
 	cmd.Flags().BoolVar(&includeCodeComments, "include-code-comments", false, "Index high-signal code comments as implementation intent artifacts")
@@ -222,8 +222,8 @@ func runScanWithRecovery(cmd *cobra.Command, path string, verbose, asJSON, quiet
 	scanOpts.IncludeWorkstreamEvidence = experimentalWorkstreamEvidence
 	scanOpts.RichTypedIndex = experimentalRichTypedIndex
 	scanOpts.RecentSourceContext = experimentalRecentSource
-	scanOpts.FirstPartySourceContext = experimentalFirstPartySource
-	scanOpts.SourceManifest = experimentalSourceManifest
+	scanOpts.FirstPartySourceContext = scanOpts.FirstPartySourceContext || experimentalFirstPartySource
+	scanOpts.SourceManifest = scanOpts.SourceManifest || experimentalSourceManifest
 	scanOpts.IgnoreRules = noGitignore
 	scanOpts.PhaseTiming = phaseTiming
 	if !quiet {
@@ -235,6 +235,9 @@ func runScanWithRecovery(cmd *cobra.Command, path string, verbose, asJSON, quiet
 	result, err := scanner.RunWithOptions(scanCtx, repoRoot, cfg, scanOpts)
 	if err != nil {
 		return indexOperationError("scan", explicitScanDeadlineLabel, scanTraversalError(repoRoot, err))
+	}
+	if !experimentalSourceManifest {
+		result.SourceManifest = nil
 	}
 	if rebuild {
 		if err := db.Close(); err != nil {
@@ -555,7 +558,7 @@ func liveScanRunOptionsContext(ctx context.Context, db *store.DB, repoRoot strin
 	if strings.TrimSpace(info.RootPath) == "" {
 		info.RootPath = repoRoot
 	}
-	opts := scan.RunOptions{UseTransaction: true, RepositoryInfo: &info}
+	opts := scan.RunOptions{UseTransaction: true, SourceManifest: true, RepositoryInfo: &info}
 	meta := db.GetRepoByRoot(repoRoot)
 	var hasArtifacts bool
 	var err error

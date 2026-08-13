@@ -1481,6 +1481,47 @@ func TestCollectFileInventoryExplainsSkippedHeavyAndIgnoredDirs(t *testing.T) {
 	}
 }
 
+func TestCollectFileInventoryIncludesTrackedFileMatchingGitIgnore(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git executable not available")
+	}
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, ".gitignore", "core.*\n")
+	writeScanTestFile(t, repoRoot, "lib/core.sh", "#!/bin/sh\necho core\n")
+	runGitCommand(t, repoRoot, "init")
+	runGitCommand(t, repoRoot, "add", ".gitignore")
+	runGitCommand(t, repoRoot, "add", "--force", "lib/core.sh")
+	matcher, err := ignore.NewMatcher(repoRoot)
+	require.NoError(t, err)
+
+	result, err := collectFileInventory(ignore.WithContext(context.Background(), matcher), repoRoot)
+	require.NoError(t, err)
+
+	require.Len(t, result.files, 2)
+	assert.Equal(t, ".gitignore", result.files[0].relPath)
+	assert.Equal(t, "lib/core.sh", result.files[1].relPath)
+}
+
+func TestCollectFileInventoryExcludesTrackedFileMatchingAIIgnore(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git executable not available")
+	}
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, ".aiignore", "core.*\n")
+	writeScanTestFile(t, repoRoot, "lib/core.sh", "#!/bin/sh\necho core\n")
+	runGitCommand(t, repoRoot, "init")
+	runGitCommand(t, repoRoot, "add", ".aiignore")
+	runGitCommand(t, repoRoot, "add", "--force", "lib/core.sh")
+	matcher, err := ignore.NewMatcher(repoRoot)
+	require.NoError(t, err)
+
+	result, err := collectFileInventory(ignore.WithContext(context.Background(), matcher), repoRoot)
+	require.NoError(t, err)
+
+	require.Len(t, result.files, 1)
+	assert.Equal(t, ".aiignore", result.files[0].relPath)
+}
+
 func TestScan_FreshIndexAppendSeedsExistingShortIDs(t *testing.T) {
 	root := t.TempDir()
 	repoOne := filepath.Join(root, "repo-one")

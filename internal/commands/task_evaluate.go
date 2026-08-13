@@ -605,8 +605,8 @@ func anyPathOverlap(left, right []string) bool {
 func intersectionPaths(left, right []string) []string {
 	var out []string
 	for _, value := range left {
-		if containsPath(right, value) {
-			out = appendNormalizedUnique(out, value)
+		if containsPath(right, value) && !containsPath(out, value) {
+			out = append(out, normalizeSinglePath(value))
 		}
 	}
 	return out

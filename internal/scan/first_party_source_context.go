@@ -3,12 +3,13 @@ package scan
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
-	"github.com/devspecs-com/devspecs-cli/internal/ignore"
 )
 
 const (
@@ -31,6 +32,13 @@ func buildFirstPartySourceContextCandidates(ctx context.Context, repoRoot string
 		return nil
 	}
 	inventory := inventoryResult.files
+	if err := annotateShellEntrypoints(ctx, inventory); err != nil {
+		return nil
+	}
+	return buildFirstPartySourceContextCandidatesFromInventory(ctx, repoRoot, inventory, existing)
+}
+
+func buildFirstPartySourceContextCandidatesFromInventory(ctx context.Context, repoRoot string, inventory []fileInventoryEntry, existing []adapters.Candidate) []adapters.Candidate {
 	existingPaths := map[string]bool{}
 	for _, candidate := range existing {
 		if rel := normalizeFirstPartySourceRel(candidate.RelPath); rel != "" {
@@ -51,15 +59,25 @@ func buildFirstPartySourceContextCandidates(ctx context.Context, repoRoot string
 		if root.path == "" {
 			continue
 		}
-		role := firstPartySourceRole(rel)
+		if !firstPartyInventoryLooksSource(file) {
+			continue
+		}
+		role := firstPartySourceRoleForInventory(file)
 		if role == "" || firstPartySourceLooksNoisePath(rel) {
 			continue
 		}
 		if firstPartySourceLooksDocumentationExample(rel) && role != "test_doc_example" {
 			continue
 		}
-		if m := ignore.FromContext(ctx); m != nil && m.ShouldSkip(rel, false) {
-			continue
+		metadata := map[string]any{
+			"admission_reason": firstPartySourceAdmissionReason,
+			"source_role":      role,
+			"source_root":      root.path,
+			"source_root_kind": root.kind,
+			"source_path":      rel,
+		}
+		if file.shellEntry {
+			metadata["language"] = "shell"
 		}
 		candidates = append(candidates, adapters.Candidate{
 			PrimaryPath:      filepath.Join(repoRoot, filepath.FromSlash(rel)),
@@ -67,13 +85,7 @@ func buildFirstPartySourceContextCandidates(ctx context.Context, repoRoot string
 			AdapterName:      sourceCompanionAdapterName,
 			DiscoveryScore:   firstPartySourceDiscoveryScore(role, root.kind),
 			DiscoveryReasons: []string{firstPartySourceAdmissionReason, role, root.kind},
-			Metadata: map[string]any{
-				"admission_reason": firstPartySourceAdmissionReason,
-				"source_role":      role,
-				"source_root":      root.path,
-				"source_root_kind": root.kind,
-				"source_path":      rel,
-			},
+			Metadata:         metadata,
 		})
 	}
 	if len(candidates) <= firstPartySourceMaxCandidates {
@@ -113,7 +125,7 @@ func detectFirstPartySourceRoots(inventory []fileInventoryEntry) []firstPartySou
 			if isFirstPartyRepoRootMarker(base) {
 				rootMarkers[base] = true
 			}
-			if firstPartySourceLooksSourcePath(rel) {
+			if firstPartyInventoryLooksSource(file) {
 				rootSourceCount++
 			}
 		}
@@ -123,7 +135,7 @@ func detectFirstPartySourceRoots(inventory []fileInventoryEntry) []firstPartySou
 				moduleMarkerDirs[dir] = true
 			}
 		}
-		if firstPartySourceLooksSourcePath(rel) && !firstPartySourceLooksNoisePath(rel) {
+		if firstPartyInventoryLooksSource(file) && !firstPartySourceLooksNoisePath(rel) {
 			for _, dir := range firstPartyAncestorDirs(rel) {
 				sourceCountsByDir[dir]++
 			}
@@ -267,9 +279,13 @@ func capFirstPartySourceCandidates(candidates []adapters.Candidate, limit int) [
 	return selected
 }
 
-func firstPartySourceRole(rel string) string {
+func firstPartySourceRoleForInventory(file fileInventoryEntry) string {
+	return firstPartySourceRoleForPath(file.relPath, file.shellEntry)
+}
+
+func firstPartySourceRoleForPath(rel string, shellEntry bool) string {
 	rel = normalizeFirstPartySourceRel(rel)
-	if rel == "" || !firstPartySourceLooksSourcePath(rel) {
+	if rel == "" || (!firstPartySourceLooksSourcePath(rel) && !shellEntry) {
 		return ""
 	}
 	if firstPartySourceLooksTestPath(rel) {
@@ -282,6 +298,10 @@ func firstPartySourceRole(rel string) string {
 		return "fixture"
 	}
 	return "implementation"
+}
+
+func firstPartyInventoryLooksSource(file fileInventoryEntry) bool {
+	return firstPartySourceLooksSourcePath(file.relPath) || file.shellEntry
 }
 
 func firstPartySourceLooksSourcePath(path string) bool {
@@ -414,9 +434,77 @@ func isFirstPartyRepoRootMarker(base string) bool {
 
 func isFirstPartyCommonRoot(part string) bool {
 	switch strings.ToLower(part) {
-	case "src", "lib", "app", "apps", "packages", "crates", "internal", "pkg",
+	case "src", "lib", "bin", "script", "scripts", "app", "apps", "packages", "crates", "internal", "pkg",
 		"cmd", "services", "modules", "components", "server", "client", "api",
 		"backend", "frontend", "web", "ui", "core", "plugins", "extensions":
+		return true
+	default:
+		return false
+	}
+}
+
+func annotateShellEntrypoints(ctx context.Context, inventory []fileInventoryEntry) error {
+	for i := range inventory {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		file := &inventory[i]
+		rel := normalizeFirstPartySourceRel(file.relPath)
+		if rel == "" || filepath.Ext(filepath.Base(rel)) != "" || file.mode&os.ModeSymlink != 0 {
+			continue
+		}
+		executable := file.mode.Perm()&0o111 != 0
+		if !executable {
+			continue
+		}
+		body, readErr := readBoundedShellHeader(file.primaryPath)
+		if readErr != nil {
+			continue
+		}
+		file.shellEntry = hasSupportedShellShebang(body)
+	}
+	return nil
+}
+
+func readBoundedShellHeader(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return io.ReadAll(io.LimitReader(file, 256))
+}
+
+func hasSupportedShellShebang(body []byte) bool {
+	line := string(body)
+	if newline := strings.IndexByte(line, '\n'); newline >= 0 {
+		line = line[:newline]
+	}
+	line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+	if !strings.HasPrefix(line, "#!") {
+		return false
+	}
+	fields := strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, "#!")))
+	if len(fields) == 0 {
+		return false
+	}
+	command := strings.ToLower(filepath.Base(filepath.ToSlash(fields[0])))
+	if command != "env" {
+		return supportedShellCommand(command)
+	}
+	for _, field := range fields[1:] {
+		field = strings.TrimSpace(field)
+		if field == "" || strings.HasPrefix(field, "-") || strings.Contains(field, "=") {
+			continue
+		}
+		return supportedShellCommand(strings.ToLower(filepath.Base(filepath.ToSlash(field))))
+	}
+	return false
+}
+
+func supportedShellCommand(command string) bool {
+	switch command {
+	case "sh", "bash", "zsh":
 		return true
 	default:
 		return false

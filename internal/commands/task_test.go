@@ -3599,6 +3599,19 @@ func TestTaskEvaluateUsesStructuredCheckpointWhenMarkdownIsUnavailable(t *testin
 	assert.Equal(t, 0, out.CheckpointSummary.MarkdownFallbacks)
 }
 
+func TestIntersectionPaths_DeduplicatesArtifactAndAnchoredTestPaths(t *testing.T) {
+	predicted := []string{
+		"internal/retrieval/ranking_test.go",
+		"internal/retrieval/ranking_test.go#TestImproveTestCompanionRecall",
+	}
+	observed := []string{"internal/retrieval/ranking_test.go"}
+
+	got := intersectionPaths(predicted, observed)
+
+	require.Len(t, got, 1)
+	assert.Equal(t, "internal/retrieval/ranking_test.go", got[0])
+}
+
 func setupCheckpointEvidenceTask(t *testing.T) taskCheckpointOutput {
 	t.Helper()
 	setupTaskCommandRepo(t)

@@ -34,26 +34,30 @@ func FromContext(ctx context.Context) *Matcher {
 // Matcher answers whether a repo-relative path should be skipped (gitignore rules).
 type Matcher struct {
 	repoRoot string
-	gi       gitignore.IgnoreParser
+	git      gitignore.IgnoreParser
+	ai       gitignore.IgnoreParser
 }
 
 // NewMatcher loads .gitignore, .git/info/exclude, and .aiignore from repoRoot (missing files ignored).
 // Returns a non-nil Matcher; matching is a no-op when no patterns exist.
 func NewMatcher(repoRoot string) (*Matcher, error) {
 	repoRoot = filepath.Clean(repoRoot)
-	var lines []string
+	var gitLines []string
 	for _, p := range []string{
 		filepath.Join(repoRoot, ".gitignore"),
 		filepath.Join(repoRoot, ".git", "info", "exclude"),
-		filepath.Join(repoRoot, ".aiignore"),
 	} {
-		lines = append(lines, readPatternLines(p)...)
+		gitLines = append(gitLines, readPatternLines(p)...)
 	}
-	var gi gitignore.IgnoreParser
-	if len(lines) > 0 {
-		gi = gitignore.CompileIgnoreLines(lines...)
+	var gitParser gitignore.IgnoreParser
+	if len(gitLines) > 0 {
+		gitParser = gitignore.CompileIgnoreLines(gitLines...)
 	}
-	return &Matcher{repoRoot: repoRoot, gi: gi}, nil
+	var aiParser gitignore.IgnoreParser
+	if aiLines := readPatternLines(filepath.Join(repoRoot, ".aiignore")); len(aiLines) > 0 {
+		aiParser = gitignore.CompileIgnoreLines(aiLines...)
+	}
+	return &Matcher{repoRoot: repoRoot, git: gitParser, ai: aiParser}, nil
 }
 
 func readPatternLines(path string) []string {
@@ -73,17 +77,33 @@ func readPatternLines(path string) []string {
 // ShouldSkip reports whether relPath (relative to repo root, slash-separated) should be ignored.
 // isDir should match the entry being tested so directory-only patterns behave like git.
 func (m *Matcher) ShouldSkip(relPath string, isDir bool) bool {
-	if m == nil || m.gi == nil {
+	if m == nil {
+		return false
+	}
+	return matcherSkips(m.git, relPath, isDir) || matcherSkips(m.ai, relPath, isDir)
+}
+
+// ShouldSkipTracked reports whether DevSpecs-specific ignore rules exclude a
+// Git-tracked path. Git's own ignore files do not apply to tracked files.
+func (m *Matcher) ShouldSkipTracked(relPath string, isDir bool) bool {
+	if m == nil {
+		return false
+	}
+	return matcherSkips(m.ai, relPath, isDir)
+}
+
+func matcherSkips(parser gitignore.IgnoreParser, relPath string, isDir bool) bool {
+	if parser == nil {
 		return false
 	}
 	rel := filepath.ToSlash(filepath.Clean(relPath))
 	if rel == "." || rel == "" {
 		return false
 	}
-	if m.gi.MatchesPath(rel) {
+	if parser.MatchesPath(rel) {
 		return true
 	}
-	if isDir && !strings.HasSuffix(rel, "/") && m.gi.MatchesPath(rel+"/") {
+	if isDir && !strings.HasSuffix(rel, "/") && parser.MatchesPath(rel+"/") {
 		return true
 	}
 	return false
