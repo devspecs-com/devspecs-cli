@@ -320,6 +320,12 @@ func collectDoctorIndex(ctx context.Context, report *doctorReport) {
 		return
 	}
 	indexReport.Path = dbPath
+	if report.Home.Exists && report.Home.Status == doctorStatusError {
+		indexReport.Status = doctorStatusNotApplicable
+		indexReport.Compatibility = store.IndexCompatibilityAbsent
+		report.Index = indexReport
+		return
+	}
 	inspection, inspectErr := store.InspectIndex(ctx, dbPath)
 	indexReport.Exists = inspection.Exists
 	indexReport.DatabaseBytes = inspection.DatabaseBytes
