@@ -366,7 +366,7 @@ with `--format nygard|madr|y-statement|outcome-first|iso-42010`; MADR also accep
 `--variant full|minimal`. Run `ds compose adr --help` for the compact format
 selection guide.
 
-External orchestration is repository opt-in and provider-neutral:
+Experimental orchestration is repository opt-in and provider-neutral:
 
 ```yaml
 version: 1
@@ -377,11 +377,22 @@ integrations:
       executable: waspflow
 ```
 
-`ds config show --json` exposes the effective selection to an external adapter.
-DevSpecs preserves this configuration but does not launch providers, store their
-runtime state, or turn a provider receipt into a task checkpoint. Each adapter
-strictly validates its own `options`; another orchestrator can implement the
-same handoff contract under a different provider key.
+The core `ds` command never launches a provider. The separately packaged,
+DevSpecs-owned `ds-orchestrate` companion consumes this setting and currently
+includes a Waspflow driver built only on stock Waspflow commands:
+
+```bash
+ds-orchestrate preflight --cwd .
+ds-orchestrate run task:my-task \
+  --task-repo . --cwd . --lane my-task-a01 --agent-provider codex
+```
+
+The companion freezes the exact `ds apply --json` input, keeps bounded handoff
+state under `DEVSPECS_HOME`, and writes a normalized receipt. It does not place
+provider runtime state in the DevSpecs index or turn a receipt into a task
+checkpoint. Each DevSpecs-owned driver strictly validates its own `options`, so
+another unchanged orchestrator can implement the same handoff contract under a
+different provider key.
 
 `ds workspace trace` reports both lifecycle `status` and index-capture
 `index_status`. Keep them separate: `index_missing` means an artifact is not

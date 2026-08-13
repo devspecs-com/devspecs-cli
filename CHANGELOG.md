@@ -11,9 +11,11 @@
   jobs to use isolated DevSpecs homes with telemetry disabled. Disposable
   benchmark homes no longer create production anonymous installation IDs.
 - Added a provider-neutral `integrations.orchestration` repository setting and
-  `ds config show --json` so explicitly selected external orchestrators can
-  consume DevSpecs handoffs without adding provider commands or runtime state to
-  DevSpecs. Configuration alone never launches work or promotes a task.
+  the separately packaged, DevSpecs-owned `ds-orchestrate` companion. Its first
+  driver uses stock Waspflow commands to freeze an exact `ds apply` handoff and
+  normalize bounded receipts without changing Waspflow, adding provider commands
+  to `ds`, or automatically promoting a task. Configuration alone never launches
+  work.
 - Added read-only `ds doctor` diagnostics for active binary and PATH
   precedence, inferred install source, DevSpecs home, index size/schema/writer
   state, and repository identity, with complete JSON output and structural

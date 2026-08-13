@@ -1,0 +1,41 @@
+schema: kalo.cli-surface/v0.2
+kind: cli_surface_tree
+
+metadata:
+  product: devspecs-cli
+  binary: ds-orchestrate
+  audited_at: "2026-08-13"
+  source:
+    - go run ./cmd/ds-orchestrate --help
+    - cmd/ds-orchestrate/main.go
+  intent: >
+    Explicit, side-effecting companion for dispatching frozen DevSpecs handoffs
+    through configured orchestration providers. This surface is intentionally
+    separate from the core ds command tree.
+
+legend:
+  experimental: Available for dogfood; expect naming or shape changes.
+
+tree:
+  ds-orchestrate:
+    status: experimental
+    purpose: Dispatch and normalize one explicitly selected provider handoff without checkpointing its DevSpecs target.
+    children:
+      preflight:
+        status: experimental
+        purpose: Validate the selected provider and required capabilities without dispatching.
+      dispatch:
+        status: experimental
+        purpose: Freeze one ds apply payload, publish a request, and start the provider run.
+      wait:
+        status: experimental
+        purpose: Wait within the handoff deadline while preserving recoverable provider state on interruption.
+      finalize:
+        status: experimental
+        purpose: Capture bounded evidence, invoke provider cleanup, and publish a normalized receipt.
+      run:
+        status: experimental
+        purpose: Compose dispatch, wait, and finalize for one synchronous handoff.
+      receipt:
+        status: experimental
+        purpose: Print one normalized handoff receipt by ID or path.
