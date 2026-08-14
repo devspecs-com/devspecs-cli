@@ -174,6 +174,23 @@ func TestRootCmd_ApplyRegistered(t *testing.T) {
 	assert.Contains(t, got, "--thread string")
 }
 
+func TestRootCmd_DispatchRegisteredInAIExecutionGroup(t *testing.T) {
+	// Arrange
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"--help"})
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	assert.Contains(t, output.String(), "AI execution")
+	assert.Contains(t, output.String(), "dispatch")
+	assert.Contains(t, output.String(), "Run one bounded target")
+}
+
 func TestRootCmd_DoctorRegisteredInAdvancedGroup(t *testing.T) {
 	cmd := newRootCmd()
 	cmd.SetArgs([]string{"--help"})

@@ -11,15 +11,17 @@
   jobs to use isolated DevSpecs homes with telemetry disabled. Disposable
   benchmark homes no longer create production anonymous installation IDs.
 - Added a provider-neutral `integrations.orchestration` repository setting and
-  the separately packaged, DevSpecs-owned `ds-orchestrate` companion. Its first
-  driver uses stock Waspflow commands to freeze an exact `ds apply` handoff and
-  normalize bounded receipts without changing Waspflow, adding provider commands
-  to `ds`, or automatically promoting a task. Configuration alone never launches
-  work.
+  experimental `ds dispatch` workflow. Its first DevSpecs-owned driver uses
+  stock Waspflow commands to freeze an exact `ds apply` target, monitor it to a
+  normalized receipt by default, and support detached `status`, `resume`, and
+  `receipt` flows without changing Waspflow or automatically promoting a task.
+  Configuration alone never launches work, and release packages still ship one
+  `ds` binary.
 - Added read-only `ds doctor` diagnostics for active binary and PATH
   precedence, inferred install source, DevSpecs home, index size/schema/writer
-  state, and repository identity, with complete JSON output and structural
-  `--redact` support for shareable reports.
+  state, repository identity, and explicitly configured orchestration-provider
+  readiness, with complete JSON output and structural `--redact` support for
+  shareable reports.
 - Added focused Linux, macOS, and Windows CI coverage for doctor executable
   discovery and read-only SQLite inspection.
 - Added advanced `ds index backup|rebuild|restore` maintenance commands.

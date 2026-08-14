@@ -26,6 +26,8 @@ type waspflowHandleData struct {
 
 type waspflowStatus struct {
 	LaneUUID       string `json:"lane_uuid"`
+	Status         string `json:"status"`
+	Result         string `json:"result"`
 	CWD            string `json:"cwd"`
 	Report         string `json:"report"`
 	VerifyState    string `json:"verify_state"`
@@ -80,7 +82,7 @@ func (d *WaspflowDriver) Preflight(ctx context.Context) (Capabilities, error) {
 	}, nil
 }
 
-func (d *WaspflowDriver) Dispatch(ctx context.Context, request HandoffRequest, opts DispatchOptions) (ProviderHandle, error) {
+func (d *WaspflowDriver) Dispatch(ctx context.Context, request DispatchRequest, opts DispatchOptions) (ProviderHandle, error) {
 	prompt, err := requestExecutionPrompt(request)
 	if err != nil {
 		return ProviderHandle{}, err
@@ -151,6 +153,22 @@ func (d *WaspflowDriver) Dispatch(ctx context.Context, request HandoffRequest, o
 	}, nil
 }
 
+func (d *WaspflowDriver) Status(ctx context.Context, handle ProviderHandle) (ProviderExecutionStatus, error) {
+	data, err := parseWaspflowHandle(handle)
+	if err != nil {
+		return ProviderExecutionStatus{}, err
+	}
+	status, err := d.status(ctx, data.Lane)
+	if err != nil {
+		return ProviderExecutionStatus{}, err
+	}
+	return ProviderExecutionStatus{
+		State:       classifyWaspflowStatus(status.Status, status.Result),
+		NativeState: status.Status,
+		Result:      status.Result,
+	}, nil
+}
+
 func (d *WaspflowDriver) Wait(ctx context.Context, handle ProviderHandle, timeoutSeconds int) error {
 	data, err := parseWaspflowHandle(handle)
 	if err != nil {
@@ -169,7 +187,7 @@ func (d *WaspflowDriver) Wait(ctx context.Context, handle ProviderHandle, timeou
 	return nil
 }
 
-func (d *WaspflowDriver) Finalize(ctx context.Context, handle ProviderHandle, request HandoffRequest, stateDir string) (ProviderResult, error) {
+func (d *WaspflowDriver) Finalize(ctx context.Context, handle ProviderHandle, request DispatchRequest, stateDir string) (ProviderResult, error) {
 	data, err := parseWaspflowHandle(handle)
 	if err != nil {
 		return ProviderResult{}, err
@@ -294,7 +312,7 @@ func parseWaspflowHandle(handle ProviderHandle) (waspflowHandleData, error) {
 	return data, nil
 }
 
-func requestExecutionPrompt(request HandoffRequest) (string, error) {
+func requestExecutionPrompt(request DispatchRequest) (string, error) {
 	var apply applyOutput
 	if err := json.Unmarshal(request.Input.ApplyPayload, &apply); err != nil {
 		return "", fmt.Errorf("parse frozen ds apply payload: %w", err)
@@ -303,6 +321,27 @@ func requestExecutionPrompt(request HandoffRequest) (string, error) {
 		return "", fmt.Errorf("frozen ds apply payload has no prompt")
 	}
 	return orchestrationPrompt(apply.Prompt), nil
+}
+
+func classifyWaspflowStatus(status, result string) string {
+	if result != "" {
+		executionState, _ := classifyWaspflowResult(result)
+		return executionState
+	}
+	switch status {
+	case "live":
+		return "running"
+	case "exited":
+		return "ready"
+	case "parked":
+		return "paused"
+	case "escalate_failed":
+		return "failed"
+	case "reaped":
+		return "unknown"
+	default:
+		return "unknown"
+	}
 }
 
 func classifyWaspflowResult(value string) (string, *Failure) {

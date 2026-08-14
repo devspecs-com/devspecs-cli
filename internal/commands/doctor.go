@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/devspecs-com/devspecs-cli/internal/orchestration"
 	"github.com/devspecs-com/devspecs-cli/internal/repo"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/devspecs-com/devspecs-cli/internal/version"
@@ -20,8 +21,9 @@ import (
 )
 
 const (
-	doctorReportSchemaVersion = 2
+	doctorReportSchemaVersion = 3
 	doctorRepoTimeout         = 5 * time.Second
+	doctorProviderTimeout     = 10 * time.Second
 	doctorPathCandidateLimit  = 8
 
 	doctorStatusOK            = "ok"
@@ -38,14 +40,15 @@ type doctorOptions struct {
 }
 
 type doctorReport struct {
-	SchemaVersion int                    `json:"schema_version"`
-	Status        string                 `json:"status"`
-	Redacted      bool                   `json:"redacted"`
-	Runtime       doctorRuntimeReport    `json:"runtime"`
-	Home          doctorHomeReport       `json:"home"`
-	Index         doctorIndexReport      `json:"index"`
-	Repository    doctorRepositoryReport `json:"repository"`
-	Findings      []doctorFinding        `json:"findings"`
+	SchemaVersion int                       `json:"schema_version"`
+	Status        string                    `json:"status"`
+	Redacted      bool                      `json:"redacted"`
+	Runtime       doctorRuntimeReport       `json:"runtime"`
+	Home          doctorHomeReport          `json:"home"`
+	Index         doctorIndexReport         `json:"index"`
+	Repository    doctorRepositoryReport    `json:"repository"`
+	Orchestration doctorOrchestrationReport `json:"orchestration"`
+	Findings      []doctorFinding           `json:"findings"`
 }
 
 type doctorRuntimeReport struct {
@@ -101,6 +104,13 @@ type doctorRepositoryReport struct {
 	RootCommitPresent bool   `json:"root_commit_present"`
 }
 
+type doctorOrchestrationReport struct {
+	Status       string                      `json:"status"`
+	Enabled      bool                        `json:"enabled"`
+	Provider     string                      `json:"provider,omitempty"`
+	Capabilities *orchestration.Capabilities `json:"capabilities,omitempty"`
+}
+
 type doctorFinding struct {
 	ID          string              `json:"id"`
 	Severity    string              `json:"severity"`
@@ -130,8 +140,8 @@ func NewDoctorCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Long: `Inspect the active DevSpecs binary, PATH precedence, installation
-channel, DEVSPECS_HOME, local index compatibility, writer state, and repository
-identity.
+channel, DEVSPECS_HOME, local index compatibility, writer state, repository
+identity, and readiness of an explicitly configured orchestration provider.
 
 Doctor is offline and read-only. It does not create or migrate an index, run a
 repair, or contact an update service. Use --redact before sharing the report.`,
@@ -170,8 +180,56 @@ func collectDoctorReport(ctx context.Context, repoPath string) doctorReport {
 	collectDoctorHome(&report)
 	collectDoctorRepository(ctx, repoPath, &report)
 	collectDoctorIndex(ctx, &report)
+	collectDoctorOrchestration(ctx, &report)
 	report.Status = doctorOverallStatus(report.Findings)
 	return report
+}
+
+func collectDoctorOrchestration(ctx context.Context, report *doctorReport) {
+	collectDoctorOrchestrationWithPreflight(ctx, report, func(ctx context.Context, home, repoRoot string) (orchestration.Capabilities, error) {
+		return orchestration.NewService(home).Preflight(ctx, repoRoot)
+	})
+}
+
+func collectDoctorOrchestrationWithPreflight(
+	ctx context.Context,
+	report *doctorReport,
+	preflight func(context.Context, string, string) (orchestration.Capabilities, error),
+) {
+	orchestrationReport := doctorOrchestrationReport{Status: doctorStatusNotApplicable}
+	if strings.TrimSpace(report.Repository.RootPath) == "" {
+		report.Orchestration = orchestrationReport
+		return
+	}
+	cfg, err := config.LoadRepoConfig(report.Repository.RootPath)
+	if err != nil {
+		orchestrationReport.Status = doctorStatusError
+		report.addFinding("orchestration.config_unreadable", doctorStatusError,
+			"The repository orchestration configuration could not be read.", err.Error())
+		report.Orchestration = orchestrationReport
+		return
+	}
+	if cfg == nil || strings.TrimSpace(cfg.Integrations.Orchestration.Provider) == "" {
+		report.Orchestration = orchestrationReport
+		return
+	}
+	orchestrationReport.Enabled = true
+	orchestrationReport.Provider = cfg.Integrations.Orchestration.Provider
+	providerCtx, cancel := context.WithTimeout(ctx, doctorProviderTimeout)
+	defer cancel()
+	home := report.Home.Path
+	capabilities, err := preflight(providerCtx, home, report.Repository.RootPath)
+	if err != nil {
+		orchestrationReport.Status = doctorStatusError
+		report.addFinding("orchestration.provider_unavailable", doctorStatusError,
+			"The configured orchestration provider is not ready.", err.Error(),
+			doctorRemediation{Safety: "read_only", Reason: "Correct the provider installation or configuration, then rerun diagnostics.", Command: "ds doctor"})
+		report.Orchestration = orchestrationReport
+		return
+	}
+	orchestrationReport.Status = doctorStatusOK
+	orchestrationReport.Capabilities = &capabilities
+	report.Orchestration = orchestrationReport
 }
 
 func collectDoctorRuntime(report *doctorReport) {
@@ -699,6 +757,12 @@ func outputDoctorReport(cmd *cobra.Command, report doctorReport, asJSON bool) er
 	}
 	if report.Repository.GitIdentity != "" {
 		fmt.Fprintf(out, "  Git identity: %s\n", report.Repository.GitIdentity)
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Orchestration")
+	fmt.Fprintf(out, "  Status: %s\n", report.Orchestration.Status)
+	if report.Orchestration.Enabled {
+		fmt.Fprintf(out, "  Provider: %s\n", report.Orchestration.Provider)
 	}
 	if len(report.Findings) > 0 {
 		fmt.Fprintln(out)

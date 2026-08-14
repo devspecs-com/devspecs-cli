@@ -10,6 +10,7 @@ metadata:
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds task --help
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds workspace --help
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds compose --help
+    - bash scripts/dev.sh --worktree -- go run ./cmd/ds dispatch --help
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds prune --help
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds doctor --help
     - cmd/ds/main.go
@@ -57,6 +58,23 @@ tree:
         status: core
         usage: ds apply [task-id|change-id|target] [--thread <key>]
         purpose: Emit one bounded prompt for an unambiguous legacy target or runnable named thread.
+      dispatch:
+        status: experimental
+        usage: ds dispatch <task:<id>|change:<id>> [--detach]
+        purpose: Run one bounded target through an explicitly configured orchestration provider without granting task lifecycle authority.
+        children:
+          status:
+            status: experimental
+            usage: ds dispatch status <dispatch-id>
+            purpose: Report provider-neutral state for one durable dispatch.
+          resume:
+            status: experimental
+            usage: ds dispatch resume <dispatch-id>
+            purpose: Resume monitoring and finalize one detached or interrupted dispatch.
+          receipt:
+            status: experimental
+            usage: ds dispatch receipt <dispatch-id|receipt-path>
+            purpose: Print one bounded normalized dispatch receipt.
       tldr:
         status: core
         purpose: Show LLM-oriented workflow quickstarts.

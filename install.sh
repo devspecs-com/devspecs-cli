@@ -5,7 +5,7 @@
 set -e
 
 REPO="devspecs-com/devspecs-cli"
-BINARY_NAMES="ds ds-orchestrate"
+BINARY_NAMES="ds"
 INSTALL_DIR="${DEVSPECS_INSTALL_DIR:-/usr/local/bin}"
 
 RED='\033[0;31m'

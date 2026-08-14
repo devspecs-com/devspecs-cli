@@ -4,7 +4,7 @@
 $ErrorActionPreference = "Stop"
 
 $Repo = "devspecs-com/devspecs-cli"
-$BinaryNames = @("ds", "ds-orchestrate")
+$BinaryNames = @("ds")
 $InstallDir = if ($env:DEVSPECS_INSTALL_DIR) { $env:DEVSPECS_INSTALL_DIR } else { "$env:LOCALAPPDATA\DevSpecs\bin" }
 
 function Get-LatestVersion {

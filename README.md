@@ -90,9 +90,10 @@ ds init
 | Recover the thread | `ds recent` | You came back cold and need the current local work thread. |
 | Ground the change | `ds map` / `ds find "topic"` | Git and rg found code, but you still need intent, boundaries, and exclusions. |
 | Diagnose local state | `ds doctor` | A binary, index, or repository check is failing and you need shareable evidence before changing anything. |
-| Create a bounded handoff | `ds task "goal"` | You know the work and want packed repo context plus a stop line. |
+| Create a bounded task | `ds task "goal"` | You know the work and want packed repo context plus a stop line. |
 | Coordinate multi-repo work | `ds workspace init .` | You have an umbrella workspace with several child repos. Experimental. |
 | Continue one slice | `ds apply` | A task already exists and the agent needs the current target only. |
+| Dispatch one slice | `ds dispatch task:<task-id>` | An opt-in orchestration provider should run one frozen target and return a receipt. Experimental. |
 | Coordinate parallel lanes | `ds thread task:<task-id>` | One task has several independently runnable slices or an explicit join. Experimental. |
 | Record the receipt | `ds task checkpoint A01 --decision promote` | You need to capture what changed, what ran, what missed, and what comes next. |
 | Preserve a durable decision | `ds compose adr "title"` | A track settled a consequential technical choice that should outlive task history. Experimental. |
@@ -149,7 +150,6 @@ irm https://raw.githubusercontent.com/devspecs-com/devspecs-cli/main/install.ps1
 
 ```bash
 go install github.com/devspecs-com/devspecs-cli/cmd/ds@latest
-go install github.com/devspecs-com/devspecs-cli/cmd/ds-orchestrate@latest
 ```
 
 After installing or upgrading, restart your shell or IDE terminal if `ds` is
@@ -378,22 +378,25 @@ integrations:
       executable: waspflow
 ```
 
-The core `ds` command never launches a provider. The separately packaged,
-DevSpecs-owned `ds-orchestrate` companion consumes this setting and currently
-includes a Waspflow driver built only on stock Waspflow commands:
+`ds dispatch` consumes this setting through a DevSpecs-owned driver. The first
+driver uses only stock Waspflow commands; Waspflow itself does not require a
+DevSpecs patch:
 
 ```bash
-ds-orchestrate preflight --cwd .
-ds-orchestrate run task:my-task \
-  --task-repo . --cwd . --lane my-task-a01 --agent-provider codex
+ds doctor
+ds dispatch task:my-task --task-repo . --cwd . --agent-provider codex
 ```
 
-The companion freezes the exact `ds apply --json` input, keeps bounded handoff
-state under `DEVSPECS_HOME`, and writes a normalized receipt. It does not place
-provider runtime state in the DevSpecs index or turn a receipt into a task
-checkpoint. Each DevSpecs-owned driver strictly validates its own `options`, so
-another unchanged orchestrator can implement the same handoff contract under a
-different provider key.
+Dispatch waits through final receipt by default. Use `--detach` to return after
+startup, `ds dispatch status <dispatch-id>` to inspect provider-neutral state,
+and `ds dispatch resume <dispatch-id>` to continue monitoring and finalization.
+DevSpecs keeps bounded request, handle, and receipt state under
+`$DEVSPECS_HOME/dispatches/`; provider runtime state remains provider-owned.
+A provider can consume the frozen `ds apply --json` input and edit its isolated
+workspace, but it cannot checkpoint, promote, or otherwise mutate the DevSpecs
+task lifecycle. Each driver validates its own `options`, so another unchanged
+orchestrator can implement the same dispatch contract under a different
+provider key. Configuration alone never launches work.
 
 `ds workspace trace` reports both lifecycle `status` and index-capture
 `index_status`. Keep them separate: `index_missing` means an artifact is not
@@ -447,6 +450,7 @@ instead of indexing every worktree as a new repository.
 | `ds task status/show` | Inspect task lifecycle state and target context. |
 | `ds thread [task:<task-id>\|change:<change-id>]` | Inspect named lanes, joins, runnable targets, and exact apply commands. Experimental. |
 | `ds apply [task-id\|change-id\|target] [--thread <key>]` | Emit one bounded prompt without mutating task state; omit lane selection only when the next target is unambiguous. |
+| `ds dispatch <task:<id>\|change:<id>> [--detach]` | Run one frozen target through an explicitly configured provider; monitor to a receipt by default. Experimental. |
 | `ds task checkpoint <task-id\|target>` | Record files, tests, misses, noise, learnings, decision evidence, and next iteration. |
 | `ds compose adr\|rfc\|prd "<title>"` | Create and index a repo-owned durable draft using established repository conventions. Experimental. |
 | `ds task slice add <task-id> "<title>" --after A01 --reason improve` | Add an A01-1-style follow-up slice after an improve/rework gate. |
@@ -458,7 +462,7 @@ instead of indexing every worktree as a new repository.
 | `ds scan` | Manually refresh or rebuild configured intent-artifact paths. |
 | `ds index backup\|rebuild\|restore` | Back up, safely rebuild, or exactly restore the local SQLite index. |
 | `ds prune [--dry-run] [--vacuum]` | Remove stale repository data and redundant capture revisions; compact the database explicitly with `--vacuum`. |
-| `ds doctor [--redact] [--json]` | Inspect binary precedence, local index compatibility, writer state, and repository identity without mutating state. |
+| `ds doctor [--redact] [--json]` | Inspect binary precedence, local index compatibility, writer state, repository identity, and configured-provider readiness without mutating DevSpecs state. |
 | `ds config show [--json]` | Inspect effective repository configuration, including opt-in integrations. |
 
 Most read commands support `--json`. Run `ds <command> --help` for the current
@@ -470,6 +474,7 @@ flags. Use the `ds workspace ...` form for workspace coordination.
 | --- | --- | --- |
 | `~/.devspecs/devspecs.db` | Local SQLite index and cache. | No. |
 | `~/.devspecs/backups/index/` | Verified manual and automatic index recovery snapshots. | No. |
+| `~/.devspecs/dispatches/<dispatch-id>/` | Frozen dispatch requests, provider handles, and normalized receipts. | No. |
 | `.devspecs/config.yaml` | Repo discovery configuration. | Usually yes. |
 | `devspecs/tasks/<task-id>/` | Default generated task workspace. | Yes, when durable. |
 | `.devspecs/tasks/<task-id>/` | Legacy or explicitly local task workspace. | No, unless you chose it deliberately. |

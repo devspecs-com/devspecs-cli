@@ -6,10 +6,11 @@ import (
 )
 
 const (
-	HandoffSchema = "devspecs.orchestration.handoff"
-	HandleSchema  = "devspecs.orchestration.handle"
-	ReceiptSchema = "devspecs.orchestration.receipt"
-	SchemaVersion = 1
+	DispatchRequestSchema = "devspecs.dispatch.request"
+	DispatchHandleSchema  = "devspecs.dispatch.handle"
+	DispatchReceiptSchema = "devspecs.dispatch.receipt"
+	DispatchStatusSchema  = "devspecs.dispatch.status"
+	SchemaVersion         = 1
 )
 
 type Target struct {
@@ -66,10 +67,10 @@ type VerifyRequirement struct {
 	Strength string `json:"strength,omitempty"`
 }
 
-type HandoffRequest struct {
+type DispatchRequest struct {
 	Schema        string       `json:"schema"`
 	SchemaVersion int          `json:"schema_version"`
-	HandoffID     string       `json:"handoff_id"`
+	DispatchID    string       `json:"dispatch_id"`
 	CreatedAt     time.Time    `json:"created_at"`
 	Target        Target       `json:"target"`
 	Repository    Repository   `json:"repository"`
@@ -91,10 +92,10 @@ type ProviderHandle struct {
 	Data            json.RawMessage `json:"data"`
 }
 
-type HandoffHandle struct {
+type DispatchHandle struct {
 	Schema        string         `json:"schema"`
 	SchemaVersion int            `json:"schema_version"`
-	HandoffID     string         `json:"handoff_id"`
+	DispatchID    string         `json:"dispatch_id"`
 	RequestSHA256 string         `json:"request_sha256"`
 	Request       ArtifactRef    `json:"request"`
 	Provider      ProviderHandle `json:"provider"`
@@ -106,6 +107,28 @@ type Capabilities struct {
 	Reports      bool   `json:"reports"`
 	Verification bool   `json:"verification"`
 	Cancellation bool   `json:"cancellation"`
+}
+
+type ProviderExecutionStatus struct {
+	State       string
+	NativeState string
+	Result      string
+}
+
+type DispatchStatusProvider struct {
+	Name        string `json:"name"`
+	RunID       string `json:"run_id"`
+	NativeState string `json:"native_state,omitempty"`
+	Result      string `json:"result,omitempty"`
+}
+
+type DispatchStatus struct {
+	Schema        string                 `json:"schema"`
+	SchemaVersion int                    `json:"schema_version"`
+	DispatchID    string                 `json:"dispatch_id"`
+	State         string                 `json:"state"`
+	Provider      DispatchStatusProvider `json:"provider"`
+	Receipt       *ArtifactRef           `json:"receipt,omitempty"`
 }
 
 type ProviderResult struct {
@@ -173,11 +196,11 @@ type ReceiptCancellation struct {
 	State     string `json:"state"`
 }
 
-type HandoffReceipt struct {
+type DispatchReceipt struct {
 	Schema        string              `json:"schema"`
 	SchemaVersion int                 `json:"schema_version"`
 	ReceiptID     string              `json:"receipt_id"`
-	HandoffID     string              `json:"handoff_id"`
+	DispatchID    string              `json:"dispatch_id"`
 	RequestSHA256 string              `json:"request_sha256"`
 	Provider      ReceiptProvider     `json:"provider"`
 	Execution     ReceiptExecution    `json:"execution"`

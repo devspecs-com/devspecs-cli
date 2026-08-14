@@ -11,30 +11,30 @@ import (
 	"strings"
 )
 
-const maxHandoffFileBytes = 2 << 20
+const maxDispatchFileBytes = 2 << 20
 
 type StateStore struct {
 	Root string
 }
 
-func (s StateStore) HandoffDir(id string) string {
-	return filepath.Join(s.Root, "orchestration", "handoffs", id)
+func (s StateStore) DispatchDir(id string) string {
+	return filepath.Join(s.Root, "dispatches", id)
 }
 
 func (s StateStore) RequestPath(id string) string {
-	return filepath.Join(s.HandoffDir(id), "request.json")
+	return filepath.Join(s.DispatchDir(id), "request.json")
 }
 
 func (s StateStore) HandlePath(id string) string {
-	return filepath.Join(s.HandoffDir(id), "handle.json")
+	return filepath.Join(s.DispatchDir(id), "handle.json")
 }
 
 func (s StateStore) ReceiptPath(id string) string {
-	return filepath.Join(s.HandoffDir(id), "receipt.json")
+	return filepath.Join(s.DispatchDir(id), "receipt.json")
 }
 
-func (s StateStore) WriteRequest(request HandoffRequest) (string, string, error) {
-	path := s.RequestPath(request.HandoffID)
+func (s StateStore) WriteRequest(request DispatchRequest) (string, string, error) {
+	path := s.RequestPath(request.DispatchID)
 	data, err := marshalJSON(request)
 	if err != nil {
 		return "", "", err
@@ -45,8 +45,8 @@ func (s StateStore) WriteRequest(request HandoffRequest) (string, string, error)
 	return path, sha256Bytes(data), nil
 }
 
-func (s StateStore) WriteHandle(handle HandoffHandle) (string, error) {
-	path := s.HandlePath(handle.HandoffID)
+func (s StateStore) WriteHandle(handle DispatchHandle) (string, error) {
+	path := s.HandlePath(handle.DispatchID)
 	data, err := marshalJSON(handle)
 	if err != nil {
 		return "", err
@@ -54,8 +54,8 @@ func (s StateStore) WriteHandle(handle HandoffHandle) (string, error) {
 	return path, writeFileAtomic(path, data, 0o600)
 }
 
-func (s StateStore) WriteReceipt(receipt HandoffReceipt) (string, error) {
-	path := s.ReceiptPath(receipt.HandoffID)
+func (s StateStore) WriteReceipt(receipt DispatchReceipt) (string, error) {
+	path := s.ReceiptPath(receipt.DispatchID)
 	data, err := marshalJSON(receipt)
 	if err != nil {
 		return "", err
@@ -66,34 +66,34 @@ func (s StateStore) WriteReceipt(receipt HandoffReceipt) (string, error) {
 	return path, writeFileAtomic(path, data, 0o600)
 }
 
-func (s StateStore) LoadHandle(identifier string) (HandoffHandle, HandoffRequest, error) {
+func (s StateStore) LoadHandle(identifier string) (DispatchHandle, DispatchRequest, error) {
 	handlePath := strings.TrimSpace(identifier)
 	if filepath.Ext(handlePath) == "" && !strings.ContainsAny(handlePath, `/\`) {
 		handlePath = s.HandlePath(handlePath)
 	}
-	var handle HandoffHandle
+	var handle DispatchHandle
 	if err := readJSONFile(handlePath, &handle); err != nil {
-		return HandoffHandle{}, HandoffRequest{}, fmt.Errorf("read orchestration handle: %w", err)
+		return DispatchHandle{}, DispatchRequest{}, fmt.Errorf("read dispatch handle: %w", err)
 	}
-	if handle.Schema != HandleSchema || handle.SchemaVersion != SchemaVersion || handle.HandoffID == "" {
-		return HandoffHandle{}, HandoffRequest{}, fmt.Errorf("unsupported orchestration handle")
+	if handle.Schema != DispatchHandleSchema || handle.SchemaVersion != SchemaVersion || handle.DispatchID == "" {
+		return DispatchHandle{}, DispatchRequest{}, fmt.Errorf("unsupported dispatch handle")
 	}
-	var request HandoffRequest
+	var request DispatchRequest
 	requestData, err := os.ReadFile(handle.Request.Value)
 	if err != nil {
-		return HandoffHandle{}, HandoffRequest{}, fmt.Errorf("read handoff request: %w", err)
+		return DispatchHandle{}, DispatchRequest{}, fmt.Errorf("read dispatch request: %w", err)
 	}
-	if len(requestData) > maxHandoffFileBytes {
-		return HandoffHandle{}, HandoffRequest{}, fmt.Errorf("handoff request exceeds 2 MiB")
+	if len(requestData) > maxDispatchFileBytes {
+		return DispatchHandle{}, DispatchRequest{}, fmt.Errorf("dispatch request exceeds 2 MiB")
 	}
 	if sha256Bytes(requestData) != handle.RequestSHA256 {
-		return HandoffHandle{}, HandoffRequest{}, fmt.Errorf("handoff request digest does not match handle")
+		return DispatchHandle{}, DispatchRequest{}, fmt.Errorf("dispatch request digest does not match handle")
 	}
 	if err := json.Unmarshal(requestData, &request); err != nil {
-		return HandoffHandle{}, HandoffRequest{}, fmt.Errorf("parse handoff request: %w", err)
+		return DispatchHandle{}, DispatchRequest{}, fmt.Errorf("parse dispatch request: %w", err)
 	}
-	if request.Schema != HandoffSchema || request.SchemaVersion != SchemaVersion || request.HandoffID != handle.HandoffID {
-		return HandoffHandle{}, HandoffRequest{}, fmt.Errorf("unsupported or mismatched handoff request")
+	if request.Schema != DispatchRequestSchema || request.SchemaVersion != SchemaVersion || request.DispatchID != handle.DispatchID {
+		return DispatchHandle{}, DispatchRequest{}, fmt.Errorf("unsupported or mismatched dispatch request")
 	}
 	return handle, request, nil
 }
@@ -142,7 +142,7 @@ func readJSONFile(path string, target any) error {
 	if err != nil {
 		return err
 	}
-	if len(data) > maxHandoffFileBytes {
+	if len(data) > maxDispatchFileBytes {
 		return fmt.Errorf("file exceeds 2 MiB")
 	}
 	return json.Unmarshal(data, target)

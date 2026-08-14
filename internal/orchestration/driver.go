@@ -8,9 +8,10 @@ import (
 type Driver interface {
 	Name() string
 	Preflight(ctx context.Context) (Capabilities, error)
-	Dispatch(ctx context.Context, request HandoffRequest, opts DispatchOptions) (ProviderHandle, error)
+	Dispatch(ctx context.Context, request DispatchRequest, opts DispatchOptions) (ProviderHandle, error)
+	Status(ctx context.Context, handle ProviderHandle) (ProviderExecutionStatus, error)
 	Wait(ctx context.Context, handle ProviderHandle, timeoutSeconds int) error
-	Finalize(ctx context.Context, handle ProviderHandle, request HandoffRequest, stateDir string) (ProviderResult, error)
+	Finalize(ctx context.Context, handle ProviderHandle, request DispatchRequest, stateDir string) (ProviderResult, error)
 }
 
 type DriverFactory func(options map[string]any) (Driver, error)

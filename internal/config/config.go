@@ -19,14 +19,12 @@ type RepoConfig struct {
 }
 
 // IntegrationConfig holds explicitly enabled DevSpecs integrations.
-// The core ds command preserves and exposes this configuration; side-effecting
-// integration hosts consume it outside the core command tree.
 type IntegrationConfig struct {
 	Orchestration OrchestrationConfig `yaml:"orchestration,omitempty" json:"orchestration,omitempty"`
 }
 
-// OrchestrationConfig selects one provider driver owned by the DevSpecs
-// orchestration companion. The selected driver owns and validates its options.
+// OrchestrationConfig selects one provider driver owned by DevSpecs. The
+// selected driver owns and validates its options.
 type OrchestrationConfig struct {
 	Provider string         `yaml:"provider,omitempty" json:"provider,omitempty"`
 	Options  map[string]any `yaml:"options,omitempty" json:"options,omitempty"`

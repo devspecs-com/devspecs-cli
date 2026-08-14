@@ -29,10 +29,10 @@ func TestServiceDispatch_WithConfiguredProvider_WritesRequestAndHandle(t *testin
 
 	// Assert
 	require.NoError(t, err)
-	assert.Equal(t, "handoff_test", handle.HandoffID)
+	assert.Equal(t, "dispatch_test", handle.DispatchID)
 	assert.Equal(t, "remote-queue", handle.Provider.Name)
 	assert.FileExists(t, handlePath)
-	assert.FileExists(t, service.Store.RequestPath("handoff_test"))
+	assert.FileExists(t, service.Store.RequestPath("dispatch_test"))
 	assert.Equal(t, "task:sample", driver.request.Target.Owner)
 	assert.Equal(t, "A01", driver.request.Target.Slice)
 	assert.Equal(t, "clean", driver.request.Repository.SourceState)
@@ -61,7 +61,105 @@ func TestServiceDispatch_WithoutConfiguredProvider_FailsBeforeRepositoryInspecti
 	assert.Empty(t, runner.calls)
 }
 
-func TestServiceWait_WhenProviderTimesOut_ReturnsRecoverableHandoff(t *testing.T) {
+func TestServiceDispatch_WithoutLane_GeneratesLaneFromDispatchID(t *testing.T) {
+	// Arrange
+	executionRepo := t.TempDir()
+	taskRepo := t.TempDir()
+	writeOrchestrationConfig(t, executionRepo, "remote-queue", nil)
+	driver := &serviceFakeDriver{name: "remote-queue"}
+	service := newTestService(t, &serviceRunner{executionRepo: executionRepo}, driver)
+	options := testDispatchOptions(taskRepo, executionRepo)
+	options.Lane = ""
+
+	// Act
+	_, _, err := service.Dispatch(context.Background(), options)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, "dispatch_test", driver.options.Lane)
+}
+
+func TestServiceStatus_WithRunningProvider_ReturnsProviderNeutralState(t *testing.T) {
+	// Arrange
+	executionRepo := t.TempDir()
+	taskRepo := t.TempDir()
+	writeOrchestrationConfig(t, executionRepo, "remote-queue", nil)
+	driver := &serviceFakeDriver{
+		name: "remote-queue",
+		status: ProviderExecutionStatus{
+			State: "running", NativeState: "busy", Result: "",
+		},
+	}
+	service := newTestService(t, &serviceRunner{executionRepo: executionRepo}, driver)
+	_, _, err := service.Dispatch(context.Background(), testDispatchOptions(taskRepo, executionRepo))
+	require.NoError(t, err)
+
+	// Act
+	status, err := service.Status(context.Background(), "dispatch_test")
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, DispatchStatusSchema, status.Schema)
+	assert.Equal(t, "dispatch_test", status.DispatchID)
+	assert.Equal(t, "running", status.State)
+	assert.Equal(t, "remote-queue", status.Provider.Name)
+	assert.Equal(t, "busy", status.Provider.NativeState)
+	assert.Nil(t, status.Receipt)
+}
+
+func TestServiceStatus_WithCompletedReceipt_DoesNotRequireProviderConfiguration(t *testing.T) {
+	// Arrange
+	service := newTestService(t, &serviceRunner{}, &serviceFakeDriver{name: "remote-queue"})
+	request := DispatchRequest{
+		Schema: DispatchRequestSchema, SchemaVersion: SchemaVersion, DispatchID: "dispatch_test",
+		Repository: Repository{RequestedRoot: t.TempDir()},
+	}
+	requestPath, requestSHA, err := service.Store.WriteRequest(request)
+	require.NoError(t, err)
+	_, err = service.Store.WriteHandle(DispatchHandle{
+		Schema: DispatchHandleSchema, SchemaVersion: SchemaVersion, DispatchID: "dispatch_test",
+		RequestSHA256: requestSHA, Request: ArtifactRef{Kind: "path", Value: requestPath},
+		Provider: ProviderHandle{Name: "remote-queue", RunID: "job-1", Data: json.RawMessage(`{}`)},
+	})
+	require.NoError(t, err)
+	receiptPath, err := service.Store.WriteReceipt(DispatchReceipt{
+		Schema: DispatchReceiptSchema, SchemaVersion: SchemaVersion,
+		DispatchID: "dispatch_test", ReceiptID: "receipt_test",
+		Execution: ReceiptExecution{State: "succeeded"}, Artifacts: []ArtifactRef{},
+	})
+	require.NoError(t, err)
+
+	// Act
+	status, err := service.Status(context.Background(), "dispatch_test")
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, "succeeded", status.State)
+	assert.Equal(t, "succeeded", status.Provider.Result)
+	require.NotNil(t, status.Receipt)
+	assert.Equal(t, receiptPath, status.Receipt.Value)
+}
+
+func TestServiceResume_WithExistingReceipt_ReturnsReceiptWithoutCallingProvider(t *testing.T) {
+	// Arrange
+	service := newTestService(t, &serviceRunner{}, &serviceFakeDriver{name: "remote-queue"})
+	expected := DispatchReceipt{
+		Schema: DispatchReceiptSchema, SchemaVersion: SchemaVersion,
+		DispatchID: "dispatch_test", ReceiptID: "receipt_test", Artifacts: []ArtifactRef{},
+	}
+	expectedPath, err := service.Store.WriteReceipt(expected)
+	require.NoError(t, err)
+
+	// Act
+	receipt, receiptPath, err := service.Resume(context.Background(), "dispatch_test")
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, expectedPath, receiptPath)
+	assert.Equal(t, "receipt_test", receipt.ReceiptID)
+}
+
+func TestServiceWait_WhenProviderTimesOut_ReturnsRecoverableDispatch(t *testing.T) {
 	// Arrange
 	executionRepo := t.TempDir()
 	taskRepo := t.TempDir()
@@ -72,13 +170,13 @@ func TestServiceWait_WhenProviderTimesOut_ReturnsRecoverableHandoff(t *testing.T
 	require.NoError(t, err)
 
 	// Act
-	_, err = service.Wait(context.Background(), handle.HandoffID)
+	_, err = service.Wait(context.Background(), handle.DispatchID)
 
 	// Assert
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "remains recoverable")
-	assert.ErrorContains(t, err, "ds-orchestrate wait handoff_test")
-	assert.FileExists(t, service.Store.HandlePath(handle.HandoffID))
+	assert.ErrorContains(t, err, "ds dispatch resume dispatch_test")
+	assert.FileExists(t, service.Store.HandlePath(handle.DispatchID))
 }
 
 func TestServiceFinalize_WithProviderResult_WritesNormalizedReceipt(t *testing.T) {
@@ -103,14 +201,14 @@ func TestServiceFinalize_WithProviderResult_WritesNormalizedReceipt(t *testing.T
 	service := newTestService(t, &serviceRunner{executionRepo: executionRepo}, driver)
 	handle, _, err := service.Dispatch(context.Background(), testDispatchOptions(taskRepo, executionRepo))
 	require.NoError(t, err)
-	service.NewID = func() string { return "receipt_test" }
+	service.NewReceiptID = func() string { return "receipt_test" }
 
 	// Act
-	receipt, receiptPath, err := service.Finalize(context.Background(), handle.HandoffID)
+	receipt, receiptPath, err := service.Finalize(context.Background(), handle.DispatchID)
 
 	// Assert
 	require.NoError(t, err)
-	assert.Equal(t, ReceiptSchema, receipt.Schema)
+	assert.Equal(t, DispatchReceiptSchema, receipt.Schema)
 	assert.Equal(t, "receipt_test", receipt.ReceiptID)
 	assert.Equal(t, "remote-queue", receipt.Provider.Name)
 	assert.Equal(t, "succeeded", receipt.Execution.State)
@@ -122,11 +220,11 @@ func TestServiceFinalize_WithProviderResult_WritesNormalizedReceipt(t *testing.T
 func TestStateStoreLoadHandle_WithChangedRequest_ReturnsDigestError(t *testing.T) {
 	// Arrange
 	store := StateStore{Root: t.TempDir()}
-	request := HandoffRequest{Schema: HandoffSchema, SchemaVersion: SchemaVersion, HandoffID: "handoff_test"}
+	request := DispatchRequest{Schema: DispatchRequestSchema, SchemaVersion: SchemaVersion, DispatchID: "dispatch_test"}
 	requestPath, requestSHA, err := store.WriteRequest(request)
 	require.NoError(t, err)
-	_, err = store.WriteHandle(HandoffHandle{
-		Schema: HandleSchema, SchemaVersion: SchemaVersion, HandoffID: request.HandoffID,
+	_, err = store.WriteHandle(DispatchHandle{
+		Schema: DispatchHandleSchema, SchemaVersion: SchemaVersion, DispatchID: request.DispatchID,
 		RequestSHA256: requestSHA, Request: ArtifactRef{Kind: "path", Value: requestPath},
 		Provider: ProviderHandle{Name: "remote-queue", RunID: "job-1", Data: json.RawMessage(`{}`)},
 	})
@@ -134,7 +232,7 @@ func TestStateStoreLoadHandle_WithChangedRequest_ReturnsDigestError(t *testing.T
 	require.NoError(t, os.WriteFile(requestPath, []byte("{}\n"), 0o600))
 
 	// Act
-	_, _, err = store.LoadHandle(request.HandoffID)
+	_, _, err = store.LoadHandle(request.DispatchID)
 
 	// Assert
 	require.Error(t, err)
@@ -144,7 +242,7 @@ func TestStateStoreLoadHandle_WithChangedRequest_ReturnsDigestError(t *testing.T
 func TestStateStoreWriteReceipt_WithExistingReceipt_ReplacesAtomically(t *testing.T) {
 	// Arrange
 	store := StateStore{Root: t.TempDir()}
-	first := HandoffReceipt{Schema: ReceiptSchema, SchemaVersion: SchemaVersion, HandoffID: "handoff_test", ReceiptID: "first", Artifacts: []ArtifactRef{}}
+	first := DispatchReceipt{Schema: DispatchReceiptSchema, SchemaVersion: SchemaVersion, DispatchID: "dispatch_test", ReceiptID: "first", Artifacts: []ArtifactRef{}}
 	_, err := store.WriteReceipt(first)
 	require.NoError(t, err)
 	second := first
@@ -155,7 +253,7 @@ func TestStateStoreWriteReceipt_WithExistingReceipt_ReplacesAtomically(t *testin
 
 	// Assert
 	require.NoError(t, err)
-	var actual HandoffReceipt
+	var actual DispatchReceipt
 	require.NoError(t, readJSONFile(path, &actual))
 	assert.Equal(t, "second", actual.ReceiptID)
 }
@@ -196,7 +294,9 @@ func (r *serviceRunner) Run(_ context.Context, _ string, executable string, args
 
 type serviceFakeDriver struct {
 	name    string
-	request HandoffRequest
+	request DispatchRequest
+	options DispatchOptions
+	status  ProviderExecutionStatus
 	waitErr error
 	result  ProviderResult
 }
@@ -209,16 +309,21 @@ func (d *serviceFakeDriver) Preflight(context.Context) (Capabilities, error) {
 	return Capabilities{Provider: d.name, Isolation: true}, nil
 }
 
-func (d *serviceFakeDriver) Dispatch(_ context.Context, request HandoffRequest, _ DispatchOptions) (ProviderHandle, error) {
+func (d *serviceFakeDriver) Dispatch(_ context.Context, request DispatchRequest, options DispatchOptions) (ProviderHandle, error) {
 	d.request = request
+	d.options = options
 	return ProviderHandle{Name: d.name, AdapterVersion: "test", RunID: "job-1", Data: json.RawMessage(`{}`)}, nil
+}
+
+func (d *serviceFakeDriver) Status(context.Context, ProviderHandle) (ProviderExecutionStatus, error) {
+	return d.status, nil
 }
 
 func (d *serviceFakeDriver) Wait(context.Context, ProviderHandle, int) error {
 	return d.waitErr
 }
 
-func (d *serviceFakeDriver) Finalize(context.Context, ProviderHandle, HandoffRequest, string) (ProviderResult, error) {
+func (d *serviceFakeDriver) Finalize(context.Context, ProviderHandle, DispatchRequest, string) (ProviderResult, error) {
 	return d.result, nil
 }
 
@@ -229,7 +334,7 @@ func newTestService(t *testing.T, runner CommandRunner, driver Driver) *Service 
 	return &Service{
 		Store: StateStore{Root: t.TempDir()}, Runner: runner, Registry: registry,
 		Now:   func() time.Time { return time.Date(2026, 8, 13, 20, 0, 0, 0, time.UTC) },
-		NewID: func() string { return "handoff_test" },
+		NewID: func() string { return "dispatch_test" }, NewReceiptID: func() string { return "receipt_test" },
 	}
 }
 

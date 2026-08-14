@@ -54,7 +54,7 @@ func TestWaspflowDriverDispatch_WithExplicitOptions_UsesStockSpawnAndStatusComma
 		{result: CommandResult{Stdout: []byte(`{"lane_uuid":"lane-uuid","cwd":"` + filepath.ToSlash(executionRepo) + `"}`)}},
 	}}
 	driver := newTestWaspflowDriver(t, runner)
-	request := HandoffRequest{
+	request := DispatchRequest{
 		Repository: Repository{RequestedRoot: executionRepo},
 		Input:      Input{ApplyPayload: json.RawMessage(`{"target":"W09","prompt":"Implement W09 only."}`)},
 	}
@@ -88,6 +88,39 @@ func TestWaspflowDriverDispatch_WithExplicitOptions_UsesStockSpawnAndStatusComma
 	require.Len(t, runner.calls[1].args, 2)
 	assert.Equal(t, "status", runner.calls[1].args[0])
 	assert.Equal(t, "devspecs-w09", runner.calls[1].args[1])
+}
+
+func TestWaspflowDriverStatus_WithLiveLane_ReturnsRunningState(t *testing.T) {
+	// Arrange
+	runner := &waspflowRunner{results: []waspflowRun{{
+		result: CommandResult{Stdout: []byte(`{"status":"live","result":""}`)},
+	}}}
+	driver := newTestWaspflowDriver(t, runner)
+	handle := testWaspflowHandle(t, "devspecs-w10")
+
+	// Act
+	status, err := driver.Status(context.Background(), handle)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, "running", status.State)
+	assert.Equal(t, "live", status.NativeState)
+	assert.Empty(t, status.Result)
+	require.Len(t, runner.calls, 1)
+	require.Len(t, runner.calls[0].args, 2)
+	assert.Equal(t, "status", runner.calls[0].args[0])
+	assert.Equal(t, "devspecs-w10", runner.calls[0].args[1])
+}
+
+func TestClassifyWaspflowStatus_WithExitedLane_ReturnsReadyState(t *testing.T) {
+	// Arrange
+	nativeState := "exited"
+
+	// Act
+	state := classifyWaspflowStatus(nativeState, "")
+
+	// Assert
+	assert.Equal(t, "ready", state)
 }
 
 func TestWaspflowDriverWait_WhenContextExpires_PreservesProviderLane(t *testing.T) {
@@ -136,7 +169,7 @@ func TestWaspflowDriverFinalize_WithMissingRequiredReport_DoesNotReapLane(t *tes
 		result: CommandResult{Stdout: []byte(`{"lane_uuid":"lane-uuid","cwd":"` + filepath.ToSlash(executionRepo) + `"}`)},
 	}}}
 	driver := newTestWaspflowDriver(t, runner)
-	request := HandoffRequest{Requirements: Requirements{Report: ReportRequirement{Required: true, Path: "result.md"}}}
+	request := DispatchRequest{Requirements: Requirements{Report: ReportRequirement{Required: true, Path: "result.md"}}}
 
 	// Act
 	result, err := driver.Finalize(context.Background(), testWaspflowHandle(t, "devspecs-w09"), request, t.TempDir())
@@ -180,7 +213,7 @@ func TestWaspflowDriverFinalize_WithSuccessfulStockReceipt_NormalizesAndReaps(t 
 	}}
 	driver := newTestWaspflowDriver(t, runner)
 	driver.home = home
-	request := HandoffRequest{Requirements: Requirements{
+	request := DispatchRequest{Requirements: Requirements{
 		Report:       ReportRequirement{Required: true, Path: "result.md"},
 		Verification: VerifyRequirement{Required: true, Command: "go test ./..."},
 	}}
@@ -237,7 +270,7 @@ func TestWaspflowDriverFinalize_WithVerificationFailure_ReturnsFailedReceipt(t *
 	}}
 	driver := newTestWaspflowDriver(t, runner)
 	driver.home = home
-	request := HandoffRequest{Requirements: Requirements{
+	request := DispatchRequest{Requirements: Requirements{
 		Verification: VerifyRequirement{Required: true, Command: "go test ./..."},
 	}}
 
@@ -277,7 +310,7 @@ func TestWaspflowDriverFinalize_WhenCleanupFailsWithoutReceipt_PreservesInspecta
 	result, err := driver.Finalize(
 		context.Background(),
 		testWaspflowHandle(t, "devspecs-w09"),
-		HandoffRequest{},
+		DispatchRequest{},
 		t.TempDir(),
 	)
 

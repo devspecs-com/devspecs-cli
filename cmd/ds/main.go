@@ -54,7 +54,8 @@ repo-owned ADRs, RFCs, and PRDs, and ds workspace for explicit multi-repo
 coordination. Use ds thread only when one task or linked workspace change has
 multiple runnable execution lanes.
 
-AI execution: agents should consume bounded prompts with ds apply and record
+AI execution: agents should consume bounded prompts with ds apply or run one
+through an explicitly configured orchestration provider with ds dispatch. Record
 evidence with ds task checkpoint, ds task evaluate, or ds task audit. If apply
 is ambiguous, inspect ds thread and select one lane with ds apply --thread.
 
@@ -88,6 +89,7 @@ remotes, document text, or raw queries. Disable with DEVSPECS_TELEMETRY=0.`,
 	rootCmd.AddCommand(commands.NewThreadCmd())
 	rootCmd.AddCommand(commands.NewComposeCmd())
 	rootCmd.AddCommand(commands.NewApplyCmd())
+	rootCmd.AddCommand(commands.NewDispatchCmd())
 	rootCmd.AddCommand(commands.NewWorkspaceCmd())
 	addHiddenWorkspaceCompatibilityCommand(rootCmd, commands.NewChangeCmd(), "ds workspace change")
 	addHiddenWorkspaceCompatibilityCommand(rootCmd, commands.NewSliceCmd(), "ds workspace slice")
@@ -135,6 +137,7 @@ func assignRootCommandGroups(rootCmd *cobra.Command) {
 		"compose":   rootGroupHumanWorkSetup,
 		"workspace": rootGroupHumanWorkSetup,
 		"apply":     rootGroupAIExecution,
+		"dispatch":  rootGroupAIExecution,
 		"tldr":      rootGroupAIExecution,
 		"change":    rootGroupAdvanced,
 		"slice":     rootGroupAdvanced,

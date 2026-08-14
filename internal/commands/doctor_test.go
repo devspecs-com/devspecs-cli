@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/devspecs-com/devspecs-cli/internal/config"
+	"github.com/devspecs-com/devspecs-cli/internal/orchestration"
 	"github.com/devspecs-com/devspecs-cli/internal/store"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -351,6 +353,72 @@ func TestOutputDoctorReport_WithHumanOutput_ExplainsSharingBoundary(t *testing.T
 	assert.Contains(t, output.String(), "Local state")
 	assert.Contains(t, output.String(), "Repository")
 	assert.Contains(t, output.String(), "ds doctor --redact")
+}
+
+func TestCollectDoctorOrchestration_WithConfiguredHealthyProvider_ReportsCapabilities(t *testing.T) {
+	// Arrange
+	repoRoot := t.TempDir()
+	home := t.TempDir()
+	cfg := config.DefaultRepoConfig()
+	cfg.Integrations.Orchestration = config.OrchestrationConfig{Provider: "waspflow"}
+	require.NoError(t, config.WriteRepoConfig(repoRoot, cfg))
+	report := doctorReport{
+		Home:       doctorHomeReport{Path: home},
+		Repository: doctorRepositoryReport{RootPath: repoRoot},
+		Findings:   []doctorFinding{},
+	}
+	preflightCalls := 0
+	actualHome := ""
+	actualRepo := ""
+	preflight := func(_ context.Context, receivedHome, receivedRepo string) (orchestration.Capabilities, error) {
+		preflightCalls++
+		actualHome = receivedHome
+		actualRepo = receivedRepo
+		return orchestration.Capabilities{Provider: "waspflow", Isolation: true}, nil
+	}
+
+	// Act
+	collectDoctorOrchestrationWithPreflight(context.Background(), &report, preflight)
+
+	// Assert
+	assert.Equal(t, 1, preflightCalls)
+	assert.Equal(t, home, actualHome)
+	assert.Equal(t, repoRoot, actualRepo)
+	assert.Equal(t, doctorStatusOK, report.Orchestration.Status)
+	assert.True(t, report.Orchestration.Enabled)
+	assert.Equal(t, "waspflow", report.Orchestration.Provider)
+	require.NotNil(t, report.Orchestration.Capabilities)
+	assert.True(t, report.Orchestration.Capabilities.Isolation)
+	assert.Empty(t, report.Findings)
+}
+
+func TestCollectDoctorOrchestration_WithUnavailableProvider_ReportsActionableError(t *testing.T) {
+	// Arrange
+	repoRoot := t.TempDir()
+	cfg := config.DefaultRepoConfig()
+	cfg.Integrations.Orchestration = config.OrchestrationConfig{Provider: "waspflow"}
+	require.NoError(t, config.WriteRepoConfig(repoRoot, cfg))
+	report := doctorReport{
+		Home:       doctorHomeReport{Path: t.TempDir()},
+		Repository: doctorRepositoryReport{RootPath: repoRoot},
+		Findings:   []doctorFinding{},
+	}
+	preflight := func(context.Context, string, string) (orchestration.Capabilities, error) {
+		return orchestration.Capabilities{}, assert.AnError
+	}
+
+	// Act
+	collectDoctorOrchestrationWithPreflight(context.Background(), &report, preflight)
+
+	// Assert
+	assert.Equal(t, doctorStatusError, report.Orchestration.Status)
+	assert.True(t, report.Orchestration.Enabled)
+	assert.Nil(t, report.Orchestration.Capabilities)
+	require.Len(t, report.Findings, 1)
+	assert.Equal(t, "orchestration.provider_unavailable", report.Findings[0].ID)
+	assert.Equal(t, doctorStatusError, report.Findings[0].Severity)
+	require.Len(t, report.Findings[0].Remediation, 1)
+	assert.Equal(t, "ds doctor", report.Findings[0].Remediation[0].Command)
 }
 
 func writeDoctorSchemaDatabase(t *testing.T, dbPath string, schemaVersion int) {
