@@ -1,0 +1,212 @@
+name: Fat Regression
+
+on:
+  schedule:
+    - cron: '41 4 * * *'
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Git ref for the accepted comparison baseline
+        required: false
+        default: v1.4.0
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fat-100-regression
+  cancel-in-progress: false
+
+jobs:
+  fat-100:
+    name: Cold activation and scan (fat-100)
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.DEVSPECS_FAT_REGRESSION_ENABLED == 'true' }}
+    runs-on: [self-hosted, linux, x64, devspecs-fat-regression]
+    timeout-minutes: 180
+    env:
+      DEVSPECS_TELEMETRY: '0'
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Configure private runner paths
+        shell: bash
+        env:
+          ACTIVATION_MANIFEST_CONFIG: ${{ vars.DEVSPECS_FAT_ACTIVATION_MANIFEST }}
+          SCAN_MANIFEST_CONFIG: ${{ vars.DEVSPECS_FAT_SCAN_MANIFEST }}
+          RESULTS_ROOT_CONFIG: ${{ vars.DEVSPECS_FAT_RESULTS_ROOT }}
+          RETENTION_DAYS_CONFIG: ${{ vars.DEVSPECS_FAT_RETENTION_DAYS }}
+          SCHEDULED_BASELINE_CONFIG: ${{ vars.DEVSPECS_FAT_BASELINE_REF }}
+          DISPATCH_BASELINE_CONFIG: ${{ inputs.baseline_ref }}
+        run: |
+          set -euo pipefail
+          : "${ACTIVATION_MANIFEST_CONFIG:?DEVSPECS_FAT_ACTIVATION_MANIFEST is required}"
+          : "${SCAN_MANIFEST_CONFIG:?DEVSPECS_FAT_SCAN_MANIFEST is required}"
+          : "${RESULTS_ROOT_CONFIG:?DEVSPECS_FAT_RESULTS_ROOT is required}"
+          case "$ACTIVATION_MANIFEST_CONFIG" in
+            /*) ;;
+            *) echo "DEVSPECS_FAT_ACTIVATION_MANIFEST must be absolute" >&2; exit 1 ;;
+          esac
+          case "$SCAN_MANIFEST_CONFIG" in
+            /*) ;;
+            *) echo "DEVSPECS_FAT_SCAN_MANIFEST must be absolute" >&2; exit 1 ;;
+          esac
+          case "$RESULTS_ROOT_CONFIG" in
+            /|"$HOME") echo "DEVSPECS_FAT_RESULTS_ROOT must be a dedicated subdirectory" >&2; exit 1 ;;
+            /*) ;;
+            *) echo "DEVSPECS_FAT_RESULTS_ROOT must be absolute" >&2; exit 1 ;;
+          esac
+
+          baseline_ref="${DISPATCH_BASELINE_CONFIG:-${SCHEDULED_BASELINE_CONFIG:-v1.4.0}}"
+          retention_days="${RETENTION_DAYS_CONFIG:-14}"
+          case "$retention_days" in
+            ''|*[!0-9]*) echo "DEVSPECS_FAT_RETENTION_DAYS must be a positive integer" >&2; exit 1 ;;
+          esac
+          if [ "$retention_days" -lt 1 ]; then
+            echo "DEVSPECS_FAT_RETENTION_DAYS must be a positive integer" >&2
+            exit 1
+          fi
+
+          result_dir="$RESULTS_ROOT_CONFIG/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$result_dir"
+          touch "$RESULTS_ROOT_CONFIG/.devspecs-fat-regression-root"
+          echo "FAT_ACTIVATION_MANIFEST=$ACTIVATION_MANIFEST_CONFIG" >> "$GITHUB_ENV"
+          echo "FAT_SCAN_MANIFEST=$SCAN_MANIFEST_CONFIG" >> "$GITHUB_ENV"
+          echo "FAT_RESULTS_ROOT=$RESULTS_ROOT_CONFIG" >> "$GITHUB_ENV"
+          echo "FAT_RESULT_DIR=$result_dir" >> "$GITHUB_ENV"
+          echo "FAT_RETENTION_DAYS=$retention_days" >> "$GITHUB_ENV"
+          echo "FAT_BASELINE_REF=$baseline_ref" >> "$GITHUB_ENV"
+          echo "FAT_PUBLIC_SUMMARY=$RUNNER_TEMP/fat-regression-summary.json" >> "$GITHUB_ENV"
+          echo "DEVSPECS_HOME=$result_dir/devspecs-home" >> "$GITHUB_ENV"
+
+      - name: Validate exact-SHA full-history corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          go run ./scripts/ci/fat-regression preflight \
+            --activation "$FAT_ACTIVATION_MANIFEST" \
+            --scan "$FAT_SCAN_MANIFEST" \
+            --minimum 100 | tee "$FAT_RESULT_DIR/preflight.json"
+
+      - name: Build baseline and candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline_source="$RUNNER_TEMP/devspecs-fat-baseline-source"
+          git worktree add --detach "$baseline_source" "$FAT_BASELINE_REF"
+          go -C "$baseline_source" build -o "$RUNNER_TEMP/ds-fat-baseline" ./cmd/ds
+          go build -o "$RUNNER_TEMP/ds-fat-candidate" ./cmd/ds
+          "$RUNNER_TEMP/ds-fat-baseline" --version
+          "$RUNNER_TEMP/ds-fat-candidate" --version
+
+      - name: Compare cold activation output
+        id: activation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$FAT_RESULT_DIR/activation"
+          set +e
+          "$RUNNER_TEMP/ds-fat-candidate" eval "$FAT_ACTIVATION_MANIFEST" \
+            --activation-matrix \
+            --activation-profile fat \
+            --activation-clone-mode full \
+            --activation-index-state cold \
+            --activation-baseline-bin "$RUNNER_TEMP/ds-fat-baseline" \
+            --activation-candidate-bin "$RUNNER_TEMP/ds-fat-candidate" \
+            --activation-repetitions 1 \
+            --activation-map-structured \
+            --activation-result-dir "$FAT_RESULT_DIR/activation" \
+            --json > "$FAT_RESULT_DIR/activation.stdout.json"
+          status=$?
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Measure baseline cold scan
+        id: baseline_scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$FAT_RESULT_DIR/scan-baseline"
+          set +e
+          "$RUNNER_TEMP/ds-fat-baseline" eval "$FAT_SCAN_MANIFEST" \
+            --activation-scan-benchmark \
+            --activation-profile fat \
+            --activation-clone-mode full \
+            --activation-index-state cold \
+            --activation-scan-max-case-ms 600000 \
+            --activation-result-dir "$FAT_RESULT_DIR/scan-baseline" \
+            --json > "$FAT_RESULT_DIR/scan-baseline.stdout.json"
+          status=$?
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Measure candidate cold scan
+        id: candidate_scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$FAT_RESULT_DIR/scan-candidate"
+          set +e
+          "$RUNNER_TEMP/ds-fat-candidate" eval "$FAT_SCAN_MANIFEST" \
+            --activation-scan-benchmark \
+            --activation-profile fat \
+            --activation-clone-mode full \
+            --activation-index-state cold \
+            --activation-scan-baseline-result "$FAT_RESULT_DIR/scan-baseline/activation-scan-benchmark-result.json" \
+            --activation-scan-max-regression-ratio 1.30 \
+            --activation-scan-max-regression-ms 5000 \
+            --activation-scan-max-case-ms 600000 \
+            --activation-result-dir "$FAT_RESULT_DIR/scan-candidate" \
+            --json > "$FAT_RESULT_DIR/scan-candidate.stdout.json"
+          status=$?
+          set -e
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Publish aggregate gate
+        shell: bash
+        env:
+          ACTIVATION_EXIT_CODE: ${{ steps.activation.outputs.exit_code }}
+          BASELINE_SCAN_EXIT_CODE: ${{ steps.baseline_scan.outputs.exit_code }}
+          CANDIDATE_SCAN_EXIT_CODE: ${{ steps.candidate_scan.outputs.exit_code }}
+        run: |
+          set -euo pipefail
+          printf 'raw command exits: activation=%s baseline_scan=%s candidate_scan=%s\n' \
+            "$ACTIVATION_EXIT_CODE" "$BASELINE_SCAN_EXIT_CODE" "$CANDIDATE_SCAN_EXIT_CODE"
+          go run ./scripts/ci/fat-regression summarize \
+            --activation-result "$FAT_RESULT_DIR/activation/activation-matrix-result.json" \
+            --baseline-scan-result "$FAT_RESULT_DIR/scan-baseline/activation-scan-benchmark-result.json" \
+            --candidate-scan-result "$FAT_RESULT_DIR/scan-candidate/activation-scan-benchmark-result.json" \
+            --baseline-ref "$FAT_BASELINE_REF" \
+            --candidate-ref "$GITHUB_SHA" \
+            --output "$FAT_PUBLIC_SUMMARY"
+
+      - name: Upload public-safe aggregate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fat-100-regression-summary
+          path: ${{ runner.temp }}/fat-regression-summary.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Remove temporary baseline worktree
+        if: always()
+        shell: bash
+        run: git worktree remove --force "$RUNNER_TEMP/devspecs-fat-baseline-source" 2>/dev/null || true
+
+      - name: Prune expired runner-local evidence
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "${FAT_RESULTS_ROOT:-}" ] && \
+             [ -f "$FAT_RESULTS_ROOT/.devspecs-fat-regression-root" ]; then
+            find "$FAT_RESULTS_ROOT" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*-[0-9]*' \
+              -mtime "+${FAT_RETENTION_DAYS:-14}" -exec rm -rf -- {} +
+          fi
