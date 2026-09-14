@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Split the `ds task audit` verdict so a mispredicted pack no longer reads as
+  agent drift: out-of-scope paths are now classified as `pack_miss`,
+  `new_surface`, or `drift` from recorded `--missed-file` entries and whether
+  the path is tracked at git HEAD. `recommendation` gained the `pack_miss` and
+  `new_surface` values, and `--json` gained `pack_miss_paths`,
+  `new_surface_paths`, and `drift_paths` alongside the unchanged
+  `out_of_scope_paths` union.
+
 ## v1.4.0 - 2026-08-12
 
 - Added experimental repo-first named execution threads with `ds thread set`,
