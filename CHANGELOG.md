@@ -3,12 +3,18 @@
 ## Unreleased
 
 - Split the `ds task audit` verdict so a mispredicted pack no longer reads as
-  agent drift: out-of-scope paths are now classified as `pack_miss`,
-  `new_surface`, or `drift` from recorded `--missed-file` entries and whether
-  the path is tracked at git HEAD. `recommendation` gained the `pack_miss` and
-  `new_surface` values, and `--json` gained `pack_miss_paths`,
-  `new_surface_paths`, and `drift_paths` alongside the unchanged
-  `out_of_scope_paths` union.
+  agent drift. Out-of-scope paths are classified as `pack_miss` (recorded with
+  `--missed-file`, listed in the pack's own `noise_risks`, or tracked at git
+  HEAD inside a predicted `relevant_areas` subsystem), `new_surface` (not
+  tracked at HEAD, so this slice created it), or `drift` (tracked at HEAD and
+  outside every relevant area). `drift` now means the slice reached a subsystem
+  the pack never identified as relevant, rather than any edit the pack failed to
+  name. `recommendation` gained the `pack_miss` and `new_surface` values, and
+  `--json` gained `pack_miss_paths`, `new_surface_paths`, `drift_paths`, and
+  `unclassified_paths` alongside the unchanged `out_of_scope_paths` union.
+  Neither fallback assigns blame: with no relevant areas recorded a tracked
+  unpredicted path is a `pack_miss`, and when HEAD tracking cannot be
+  determined the paths stay unclassified and the verdict falls to `review`.
 
 ## v1.4.0 - 2026-08-12
 

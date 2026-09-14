@@ -3111,7 +3111,7 @@ func TestTaskAuditReportsPassForInScopeCheckpointFiles(t *testing.T) {
 	assert.True(t, containsPath(out.InScopePaths, "internal/retrieval/ranking_test.go"))
 }
 
-func TestTaskAuditReportsDriftForOutOfScopeCheckpointFile(t *testing.T) {
+func TestTaskAudit_WhenGitHeadTrackingUnavailable_ReportsReviewWithUnclassifiedPath(t *testing.T) {
 	setupPassingAuditTask(t)
 	addDriftAuditCheckpoint(t)
 	cmd := NewTaskCmd()
@@ -3124,9 +3124,10 @@ func TestTaskAuditReportsDriftForOutOfScopeCheckpointFile(t *testing.T) {
 	require.NoError(t, err)
 	var out taskAuditOutput
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
-	assert.Equal(t, "drift", out.Recommendation)
+	assert.Equal(t, "review", out.Recommendation)
+	assert.Contains(t, out.Unclassified, "internal/other/unrelated.go")
 	assert.True(t, containsPath(out.OutOfScopePaths, "internal/other/unrelated.go"))
-	assert.True(t, containsPath(out.DriftPaths, "internal/other/unrelated.go"))
+	assert.Empty(t, out.DriftPaths)
 }
 
 func setupPassingAuditTask(t *testing.T) {
@@ -3212,7 +3213,7 @@ func TestTaskAudit_WhenUntrackedFileInNewDirectory_ReportsNewSurface(t *testing.
 	assert.Empty(t, out.PackMissPaths)
 }
 
-func TestTaskAudit_WhenTrackedFileBesidePredictedPath_ReportsDrift(t *testing.T) {
+func TestTaskAudit_WhenTrackedFileBesidePredictedPathInRelevantArea_ReportsPackMiss(t *testing.T) {
 	repoDir := setupGitBackedAuditTask(t)
 	mustWriteFile(t, filepath.Join(repoDir, "internal", "retrieval", "sibling.go"), "package retrieval\n\nfunc Sibling() int { return 2 }\n")
 	addGitAuditCheckpoint(t, []string{"internal/retrieval/sibling.go"}, nil)
@@ -3226,18 +3227,83 @@ func TestTaskAudit_WhenTrackedFileBesidePredictedPath_ReportsDrift(t *testing.T)
 	require.NoError(t, err)
 	var out taskAuditOutput
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
-	assert.Equal(t, "drift", out.Recommendation)
-	assert.Contains(t, out.DriftPaths, "internal/retrieval/sibling.go")
-	assert.Empty(t, out.PackMissPaths)
+	assert.Contains(t, out.AllowedSurface, "internal/retrieval/ranking.go")
+	assert.Equal(t, "pack_miss", out.Recommendation)
+	assert.Contains(t, out.PackMissPaths, "internal/retrieval/sibling.go")
+	assert.Empty(t, out.DriftPaths)
 	assert.Empty(t, out.NewSurfacePaths)
+}
+
+func TestTaskAudit_WhenTrackedFileOutsideEveryRelevantArea_ReportsDrift(t *testing.T) {
+	repoDir := setupGitBackedAuditTask(t)
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "legacy", "old.go"), "package legacy\n\nfunc Old() int { return 1 }\n")
+	addGitAuditCheckpoint(t, []string{"internal/legacy/old.go"}, nil)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.NotContains(t, out.AllowedSurface, "internal/legacy/old.go")
+	assert.Equal(t, "drift", out.Recommendation)
+	assert.Contains(t, out.DriftPaths, "internal/legacy/old.go")
+	assert.Empty(t, out.PackMissPaths)
+}
+
+func TestTaskAudit_WhenPathListedAsNoiseRisk_ReportsPackMiss(t *testing.T) {
+	repoDir := setupGitBackedAuditTask(t)
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "legacy", "old.go"), "package legacy\n\nfunc Old() int { return 1 }\n")
+	addGitAuditCheckpoint(t, []string{"internal/legacy/old.go"}, nil)
+	rewriteAuditManifestPredicted(t, repoDir, func(predicted *taskPredictedContext) {
+		predicted.NoiseRisks = append(predicted.NoiseRisks, taskPredictedFile{Path: "internal/legacy/old.go"})
+	})
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "pack_miss", out.Recommendation)
+	assert.Contains(t, out.PackMissPaths, "internal/legacy/old.go")
+	assert.Empty(t, out.DriftPaths)
+}
+
+func TestTaskAudit_WhenRelevantAreasEmpty_ReportsPackMissForTrackedPath(t *testing.T) {
+	repoDir := setupGitBackedAuditTask(t)
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "legacy", "old.go"), "package legacy\n\nfunc Old() int { return 1 }\n")
+	addGitAuditCheckpoint(t, []string{"internal/legacy/old.go"}, nil)
+	rewriteAuditManifestPredicted(t, repoDir, func(predicted *taskPredictedContext) {
+		predicted.RelevantAreas = nil
+	})
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "pack_miss", out.Recommendation)
+	assert.Contains(t, out.PackMissPaths, "internal/legacy/old.go")
+	assert.Empty(t, out.DriftPaths)
 }
 
 func TestTaskAudit_WhenNewSurfaceAndDriftBothPresent_ReportsDrift(t *testing.T) {
 	repoDir := setupGitBackedAuditTask(t)
 	mustMkdirAll(t, filepath.Join(repoDir, "internal", "brandnew"))
 	mustWriteFile(t, filepath.Join(repoDir, "internal", "brandnew", "feature.go"), "package brandnew\n\nfunc Feature() {}\n")
-	mustWriteFile(t, filepath.Join(repoDir, "internal", "retrieval", "sibling.go"), "package retrieval\n\nfunc Sibling() int { return 2 }\n")
-	addGitAuditCheckpoint(t, []string{"internal/brandnew/feature.go", "internal/retrieval/sibling.go"}, nil)
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "legacy", "old.go"), "package legacy\n\nfunc Old() int { return 1 }\n")
+	addGitAuditCheckpoint(t, []string{"internal/brandnew/feature.go", "internal/legacy/old.go"}, nil)
 	cmd := NewTaskCmd()
 	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
 	buf := &bytes.Buffer{}
@@ -3250,7 +3316,7 @@ func TestTaskAudit_WhenNewSurfaceAndDriftBothPresent_ReportsDrift(t *testing.T) 
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
 	assert.Equal(t, "drift", out.Recommendation)
 	assert.Contains(t, out.NewSurfacePaths, "internal/brandnew/feature.go")
-	assert.Contains(t, out.DriftPaths, "internal/retrieval/sibling.go")
+	assert.Contains(t, out.DriftPaths, "internal/legacy/old.go")
 }
 
 func TestTaskAudit_WhenAllThreeKindsPresent_OutOfScopePathsKeepUnion(t *testing.T) {
@@ -3271,9 +3337,9 @@ func TestTaskAudit_WhenAllThreeKindsPresent_OutOfScopePathsKeepUnion(t *testing.
 	var out taskAuditOutput
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
 	assert.Contains(t, out.NewSurfacePaths, "internal/brandnew/feature.go")
-	assert.Contains(t, out.DriftPaths, "internal/retrieval/sibling.go")
-	assert.Contains(t, out.PackMissPaths, "internal/legacy/old.go")
-	assert.Len(t, out.OutOfScopePaths, len(out.PackMissPaths)+len(out.NewSurfacePaths)+len(out.DriftPaths))
+	assert.Contains(t, out.PackMissPaths, "internal/retrieval/sibling.go")
+	assert.Contains(t, out.DriftPaths, "internal/legacy/old.go")
+	assert.Len(t, out.OutOfScopePaths, len(out.PackMissPaths)+len(out.NewSurfacePaths)+len(out.DriftPaths)+len(out.Unclassified))
 }
 
 // setupGitBackedAuditTask builds a committed git repo with a directory the pack
@@ -3319,6 +3385,17 @@ func addGitAuditCheckpoint(t *testing.T, editedFiles, missedFiles []string) {
 	cmd.SetArgs(args)
 	cmd.SetOut(&bytes.Buffer{})
 	require.NoError(t, cmd.Execute())
+}
+
+// rewriteAuditManifestPredicted edits the predicted context the pack recorded so
+// a test can arrange one pack judgement without regenerating a whole pack.
+func rewriteAuditManifestPredicted(t *testing.T, repoDir string, mutate func(predicted *taskPredictedContext)) {
+	t.Helper()
+	manifestPath := filepath.Join(repoDir, "devspecs", "tasks", "git-audit-test", taskManifestFilename)
+	manifest, err := readTaskManifest(manifestPath)
+	require.NoError(t, err)
+	mutate(&manifest.Predicted)
+	require.NoError(t, writeTaskManifest(manifestPath, manifest))
 }
 
 func TestTask_StartUsesGitWorktreeRoot(t *testing.T) {

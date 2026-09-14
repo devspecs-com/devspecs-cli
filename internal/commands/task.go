@@ -390,6 +390,7 @@ type taskAuditOutput struct {
 	PackMissPaths   []string `json:"pack_miss_paths,omitempty"`
 	NewSurfacePaths []string `json:"new_surface_paths,omitempty"`
 	DriftPaths      []string `json:"drift_paths,omitempty"`
+	Unclassified    []string `json:"unclassified_paths,omitempty"`
 	AllowedSurface  []string `json:"allowed_surface,omitempty"`
 	ReviewSurface   []string `json:"review_surface,omitempty"`
 	Checkpoints     []string `json:"checkpoints,omitempty"`
@@ -2562,7 +2563,7 @@ func buildTaskAuditOutput(ctx taskTargetContext, includeCurrentGitDiff bool) (ta
 		recommendation = taskAuditVerdictNewSurface
 	case len(split.PackMiss) > 0:
 		recommendation = taskAuditVerdictPackMiss
-	case len(review) > 0:
+	case len(split.Unclassified) > 0 || len(review) > 0:
 		recommendation = "review"
 	}
 	if len(observedChanged) == 0 {
@@ -2590,6 +2591,7 @@ func buildTaskAuditOutput(ctx taskTargetContext, includeCurrentGitDiff bool) (ta
 		PackMissPaths:   split.PackMiss,
 		NewSurfacePaths: split.NewSurface,
 		DriftPaths:      split.Drift,
+		Unclassified:    split.Unclassified,
 		AllowedSurface:  allowed,
 		ReviewSurface:   reviewSurface,
 		Checkpoints:     checkpoints,
@@ -2598,78 +2600,95 @@ func buildTaskAuditOutput(ctx taskTargetContext, includeCurrentGitDiff bool) (ta
 }
 
 // taskAuditScopeSplit separates out-of-scope paths into the reasons they landed
-// there: a pack that failed to predict them, a surface this slice created, or
-// genuine drift by the agent.
+// there: a pack that failed to predict them, a surface this slice created,
+// genuine drift into an unrelated subsystem, or facts we could not establish.
 type taskAuditScopeSplit struct {
-	PackMiss   []string
-	NewSurface []string
-	Drift      []string
-	Notes      []string
+	PackMiss     []string
+	NewSurface   []string
+	Drift        []string
+	Unclassified []string
+	Notes        []string
 }
 
-// classifyTaskAuditOutOfScopePaths labels every out-of-scope path. A path
-// recorded with --missed-file, or tracked at HEAD in a directory the pack never
-// predicted, is a pack miss. A path that does not exist at HEAD in a directory
-// the pack never predicted is new surface this slice created. Everything else is
-// drift. HEAD tracking is resolved with a single bounded git call for the paths
-// that still need it; when it cannot be resolved the paths stay drift.
+// classifyTaskAuditOutOfScopePaths labels every out-of-scope path, in the order
+// that puts the cheapest and strongest pack evidence first:
+//
+//  1. recorded with --missed-file for this target: pack miss;
+//  2. listed in the pack's own noise_risks: pack miss, and the strongest kind,
+//     because the pack looked at the file, called it a distraction, and the
+//     slice needed it anyway;
+//  3. not tracked at HEAD: new surface this slice created;
+//  4. tracked at HEAD inside a predicted relevant area: pack miss, because Go
+//     packages are directories and the pack named the subsystem but not the file;
+//  5. tracked at HEAD outside every relevant area: drift, the one case where the
+//     slice reached a subsystem the pack never identified as relevant at all.
+//
+// Neither fallback asserts blame. With no relevant areas recorded there is no
+// basis for a drift claim, so a tracked unpredicted path is a pack miss. When
+// HEAD tracking cannot be established the paths stay unclassified and the
+// verdict falls to review, because calling something drift on facts we could
+// not determine is the same error this split exists to remove.
 func classifyTaskAuditOutOfScopePaths(ctx taskTargetContext, outOfScope, missedFiles []string) taskAuditScopeSplit {
 	var split taskAuditScopeSplit
 	if len(outOfScope) == 0 {
 		return split
 	}
-	predictedDirs := taskAuditPredictedDirs(ctx)
+	noiseRisks := predictedFilePaths(ctx.Manifest.Predicted.NoiseRisks)
 	var unresolved []string
 	for _, path := range outOfScope {
-		switch {
-		case containsPath(missedFiles, path):
+		if containsPath(missedFiles, path) || containsPath(noiseRisks, path) {
 			split.PackMiss = appendNormalizedUnique(split.PackMiss, path)
-		case predictedDirs[taskAuditPathDir(path)]:
-			split.Drift = appendNormalizedUnique(split.Drift, path)
-		default:
-			unresolved = append(unresolved, normalizeSinglePath(path))
+			continue
 		}
+		unresolved = append(unresolved, normalizeSinglePath(path))
 	}
 	if len(unresolved) == 0 {
 		return split
 	}
 	tracked, ok := taskAuditTrackedAtHead(ctx.RepoRoot, unresolved)
 	if !ok {
-		split.Drift = appendNormalizedUnique(split.Drift, unresolved...)
-		split.Notes = append(split.Notes, "Git HEAD tracking could not be determined; unpredicted paths were reported as drift.")
+		split.Unclassified = appendNormalizedUnique(split.Unclassified, unresolved...)
+		split.Notes = append(split.Notes, "Git HEAD tracking could not be determined, so these paths were left unclassified rather than reported as drift.")
 		return split
 	}
+	areas := taskAuditRelevantAreas(ctx)
 	for _, path := range unresolved {
-		if tracked[path] {
+		switch {
+		case !tracked[path]:
+			split.NewSurface = appendNormalizedUnique(split.NewSurface, path)
+		case len(areas) == 0 || taskAuditPathInRelevantArea(areas, path):
 			split.PackMiss = appendNormalizedUnique(split.PackMiss, path)
-			continue
+		default:
+			split.Drift = appendNormalizedUnique(split.Drift, path)
 		}
-		split.NewSurface = appendNormalizedUnique(split.NewSurface, path)
 	}
 	return split
 }
 
-// taskAuditPredictedDirs collects the directories the pack predicted, so an
-// edit beside a predicted file reads as drift rather than a pack miss.
-func taskAuditPredictedDirs(ctx taskTargetContext) map[string]bool {
-	dirs := map[string]bool{}
-	var predicted []string
-	predicted = appendNormalizedUnique(predicted, predictedFilePaths(ctx.Manifest.Predicted.PrimaryFiles)...)
-	predicted = appendNormalizedUnique(predicted, predictedFilePaths(ctx.Manifest.Predicted.Tests)...)
-	predicted = appendNormalizedUnique(predicted, predictedFilePaths(ctx.Manifest.Predicted.DocsPlansConfig)...)
-	predicted = appendNormalizedUnique(predicted, predictedFilePaths(ctx.Manifest.Predicted.SupportingContext)...)
-	for _, path := range predicted {
-		dirs[taskAuditPathDir(path)] = true
+// taskAuditRelevantAreas returns the subsystems the pack identified as relevant.
+func taskAuditRelevantAreas(ctx taskTargetContext) []string {
+	var areas []string
+	for _, area := range ctx.Manifest.Predicted.RelevantAreas {
+		area = strings.Trim(normalizeSinglePath(area), "/")
+		if area == "" || area == "." {
+			continue
+		}
+		areas = appendUniqueString(areas, area)
 	}
-	return dirs
+	return areas
 }
 
-func taskAuditPathDir(path string) string {
-	path = normalizeSinglePath(path)
-	if idx := strings.LastIndex(path, "/"); idx >= 0 {
-		return path[:idx]
+// taskAuditPathInRelevantArea matches a path prefix at a path-segment boundary,
+// so "internal/commands" covers "internal/commands/task.go" but never
+// "internal/commandsfoo/x.go".
+func taskAuditPathInRelevantArea(areas []string, path string) bool {
+	path = strings.Trim(normalizeSinglePath(path), "/")
+	for _, area := range areas {
+		if path == area || strings.HasPrefix(path, area+"/") {
+			return true
+		}
 	}
-	return "."
+	return false
 }
 
 // taskAuditTrackedAtHead reports which of paths are tracked in the HEAD commit.
@@ -2745,6 +2764,9 @@ func writeTaskAuditHuman(out io.Writer, audit taskAuditOutput) error {
 	if len(audit.NewSurfacePaths) > 0 {
 		fmt.Fprintf(out, "This slice created %d files outside the predicted surface; confirm the slice title covers them.\n", len(audit.NewSurfacePaths))
 	}
+	if len(audit.DriftPaths) > 0 {
+		fmt.Fprintf(out, "This slice edited %d files in subsystems outside every area the pack identified as relevant; confirm the slice should reach them.\n", len(audit.DriftPaths))
+	}
 	if len(audit.Notes) > 0 {
 		fmt.Fprintln(out, "Notes:")
 		for _, note := range audit.Notes {
@@ -2760,8 +2782,10 @@ func taskAuditPathKindLabel(audit taskAuditOutput, path string) string {
 		return "pack miss"
 	case containsPath(audit.NewSurfacePaths, path):
 		return "new surface"
-	default:
+	case containsPath(audit.DriftPaths, path):
 		return "drift"
+	default:
+		return "unclassified"
 	}
 }
 

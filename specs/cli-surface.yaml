@@ -137,7 +137,7 @@ tree:
       audit:
         status: diagnostic
         usage: ds task audit <task-id|target>
-        purpose: Check whether observed edits stayed inside one task target, separating pack misses and newly created surface from agent drift.
+        purpose: Check whether observed edits stayed inside one task target, separating pack misses and newly created surface from drift into a subsystem the pack never identified as relevant.
       evaluate:
         status: diagnostic
         usage: ds task evaluate <task-id>
