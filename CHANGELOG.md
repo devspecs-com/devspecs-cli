@@ -19,6 +19,14 @@
   records the next target, and the generated Codex, Cursor, Claude, and
   Windsurf adapters name the same flags. Text only: no command, flag, or
   recorded field changed.
+- Generated task slice and follow-up slice file names now cut their slug at a
+  word boundary inside a 64-character budget instead of truncating mid-word at
+  48 characters, so plan and result names no longer read like
+  `...-with-environme-plan.md`. De-duplication and follow-up ordinal suffixes
+  count against the budget. Slugs already recorded in a `task.json` manifest
+  stay byte-identical; nothing on disk is renamed. Commands that take a slice
+  selector also accept the slug a slice actually carries in its file name, in
+  addition to every selector they accepted before.
 
 ## v1.4.0 - 2026-08-12
 
