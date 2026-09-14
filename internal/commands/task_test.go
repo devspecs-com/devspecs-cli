@@ -2421,9 +2421,9 @@ func TestTaskCheckpointPreservesRequestedSeriesMetadata(t *testing.T) {
 	assert.Equal(t, "complete", record.Decision)
 }
 
-func setupBSeriesTask(t *testing.T) {
+func setupBSeriesTask(t *testing.T) string {
 	t.Helper()
-	setupTaskCommandRepo(t)
+	repoDir := setupTaskCommandRepo(t)
 	cmd := NewTaskCmd()
 	cmd.SetArgs([]string{
 		"--id", "b-series-test",
@@ -2437,6 +2437,8 @@ func setupBSeriesTask(t *testing.T) {
 	})
 	cmd.SetOut(&bytes.Buffer{})
 	require.NoError(t, cmd.Execute())
+
+	return repoDir
 }
 
 type lifecycleTaskFixture struct {

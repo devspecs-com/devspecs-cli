@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added file and stdin input for the free-text `ds task checkpoint` fields:
+  `--description -` and `--note -` read all of stdin, `--description-file` and
+  `--note-file` read a file. Each field takes exactly one source, only one flag
+  may consume stdin per invocation, CRLF is normalised to LF, one trailing
+  newline is trimmed, and interior newlines survive into the checkpoint JSON,
+  the Markdown twin, and `--draft` previews.
+
 ## v1.4.0 - 2026-08-12
 
 - Added experimental repo-first named execution threads with `ds thread set`,
