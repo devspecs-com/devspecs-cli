@@ -21,7 +21,10 @@ import (
 )
 
 const (
-	defaultEndpoint = "https://devspecs.com/api/telemetry"
+	// defaultEndpoint uses the canonical www host. The apex host answers with a
+	// 308 to this URL, so pointing at it directly spends one network round trip
+	// per event instead of two against the defaultTimeout budget.
+	defaultEndpoint = "https://www.devspecs.com/api/telemetry"
 	defaultTimeout  = 750 * time.Millisecond
 )
 

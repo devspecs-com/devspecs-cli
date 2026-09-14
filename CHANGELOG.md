@@ -8,6 +8,9 @@
   may consume stdin per invocation, CRLF is normalised to LF, one trailing
   newline is trimmed, and interior newlines survive into the checkpoint JSON,
   the Markdown twin, and `--draft` previews.
+- Pointed default telemetry at the canonical `www.devspecs.com` endpoint so each
+  usage event costs one network round trip instead of following an apex-host 308
+  redirect, halving the network work on every command's exit path.
 
 ## v1.4.0 - 2026-08-12
 
