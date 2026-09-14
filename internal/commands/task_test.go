@@ -4863,3 +4863,100 @@ func TestTaskCheckpoint_WithWordSafeSliceSlugs_KeepsStageOnlyCheckpointStem(t *t
 	assert.Regexp(t, `^\d{8}-\d{6}-implemented\.md$`, filepath.Base(out.CheckpointPath))
 	assert.Regexp(t, `^\d{8}-\d{6}-implemented\.json$`, filepath.Base(out.CheckpointJSONPath))
 }
+
+const (
+	taskSelectorLongTitle     = "Improve retrieval pack scout ranking for slice titles that mention environment overrides"
+	taskSelectorLongSlug      = "improve-retrieval-pack-scout-ranking-for-slice-titles-that"
+	taskSelectorLegacyTitle   = "Tune slice ranking for titles with environment overrides"
+	taskSelectorLegacySlug    = "tune-slice-ranking-for-titles-with-environment-o"
+	taskSelectorFollowUpTitle = "Repairing the lifecycle status projection for regulated pilot of two agent lanes"
+	taskSelectorFollowUpSlug  = "repairing-the-lifecycle-status-projection-for-regulated-pilot"
+)
+
+// taskSliceSelectorManifest builds a manifest whose recorded slugs are written
+// out literally: B01 under the word-safe rule, B02 under the legacy 48-char
+// rule, and B01-1 as a follow-up whose ID itself contains a hyphen.
+func taskSliceSelectorManifest() taskManifest {
+	return taskManifest{
+		Series: "B",
+		Artifacts: taskArtifactPaths{
+			Series: "B",
+			Index:  "B00-index.md",
+			Slices: []taskSliceArtifact{
+				taskSliceArtifactWithSlug("B01", taskSelectorLongTitle, taskSelectorLongSlug, "slice", "", ""),
+				taskSliceArtifactWithSlug("B02", taskSelectorLegacyTitle, taskSelectorLegacySlug, "slice", "", ""),
+				taskSliceArtifactWithSlug("B01-1", taskSelectorFollowUpTitle, taskSelectorFollowUpSlug, "iteration", "B01", "improve"),
+			},
+		},
+	}
+}
+
+func TestTaskSliceForCheckpoint_WhenSelectedByWordSafeSlug_ResolvesLongTitledSlice(t *testing.T) {
+	manifest := taskSliceSelectorManifest()
+
+	slice, err := taskSliceForCheckpoint(manifest, taskSelectorLongSlug)
+
+	require.NoError(t, err)
+	assert.Equal(t, "B01", slice.ID)
+}
+
+func TestTaskSliceForCheckpoint_WhenSelectedByID_ResolvesLongTitledSlice(t *testing.T) {
+	manifest := taskSliceSelectorManifest()
+
+	slice, err := taskSliceForCheckpoint(manifest, "B01")
+
+	require.NoError(t, err)
+	assert.Equal(t, "B01", slice.ID)
+}
+
+func TestTaskSliceForCheckpoint_WhenSelectedByTitle_ResolvesLongTitledSlice(t *testing.T) {
+	manifest := taskSliceSelectorManifest()
+
+	slice, err := taskSliceForCheckpoint(manifest, taskSelectorLongTitle)
+
+	require.NoError(t, err)
+	assert.Equal(t, "B01", slice.ID)
+}
+
+func TestTaskSliceForCheckpoint_WhenSelectedByPlanFileName_ResolvesLongTitledSlice(t *testing.T) {
+	manifest := taskSliceSelectorManifest()
+
+	slice, err := taskSliceForCheckpoint(manifest, "B01-"+taskSelectorLongSlug+"-plan.md")
+
+	require.NoError(t, err)
+	assert.Equal(t, "B01", slice.ID)
+}
+
+func TestTaskSliceForCheckpoint_WhenSelectedByLegacyFortyEightCharacterSlug_StillResolves(t *testing.T) {
+	manifest := taskSliceSelectorManifest()
+
+	slice, err := taskSliceForCheckpoint(manifest, taskSelectorLegacySlug)
+
+	require.NoError(t, err)
+	assert.Equal(t, "B02", slice.ID)
+}
+
+func TestTaskSliceForCheckpoint_WhenSelectedByFollowUpRecordedSlug_ResolvesIterationSlice(t *testing.T) {
+	manifest := taskSliceSelectorManifest()
+
+	slice, err := taskSliceForCheckpoint(manifest, taskSelectorFollowUpSlug)
+
+	require.NoError(t, err)
+	assert.Equal(t, "B01-1", slice.ID)
+}
+
+func TestTaskSliceRecordedSlug_WhenFollowUpIDContainsHyphen_StripsWholeIDPrefix(t *testing.T) {
+	slice := taskSliceArtifactWithSlug("B01-1", taskSelectorFollowUpTitle, taskSelectorFollowUpSlug, "iteration", "B01", "improve")
+
+	slug := taskSliceRecordedSlug(slice)
+
+	assert.Equal(t, taskSelectorFollowUpSlug, slug)
+}
+
+func TestTaskSliceRecordedSlug_WhenSlugCarriesDeduplicationSuffix_KeepsSuffix(t *testing.T) {
+	slice := taskSliceArtifactWithSlug("B03", taskSelectorLongTitle, taskSelectorLongSlug+"-2", "slice", "", "")
+
+	slug := taskSliceRecordedSlug(slice)
+
+	assert.Equal(t, taskSelectorLongSlug+"-2", slug)
+}

@@ -3020,12 +3020,48 @@ func taskSliceMatchesSelector(slice taskSliceArtifact, selector string) bool {
 		slice.Plan,
 		slice.Result,
 		sanitizeTaskFilename(slice.Title),
+		taskSliceRecordedSlug(slice),
 	} {
 		if strings.EqualFold(strings.TrimSpace(candidate), selector) {
 			return true
 		}
 	}
 	return false
+}
+
+// taskSliceRecordedSlug recovers the slug a slice actually carries in its
+// generated file names, so a caller can select the slice by the slug it can
+// see on disk. It strips the record's own ID prefix and the known artifact
+// suffix rather than splitting on the first hyphen, which would mangle a
+// follow-up ID such as "B01-1". Returns "" when no slug can be recovered;
+// callers treat that as no additional candidate.
+func taskSliceRecordedSlug(slice taskSliceArtifact) string {
+	id := strings.TrimSpace(slice.ID)
+	if id == "" {
+		return ""
+	}
+	prefix := id + "-"
+	for _, candidate := range [][2]string{
+		{slice.Plan, "-plan.md"},
+		{slice.Result, "-result.md"},
+	} {
+		path := strings.TrimSpace(candidate[0])
+		if path == "" {
+			continue
+		}
+		stem := filepath.Base(filepath.ToSlash(path))
+		if !strings.HasSuffix(stem, candidate[1]) {
+			continue
+		}
+		stem = strings.TrimSuffix(stem, candidate[1])
+		if len(stem) <= len(prefix) || !strings.EqualFold(stem[:len(prefix)], prefix) {
+			continue
+		}
+		if slug := strings.Trim(stem[len(prefix):], "-"); slug != "" {
+			return slug
+		}
+	}
+	return ""
 }
 
 type taskPreflight struct {

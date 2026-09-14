@@ -7,7 +7,9 @@
   48 characters, so plan and result names no longer read like
   `...-with-environme-plan.md`. De-duplication and follow-up ordinal suffixes
   count against the budget. Slugs already recorded in a `task.json` manifest
-  stay byte-identical; nothing on disk is renamed.
+  stay byte-identical; nothing on disk is renamed. Commands that take a slice
+  selector also accept the slug a slice actually carries in its file name, in
+  addition to every selector they accepted before.
 
 ## v1.4.0 - 2026-08-12
 
