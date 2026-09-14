@@ -27,6 +27,22 @@
   stay byte-identical; nothing on disk is renamed. Commands that take a slice
   selector also accept the slug a slice actually carries in its file name, in
   addition to every selector they accepted before.
+- Split the `ds task audit` verdict so a mispredicted pack no longer reads as
+  agent drift. Out-of-scope paths are classified as `pack_miss` (recorded with
+  `--missed-file`, listed in the pack's own `noise_risks`, or tracked at git
+  HEAD inside a predicted `relevant_areas` subsystem, or shared surface no
+  subsystem owns such as a repository-root file or documentation),
+  `new_surface` (not tracked at HEAD, so this slice created it), or `drift`
+  (a tracked source file outside every relevant area). `drift` now means the
+  slice reached a source subsystem the pack never identified as relevant,
+  rather than any edit the pack failed to name, so routine `CHANGELOG.md` and
+  docs updates no longer end every slice in a drift verdict.
+  `recommendation` gained the `pack_miss` and `new_surface` values, and
+  `--json` gained `pack_miss_paths`, `new_surface_paths`, `drift_paths`, and
+  `unclassified_paths` alongside the unchanged `out_of_scope_paths` union.
+  Neither fallback assigns blame: with no relevant areas recorded a tracked
+  unpredicted path is a `pack_miss`, and when HEAD tracking cannot be
+  determined the paths stay unclassified and the verdict falls to `review`.
 
 ## v1.4.0 - 2026-08-12
 

@@ -37,6 +37,13 @@ const (
 	// taskSliceSlugBudget caps a generated slice slug, including any
 	// de-duplication suffix and the follow-up ordinal added to the slice ID.
 	taskSliceSlugBudget = 64
+	// Audit verdicts for out-of-scope paths, in ascending precedence order.
+	taskAuditVerdictPackMiss   = "pack_miss"
+	taskAuditVerdictNewSurface = "new_surface"
+	taskAuditVerdictDrift      = "drift"
+
+	// taskAuditGitMaxBytes bounds the HEAD-tracking git calls the audit makes.
+	taskAuditGitMaxBytes = 1 << 20
 )
 
 var taskLifecycleStages = []string{
@@ -385,6 +392,10 @@ type taskAuditOutput struct {
 	InScopePaths    []string `json:"in_scope_paths,omitempty"`
 	ReviewPaths     []string `json:"review_paths,omitempty"`
 	OutOfScopePaths []string `json:"out_of_scope_paths,omitempty"`
+	PackMissPaths   []string `json:"pack_miss_paths,omitempty"`
+	NewSurfacePaths []string `json:"new_surface_paths,omitempty"`
+	DriftPaths      []string `json:"drift_paths,omitempty"`
+	Unclassified    []string `json:"unclassified_paths,omitempty"`
 	AllowedSurface  []string `json:"allowed_surface,omitempty"`
 	ReviewSurface   []string `json:"review_surface,omitempty"`
 	Checkpoints     []string `json:"checkpoints,omitempty"`
@@ -2570,10 +2581,18 @@ func buildTaskAuditOutput(ctx taskTargetContext, includeCurrentGitDiff bool) (ta
 		}
 	}
 
+	split := classifyTaskAuditOutOfScopePaths(ctx, outOfScope, observed.MissedFiles)
+	notes = append(notes, split.Notes...)
+
 	recommendation := "pass"
-	if len(outOfScope) > 0 {
-		recommendation = "drift"
-	} else if len(review) > 0 {
+	switch {
+	case len(split.Drift) > 0:
+		recommendation = taskAuditVerdictDrift
+	case len(split.NewSurface) > 0:
+		recommendation = taskAuditVerdictNewSurface
+	case len(split.PackMiss) > 0:
+		recommendation = taskAuditVerdictPackMiss
+	case len(split.Unclassified) > 0 || len(review) > 0:
 		recommendation = "review"
 	}
 	if len(observedChanged) == 0 {
@@ -2598,11 +2617,195 @@ func buildTaskAuditOutput(ctx taskTargetContext, includeCurrentGitDiff bool) (ta
 		InScopePaths:    inScope,
 		ReviewPaths:     review,
 		OutOfScopePaths: outOfScope,
+		PackMissPaths:   split.PackMiss,
+		NewSurfacePaths: split.NewSurface,
+		DriftPaths:      split.Drift,
+		Unclassified:    split.Unclassified,
 		AllowedSurface:  allowed,
 		ReviewSurface:   reviewSurface,
 		Checkpoints:     checkpoints,
 		Notes:           uniqueStrings(notes),
 	}, nil
+}
+
+// taskAuditScopeSplit separates out-of-scope paths into the reasons they landed
+// there: a pack that failed to predict them, a surface this slice created,
+// genuine drift into an unrelated subsystem, or facts we could not establish.
+type taskAuditScopeSplit struct {
+	PackMiss     []string
+	NewSurface   []string
+	Drift        []string
+	Unclassified []string
+	Notes        []string
+}
+
+// classifyTaskAuditOutOfScopePaths labels every out-of-scope path, in the order
+// that puts the cheapest and strongest pack evidence first:
+//
+//  1. recorded with --missed-file for this target: pack miss;
+//  2. listed in the pack's own noise_risks: pack miss, and the strongest kind,
+//     because the pack looked at the file, called it a distraction, and the
+//     slice needed it anyway;
+//  3. not tracked at HEAD: new surface this slice created;
+//  4. tracked at HEAD inside a predicted relevant area: pack miss, because Go
+//     packages are directories and the pack named the subsystem but not the file;
+//  5. tracked at HEAD but shared surface no subsystem owns, such as a
+//     repository-root file or documentation: pack miss, because drift is a claim
+//     about code subsystems and these cannot be in one;
+//  6. tracked at HEAD outside every relevant area: drift, the one case where the
+//     slice reached a source subsystem the pack never identified as relevant.
+//
+// Neither fallback asserts blame. With no relevant areas recorded there is no
+// basis for a drift claim, so a tracked unpredicted path is a pack miss. When
+// HEAD tracking cannot be established the paths stay unclassified and the
+// verdict falls to review, because calling something drift on facts we could
+// not determine is the same error this split exists to remove.
+func classifyTaskAuditOutOfScopePaths(ctx taskTargetContext, outOfScope, missedFiles []string) taskAuditScopeSplit {
+	var split taskAuditScopeSplit
+	if len(outOfScope) == 0 {
+		return split
+	}
+	noiseRisks := predictedFilePaths(ctx.Manifest.Predicted.NoiseRisks)
+	var unresolved []string
+	for _, path := range outOfScope {
+		if containsPath(missedFiles, path) || containsPath(noiseRisks, path) {
+			split.PackMiss = appendNormalizedUnique(split.PackMiss, path)
+			continue
+		}
+		unresolved = append(unresolved, normalizeSinglePath(path))
+	}
+	if len(unresolved) == 0 {
+		return split
+	}
+	tracked, ok := taskAuditTrackedAtHead(ctx.RepoRoot, unresolved)
+	if !ok {
+		split.Unclassified = appendNormalizedUnique(split.Unclassified, unresolved...)
+		split.Notes = append(split.Notes, "Git HEAD tracking could not be determined, so these paths were left unclassified rather than reported as drift.")
+		return split
+	}
+	areas := taskAuditRelevantAreas(ctx)
+	for _, path := range unresolved {
+		switch {
+		case !tracked[path]:
+			split.NewSurface = appendNormalizedUnique(split.NewSurface, path)
+		case len(areas) == 0 || taskAuditPathInRelevantArea(areas, path):
+			split.PackMiss = appendNormalizedUnique(split.PackMiss, path)
+		case taskAuditPathIsSharedSurface(path):
+			split.PackMiss = appendNormalizedUnique(split.PackMiss, path)
+		default:
+			split.Drift = appendNormalizedUnique(split.Drift, path)
+		}
+	}
+	return split
+}
+
+// taskAuditRelevantAreas returns the subsystems the pack identified as relevant.
+func taskAuditRelevantAreas(ctx taskTargetContext) []string {
+	var areas []string
+	for _, area := range ctx.Manifest.Predicted.RelevantAreas {
+		area = strings.Trim(normalizeSinglePath(area), "/")
+		if area == "" || area == "." {
+			continue
+		}
+		areas = appendUniqueString(areas, area)
+	}
+	return areas
+}
+
+// taskAuditSharedSurfaceExtensions are the documentation and configuration file
+// types that are shared surface rather than a code subsystem.
+var taskAuditSharedSurfaceExtensions = map[string]bool{
+	".md":   true,
+	".rst":  true,
+	".txt":  true,
+	".adoc": true,
+	".yaml": true,
+	".yml":  true,
+	".json": true,
+	".toml": true,
+	".ini":  true,
+	".cfg":  true,
+}
+
+// taskAuditPathIsSharedSurface reports whether a path is shared surface that no
+// subsystem owns: a repository-root file, anything under a docs directory, or a
+// documentation or configuration file anywhere. Drift is a claim about code
+// subsystems, and none of these can be in one, so they cannot drift out of an
+// area. The pack has a dedicated docs_plans_config slot; when it predicts
+// nothing there and the slice needed documentation anyway, the pack missed.
+func taskAuditPathIsSharedSurface(path string) bool {
+	path = strings.Trim(normalizeSinglePath(path), "/")
+	if path == "" {
+		return false
+	}
+	if !strings.Contains(path, "/") {
+		return true
+	}
+	for _, segment := range strings.Split(path, "/") {
+		if strings.EqualFold(segment, "docs") {
+			return true
+		}
+	}
+	return taskAuditSharedSurfaceExtensions[strings.ToLower(filepath.Ext(path))]
+}
+
+// taskAuditPathInRelevantArea matches a path prefix at a path-segment boundary,
+// so "internal/commands" covers "internal/commands/task.go" but never
+// "internal/commandsfoo/x.go".
+func taskAuditPathInRelevantArea(areas []string, path string) bool {
+	path = strings.Trim(normalizeSinglePath(path), "/")
+	for _, area := range areas {
+		if path == area || strings.HasPrefix(path, area+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// taskAuditTrackedAtHead reports which of paths are tracked in the HEAD commit.
+// Pathspecs are literal so a recorded path containing a glob character cannot
+// match something it does not name. It runs one bounded `git ls-tree` per batch
+// of pathspecs, and falls back to a single `git rev-parse` only when that call
+// fails, so a repository without commits is told apart from a directory that is
+// not a git repository at all.
+// The second return value is false when tracking could not be determined.
+func taskAuditTrackedAtHead(repoRoot string, paths []string) (map[string]bool, bool) {
+	tracked := map[string]bool{}
+	const pathspecBatch = 100
+	for start := 0; start < len(paths); start += pathspecBatch {
+		end := start + pathspecBatch
+		if end > len(paths) {
+			end = len(paths)
+		}
+		args := []string{"--literal-pathspecs", "ls-tree", "-r", "-z", "--name-only", "--full-name", "HEAD", "--"}
+		args = append(args, paths[start:end]...)
+		output, truncated, err := runBoundedGitCommand(repoRoot, taskAuditGitMaxBytes, args...)
+		if err != nil {
+			return taskAuditEmptyHeadTree(repoRoot)
+		}
+		if truncated {
+			return nil, false
+		}
+		for _, name := range strings.Split(output, "\x00") {
+			name = normalizeSinglePath(name)
+			if name == "" {
+				continue
+			}
+			tracked[name] = true
+		}
+	}
+	return tracked, true
+}
+
+// taskAuditEmptyHeadTree decides what a failed HEAD listing means: inside a git
+// repository it means there is no commit yet, so nothing is tracked; anywhere
+// else tracking is simply unknown.
+func taskAuditEmptyHeadTree(repoRoot string) (map[string]bool, bool) {
+	output, _, err := runBoundedGitCommand(repoRoot, taskAuditGitMaxBytes, "rev-parse", "--is-inside-work-tree")
+	if err != nil || !strings.EqualFold(strings.TrimSpace(output), "true") {
+		return nil, false
+	}
+	return map[string]bool{}, true
 }
 
 func writeTaskAuditHuman(out io.Writer, audit taskAuditOutput) error {
@@ -2623,8 +2826,17 @@ func writeTaskAuditHuman(out io.Writer, audit taskAuditOutput) error {
 	if len(audit.OutOfScopePaths) > 0 {
 		fmt.Fprintln(out, "Out of scope:")
 		for _, path := range audit.OutOfScopePaths {
-			fmt.Fprintf(out, "  - %s\n", path)
+			fmt.Fprintf(out, "  - %s (%s)\n", path, taskAuditPathKindLabel(audit, path))
 		}
+	}
+	if len(audit.PackMissPaths) > 0 {
+		fmt.Fprintf(out, "The pack did not predict %d files this slice needed. Record the missing code files with --missed-file so later packs improve. This is not agent drift.\n", len(audit.PackMissPaths))
+	}
+	if len(audit.NewSurfacePaths) > 0 {
+		fmt.Fprintf(out, "This slice created %d files outside the predicted surface; confirm the slice title covers them.\n", len(audit.NewSurfacePaths))
+	}
+	if len(audit.DriftPaths) > 0 {
+		fmt.Fprintf(out, "This slice edited %d source files in subsystems outside every area the pack identified as relevant; confirm the slice should reach them.\n", len(audit.DriftPaths))
 	}
 	if len(audit.Notes) > 0 {
 		fmt.Fprintln(out, "Notes:")
@@ -2633,6 +2845,19 @@ func writeTaskAuditHuman(out io.Writer, audit taskAuditOutput) error {
 		}
 	}
 	return nil
+}
+
+func taskAuditPathKindLabel(audit taskAuditOutput, path string) string {
+	switch {
+	case containsPath(audit.PackMissPaths, path):
+		return "pack miss"
+	case containsPath(audit.NewSurfacePaths, path):
+		return "new surface"
+	case containsPath(audit.DriftPaths, path):
+		return "drift"
+	default:
+		return "unclassified"
+	}
 }
 
 func readTaskObservedPathsForTarget(workspace, targetID string) (taskObservedPaths, []string, error) {
