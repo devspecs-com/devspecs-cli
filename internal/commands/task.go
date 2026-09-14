@@ -2223,6 +2223,8 @@ func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput, prior
 		checkpointCommand += " --repo " + commandArg(ctx.RepoArg)
 	}
 	fmt.Fprintf(&b, "Record the outcome in `%s` or with `%s`.\n", filepath.ToSlash(taskRelativePath(ctx.RepoRoot, target.ResultPath)), checkpointCommand)
+	fmt.Fprintln(&b, "Checkpoint fields that matter for handoff: `--next-target` and `--next-decision` record what should run next, `--missed-file` and `--noise-file` record what the packed context got wrong, and `--from-git` fills edited-file evidence from the worktree.")
+	fmt.Fprintf(&b, "Example: `%s --stage validated --decision continue --from-git --test-run \"<command>\" --next-target %s --next-decision promote`\n", checkpointCommand, taskPromptNextTargetPlaceholder(ctx.Manifest, target.Target))
 	fmt.Fprintln(&b, "Checklist edits are useful notes, but lifecycle state should be recorded with `ds task checkpoint`; legacy `finish` and `decide` shortcuts are compatibility-only.")
 	fmt.Fprintln(&b, "Command roles: use `ds find` to discover and pack evidence, `ds task status` to inspect lifecycle, `ds apply` to emit the current bounded prompt, and `ds workspace trace` only for known workspace change/task links. In trace output, `status` and `index_status` are separate signals.")
 	fmt.Fprintln(&b, "At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.")
@@ -2259,6 +2261,8 @@ func renderTaskCloseoutPrompt(ctx taskTargetContext, target taskTargetOutput, pr
 	fmt.Fprintf(&b, "- none: `ds task checkpoint %s --target %s --stage completed --decision complete --durable-record none%s`\n", target.TaskID, target.Target, repoArg)
 	fmt.Fprintf(&b, "- recorded: create or finish repo-owned ADR/RFC/PRD files, then run `ds task checkpoint %s --target %s --stage completed --decision complete --durable-record recorded --durable-artifact <path>%s`\n", target.TaskID, target.Target, repoArg)
 	fmt.Fprintf(&b, "- deferred: `ds task checkpoint %s --target %s --stage completed --decision complete --durable-record deferred --next-target <target>%s`\n", target.TaskID, target.Target, repoArg)
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "Checkpoint fields that matter for handoff: `--durable-record` and `--durable-artifact` record where the institutional knowledge landed, `--next-target` and `--next-decision` record what should run next when the disposition is deferred, and `--missed-file` and `--noise-file` record what the packed context got wrong.")
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "Use `ds compose adr|rfc|prd \"<title>\" --from-task "+target.TaskID+" --target "+target.Target+repoArg+"` when a new durable draft is needed. Complete its placeholders before recording it.")
 	fmt.Fprintln(&b, "ADR formats: Nygard for compact records; MADR for explicit option comparison; Y-Statement for the shortest reviewable choice; Outcome-First for async alignment; ISO 42010 Companion for stakeholders, concerns, views, and traceability.")
@@ -2497,6 +2501,24 @@ func taskTargetTerminal(slice taskSliceArtifact) bool {
 	default:
 		return false
 	}
+}
+
+// taskPromptNextTargetPlaceholder returns the target that follows targetID in the
+// manifest slice order so the prompt example is copy-pasteable. When targetID is the
+// last target (or is unknown) it returns a neutral placeholder rather than an ID that
+// does not exist.
+func taskPromptNextTargetPlaceholder(manifest taskManifest, targetID string) string {
+	slices := taskSyncSlices(manifest)
+	for i, slice := range slices {
+		if !strings.EqualFold(slice.ID, targetID) {
+			continue
+		}
+		if i+1 < len(slices) {
+			return slices[i+1].ID
+		}
+		break
+	}
+	return "<next-target>"
 }
 
 func taskSiblingTargetIDs(manifest taskManifest, targetID string) []string {

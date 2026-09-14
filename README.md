@@ -93,7 +93,7 @@ ds init
 | Coordinate multi-repo work | `ds workspace init .` | You have an umbrella workspace with several child repos. Experimental. |
 | Continue one slice | `ds apply` | A task already exists and the agent needs the current target only. |
 | Coordinate parallel lanes | `ds thread task:<task-id>` | One task has several independently runnable slices or an explicit join. Experimental. |
-| Record the receipt | `ds task checkpoint A01 --decision promote` | You need to capture what changed, what ran, what missed, and what comes next. |
+| Record the receipt | `ds task checkpoint A01 --decision promote --next-target A02 --next-decision promote` | You need to capture what changed, what ran, what missed, and what comes next. |
 | Preserve a durable decision | `ds compose adr "title"` | A track settled a consequential technical choice that should outlive task history. Experimental. |
 | Inspect exact context | `ds context <artifact-id>` | You want one indexed artifact as paste-ready agent context. |
 
@@ -175,7 +175,7 @@ ds task "Serve Swagger UI OAuth2 redirect from a custom docs redirect URL" \
 
 ds task show A01
 ds apply
-ds task checkpoint A01 --decision promote --next-target A02
+ds task checkpoint A01 --decision promote --next-target A02 --next-decision promote
 ds apply
 ```
 
@@ -256,7 +256,7 @@ ds workspace change create "Customer export across frontend/backend" --workspace
 ds workspace slice create EAG-C001 --workspace . --repo backend --name "Backend API" --json
 ds task show eag-c001-backend --repo ./enalytics-backend --json
 ds apply eag-c001-backend --repo ./enalytics-backend --json
-ds task checkpoint eag-c001-backend --repo ./enalytics-backend --target A01 --stage validated --decision promote --json
+ds task checkpoint eag-c001-backend --repo ./enalytics-backend --target A01 --stage validated --decision promote --next-target A02 --next-decision promote --json
 ds compose adr "Define the export ownership boundary" --repo ./enalytics-backend --from-task eag-c001-backend --target A00 --json
 ds workspace trace EAG-C001 --workspace . --json
 ```

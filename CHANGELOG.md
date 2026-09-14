@@ -11,6 +11,14 @@
 - Pointed default telemetry at the canonical `www.devspecs.com` endpoint so each
   usage event costs one network round trip instead of following an apex-host 308
   redirect, halving the network work on every command's exit path.
+- Surfaced the existing checkpoint handoff flags where agents actually read
+  them. The bounded `ds apply` slice prompt and the closeout prompt now name
+  `--next-target`, `--next-decision`, `--missed-file`, `--noise-file`, and
+  `--from-git`, with a copy-pasteable example that uses the real task and next
+  target IDs. The `ds tldr handoff` workflow lists the checkpoint command that
+  records the next target, and the generated Codex, Cursor, Claude, and
+  Windsurf adapters name the same flags. Text only: no command, flag, or
+  recorded field changed.
 
 ## v1.4.0 - 2026-08-12
 
