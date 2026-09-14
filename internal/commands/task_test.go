@@ -3387,6 +3387,77 @@ func addGitAuditCheckpoint(t *testing.T, editedFiles, missedFiles []string) {
 	require.NoError(t, cmd.Execute())
 }
 
+func TestTaskAudit_WhenTrackedRootDocumentEdited_ReportsPackMiss(t *testing.T) {
+	repoDir := setupGitBackedAuditTask(t)
+	mustWriteFile(t, filepath.Join(repoDir, "CHANGELOG.md"), "# Changelog\n\n## Unreleased\n")
+	commitTaskGitRepo(t, repoDir, "add changelog")
+	addGitAuditCheckpoint(t, []string{"CHANGELOG.md"}, nil)
+	rewriteAuditManifestPredicted(t, repoDir, func(predicted *taskPredictedContext) {
+		predicted.RelevantAreas = []string{"internal/retrieval"}
+	})
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "pack_miss", out.Recommendation)
+	assert.Contains(t, out.PackMissPaths, "CHANGELOG.md")
+	assert.Empty(t, out.DriftPaths)
+}
+
+func TestTaskAudit_WhenTrackedDocsFileOutsideRelevantAreas_ReportsPackMiss(t *testing.T) {
+	repoDir := setupGitBackedAuditTask(t)
+	mustMkdirAll(t, filepath.Join(repoDir, "docs", "guides"))
+	mustWriteFile(t, filepath.Join(repoDir, "docs", "guides", "workflow.md"), "# Workflow\n\nHow to run a slice.\n")
+	commitTaskGitRepo(t, repoDir, "add guide")
+	addGitAuditCheckpoint(t, []string{"docs/guides/workflow.md"}, nil)
+	rewriteAuditManifestPredicted(t, repoDir, func(predicted *taskPredictedContext) {
+		predicted.RelevantAreas = []string{"internal/retrieval"}
+	})
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "pack_miss", out.Recommendation)
+	assert.Contains(t, out.PackMissPaths, "docs/guides/workflow.md")
+	assert.Empty(t, out.DriftPaths)
+}
+
+func TestTaskAudit_WhenConfigFileUnderRelevantArea_ReportsPackMiss(t *testing.T) {
+	repoDir := setupGitBackedAuditTask(t)
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "retrieval", "fixtures.yaml"), "cases:\n  - name: recall\n")
+	commitTaskGitRepo(t, repoDir, "add fixture")
+	addGitAuditCheckpoint(t, []string{"internal/retrieval/fixtures.yaml"}, nil)
+	rewriteAuditManifestPredicted(t, repoDir, func(predicted *taskPredictedContext) {
+		predicted.RelevantAreas = []string{"internal/retrieval"}
+	})
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.True(t, taskAuditPathInRelevantArea([]string{"internal/retrieval"}, "internal/retrieval/fixtures.yaml"))
+	assert.Equal(t, "pack_miss", out.Recommendation)
+	assert.Contains(t, out.PackMissPaths, "internal/retrieval/fixtures.yaml")
+	assert.Empty(t, out.DriftPaths)
+}
+
 // rewriteAuditManifestPredicted edits the predicted context the pack recorded so
 // a test can arrange one pack judgement without regenerating a whole pack.
 func rewriteAuditManifestPredicted(t *testing.T, repoDir string, mutate func(predicted *taskPredictedContext)) {

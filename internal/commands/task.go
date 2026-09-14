@@ -2620,8 +2620,11 @@ type taskAuditScopeSplit struct {
 //  3. not tracked at HEAD: new surface this slice created;
 //  4. tracked at HEAD inside a predicted relevant area: pack miss, because Go
 //     packages are directories and the pack named the subsystem but not the file;
-//  5. tracked at HEAD outside every relevant area: drift, the one case where the
-//     slice reached a subsystem the pack never identified as relevant at all.
+//  5. tracked at HEAD but shared surface no subsystem owns, such as a
+//     repository-root file or documentation: pack miss, because drift is a claim
+//     about code subsystems and these cannot be in one;
+//  6. tracked at HEAD outside every relevant area: drift, the one case where the
+//     slice reached a source subsystem the pack never identified as relevant.
 //
 // Neither fallback asserts blame. With no relevant areas recorded there is no
 // basis for a drift claim, so a tracked unpredicted path is a pack miss. When
@@ -2658,6 +2661,8 @@ func classifyTaskAuditOutOfScopePaths(ctx taskTargetContext, outOfScope, missedF
 			split.NewSurface = appendNormalizedUnique(split.NewSurface, path)
 		case len(areas) == 0 || taskAuditPathInRelevantArea(areas, path):
 			split.PackMiss = appendNormalizedUnique(split.PackMiss, path)
+		case taskAuditPathIsSharedSurface(path):
+			split.PackMiss = appendNormalizedUnique(split.PackMiss, path)
 		default:
 			split.Drift = appendNormalizedUnique(split.Drift, path)
 		}
@@ -2676,6 +2681,43 @@ func taskAuditRelevantAreas(ctx taskTargetContext) []string {
 		areas = appendUniqueString(areas, area)
 	}
 	return areas
+}
+
+// taskAuditSharedSurfaceExtensions are the documentation and configuration file
+// types that are shared surface rather than a code subsystem.
+var taskAuditSharedSurfaceExtensions = map[string]bool{
+	".md":   true,
+	".rst":  true,
+	".txt":  true,
+	".adoc": true,
+	".yaml": true,
+	".yml":  true,
+	".json": true,
+	".toml": true,
+	".ini":  true,
+	".cfg":  true,
+}
+
+// taskAuditPathIsSharedSurface reports whether a path is shared surface that no
+// subsystem owns: a repository-root file, anything under a docs directory, or a
+// documentation or configuration file anywhere. Drift is a claim about code
+// subsystems, and none of these can be in one, so they cannot drift out of an
+// area. The pack has a dedicated docs_plans_config slot; when it predicts
+// nothing there and the slice needed documentation anyway, the pack missed.
+func taskAuditPathIsSharedSurface(path string) bool {
+	path = strings.Trim(normalizeSinglePath(path), "/")
+	if path == "" {
+		return false
+	}
+	if !strings.Contains(path, "/") {
+		return true
+	}
+	for _, segment := range strings.Split(path, "/") {
+		if strings.EqualFold(segment, "docs") {
+			return true
+		}
+	}
+	return taskAuditSharedSurfaceExtensions[strings.ToLower(filepath.Ext(path))]
 }
 
 // taskAuditPathInRelevantArea matches a path prefix at a path-segment boundary,
@@ -2759,13 +2801,13 @@ func writeTaskAuditHuman(out io.Writer, audit taskAuditOutput) error {
 		}
 	}
 	if len(audit.PackMissPaths) > 0 {
-		fmt.Fprintf(out, "The pack did not predict %d files this slice needed. Record them with --missed-file so later packs improve. This is not agent drift.\n", len(audit.PackMissPaths))
+		fmt.Fprintf(out, "The pack did not predict %d files this slice needed. Record the missing code files with --missed-file so later packs improve. This is not agent drift.\n", len(audit.PackMissPaths))
 	}
 	if len(audit.NewSurfacePaths) > 0 {
 		fmt.Fprintf(out, "This slice created %d files outside the predicted surface; confirm the slice title covers them.\n", len(audit.NewSurfacePaths))
 	}
 	if len(audit.DriftPaths) > 0 {
-		fmt.Fprintf(out, "This slice edited %d files in subsystems outside every area the pack identified as relevant; confirm the slice should reach them.\n", len(audit.DriftPaths))
+		fmt.Fprintf(out, "This slice edited %d source files in subsystems outside every area the pack identified as relevant; confirm the slice should reach them.\n", len(audit.DriftPaths))
 	}
 	if len(audit.Notes) > 0 {
 		fmt.Fprintln(out, "Notes:")
