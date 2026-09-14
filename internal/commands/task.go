@@ -140,7 +140,9 @@ type taskCheckpointOptions struct {
 	Stage            string
 	Decision         string
 	Note             string
+	NoteFile         string
 	Description      string
+	DescriptionFile  string
 	Goal             string
 	Resources        []string
 	FilesRead        []string
@@ -989,8 +991,10 @@ func newTaskCheckpointCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.Slice, "slice", "", "Deprecated alias for --target")
 	cmd.Flags().StringVar(&opts.Stage, "stage", opts.Stage, "Lifecycle stage: packed, planned, started, implemented, validated, done, blocked, completed, split, superseded, cancelled, rolled_back")
 	cmd.Flags().StringVar(&opts.Decision, "decision", opts.Decision, "Decision gate: promote, improve, rework, rollback, block, complete, split, supersede, cancel, continue")
-	cmd.Flags().StringVar(&opts.Note, "note", "", "Short checkpoint note")
-	cmd.Flags().StringVar(&opts.Description, "description", "", "What changed or was learned")
+	cmd.Flags().StringVar(&opts.Note, "note", "", "Short checkpoint note; use - to read all of stdin")
+	cmd.Flags().StringVar(&opts.NoteFile, "note-file", "", "Read the checkpoint note from a file instead of --note")
+	cmd.Flags().StringVar(&opts.Description, "description", "", taskCheckpointDescriptionFlagUsage)
+	cmd.Flags().StringVar(&opts.DescriptionFile, "description-file", "", "Read the checkpoint description from a file instead of --description")
 	cmd.Flags().StringVar(&opts.Goal, "goal", "", "Checkpoint goal")
 	cmd.Flags().StringArrayVar(&opts.Resources, "resource", nil, "Resource link/path to record; may be repeated")
 	cmd.Flags().StringArrayVar(&opts.FilesRead, "file-read", nil, "File actually read; may be repeated")
@@ -4870,6 +4874,10 @@ func taskAdvisorySourceLeads(files []taskAdvisoryFile) []taskAdvisoryFile {
 }
 
 func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOptions) error {
+	opts, err := resolveTaskCheckpointTextInputs(cmd, opts)
+	if err != nil {
+		return err
+	}
 	target, err := checkpointTargetFromOptions(opts)
 	if err != nil {
 		return err
@@ -5145,6 +5153,85 @@ func checkpointTargetFromOptions(opts taskCheckpointOptions) (string, error) {
 		return target, nil
 	}
 	return slice, nil
+}
+
+// taskCheckpointStdinToken is the --description/--note value that means "read
+// all of stdin".
+const taskCheckpointStdinToken = "-"
+
+const taskCheckpointDescriptionFlagUsage = `What changed or was learned; use - to read all of stdin
+PowerShell here-string:
+  @'
+  line one
+  line two
+  '@ | ds task checkpoint <task> --target <id> --description -
+bash heredoc:
+  ds task checkpoint <task> --target <id> --description - <<'EOF'
+  line one
+  line two
+  EOF`
+
+// resolveTaskCheckpointTextInputs resolves the free-text checkpoint fields that
+// may come from stdin or a file. Each field accepts exactly one source, and at
+// most one field may consume stdin per invocation.
+func resolveTaskCheckpointTextInputs(cmd *cobra.Command, opts taskCheckpointOptions) (taskCheckpointOptions, error) {
+	stdinOwner := ""
+
+	description, err := resolveTaskCheckpointTextInput(cmd, opts.Description, opts.DescriptionFile, "--description", "--description-file", &stdinOwner)
+	if err != nil {
+		return opts, err
+	}
+	note, err := resolveTaskCheckpointTextInput(cmd, opts.Note, opts.NoteFile, "--note", "--note-file", &stdinOwner)
+	if err != nil {
+		return opts, err
+	}
+	opts.Description = description
+	opts.DescriptionFile = ""
+	opts.Note = note
+	opts.NoteFile = ""
+	return opts, nil
+}
+
+func resolveTaskCheckpointTextInput(cmd *cobra.Command, value, file, valueFlag, fileFlag string, stdinOwner *string) (string, error) {
+	file = strings.TrimSpace(file)
+	if file != "" {
+		if strings.TrimSpace(value) != "" {
+			return "", fmt.Errorf("use either %s or %s for the checkpoint text, not both", valueFlag, fileFlag)
+		}
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return "", fmt.Errorf("read %s %s: %w", fileFlag, file, err)
+		}
+		text := normalizeTaskCheckpointText(string(data))
+		if strings.TrimSpace(text) == "" {
+			return "", fmt.Errorf("%s %s is empty; write the text into the file or drop the flag", fileFlag, file)
+		}
+		return text, nil
+	}
+	if strings.TrimSpace(value) != taskCheckpointStdinToken {
+		return normalizeTaskCheckpointText(value), nil
+	}
+	if *stdinOwner != "" {
+		return "", fmt.Errorf("stdin already consumed by %s", *stdinOwner)
+	}
+	*stdinOwner = valueFlag
+	data, err := io.ReadAll(cmd.InOrStdin())
+	if err != nil {
+		return "", fmt.Errorf("read %s from stdin: %w", valueFlag, err)
+	}
+	text := normalizeTaskCheckpointText(string(data))
+	if strings.TrimSpace(text) == "" {
+		return "", fmt.Errorf("%s - read empty stdin; pipe text or use %s <path>", valueFlag, fileFlag)
+	}
+	return text, nil
+}
+
+// normalizeTaskCheckpointText normalizes CRLF line endings to LF and trims at
+// most one trailing newline so a PowerShell here-string and a bash heredoc
+// produce byte-identical stored text. Interior newlines are preserved.
+func normalizeTaskCheckpointText(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	return strings.TrimSuffix(text, "\n")
 }
 
 func normalizeTaskCheckpointOptions(opts taskCheckpointOptions) taskCheckpointOptions {

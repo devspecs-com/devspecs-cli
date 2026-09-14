@@ -210,6 +210,38 @@ Structured checkpoint: <repo>/devspecs/tasks/weekly-digest/checkpoints/20260609-
 Updated result: <repo>/devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md
 ```
 
+Long descriptions do not have to survive shell quoting. `--description -` reads
+all of stdin, and `--description-file <path>` reads a file. The same pair exists
+for the note: `--note -` and `--note-file <path>`. Only one flag may read stdin
+per invocation, and a field takes exactly one source.
+
+PowerShell single-quoted here-string:
+
+```powershell
+@'
+Verified the existing digest builder and focused tests.
+
+- Scheduling contract is unchanged.
+- Windows CRLF fixtures were not exercised.
+'@ | ds task checkpoint weekly-digest --target A01 --stage validated --decision promote --description -
+```
+
+bash heredoc:
+
+```bash
+ds task checkpoint weekly-digest --target A01 --stage validated --decision promote --description - <<'EOF'
+Verified the existing digest builder and focused tests.
+
+- Scheduling contract is unchanged.
+- Windows CRLF fixtures were not exercised.
+EOF
+```
+
+Both forms store the same bytes: CRLF is normalised to LF, one trailing newline
+is trimmed, and interior newlines are preserved in the checkpoint JSON and the
+rendered Markdown. Add `--draft --json` to preview the record without writing
+any files.
+
 ```bash
 $ ds task status weekly-digest
 ```
