@@ -33,6 +33,10 @@ const (
 	taskManifestFilename    = "task.json"
 	taskProfileCodeChange   = "code-change"
 	taskProfileGreenfield   = "greenfield"
+
+	// taskSliceSlugBudget caps a generated slice slug, including any
+	// de-duplication suffix and the follow-up ordinal added to the slice ID.
+	taskSliceSlugBudget = 64
 )
 
 var taskLifecycleStages = []string{
@@ -2706,7 +2710,8 @@ func newTaskIterationArtifact(parent taskSliceArtifact, ordinal int, title, reas
 		ordinal = 1
 	}
 	id := fmt.Sprintf("%s-%d", parent.ID, ordinal)
-	return taskSliceArtifactWithSlug(id, title, uniqueTaskSliceSlug(title, usedSlugs), "iteration", parent.ID, reason)
+	budget := taskSliceSlugBudget - (len(id) - len(parent.ID))
+	return taskSliceArtifactWithSlug(id, title, uniqueTaskSliceSlugWithBudget(title, usedSlugs, budget), "iteration", parent.ID, reason)
 }
 
 func taskSliceArtifactWithSlug(id, title, slug, kind, parentID, reason string) taskSliceArtifact {
@@ -2808,13 +2813,24 @@ func normalizeTaskSliceTitles(query string, values []string) []string {
 }
 
 func uniqueTaskSliceSlug(title string, used map[string]int) string {
-	slug := sanitizeTaskFilename(title)
+	return uniqueTaskSliceSlugWithBudget(title, used, taskSliceSlugBudget)
+}
+
+// uniqueTaskSliceSlugWithBudget keeps the de-duplication suffix inside budget
+// so the generated file name never exceeds what the budget implies.
+func uniqueTaskSliceSlugWithBudget(title string, used map[string]int, budget int) string {
+	slug := wordSafeTaskSlug(title, budget)
 	seen := used[slug]
 	used[slug] = seen + 1
 	if seen == 0 {
 		return slug
 	}
-	return fmt.Sprintf("%s-%d", slug, seen+1)
+	suffix := fmt.Sprintf("-%d", seen+1)
+	remaining := budget - len(suffix)
+	if budget > 0 && remaining < 1 {
+		remaining = 1
+	}
+	return wordSafeTaskSlug(title, remaining) + suffix
 }
 
 func firstTaskSliceArtifact(paths taskArtifactPaths) taskSliceArtifact {
@@ -6622,6 +6638,16 @@ func generatedTaskID(query string, now time.Time) string {
 }
 
 func sanitizeTaskFilename(value string) string {
+	out := taskFilenameWords(value)
+	if len(out) > 48 {
+		out = strings.Trim(out[:48], "-")
+	}
+	return out
+}
+
+// taskFilenameWords lowercases value and joins its alphanumeric runs with
+// single hyphens. It applies no length budget; callers decide how to cut.
+func taskFilenameWords(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	var b strings.Builder
 	lastDash := false
@@ -6640,10 +6666,49 @@ func sanitizeTaskFilename(value string) string {
 	if out == "" {
 		out = "task"
 	}
-	if len(out) > 48 {
-		out = strings.Trim(out[:48], "-")
-	}
 	return out
+}
+
+// wordSafeTaskSlug renders value as a hyphenated slug of at most budget
+// characters, cutting at the last hyphen at or before the budget so the slug
+// never ends mid-word. A first word longer than the budget is cut hard so the
+// result is always non-empty.
+func wordSafeTaskSlug(value string, budget int) string {
+	out := taskFilenameWords(value)
+	if budget <= 0 {
+		return out
+	}
+	cut := taskSlugCutIndex(out, budget)
+	if cut >= len(out) {
+		return out
+	}
+	head := out[:cut]
+	if out[cut] != '-' {
+		if idx := strings.LastIndexByte(head, '-'); idx > 0 {
+			head = head[:idx]
+		}
+	}
+	head = strings.Trim(head, "-")
+	if head == "" {
+		head = strings.Trim(out[:cut], "-")
+	}
+	if head == "" {
+		head = "task"
+	}
+	return head
+}
+
+// taskSlugCutIndex returns the byte offset of the budget-th rune in value, or
+// len(value) when value is shorter. Cutting there never splits a rune.
+func taskSlugCutIndex(value string, budget int) int {
+	count := 0
+	for i := range value {
+		if count == budget {
+			return i
+		}
+		count++
+	}
+	return len(value)
 }
 
 func validateTaskID(taskID string) error {

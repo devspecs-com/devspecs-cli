@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Generated task slice and follow-up slice file names now cut their slug at a
+  word boundary inside a 64-character budget instead of truncating mid-word at
+  48 characters, so plan and result names no longer read like
+  `...-with-environme-plan.md`. De-duplication and follow-up ordinal suffixes
+  count against the budget. Slugs already recorded in a `task.json` manifest
+  stay byte-identical; nothing on disk is renamed.
+
 ## v1.4.0 - 2026-08-12
 
 - Added experimental repo-first named execution threads with `ds thread set`,
