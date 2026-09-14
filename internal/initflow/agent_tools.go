@@ -373,7 +373,7 @@ func taskAdapterBody(goalPhrase, taskCommand string) string {
 		"6. If the target is unclear, run `ds recent` and `ds find \"<topic>\"` as diagnostics, then return to one bounded task.\n"+
 		"7. Work exactly one slice at a time. Do not implement an entire track when the current target is a slice like A01.\n"+
 		"8. End with a DevSpecs decision gate: `promote`, `improve`, `rework`, `rollback`, or `block`.\n"+
-		"9. Record evidence with `ds task checkpoint <task-id|target> --stage validated --decision <gate>` before claiming the slice is done.\n\n"+
+		"9. Record evidence with `ds task checkpoint <task-id|target> --stage validated --decision <gate>` before claiming the slice is done. Add `--next-target` and `--next-decision` for what should run next, and `--missed-file` and `--noise-file` for what the packed context got wrong.\n\n"+
 		"Keep `M00` or `A00` as the index, `M01`/`A01` as planned slices, and `M01-1`/`A01-1` as follow-up slices. Create follow-up slices with `ds task slice add <task-id> \"<title>\" --after A01 --reason improve`.", goalPhrase, taskCommand)
 }
 
@@ -385,7 +385,7 @@ func applyAdapterBody(targetPhrase, applyCommand string) string {
 		"4. Treat tasks as repo-owned unless their manifest explicitly links a workspace change; do not create a workspace just to use threads.\n"+
 		"5. If the target is unclear, run `ds recent` and `ds find \"<topic>\"` as diagnostics, then rerun `ds apply` with one target.\n"+
 		"6. Implement only the resolved slice. Do not continue into sibling slices unless the decision gate explicitly promotes to them.\n"+
-		"7. Record what changed, files read/edited, tests run, misses, noise, and the next gate using `ds task checkpoint`.\n"+
+		"7. Record what changed, files read/edited, tests run, misses, noise, and the next gate using `ds task checkpoint`: `--next-target` and `--next-decision` for what runs next, `--missed-file` and `--noise-file` for what the packed context got wrong.\n"+
 		"8. Stop after the decision gate. Recommend `promote`, `improve`, `rework`, `rollback`, or `block`.\n\n"+
 		"The adapter is a thin wrapper over the DevSpecs CLI. Do not invent a separate task system.", targetPhrase, applyCommand, applyCommand, applyCommand)
 }

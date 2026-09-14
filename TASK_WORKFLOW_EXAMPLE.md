@@ -170,6 +170,8 @@ Goal: Trace existing digest behavior and tests
 
 Do not implement sibling slices, future slices, or the full task track. Stop after this target's acceptance checks are satisfied.
 Record the outcome in `devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md` or with `ds task checkpoint weekly-digest --target A01`.
+Checkpoint fields that matter for handoff: `--next-target` and `--next-decision` record what should run next, `--missed-file` and `--noise-file` record what the packed context got wrong, and `--from-git` fills edited-file evidence from the worktree.
+Example: `ds task checkpoint weekly-digest --target A01 --stage validated --decision continue --from-git --test-run "<command>" --next-target A02 --next-decision promote`
 Checklist edits are useful notes, but lifecycle state should be recorded with `ds task checkpoint`.
 Command roles: use `ds find` to discover and pack evidence, `ds task status`
 to inspect lifecycle, `ds apply` to emit the current bounded prompt, and
