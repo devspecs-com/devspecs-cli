@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Pointed default telemetry at the canonical `www.devspecs.com` endpoint so each
+  usage event costs one network round trip instead of following an apex-host 308
+  redirect, halving the network work on every command's exit path.
+
 ## v1.4.0 - 2026-08-12
 
 - Added experimental repo-first named execution threads with `ds thread set`,
