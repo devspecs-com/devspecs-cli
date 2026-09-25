@@ -1384,6 +1384,9 @@ var mapDynamicConceptPathTerms = []string{
 }
 
 func runMap(cmd *cobra.Command, opts mapOptions) error {
+	if err := cmd.Context().Err(); err != nil {
+		return err
+	}
 	start := time.Now()
 	success := false
 	props := map[string]any{
@@ -1409,8 +1412,14 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 	}
 	if !opts.Recent {
 		if out, ok, err := loadMapOutputCache(cmd.Context(), repoRoot, opts.MaxAreas); err != nil {
+			if cmd.Context().Err() != nil {
+				return cmd.Context().Err()
+			}
 			debugLog("map output cache unavailable: %v", err)
 		} else if ok {
+			if err := cmd.Context().Err(); err != nil {
+				return err
+			}
 			success = true
 			props["confidence"] = out.Repo.Confidence
 			props["area_count_bucket"] = telemetry.CountBucket(len(out.Areas))
@@ -1420,7 +1429,10 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 		}
 	}
 	if opts.Recent {
-		out := buildMapRecentOutput(cmd.Context(), repoRoot, opts)
+		out, err := buildMapRecentOutput(cmd.Context(), repoRoot, opts)
+		if err != nil {
+			return err
+		}
 		success = true
 		props["recent_topic_count_bucket"] = telemetry.CountBucket(len(out.Topics))
 		if opts.JSON {
@@ -1437,7 +1449,13 @@ func runMap(cmd *cobra.Command, opts mapOptions) error {
 			return err
 		}
 	}
-	out := buildPathBoundaryMapOutput(cmd.Context(), repoRoot, opts)
+	out, err := buildPathBoundaryMapOutput(cmd.Context(), repoRoot, opts)
+	if err != nil {
+		return err
+	}
+	if err := cmd.Context().Err(); err != nil {
+		return err
+	}
 	success = true
 	props["confidence"] = out.Repo.Confidence
 	props["area_count_bucket"] = telemetry.CountBucket(len(out.Areas))
@@ -1478,12 +1496,18 @@ func runRecent(cmd *cobra.Command, opts mapOptions) error {
 			fmt.Fprintln(cmd.ErrOrStderr(), "Recent progress: reading recent commits and path boundaries")
 		}
 	}
-	out := buildMapRecentOutput(cmd.Context(), repoRoot, opts)
+	out, err := buildMapRecentOutput(cmd.Context(), repoRoot, opts)
+	if err != nil {
+		return err
+	}
 	if showProgress && opts.Verbose {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Recent progress: analyzed %d commit(s), matched %d topic(s)\n", out.Diagnostics.CommitsRead, len(out.Topics))
 	}
 	if showProgress {
 		fmt.Fprintln(cmd.ErrOrStderr(), "Recent progress: complete")
+	}
+	if err := cmd.Context().Err(); err != nil {
+		return err
 	}
 	success = true
 	props["recent_topic_count_bucket"] = telemetry.CountBucket(len(out.Topics))
@@ -1563,13 +1587,16 @@ func mapRepoHasIndexedArtifacts(repoRoot string) (bool, error) {
 }
 
 type cachedMapOutputFile struct {
-	Schema         string    `json:"schema"`
-	RepoRoot       string    `json:"repo_root"`
-	LastScanCommit string    `json:"last_scan_commit,omitempty"`
-	LastScanAt     string    `json:"last_scan_at,omitempty"`
-	MaxAreas       int       `json:"max_areas"`
-	Output         mapOutput `json:"output"`
+	EvidenceVersion int       `json:"evidence_version"`
+	Schema          string    `json:"schema"`
+	RepoRoot        string    `json:"repo_root"`
+	LastScanCommit  string    `json:"last_scan_commit,omitempty"`
+	LastScanAt      string    `json:"last_scan_at,omitempty"`
+	MaxAreas        int       `json:"max_areas"`
+	Output          mapOutput `json:"output"`
 }
+
+const mapCacheEvidenceVersion = 1
 
 func loadMapOutputCache(ctx context.Context, repoRoot string, maxAreas int) (mapOutput, bool, error) {
 	db, err := openDB()
@@ -1616,7 +1643,7 @@ func loadMapOutputCache(ctx context.Context, repoRoot string, maxAreas int) (map
 	if err := json.Unmarshal(data, &cached); err != nil {
 		return mapOutput{}, false, err
 	}
-	if cached.Schema != mapSchemaVersion ||
+	if cached.EvidenceVersion != mapCacheEvidenceVersion || cached.Schema != mapSchemaVersion ||
 		cached.RepoRoot != repoRoot ||
 		!mapOutputCacheScanMetaMatches(cached, meta) ||
 		cached.MaxAreas != maxAreas {
@@ -1650,12 +1677,13 @@ func saveMapOutputCache(repoRoot string, maxAreas int, out mapOutput) error {
 		return err
 	}
 	payload := cachedMapOutputFile{
-		Schema:         mapSchemaVersion,
-		RepoRoot:       repoRoot,
-		LastScanCommit: meta.LastScanCommit,
-		LastScanAt:     meta.LastScanAt,
-		MaxAreas:       maxAreas,
-		Output:         out,
+		EvidenceVersion: mapCacheEvidenceVersion,
+		Schema:          mapSchemaVersion,
+		RepoRoot:        repoRoot,
+		LastScanCommit:  meta.LastScanCommit,
+		LastScanAt:      meta.LastScanAt,
+		MaxAreas:        maxAreas,
+		Output:          out,
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
@@ -1897,7 +1925,7 @@ func cachedMapFoundCounts(db *store.DB, repoRoot string) (map[string]int, error)
 	return found, nil
 }
 
-func buildMapOutput(repoRoot string, result *scan.Result, opts mapOptions) mapOutput {
+func buildMapOutput(repoRoot string, result *scan.Result, opts mapOptions) (mapOutput, error) {
 	repoName := filepath.Base(filepath.Clean(repoRoot))
 	clusters := mapWorkstreamClusters(result)
 	var accum []*mapAreaInternal
@@ -1927,7 +1955,10 @@ func buildMapOutput(repoRoot string, result *scan.Result, opts mapOptions) mapOu
 		}
 		return mapAreaScore(accum[i]) > mapAreaScore(accum[j])
 	})
-	areas := publicMapAreas(repoRoot, repoName, accum, opts.MaxAreas, mapRepoShapeUnknown, nil)
+	areas, err := publicMapAreas(repoRoot, repoName, accum, opts.MaxAreas, mapRepoShapeUnknown, nil)
+	if err != nil {
+		return mapOutput{}, err
+	}
 	confidence := mapOutputConfidence(result, areas)
 	caveats := mapOutputCaveats(repoRoot, result, areas, clusters, confidence)
 	if confidence == mapLowConfidence {
@@ -1952,7 +1983,7 @@ func buildMapOutput(repoRoot string, result *scan.Result, opts mapOptions) mapOu
 			WorkstreamAnchorsSeen:  mapWorkstreamAnchorsSeen(result),
 			WorkstreamMaterialized: mapWorkstreamAnchorsMaterialized(result),
 		},
-	}
+	}, nil
 }
 
 func mapWorkstreamClusters(result *scan.Result) []scan.WorkstreamClusterExample {
@@ -1980,10 +2011,16 @@ type mapPathBoundaryCandidate struct {
 	TraceReceipts     []mapTraceReceipt
 }
 
-func buildPathBoundaryMapOutput(ctx context.Context, repoRoot string, opts mapOptions) mapOutput {
+func buildPathBoundaryMapOutput(ctx context.Context, repoRoot string, opts mapOptions) (mapOutput, error) {
 	repoName := filepath.Base(filepath.Clean(repoRoot))
 	files, source, limited, fileErr := listMapBoundaryFiles(ctx, repoRoot)
-	recentCommits := mapBoundaryRecentCommits(ctx, repoRoot)
+	if err := ctx.Err(); err != nil {
+		return mapOutput{}, err
+	}
+	recentCommits, err := mapBoundaryRecentCommits(ctx, repoRoot)
+	if err != nil {
+		return mapOutput{}, err
+	}
 	packability, packabilityErr := loadMapPackabilityIndex(repoRoot)
 	if packabilityErr != nil {
 		debugLog("map packability index unavailable: %v", packabilityErr)
@@ -1991,7 +2028,10 @@ func buildPathBoundaryMapOutput(ctx context.Context, repoRoot string, opts mapOp
 	if opts.NoRefresh && packability == nil && len(files) > 0 {
 		packability = mapPackabilityIndexFromFiles(files)
 	}
-	areas, evidence, rawCandidateCount := buildPathBoundaryAreasContext(ctx, repoRoot, repoName, files, recentCommits, opts.MaxAreas, packability)
+	areas, evidence, rawCandidateCount, err := buildPathBoundaryAreasContext(ctx, repoRoot, repoName, files, recentCommits, opts.MaxAreas, packability)
+	if err != nil {
+		return mapOutput{}, err
+	}
 	confidence := mapBoundaryOutputConfidence(areas)
 	caveats := []string{"path-primary boundary map; git/docs/tests boost boundaries but do not define them"}
 	if source == "walk" {
@@ -2033,7 +2073,7 @@ func buildPathBoundaryMapOutput(ctx context.Context, repoRoot string, opts mapOp
 			RawClusterCount:       rawCandidateCount,
 			WorkstreamAnchorsSeen: len(recentCommits),
 		},
-	}
+	}, nil
 }
 
 func listMapBoundaryFiles(ctx context.Context, repoRoot string) ([]string, string, bool, error) {
@@ -2110,15 +2150,16 @@ func listMapBoundaryWalkFiles(ctx context.Context, repoRoot string) ([]string, b
 	return files, limited, err
 }
 
-func mapBoundaryRecentCommits(ctx context.Context, repoRoot string) []parsedFindGitCommit {
-	gitCtx, cancel := context.WithTimeout(ctx, findGitReceiptTimeout)
+func mapBoundaryRecentCommits(ctx context.Context, repoRoot string) ([]parsedFindGitCommit, error) {
+	gitCtx, cancel := context.WithTimeout(ctx, mapGitEvidenceTimeout)
 	defer cancel()
-	if !findGitRepoAvailable(gitCtx, repoRoot) {
-		return nil
+	available, err := mapGitHistoryAvailable(gitCtx, repoRoot)
+	if err != nil || !available {
+		return nil, err
 	}
-	commits, ok := findGitLogRecent(gitCtx, repoRoot, mapBoundaryMaxCommits)
-	if !ok {
-		return nil
+	commits, err := readFindGitLog(gitCtx, repoRoot, mapBoundaryMaxCommits)
+	if err != nil {
+		return nil, err
 	}
 	var out []parsedFindGitCommit
 	for _, commit := range commits {
@@ -2127,7 +2168,7 @@ func mapBoundaryRecentCommits(ctx context.Context, repoRoot string) []parsedFind
 		}
 		out = append(out, commit)
 	}
-	return out
+	return out, nil
 }
 
 func annotateMapAreas(areas []mapArea) {
@@ -2218,15 +2259,15 @@ func mapAdjacentSystemLabels(primary mapArea, areas []mapArea) []string {
 	return firstStrings(labels, 3)
 }
 
-func buildPathBoundaryAreas(repoRoot, repoName string, files []string, commits []parsedFindGitCommit, maxAreas int, packabilityArg ...*mapPackabilityIndex) ([]mapArea, mapEvidenceAvailability, int) {
+func buildPathBoundaryAreas(repoRoot, repoName string, files []string, commits []parsedFindGitCommit, maxAreas int, packabilityArg ...*mapPackabilityIndex) ([]mapArea, mapEvidenceAvailability, int, error) {
 	return buildPathBoundaryAreasContext(context.Background(), repoRoot, repoName, files, commits, maxAreas, packabilityArg...)
 }
 
-func buildPathBoundaryAreasContext(ctx context.Context, repoRoot, repoName string, files []string, commits []parsedFindGitCommit, maxAreas int, packabilityArg ...*mapPackabilityIndex) ([]mapArea, mapEvidenceAvailability, int) {
+func buildPathBoundaryAreasContext(ctx context.Context, repoRoot, repoName string, files []string, commits []parsedFindGitCommit, maxAreas int, packabilityArg ...*mapPackabilityIndex) ([]mapArea, mapEvidenceAvailability, int, error) {
 	return buildPathBoundaryAreasContextWithRelationships(ctx, repoRoot, repoName, files, commits, maxAreas, true, packabilityArg...)
 }
 
-func buildPathBoundaryAreasContextWithRelationships(ctx context.Context, repoRoot, repoName string, files []string, commits []parsedFindGitCommit, maxAreas int, expandRelationships bool, packabilityArg ...*mapPackabilityIndex) ([]mapArea, mapEvidenceAvailability, int) {
+func buildPathBoundaryAreasContextWithRelationships(ctx context.Context, repoRoot, repoName string, files []string, commits []parsedFindGitCommit, maxAreas int, expandRelationships bool, packabilityArg ...*mapPackabilityIndex) ([]mapArea, mapEvidenceAvailability, int, error) {
 	var packability *mapPackabilityIndex
 	if len(packabilityArg) > 0 {
 		packability = packabilityArg[0]
@@ -2277,8 +2318,8 @@ func buildPathBoundaryAreasContextWithRelationships(ctx context.Context, repoRoo
 		return left > right
 	})
 	internals = selectMapBoundaryAreas(internals, maxAreas*2, repoShape)
-	areas := publicMapAreasContext(ctx, repoRoot, repoName, internals, maxAreas, repoShape, packability)
-	return areas, evidence, len(candidates)
+	areas, err := publicMapAreasContext(ctx, repoRoot, repoName, internals, maxAreas, repoShape, packability)
+	return areas, evidence, len(candidates), err
 }
 
 func addMapBoundaryPathCandidates(candidates map[string]*mapPathBoundaryCandidate, repoName, path, family string) {
@@ -3507,10 +3548,36 @@ func mapBoundaryAreaInternal(candidate *mapPathBoundaryCandidate) *mapAreaIntern
 		TraceReceipts:   firstMapTraceReceipts(candidate.TraceReceipts, mapMaxTraceReceipts),
 		Caveats:         caveats,
 	}
-	if len(area.Artifacts) > mapBoundaryMaxArtifacts {
-		area.Artifacts = area.Artifacts[:mapBoundaryMaxArtifacts]
-	}
+	area.Artifacts = selectMapBoundaryArtifacts(area.Artifacts, mapBoundaryMaxArtifacts, candidate.EvidenceSources)
 	return area
+}
+
+// Preserve the ranked evidence budget, plus at most two complementary test
+// anchors for concrete path boundaries when source growth crowds tests out.
+func selectMapBoundaryArtifacts(ranked []mapArtifact, limit int, evidenceSources map[string]bool) []mapArtifact {
+	if len(ranked) <= limit {
+		return ranked
+	}
+	selected := append([]mapArtifact(nil), ranked[:limit]...)
+	if !evidenceSources["path_boundary"] || evidenceSources["conceptual_parent"] {
+		return selected
+	}
+	tests := 0
+	for _, artifact := range selected {
+		if mapArtifactFamilyForPath(artifact.Kind, artifact.Subtype, artifact.Path) == "test" {
+			tests++
+		}
+	}
+	for _, artifact := range ranked[limit:] {
+		if tests >= 2 {
+			break
+		}
+		if mapArtifactFamilyForPath(artifact.Kind, artifact.Subtype, artifact.Path) == "test" {
+			selected = append(selected, artifact)
+			tests++
+		}
+	}
+	return selected
 }
 
 func mapBoundaryRawAnchors(candidate *mapPathBoundaryCandidate) []string {
@@ -4160,16 +4227,24 @@ func mergeDuplicateMapAreas(areas []*mapAreaInternal) []*mapAreaInternal {
 	return out
 }
 
-func publicMapAreas(repoRoot, repoName string, areas []*mapAreaInternal, maxAreas int, repoShape string, packability *mapPackabilityIndex) []mapArea {
+func publicMapAreas(repoRoot, repoName string, areas []*mapAreaInternal, maxAreas int, repoShape string, packability *mapPackabilityIndex) ([]mapArea, error) {
 	return publicMapAreasContext(context.Background(), repoRoot, repoName, areas, maxAreas, repoShape, packability)
 }
 
-func publicMapAreasContext(ctx context.Context, repoRoot, repoName string, areas []*mapAreaInternal, maxAreas int, repoShape string, packability *mapPackabilityIndex) []mapArea {
+func publicMapAreasContext(ctx context.Context, repoRoot, repoName string, areas []*mapAreaInternal, maxAreas int, repoShape string, packability *mapPackabilityIndex) ([]mapArea, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	gitCtx, cancel := context.WithTimeout(ctx, mapGitEvidenceTimeout)
+	defer cancel()
 	if maxAreas <= 0 {
 		maxAreas = mapDefaultMaxAreas
 	}
 	out := make([]mapArea, 0, mapMinInt(maxAreas, len(areas)))
 	for _, area := range areas {
+		if err := gitCtx.Err(); err != nil {
+			return nil, err
+		}
 		if len(out) >= maxAreas {
 			break
 		}
@@ -4189,7 +4264,11 @@ func publicMapAreasContext(ctx context.Context, repoRoot, repoName string, areas
 		covers = cleanMapCovers(label, covers)
 		traceReceipts := firstMapTraceReceipts(area.TraceReceipts, mapMaxTraceReceipts)
 		if len(traceReceipts) == 0 {
-			traceReceipts = mapTraceReceipts(ctx, repoRoot, area, covers)
+			var err error
+			traceReceipts, err = mapTraceReceipts(gitCtx, repoRoot, area, covers)
+			if err != nil {
+				return nil, fmt.Errorf("map evidence for %s is incomplete: %w", label, err)
+			}
 		}
 		keyPaths := mapArtifactPaths(area.Artifacts)
 		areaType := classifyMapAreaType(area, label, areaClass, isRoot, covers)
@@ -4225,7 +4304,7 @@ func publicMapAreasContext(ctx context.Context, repoRoot, repoName string, areas
 		out = append(out, pub)
 	}
 	annotateMapAreas(out)
-	return out
+	return out, nil
 }
 
 func writeMapText(out io.Writer, m mapOutput, verbose bool) {
@@ -4423,28 +4502,32 @@ type mapRecentTopicBuilder struct {
 	Order          int
 }
 
-func buildMapRecentOutput(ctx context.Context, repoRoot string, opts mapOptions) mapRecentOutput {
+func buildMapRecentOutput(ctx context.Context, repoRoot string, opts mapOptions) (mapRecentOutput, error) {
 	repoName := filepath.Base(repoRoot)
 	out := mapRecentOutput{
 		Schema:    mapRecentSchemaVersion,
 		Repo:      mapRepo{Name: repoName, Path: repoRoot, Confidence: mapMediumConfidence},
 		AreaQuery: opts.AreaQuery,
 	}
-	gitCtx, cancel := context.WithTimeout(ctx, findGitReceiptTimeout)
+	gitCtx, cancel := context.WithTimeout(ctx, mapGitEvidenceTimeout)
 	defer cancel()
-	if !findGitRepoAvailable(gitCtx, repoRoot) {
+	available, err := mapGitHistoryAvailable(gitCtx, repoRoot)
+	if err != nil {
+		return mapRecentOutput{}, err
+	}
+	if !available {
 		out.Repo.Confidence = mapLowConfidence
 		out.Caveats = append(out.Caveats, "local git history is unavailable")
-		return out
+		return out, nil
 	}
-	commits, ok := findGitLogRecent(gitCtx, repoRoot, mapRecentMaxCommits)
-	if !ok {
-		out.Repo.Confidence = mapLowConfidence
-		out.Caveats = append(out.Caveats, "recent git history could not be read within the time budget")
-		return out
+	commits, err := readFindGitLog(gitCtx, repoRoot, mapRecentMaxCommits)
+	if err != nil {
+		return mapRecentOutput{}, err
 	}
 	topics, skipped := buildMapRecentTopics(commits, opts.AreaQuery, mapRecentMaxCommits)
-	applyMapRecentBoundaryQuality(ctx, repoRoot, commits, topics)
+	if err := applyMapRecentBoundaryQuality(ctx, repoRoot, commits, topics); err != nil {
+		return mapRecentOutput{}, err
+	}
 	topics = mergeMapRecentOverlappingTopics(topics)
 	sortMapRecentTopics(topics)
 	rawTopicCount := len(topics)
@@ -4465,7 +4548,7 @@ func buildMapRecentOutput(ctx context.Context, repoRoot string, opts mapOptions)
 		out.Repo.Confidence = mapLowConfidence
 		out.Caveats = append(out.Caveats, "no non-noisy recent topics found")
 	}
-	return out
+	return out, nil
 }
 
 func buildFastMapFallbackOutputFromRecent(repoRoot string, recent mapRecentOutput, indexReady bool) mapOutput {
@@ -4622,18 +4705,24 @@ func sortMapRecentTopics(topics []mapRecentTopic) {
 	})
 }
 
-func applyMapRecentBoundaryQuality(ctx context.Context, repoRoot string, commits []parsedFindGitCommit, topics []mapRecentTopic) {
+func applyMapRecentBoundaryQuality(ctx context.Context, repoRoot string, commits []parsedFindGitCommit, topics []mapRecentTopic) error {
 	if len(topics) == 0 {
-		return
+		return ctx.Err()
 	}
 	files, _, _, err := listMapBoundaryFiles(ctx, repoRoot)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if err != nil {
 		debugLog("recent boundary file inventory unavailable: %v", err)
 	}
 	var areas []mapArea
 	if len(files) > 0 {
 		repoName := filepath.Base(filepath.Clean(repoRoot))
-		areas, _, _ = buildPathBoundaryAreasContextWithRelationships(ctx, repoRoot, repoName, files, commits, mapRecentMaxTopics*3, false)
+		areas, _, _, err = buildPathBoundaryAreasContextWithRelationships(ctx, repoRoot, repoName, files, commits, mapRecentMaxTopics*3, false)
+		if err != nil {
+			return err
+		}
 	}
 	for i := range topics {
 		if topics[i].EvidenceCounts["source"] > 0 || topics[i].EvidenceCounts["test"] > 0 {
@@ -4677,6 +4766,7 @@ func applyMapRecentBoundaryQuality(ctx context.Context, repoRoot string, commits
 			topics[i].Score -= mapRecentMaintenancePenalty(topics[i])
 		}
 	}
+	return ctx.Err()
 }
 
 func mergeMapRecentOverlappingTopics(topics []mapRecentTopic) []mapRecentTopic {
@@ -7710,19 +7800,21 @@ func joinMapQuery(label, cover string) string {
 	return displayMapLabel(strings.Join(words, " "))
 }
 
-func mapTraceReceipts(parent context.Context, repoRoot string, area *mapAreaInternal, covers []string) []mapTraceReceipt {
+func mapTraceReceipts(ctx context.Context, repoRoot string, area *mapAreaInternal, covers []string) ([]mapTraceReceipt, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	paths := mapArtifactPaths(area.Artifacts)
 	if len(paths) == 0 {
-		return nil
+		return nil, nil
 	}
-	ctx, cancel := context.WithTimeout(parent, findGitReceiptTimeout)
-	defer cancel()
-	if !findGitRepoAvailable(ctx, repoRoot) {
-		return nil
+	available, err := mapGitHistoryAvailable(ctx, repoRoot)
+	if err != nil || !available {
+		return nil, err
 	}
-	commits, ok := findGitLogForPaths(ctx, repoRoot, firstStrings(paths, findGitReceiptMaxPaths))
-	if !ok || len(commits) == 0 {
-		return nil
+	commits, err := readFindGitLog(ctx, repoRoot, findGitReceiptMaxCommits, append([]string{"--"}, firstStrings(paths, findGitReceiptMaxPaths)...)...)
+	if err != nil {
+		return nil, err
 	}
 	anchors := mapTraceAnchors(area, covers)
 	scored := make([]FindGitReceipt, 0, len(commits))
@@ -7758,7 +7850,7 @@ func mapTraceReceipts(parent context.Context, repoRoot string, area *mapAreaInte
 	for _, receipt := range firstFindGitReceipts(scored, 3) {
 		out = append(out, mapTraceReceipt{SHA: receipt.ShortSHA, Subject: receipt.Subject})
 	}
-	return out
+	return out, ctx.Err()
 }
 
 func mapTraceAnchors(area *mapAreaInternal, covers []string) []string {

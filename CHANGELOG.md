@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Made `ds map` and `ds recent` fail with a bounded Git evidence error instead
+  of silently omitting receipts after a timeout or cancellation. Existing map
+  output caches are rebuilt so incomplete cached evidence is not reused.
+- Kept the top-ranked map key paths intact while adding at most two
+  complementary test anchors for concrete path boundaries when the ranked
+  path budget would hide them. Broad conceptual parents keep the original cap.
 - Hardened the opt-in fat-regression infrastructure: reject dirty corpus
   checkouts and empty, incomplete, duplicate or incompatible result sets;
   require preflight counts and observed successful command exits before

@@ -18,7 +18,7 @@ import (
 
 func TestMapTextHidesReviewerDiagnosticsByDefault(t *testing.T) {
 	repoRoot := filepath.Join(t.TempDir(), "payments-api")
-	out := buildMapOutput(repoRoot, &scan.Result{
+	out, err := buildMapOutput(repoRoot, &scan.Result{
 		Found: map[string]int{
 			"source_context": 2,
 			"test_case":      1,
@@ -38,6 +38,7 @@ func TestMapTextHidesReviewerDiagnosticsByDefault(t *testing.T) {
 			},
 		},
 	}, mapOptions{MaxAreas: 4})
+	require.NoError(t, err)
 
 	var buf bytes.Buffer
 	writeMapText(&buf, out, false)
@@ -108,7 +109,7 @@ func TestMapTextHidesReviewerDiagnosticsByDefault(t *testing.T) {
 
 func TestMapJSONSchemaIsAgentReadable(t *testing.T) {
 	repoRoot := filepath.Join(t.TempDir(), "orders")
-	out := buildMapOutput(repoRoot, &scan.Result{
+	out, err := buildMapOutput(repoRoot, &scan.Result{
 		Found: map[string]int{"source_context": 1},
 		WorkstreamEvidence: &scan.WorkstreamEvidenceDiagnostics{
 			TopClusters: []scan.WorkstreamClusterExample{
@@ -123,6 +124,7 @@ func TestMapJSONSchemaIsAgentReadable(t *testing.T) {
 			},
 		},
 	}, mapOptions{MaxAreas: 2})
+	require.NoError(t, err)
 
 	data, err := json.Marshal(out)
 	require.NoError(t, err)
@@ -160,7 +162,7 @@ func TestMapEvidenceCountsUsesPathFamilies(t *testing.T) {
 
 func TestMapRootOnlyAreaStaysLowConfidence(t *testing.T) {
 	repoRoot := filepath.Join(t.TempDir(), "requests")
-	out := buildMapOutput(repoRoot, &scan.Result{
+	out, err := buildMapOutput(repoRoot, &scan.Result{
 		Found: map[string]int{"source_context": 3},
 		WorkstreamEvidence: &scan.WorkstreamEvidenceDiagnostics{
 			TopClusters: []scan.WorkstreamClusterExample{
@@ -176,6 +178,7 @@ func TestMapRootOnlyAreaStaysLowConfidence(t *testing.T) {
 			},
 		},
 	}, mapOptions{MaxAreas: 3})
+	require.NoError(t, err)
 	assert.Equalf(t, mapLowConfidence, out.Repo.Confidence,
 		"root-only map confidence = %q, want low; areas=%#v", out.Repo.Confidence, out.Areas)
 	require.NotEmpty(t, out.Areas)
@@ -790,7 +793,8 @@ func TestPathBoundaryMapUsesStablePathLabelOverRecentWorkstream(t *testing.T) {
 		},
 	}}
 
-	areas, _, _ := buildPathBoundaryAreas(repoRoot, "dub", files, commits, 5)
+	areas, _, _, err := buildPathBoundaryAreas(repoRoot, "dub", files, commits, 5)
+	require.NoError(t, err)
 	require.NotEmptyf(t, areas,
 		"expected boundary areas")
 	assert.Equalf(t, "Webhooks", areas[0].Label,
@@ -812,7 +816,8 @@ func TestPathBoundaryMapBuildsSubareasFromChildPaths(t *testing.T) {
 		"packages/twenty-server/src/modules/workflow/docs/workflow-runtime.md",
 	}
 
-	areas, _, _ := buildPathBoundaryAreas(repoRoot, "twenty", files, nil, 5)
+	areas, _, _, err := buildPathBoundaryAreas(repoRoot, "twenty", files, nil, 5)
+	require.NoError(t, err)
 	var workflow *mapArea
 	for i := range areas {
 		if areas[i].Label == "Workflows & Automation" {
@@ -859,7 +864,8 @@ func TestPathBoundaryMapAddsImportStructureReceipts(t *testing.T) {
 	writeMapTestFile(t, repoRoot, "apps/web/modules/webhooks/lib/handler.test.ts", "import { handler } from './handler';\nhandler;\n")
 	writeMapTestFile(t, repoRoot, "apps/web/modules/webhooks/components/WebhookForm.tsx", "import { handler } from '../lib/handler';\nexport function WebhookForm(){ return handler; }\n")
 
-	areas, _, _ := buildPathBoundaryAreas(repoRoot, "dub", files, nil, 5)
+	areas, _, _, err := buildPathBoundaryAreas(repoRoot, "dub", files, nil, 5)
+	require.NoError(t, err)
 	webhooks := findMapTestArea(areas, "Webhooks")
 	require.NotNilf(t, webhooks,
 		"expected Webhooks area, got %#v", areas)
@@ -968,7 +974,8 @@ func TestPathBoundaryMapSuppressesWrapperAndDomainShellLabels(t *testing.T) {
 		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
 	}
 
-	areas, _, _ := buildPathBoundaryAreas(repoRoot, "dub", files, nil, 8)
+	areas, _, _, err := buildPathBoundaryAreas(repoRoot, "dub", files, nil, 8)
+	require.NoError(t, err)
 	assert.Nil(t, findMapTestArea(areas, "Hooks"))
 	assert.Nil(t, findMapTestArea(areas, "Dashboard"))
 	assert.Nil(t, findMapTestArea(areas, "App Dub Co"))
@@ -996,7 +1003,8 @@ func TestPathBoundaryMapAggregatesDubConceptualParents(t *testing.T) {
 		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
 	}
 
-	areas, _, _ := buildPathBoundaryAreas(repoRoot, "dub", files, nil, 8)
+	areas, _, _, err := buildPathBoundaryAreas(repoRoot, "dub", files, nil, 8)
+	require.NoError(t, err)
 	partners := findMapTestArea(areas, "Affiliate / Partner Programs")
 	require.NotNilf(t, partners,
 		"expected Affiliate / Partner Programs, got %#v", areas)
@@ -1035,7 +1043,8 @@ func TestPathBoundaryMapAggregatesPlaneConceptualParents(t *testing.T) {
 		writeMapTestFile(t, repoRoot, file, "value = 1\n")
 	}
 
-	areas, _, _ := buildPathBoundaryAreas(repoRoot, "plane", files, nil, 8)
+	areas, _, _, err := buildPathBoundaryAreas(repoRoot, "plane", files, nil, 8)
+	require.NoError(t, err)
 	workItems := findMapTestArea(areas, "Work Items & Project Delivery")
 	require.NotNilf(t, workItems,
 		"expected Work Items & Project Delivery, got %#v", areas)
@@ -1065,7 +1074,8 @@ func TestPathBoundaryMapDoesNotUseDjangoParentForGenericTypeScriptAPI(t *testing
 		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
 	}
 
-	areas, _, _ := buildPathBoundaryAreas(repoRoot, "novu", files, nil, 8)
+	areas, _, _, err := buildPathBoundaryAreas(repoRoot, "novu", files, nil, 8)
+	require.NoError(t, err)
 	assert.Nilf(t, findMapTestArea(areas, "Django API, Persistence & Async Workers"),
 		"Django parent should require Python/Django evidence, got %#v", areas)
 
@@ -1090,7 +1100,8 @@ func TestPathBoundaryMapAggregatesTwentyConceptualParents(t *testing.T) {
 		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
 	}
 
-	areas, _, _ := buildPathBoundaryAreas(repoRoot, "twenty", files, nil, 8)
+	areas, _, _, err := buildPathBoundaryAreas(repoRoot, "twenty", files, nil, 8)
+	require.NoError(t, err)
 	require.NotNilf(t, findMapTestArea(areas, "Metadata Engine & Data Model"),
 		"expected metadata parent, got %#v", areas)
 	require.NotNilf(t, findMapTestArea(areas, "CRM Record Experience"),
@@ -1120,7 +1131,8 @@ func TestPathBoundaryMapRanksConceptualParentKeyFiles(t *testing.T) {
 		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
 	}
 
-	areas, _, _ := buildPathBoundaryAreas(repoRoot, "twenty", files, nil, 8)
+	areas, _, _, err := buildPathBoundaryAreas(repoRoot, "twenty", files, nil, 8)
+	require.NoError(t, err)
 	metadata := findMapTestArea(areas, "Metadata Engine & Data Model")
 	require.NotNilf(t, metadata,
 		"expected metadata parent, got %#v", areas)
@@ -1147,7 +1159,8 @@ func TestPathBoundaryMapDedupesIdentityConceptualParents(t *testing.T) {
 		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
 	}
 
-	areas, _, _ := buildPathBoundaryAreas(repoRoot, "crm", files, nil, 8)
+	areas, _, _, err := buildPathBoundaryAreas(repoRoot, "crm", files, nil, 8)
+	require.NoError(t, err)
 	identityParents := 0
 	if findMapTestArea(areas,
 		("Workspace Identity, Access & Billing")) !=
@@ -1199,7 +1212,8 @@ func TestPathBoundaryMapUsesToolRepoParents(t *testing.T) {
 		writeMapTestFile(t, repoRoot, file, "pub fn value() {}\n")
 	}
 
-	areas, _, _ := buildPathBoundaryAreas(repoRoot, "uv", files, nil, 8)
+	areas, _, _, err := buildPathBoundaryAreas(repoRoot, "uv", files, nil, 8)
+	require.NoError(t, err)
 	require.NotNilf(t, findMapTestArea(areas,
 		("Project & Workspace Lifecycle")),
 		"expected tool parent %q, got %#v",
@@ -1283,7 +1297,8 @@ func TestPathBoundaryMapFoldsRailsShellsIntoProductParents(t *testing.T) {
 		writeMapTestFile(t, repoRoot, file, "class Value; end\n")
 	}
 
-	areas, _, _ := buildPathBoundaryAreas(repoRoot, "maybe", files, nil, 8)
+	areas, _, _, err := buildPathBoundaryAreas(repoRoot, "maybe", files, nil, 8)
+	require.NoError(t, err)
 	require.NotNilf(t, findMapTestArea(areas,
 		("Accounts & Net-Worth Dashboard")),
 
@@ -1347,7 +1362,8 @@ func TestPathBoundaryMapFoldsPlatformShellsIntoCommerceParents(t *testing.T) {
 		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
 	}
 
-	areas, _, _ := buildPathBoundaryAreas(repoRoot, "medusa", files, nil, 8)
+	areas, _, _, err := buildPathBoundaryAreas(repoRoot, "medusa", files, nil, 8)
+	require.NoError(t, err)
 	require.NotNilf(t, findMapTestArea(areas,
 		("Framework Runtime & Module Platform")), "expected platform/commerce parent %q, got %#v",
 		("Framework Runtime & Module Platform"), areas)
@@ -1399,7 +1415,8 @@ func TestPathBoundaryMapDiscoversDocumentSigningParentOverFrameworkShells(t *tes
 		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
 	}
 
-	areas, _, _ := buildPathBoundaryAreas(repoRoot, "documenso", files, nil, 8)
+	areas, _, _, err := buildPathBoundaryAreas(repoRoot, "documenso", files, nil, 8)
+	require.NoError(t, err)
 	signing := findMapTestArea(areas, "Document Signing & Authoring")
 	require.NotNilf(t, signing,
 		"expected document signing parent, got %#v", areas)
@@ -1474,7 +1491,8 @@ func TestPathBoundaryMapDiscoversPlatformConceptsOverComposablesAndBlackbox(t *t
 		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
 	}
 
-	areas, _, _ := buildPathBoundaryAreas(repoRoot, "directus", files, nil, 8)
+	areas, _, _, err := buildPathBoundaryAreas(repoRoot, "directus", files, nil, 8)
+	require.NoError(t, err)
 	require.NotNilf(t, findMapTestArea(areas,
 		("Content/Data Model")),
 		"expected platform concept parent %q, got %#v",
@@ -1547,7 +1565,8 @@ func TestPathBoundaryMapDemotesFreshHoldoutShellBuckets(t *testing.T) {
 		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
 	}
 
-	areas, _, _ := buildPathBoundaryAreas(repoRoot, "support-platform", files, nil, 8)
+	areas, _, _, err := buildPathBoundaryAreas(repoRoot, "support-platform", files, nil, 8)
+	require.NoError(t, err)
 	assert.Nilf(t, findMapTestArea(areas, "Javascript"),
 		"javascript shell leaked into first-screen map: %#v", areas)
 	require.NotNilf(t, findMapTestArea(areas,
@@ -1990,7 +2009,8 @@ func TestPathBoundaryMapPrefersImplementationKeyFilesOverTestsAndExamples(t *tes
 		writeMapTestFile(t, repoRoot, file, "export const value = 1;\n")
 	}
 
-	areas, _, _ := buildPathBoundaryAreas(repoRoot, "cms", files, nil, 8)
+	areas, _, _, err := buildPathBoundaryAreas(repoRoot, "cms", files, nil, 8)
+	require.NoError(t, err)
 	dataModel := findMapTestArea(areas, "Content/Data Model")
 	require.NotNilf(t, dataModel,
 		"expected Content/Data Model, got %#v", areas)
@@ -2370,7 +2390,8 @@ func TestBuildCachedMapResultUsesStoredWorkstreamEdges(t *testing.T) {
 	require.True(t, ok,
 		"expected cached map result")
 
-	out := buildMapOutput(repoRoot, result, mapOptions{MaxAreas: 4})
+	out, err := buildMapOutput(repoRoot, result, mapOptions{MaxAreas: 4})
+	require.NoError(t, err)
 	require.NotEmptyf(t, out.Areas,
 		"expected cached areas: %#v", out)
 	{
@@ -2900,7 +2921,7 @@ func TestMapRecentSubjectTermsFiltersFillerLabels(t *testing.T) {
 func buildProductMapTestOutput(t *testing.T) mapOutput {
 	t.Helper()
 	repoRoot := filepath.Join(t.TempDir(), "product")
-	return buildMapOutput(repoRoot, &scan.Result{
+	out, err := buildMapOutput(repoRoot, &scan.Result{
 		Found: map[string]int{"source_context": 6, "test_case": 2},
 		WorkstreamEvidence: &scan.WorkstreamEvidenceDiagnostics{
 			TopClusters: []scan.WorkstreamClusterExample{
@@ -2933,6 +2954,8 @@ func buildProductMapTestOutput(t *testing.T) mapOutput {
 			},
 		},
 	}, mapOptions{MaxAreas: 6})
+	require.NoError(t, err)
+	return out
 }
 
 func mustMapTestNoErr(t *testing.T, err error) {

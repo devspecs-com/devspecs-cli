@@ -123,27 +123,11 @@ func findGitRepoAvailable(ctx context.Context, repoRoot string) bool {
 }
 
 func findGitLogForPaths(ctx context.Context, repoRoot string, paths []string) ([]parsedFindGitCommit, bool) {
-	args := []string{
-		"-C", filepath.Clean(repoRoot),
-		"log",
-		"--date=short",
-		"--pretty=format:" + findGitCommitMarker + "%x1f%H%x1f%ad%x1f%s%n" + findGitBodyMarker + "%n%b%n" + findGitFilesMarker,
-		"--name-only",
-		"-n", fmt.Sprintf("%d", findGitReceiptMaxCommits),
-		"--",
-	}
-	args = append(args, paths...)
-	out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput()
-	if err != nil {
-		return nil, false
-	}
-	return parseFindGitLog(string(out)), true
+	commits, err := readFindGitLog(ctx, repoRoot, findGitReceiptMaxCommits, append([]string{"--"}, paths...)...)
+	return commits, err == nil
 }
 
-func findGitLogRecent(ctx context.Context, repoRoot string, limit int) ([]parsedFindGitCommit, bool) {
-	if limit <= 0 {
-		limit = findGitReceiptMaxDisplay
-	}
+func readFindGitLog(ctx context.Context, repoRoot string, limit int, paths ...string) ([]parsedFindGitCommit, error) {
 	args := []string{
 		"-C", filepath.Clean(repoRoot),
 		"log",
@@ -152,11 +136,18 @@ func findGitLogRecent(ctx context.Context, repoRoot string, limit int) ([]parsed
 		"--name-only",
 		"-n", fmt.Sprintf("%d", limit),
 	}
+	args = append(args, paths...)
 	out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput()
 	if err != nil {
-		return nil, false
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("read git history: %w", err)
 	}
-	return parseFindGitLog(string(out)), true
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return parseFindGitLog(string(out)), nil
 }
 
 func parseFindGitLog(raw string) []parsedFindGitCommit {
