@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Hardened the opt-in fat-regression infrastructure: reject dirty corpus
+  checkouts and empty, incomplete, duplicate or incompatible result sets;
+  require preflight counts and observed successful command exits before
+  reporting a passing aggregate gate. This does not enable a runner or promote
+  changed output automatically.
 - Added repository-owned Git Bash and PowerShell development launchers with
   deterministic named-channel or source-worktree homes under
   `~/.devspecs-dev`. Local builds and cross-repo agent sessions can now avoid

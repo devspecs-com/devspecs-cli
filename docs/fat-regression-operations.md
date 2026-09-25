@@ -31,7 +31,11 @@ available for runner provisioning and accepts an explicit baseline ref.
 Both manifests must describe the same 100 or more repositories. Every entry
 must use a unique ID, an exact 40-character commit, `clone_mode: full`, and the
 `fat` profile. The preflight verifies that each path is its Git root, `HEAD`
-matches the pinned commit, history is not shallow, and tracked files exist.
+matches the pinned commit, history is not shallow, tracked files exist, and
+there are no tracked edits, untracked files, or ignored build/generated files.
+Ignored files can still affect repository configuration or tooling. Use dedicated clean
+checkouts, not active development worktrees. Each activation entry has exactly
+one `recent` and one `map` command; each scan entry has exactly one `scan`.
 
 Run the same preflight directly on the runner before enabling the schedule:
 
@@ -61,12 +65,24 @@ detail.
 
 ## Interpreting the gate
 
-- `passed` means activation output matched the accepted baseline and no scan
-  case crossed both the 1.30 ratio and 5-second fixed threshold.
+- `passed` means activation output matched the comparison baseline, the result
+  schemas, execution modes, case identities and counts are internally consistent
+  and match the successful preflight count, all three command exits were zero,
+  and no scan case exceeded `floor(baseline_ms * 1.30) + 5000` milliseconds.
+  This is ratio plus fixed slack, not separate ratio-AND-delta thresholds.
 - `needs_review` means output changed, a material scan regression appeared, or
   one binary introduced a command failure.
 - A command-level failure with the same classification in both scan roles is
-  counted as shared debt. It does not make the candidate weaker by itself.
+  counted as shared debt. It does not make the candidate weaker by itself, but
+  a nonzero command exit still requires operational review rather than a green
+  run. Missing exit evidence also requires review.
+
+Manual summary invocations must provide `--preflight-result` and the observed
+`--activation-exit`, `--baseline-scan-exit`, and `--candidate-scan-exit` codes.
+Do not substitute zeros for failed or unobserved commands. Empty, truncated,
+duplicate or mismatched case sets are never accepted as passing evidence.
+The workflow uses a run-specific public artifact path so a failed parse cannot
+upload an older run's green summary.
 
 The workflow never promotes changed output or advances the baseline. Review raw
 local evidence, classify every quality delta, and update the accepted baseline

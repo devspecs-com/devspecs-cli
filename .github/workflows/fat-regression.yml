@@ -83,7 +83,7 @@ jobs:
           echo "FAT_RESULT_DIR=$result_dir" >> "$GITHUB_ENV"
           echo "FAT_RETENTION_DAYS=$retention_days" >> "$GITHUB_ENV"
           echo "FAT_BASELINE_REF=$baseline_ref" >> "$GITHUB_ENV"
-          echo "FAT_PUBLIC_SUMMARY=$RUNNER_TEMP/fat-regression-summary.json" >> "$GITHUB_ENV"
+          echo "FAT_PUBLIC_SUMMARY=$RUNNER_TEMP/fat-regression-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json" >> "$GITHUB_ENV"
           echo "DEVSPECS_HOME=$result_dir/devspecs-home" >> "$GITHUB_ENV"
 
       - name: Validate exact-SHA full-history corpus
@@ -180,6 +180,10 @@ jobs:
           printf 'raw command exits: activation=%s baseline_scan=%s candidate_scan=%s\n' \
             "$ACTIVATION_EXIT_CODE" "$BASELINE_SCAN_EXIT_CODE" "$CANDIDATE_SCAN_EXIT_CODE"
           go run ./scripts/ci/fat-regression summarize \
+            --preflight-result "$FAT_RESULT_DIR/preflight.json" \
+            --activation-exit "$ACTIVATION_EXIT_CODE" \
+            --baseline-scan-exit "$BASELINE_SCAN_EXIT_CODE" \
+            --candidate-scan-exit "$CANDIDATE_SCAN_EXIT_CODE" \
             --activation-result "$FAT_RESULT_DIR/activation/activation-matrix-result.json" \
             --baseline-scan-result "$FAT_RESULT_DIR/scan-baseline/activation-scan-benchmark-result.json" \
             --candidate-scan-result "$FAT_RESULT_DIR/scan-candidate/activation-scan-benchmark-result.json" \
@@ -192,7 +196,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fat-100-regression-summary
-          path: ${{ runner.temp }}/fat-regression-summary.json
+          path: ${{ env.FAT_PUBLIC_SUMMARY }}
           if-no-files-found: warn
           retention-days: 30
 

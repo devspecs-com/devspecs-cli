@@ -52,7 +52,12 @@ type preflightResult struct {
 }
 
 type activationResult struct {
-	Summary struct {
+	Schema     string           `json:"schema"`
+	Profile    string           `json:"profile"`
+	CloneMode  string           `json:"clone_mode"`
+	IndexState string           `json:"index_state"`
+	Cases      []activationCase `json:"cases"`
+	Summary    struct {
 		Total          int `json:"total"`
 		Passed         int `json:"passed"`
 		Missing        int `json:"missing"`
@@ -68,8 +73,18 @@ type activationResult struct {
 	} `json:"timing"`
 }
 
+type activationCase struct {
+	RepoID  string `json:"repo_id"`
+	Command string `json:"command"`
+	Status  string `json:"status"`
+}
+
 type scanResult struct {
-	Summary struct {
+	Schema     string `json:"schema"`
+	Profile    string `json:"profile"`
+	CloneMode  string `json:"clone_mode"`
+	IndexState string `json:"index_state"`
+	Summary    struct {
 		Total              int `json:"total"`
 		Passed             int `json:"passed"`
 		Failed             int `json:"failed"`
@@ -195,6 +210,10 @@ func runSummarize(args []string, out io.Writer) error {
 	outputPath := flags.String("output", "", "summary output JSON")
 	baselineRef := flags.String("baseline-ref", "", "public baseline ref")
 	candidateRef := flags.String("candidate-ref", "", "public candidate ref")
+	preflightPath := flags.String("preflight-result", "", "successful corpus preflight JSON")
+	activationExit := flags.Int("activation-exit", -1, "observed activation command exit code")
+	baselineExit := flags.Int("baseline-scan-exit", -1, "observed baseline scan exit code")
+	candidateExit := flags.Int("candidate-scan-exit", -1, "observed candidate scan exit code")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -214,6 +233,18 @@ func runSummarize(args []string, out io.Writer) error {
 		return err
 	}
 	summary := buildSummary(activation, baselineScan, candidateScan, *baselineRef, *candidateRef, time.Now().UTC())
+	preflight, preflightErr := readJSON[preflightResult](*preflightPath, "preflight")
+	if preflightErr != nil || preflight.Schema != preflightSchema || preflight.Repositories < 1 ||
+		preflight.ExactHead != preflight.Repositories || preflight.FullHistory != preflight.Repositories ||
+		preflight.ActivationCommand != preflight.Repositories*2 || preflight.ScanCommands != preflight.Repositories ||
+		activation.RepoSet.Total != preflight.Repositories {
+		summary.Gate.Status = "needs_review"
+		summary.Gate.Reasons = append(summary.Gate.Reasons, "result corpus does not match a successful preflight")
+	}
+	if *activationExit != 0 || *baselineExit != 0 || *candidateExit != 0 {
+		summary.Gate.Status = "needs_review"
+		summary.Gate.Reasons = append(summary.Gate.Reasons, "command exit status was missing or nonzero")
+	}
 	encoded, err := json.MarshalIndent(summary, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode public summary: %w", err)
@@ -323,6 +354,9 @@ func validateManifestRepo(repo regressionRepo, position int, label string, requi
 	if !contains(repo.Profiles, "fat") {
 		return fmt.Errorf("%s repository %d must include the fat profile", label, position)
 	}
+	if len(repo.Commands) != len(requiredCommands) {
+		return fmt.Errorf("%s repository %d has an unexpected command count", label, position)
+	}
 	for _, required := range requiredCommands {
 		if !containsCommand(repo.Commands, required) {
 			return fmt.Errorf("%s repository %d is missing the %s command", label, position, required)
@@ -360,12 +394,19 @@ func validateCheckout(repo regressionRepo, position int) error {
 	if err != nil || len(tracked) == 0 {
 		return fmt.Errorf("repository %d has no tracked files", position)
 	}
+	dirty, err := gitOutput(repo.Path, "status", "--porcelain=v1", "--untracked-files=all", "--ignored=matching", "--ignore-submodules=none")
+	if err != nil || dirty != "" {
+		return fmt.Errorf("repository %d checkout is not clean", position)
+	}
 	return nil
 }
 
 func buildSummary(activation activationResult, baselineScan, candidateScan scanResult, baselineRef, candidateRef string, generated time.Time) publicSummary {
 	shared, baselineOnly, candidateOnly := classifyScanFailures(baselineScan.Cases, candidateScan.Cases)
 	reasons := make([]string, 0, 4)
+	if err := validateResultSets(activation, baselineScan, candidateScan); err != nil {
+		reasons = append(reasons, err.Error())
+	}
 	if activation.Summary.Failed > 0 || activation.Summary.Missing > 0 {
 		reasons = append(reasons, "activation output changed or failed")
 	}

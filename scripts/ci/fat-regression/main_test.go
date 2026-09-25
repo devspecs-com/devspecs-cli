@@ -36,8 +36,9 @@ func TestRun_WithPreflightCommand_WritesAggregateResult(t *testing.T) {
 
 func TestRun_WithPassingSummaryCommand_WritesPublicResultFile(t *testing.T) {
 	activationPath := writeJSONFixture(t, activationFixture(2, 2, 0))
-	baselinePath := writeJSONFixture(t, scanFixture(scanCase{RepoID: "private-baseline", Command: "scan", Status: "passed"}))
-	candidatePath := writeJSONFixture(t, scanFixture(scanCase{RepoID: "private-candidate", Command: "scan", Status: "passed"}))
+	baselinePath := writeJSONFixture(t, scanFixture(scanCase{RepoID: "sample", Command: "scan", Status: "passed"}))
+	candidatePath := writeJSONFixture(t, scanFixture(scanCase{RepoID: "sample", Command: "scan", Status: "passed"}))
+	preflightPath := writeJSONFixture(t, validPreflightFixture())
 	outputPath := filepath.Join(t.TempDir(), "summary.json")
 	var output bytes.Buffer
 
@@ -48,6 +49,8 @@ func TestRun_WithPassingSummaryCommand_WritesPublicResultFile(t *testing.T) {
 		"--candidate-scan-result", candidatePath,
 		"--baseline-ref", "v1.4.0",
 		"--candidate-ref", "abcdef1",
+		"--preflight-result", preflightPath,
+		"--activation-exit", "0", "--baseline-scan-exit", "0", "--candidate-scan-exit", "0",
 		"--output", outputPath,
 	}, &output)
 
@@ -227,8 +230,8 @@ func TestValidateCorpora_WithDriftedCheckout_RejectsCorpus(t *testing.T) {
 
 func TestBuildSummary_WithExactActivationAndSharedScanWarning_Passes(t *testing.T) {
 	activation := activationFixture(2, 2, 0)
-	baseline := scanFixture(scanCase{RepoID: "private-repo", Command: "scan", Status: "failed", Error: "scan benchmark wrote stderr"})
-	candidate := scanFixture(scanCase{RepoID: "private-repo", Command: "scan", Status: "failed", Error: "scan benchmark wrote stderr"})
+	baseline := scanFixture(scanCase{RepoID: "sample", Command: "scan", Status: "failed", Error: "scan benchmark wrote stderr"})
+	candidate := scanFixture(scanCase{RepoID: "sample", Command: "scan", Status: "failed", Error: "scan benchmark wrote stderr"})
 
 	summary := buildSummary(activation, baseline, candidate, "v1.4.0", "abcdef1", time.Date(2026, 8, 15, 8, 0, 0, 0, time.UTC))
 
@@ -247,7 +250,7 @@ func TestBuildSummary_WithActivationDelta_RequiresReview(t *testing.T) {
 	summary := buildSummary(activation, baseline, candidate, "v1.4.0", "abcdef1", time.Now())
 
 	assert.Equal(t, "needs_review", summary.Gate.Status)
-	assert.Len(t, summary.Gate.Reasons, 1)
+	require.Len(t, summary.Gate.Reasons, 1)
 	assert.Equal(t, "activation output changed or failed", summary.Gate.Reasons[0])
 }
 
@@ -260,7 +263,7 @@ func TestBuildSummary_WithCandidateScanRegression_RequiresReview(t *testing.T) {
 	summary := buildSummary(activation, baseline, candidate, "v1.4.0", "abcdef1", time.Now())
 
 	assert.Equal(t, "needs_review", summary.Gate.Status)
-	assert.Len(t, summary.Gate.Reasons, 2)
+	require.Len(t, summary.Gate.Reasons, 2)
 	assert.Equal(t, "cold scan performance crossed the regression threshold", summary.Gate.Reasons[0])
 	assert.Equal(t, "candidate scan introduced command failures", summary.Gate.Reasons[1])
 	assert.Equal(t, 1, summary.Scan.RegressionFailures)
@@ -269,6 +272,9 @@ func TestBuildSummary_WithCandidateScanRegression_RequiresReview(t *testing.T) {
 
 func TestPublicSummary_WithPrivateInputs_OmitsRepositoryIdentity(t *testing.T) {
 	activation := activationFixture(2, 2, 0)
+	require.Len(t, activation.Cases, 2)
+	activation.Cases[0].RepoID = "secret-company-repo"
+	activation.Cases[1].RepoID = "secret-company-repo"
 	baseline := scanFixture(scanCase{RepoID: "secret-company-repo", Command: "scan", Status: "failed", Error: "shared warning"})
 	candidate := scanFixture(scanCase{RepoID: "secret-company-repo", Command: "scan", Status: "failed", Error: "shared warning"})
 	summary := buildSummary(activation, baseline, candidate, "v1.4.0", "abcdef1", time.Now())
@@ -292,7 +298,7 @@ func TestBuildSummary_WithDifferentCapturedWarnings_RequiresReview(t *testing.T)
 	summary := buildSummary(activation, baseline, candidate, "v1.4.0", "abcdef1", time.Now())
 
 	assert.Equal(t, "needs_review", summary.Gate.Status)
-	assert.Len(t, summary.Gate.Reasons, 2)
+	require.Len(t, summary.Gate.Reasons, 2)
 	assert.Equal(t, "candidate scan introduced command failures", summary.Gate.Reasons[0])
 	assert.Equal(t, "baseline scan failed where the candidate did not", summary.Gate.Reasons[1])
 	assert.Equal(t, 0, summary.Scan.SharedFailures)
@@ -373,7 +379,16 @@ func runRegressionGit(t *testing.T, repoPath string, args ...string) string {
 }
 
 func activationFixture(total, passed, failed int) activationResult {
-	result := activationResult{}
+	result := activationResult{
+		Schema: "devspecs.activation_matrix.v1", Profile: "fat", CloneMode: "full", IndexState: "cold",
+		Cases: []activationCase{
+			{RepoID: "sample", Command: "recent", Status: "passed"},
+			{RepoID: "sample", Command: "map", Status: "passed"},
+		},
+	}
+	if failed == 1 {
+		result.Cases[1].Status = "failed"
+	}
 	result.RepoSet.Total = 1
 	result.Summary.Total = total
 	result.Summary.Passed = passed
@@ -382,7 +397,10 @@ func activationFixture(total, passed, failed int) activationResult {
 }
 
 func scanFixture(item scanCase) scanResult {
-	result := scanResult{Cases: []scanCase{item}}
+	result := scanResult{
+		Schema: "devspecs.activation_scan_benchmark.v1", Profile: "fat", CloneMode: "full", IndexState: "cold",
+		Cases: []scanCase{item},
+	}
 	result.RepoSet.Total = 1
 	result.Summary.Total = 1
 	if item.Status == "passed" {
