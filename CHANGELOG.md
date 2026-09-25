@@ -36,6 +36,47 @@
   WAL-backed future-schema refusal/backup/rebuild coverage, and three-platform
   file-swap recovery checks. The five-repository full-history activation corpus
   remains exact after recovery.
+- Added file and stdin input for the free-text `ds task checkpoint` fields:
+  `--description -` and `--note -` read all of stdin, `--description-file` and
+  `--note-file` read a file. Each field takes exactly one source, only one flag
+  may consume stdin per invocation, CRLF is normalised to LF, one trailing
+  newline is trimmed, and interior newlines survive into the checkpoint JSON,
+  the Markdown twin, and `--draft` previews.
+- Pointed default telemetry at the canonical `www.devspecs.com` endpoint so each
+  usage event costs one network round trip instead of following an apex-host 308
+  redirect, halving the network work on every command's exit path.
+- Surfaced the existing checkpoint handoff flags where agents actually read
+  them. The bounded `ds apply` slice prompt and the closeout prompt now name
+  `--next-target`, `--next-decision`, `--missed-file`, `--noise-file`, and
+  `--from-git`, with a copy-pasteable example that uses the real task and next
+  target IDs. The `ds tldr handoff` workflow lists the checkpoint command that
+  records the next target, and the generated Codex, Cursor, Claude, and
+  Windsurf adapters name the same flags. Text only: no command, flag, or
+  recorded field changed.
+- Generated task slice and follow-up slice file names now cut their slug at a
+  word boundary inside a 64-character budget instead of truncating mid-word at
+  48 characters, so plan and result names no longer read like
+  `...-with-environme-plan.md`. De-duplication and follow-up ordinal suffixes
+  count against the budget. Slugs already recorded in a `task.json` manifest
+  stay byte-identical; nothing on disk is renamed. Commands that take a slice
+  selector also accept the slug a slice actually carries in its file name, in
+  addition to every selector they accepted before.
+- Split the `ds task audit` verdict so a mispredicted pack no longer reads as
+  agent drift. Out-of-scope paths are classified as `pack_miss` (recorded with
+  `--missed-file`, listed in the pack's own `noise_risks`, or tracked at git
+  HEAD inside a predicted `relevant_areas` subsystem, or shared surface no
+  subsystem owns such as a repository-root file or documentation),
+  `new_surface` (not tracked at HEAD, so this slice created it), or `drift`
+  (a tracked source file outside every relevant area). `drift` now means the
+  slice reached a source subsystem the pack never identified as relevant,
+  rather than any edit the pack failed to name, so routine `CHANGELOG.md` and
+  docs updates no longer end every slice in a drift verdict.
+  `recommendation` gained the `pack_miss` and `new_surface` values, and
+  `--json` gained `pack_miss_paths`, `new_surface_paths`, `drift_paths`, and
+  `unclassified_paths` alongside the unchanged `out_of_scope_paths` union.
+  Neither fallback assigns blame: with no relevant areas recorded a tracked
+  unpredicted path is a `pack_miss`, and when HEAD tracking cannot be
+  determined the paths stay unclassified and the verdict falls to `review`.
 
 ## v1.4.0 - 2026-08-12
 

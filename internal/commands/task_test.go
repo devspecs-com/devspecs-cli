@@ -2421,9 +2421,9 @@ func TestTaskCheckpointPreservesRequestedSeriesMetadata(t *testing.T) {
 	assert.Equal(t, "complete", record.Decision)
 }
 
-func setupBSeriesTask(t *testing.T) {
+func setupBSeriesTask(t *testing.T) string {
 	t.Helper()
-	setupTaskCommandRepo(t)
+	repoDir := setupTaskCommandRepo(t)
 	cmd := NewTaskCmd()
 	cmd.SetArgs([]string{
 		"--id", "b-series-test",
@@ -2437,6 +2437,8 @@ func setupBSeriesTask(t *testing.T) {
 	})
 	cmd.SetOut(&bytes.Buffer{})
 	require.NoError(t, cmd.Execute())
+
+	return repoDir
 }
 
 type lifecycleTaskFixture struct {
@@ -3111,7 +3113,7 @@ func TestTaskAuditReportsPassForInScopeCheckpointFiles(t *testing.T) {
 	assert.True(t, containsPath(out.InScopePaths, "internal/retrieval/ranking_test.go"))
 }
 
-func TestTaskAuditReportsDriftForOutOfScopeCheckpointFile(t *testing.T) {
+func TestTaskAudit_WhenGitHeadTrackingUnavailable_ReportsReviewWithUnclassifiedPath(t *testing.T) {
 	setupPassingAuditTask(t)
 	addDriftAuditCheckpoint(t)
 	cmd := NewTaskCmd()
@@ -3124,8 +3126,10 @@ func TestTaskAuditReportsDriftForOutOfScopeCheckpointFile(t *testing.T) {
 	require.NoError(t, err)
 	var out taskAuditOutput
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
-	assert.Equal(t, "drift", out.Recommendation)
+	assert.Equal(t, "review", out.Recommendation)
+	assert.Contains(t, out.Unclassified, "internal/other/unrelated.go")
 	assert.True(t, containsPath(out.OutOfScopePaths, "internal/other/unrelated.go"))
+	assert.Empty(t, out.DriftPaths)
 }
 
 func setupPassingAuditTask(t *testing.T) {
@@ -3169,6 +3173,304 @@ func addDriftAuditCheckpoint(t *testing.T) {
 	cmd.SetOut(&bytes.Buffer{})
 	require.NoError(t, cmd.Execute())
 }
+
+func TestTaskAudit_WhenPathRecordedAsMissedFile_ReportsPackMiss(t *testing.T) {
+	repoDir := setupGitBackedAuditTask(t)
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "retrieval", "sibling.go"), "package retrieval\n\nfunc Sibling() int { return 2 }\n")
+	addGitAuditCheckpoint(t, []string{"internal/retrieval/sibling.go"}, []string{"internal/retrieval/sibling.go"})
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "pack_miss", out.Recommendation)
+	assert.Contains(t, out.PackMissPaths, "internal/retrieval/sibling.go")
+	assert.Empty(t, out.DriftPaths)
+	assert.Empty(t, out.NewSurfacePaths)
+}
+
+func TestTaskAudit_WhenUntrackedFileInNewDirectory_ReportsNewSurface(t *testing.T) {
+	repoDir := setupGitBackedAuditTask(t)
+	mustMkdirAll(t, filepath.Join(repoDir, "internal", "brandnew"))
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "brandnew", "feature.go"), "package brandnew\n\nfunc Feature() {}\n")
+	addGitAuditCheckpoint(t, []string{"internal/brandnew/feature.go"}, nil)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "new_surface", out.Recommendation)
+	assert.Contains(t, out.NewSurfacePaths, "internal/brandnew/feature.go")
+	assert.Empty(t, out.DriftPaths)
+	assert.Empty(t, out.PackMissPaths)
+}
+
+func TestTaskAudit_WhenTrackedFileBesidePredictedPathInRelevantArea_ReportsPackMiss(t *testing.T) {
+	repoDir := setupGitBackedAuditTask(t)
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "retrieval", "sibling.go"), "package retrieval\n\nfunc Sibling() int { return 2 }\n")
+	addGitAuditCheckpoint(t, []string{"internal/retrieval/sibling.go"}, nil)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Contains(t, out.AllowedSurface, "internal/retrieval/ranking.go")
+	assert.Equal(t, "pack_miss", out.Recommendation)
+	assert.Contains(t, out.PackMissPaths, "internal/retrieval/sibling.go")
+	assert.Empty(t, out.DriftPaths)
+	assert.Empty(t, out.NewSurfacePaths)
+}
+
+func TestTaskAudit_WhenTrackedFileOutsideEveryRelevantArea_ReportsDrift(t *testing.T) {
+	repoDir := setupGitBackedAuditTask(t)
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "legacy", "old.go"), "package legacy\n\nfunc Old() int { return 1 }\n")
+	addGitAuditCheckpoint(t, []string{"internal/legacy/old.go"}, nil)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.NotContains(t, out.AllowedSurface, "internal/legacy/old.go")
+	assert.Equal(t, "drift", out.Recommendation)
+	assert.Contains(t, out.DriftPaths, "internal/legacy/old.go")
+	assert.Empty(t, out.PackMissPaths)
+}
+
+func TestTaskAudit_WhenPathListedAsNoiseRisk_ReportsPackMiss(t *testing.T) {
+	repoDir := setupGitBackedAuditTask(t)
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "legacy", "old.go"), "package legacy\n\nfunc Old() int { return 1 }\n")
+	addGitAuditCheckpoint(t, []string{"internal/legacy/old.go"}, nil)
+	rewriteAuditManifestPredicted(t, repoDir, func(predicted *taskPredictedContext) {
+		predicted.NoiseRisks = append(predicted.NoiseRisks, taskPredictedFile{Path: "internal/legacy/old.go"})
+	})
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "pack_miss", out.Recommendation)
+	assert.Contains(t, out.PackMissPaths, "internal/legacy/old.go")
+	assert.Empty(t, out.DriftPaths)
+}
+
+func TestTaskAudit_WhenRelevantAreasEmpty_ReportsPackMissForTrackedPath(t *testing.T) {
+	repoDir := setupGitBackedAuditTask(t)
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "legacy", "old.go"), "package legacy\n\nfunc Old() int { return 1 }\n")
+	addGitAuditCheckpoint(t, []string{"internal/legacy/old.go"}, nil)
+	rewriteAuditManifestPredicted(t, repoDir, func(predicted *taskPredictedContext) {
+		predicted.RelevantAreas = nil
+	})
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "pack_miss", out.Recommendation)
+	assert.Contains(t, out.PackMissPaths, "internal/legacy/old.go")
+	assert.Empty(t, out.DriftPaths)
+}
+
+func TestTaskAudit_WhenNewSurfaceAndDriftBothPresent_ReportsDrift(t *testing.T) {
+	repoDir := setupGitBackedAuditTask(t)
+	mustMkdirAll(t, filepath.Join(repoDir, "internal", "brandnew"))
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "brandnew", "feature.go"), "package brandnew\n\nfunc Feature() {}\n")
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "legacy", "old.go"), "package legacy\n\nfunc Old() int { return 1 }\n")
+	addGitAuditCheckpoint(t, []string{"internal/brandnew/feature.go", "internal/legacy/old.go"}, nil)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "drift", out.Recommendation)
+	assert.Contains(t, out.NewSurfacePaths, "internal/brandnew/feature.go")
+	assert.Contains(t, out.DriftPaths, "internal/legacy/old.go")
+}
+
+func TestTaskAudit_WhenAllThreeKindsPresent_OutOfScopePathsKeepUnion(t *testing.T) {
+	repoDir := setupGitBackedAuditTask(t)
+	mustMkdirAll(t, filepath.Join(repoDir, "internal", "brandnew"))
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "brandnew", "feature.go"), "package brandnew\n\nfunc Feature() {}\n")
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "retrieval", "sibling.go"), "package retrieval\n\nfunc Sibling() int { return 2 }\n")
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "legacy", "old.go"), "package legacy\n\nfunc Old() int { return 1 }\n")
+	addGitAuditCheckpoint(t, []string{"internal/brandnew/feature.go", "internal/retrieval/sibling.go", "internal/legacy/old.go"}, nil)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Contains(t, out.NewSurfacePaths, "internal/brandnew/feature.go")
+	assert.Contains(t, out.PackMissPaths, "internal/retrieval/sibling.go")
+	assert.Contains(t, out.DriftPaths, "internal/legacy/old.go")
+	assert.Len(t, out.OutOfScopePaths, len(out.PackMissPaths)+len(out.NewSurfacePaths)+len(out.DriftPaths)+len(out.Unclassified))
+}
+
+// setupGitBackedAuditTask builds a committed git repo with a directory the pack
+// never predicts, then creates the audit task so HEAD tracking is meaningful.
+func setupGitBackedAuditTask(t *testing.T) string {
+	t.Helper()
+	repoDir := setupTaskCommandRepo(t)
+	initTaskGitRepo(t, repoDir)
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "retrieval", "sibling.go"), "package retrieval\n\nfunc Sibling() {}\n")
+	mustMkdirAll(t, filepath.Join(repoDir, "internal", "legacy"))
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "legacy", "old.go"), "package legacy\n\nfunc Old() {}\n")
+	commitTaskGitRepo(t, repoDir, "baseline")
+	startCmd := NewTaskCmd()
+	startCmd.SetArgs([]string{
+		"--id", "git-audit-test",
+		"--no-refresh",
+		"--index=false",
+		"--json",
+		"improve test companion recall",
+	})
+	startCmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, startCmd.Execute())
+	return repoDir
+}
+
+func addGitAuditCheckpoint(t *testing.T, editedFiles, missedFiles []string) {
+	t.Helper()
+	args := []string{
+		"checkpoint", "git-audit-test",
+		"--target", "A01",
+		"--stage", "implemented",
+		"--decision", "continue",
+		"--index=false",
+		"--json",
+	}
+	for _, path := range editedFiles {
+		args = append(args, "--file-edited", path)
+	}
+	for _, path := range missedFiles {
+		args = append(args, "--missed-file", path)
+	}
+	cmd := NewTaskCmd()
+	cmd.SetArgs(args)
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+}
+
+func TestTaskAudit_WhenTrackedRootDocumentEdited_ReportsPackMiss(t *testing.T) {
+	repoDir := setupGitBackedAuditTask(t)
+	mustWriteFile(t, filepath.Join(repoDir, "CHANGELOG.md"), "# Changelog\n\n## Unreleased\n")
+	commitTaskGitRepo(t, repoDir, "add changelog")
+	addGitAuditCheckpoint(t, []string{"CHANGELOG.md"}, nil)
+	rewriteAuditManifestPredicted(t, repoDir, func(predicted *taskPredictedContext) {
+		predicted.RelevantAreas = []string{"internal/retrieval"}
+	})
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "pack_miss", out.Recommendation)
+	assert.Contains(t, out.PackMissPaths, "CHANGELOG.md")
+	assert.Empty(t, out.DriftPaths)
+}
+
+func TestTaskAudit_WhenTrackedDocsFileOutsideRelevantAreas_ReportsPackMiss(t *testing.T) {
+	repoDir := setupGitBackedAuditTask(t)
+	mustMkdirAll(t, filepath.Join(repoDir, "docs", "guides"))
+	mustWriteFile(t, filepath.Join(repoDir, "docs", "guides", "workflow.md"), "# Workflow\n\nHow to run a slice.\n")
+	commitTaskGitRepo(t, repoDir, "add guide")
+	addGitAuditCheckpoint(t, []string{"docs/guides/workflow.md"}, nil)
+	rewriteAuditManifestPredicted(t, repoDir, func(predicted *taskPredictedContext) {
+		predicted.RelevantAreas = []string{"internal/retrieval"}
+	})
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "pack_miss", out.Recommendation)
+	assert.Contains(t, out.PackMissPaths, "docs/guides/workflow.md")
+	assert.Empty(t, out.DriftPaths)
+}
+
+func TestTaskAudit_WhenConfigFileUnderRelevantArea_ReportsPackMiss(t *testing.T) {
+	repoDir := setupGitBackedAuditTask(t)
+	mustWriteFile(t, filepath.Join(repoDir, "internal", "retrieval", "fixtures.yaml"), "cases:\n  - name: recall\n")
+	commitTaskGitRepo(t, repoDir, "add fixture")
+	addGitAuditCheckpoint(t, []string{"internal/retrieval/fixtures.yaml"}, nil)
+	rewriteAuditManifestPredicted(t, repoDir, func(predicted *taskPredictedContext) {
+		predicted.RelevantAreas = []string{"internal/retrieval"}
+	})
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{"audit", "git-audit-test", "--target", "A01", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskAuditOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.True(t, taskAuditPathInRelevantArea([]string{"internal/retrieval"}, "internal/retrieval/fixtures.yaml"))
+	assert.Equal(t, "pack_miss", out.Recommendation)
+	assert.Contains(t, out.PackMissPaths, "internal/retrieval/fixtures.yaml")
+	assert.Empty(t, out.DriftPaths)
+}
+
+// rewriteAuditManifestPredicted edits the predicted context the pack recorded so
+// a test can arrange one pack judgement without regenerating a whole pack.
+func rewriteAuditManifestPredicted(t *testing.T, repoDir string, mutate func(predicted *taskPredictedContext)) {
+	t.Helper()
+	manifestPath := filepath.Join(repoDir, "devspecs", "tasks", "git-audit-test", taskManifestFilename)
+	manifest, err := readTaskManifest(manifestPath)
+	require.NoError(t, err)
+	mutate(&manifest.Predicted)
+	require.NoError(t, writeTaskManifest(manifestPath, manifest))
+}
+
 func TestTask_StartUsesGitWorktreeRoot(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available:", err)
@@ -4764,4 +5066,212 @@ func taskArtifactRefreshContainsPath(artifacts []taskArtifactRefresh, want strin
 		}
 	}
 	return false
+}
+
+func TestUniqueTaskSliceSlug_WhenTitleExceedsBudget_CutsAtWordBoundary(t *testing.T) {
+	title := "Improve retrieval pack scout ranking for slice titles that mention environment overrides"
+	used := map[string]int{}
+
+	slug := uniqueTaskSliceSlug(title, used)
+
+	assert.Equal(t, "improve-retrieval-pack-scout-ranking-for-slice-titles-that", slug)
+	assert.LessOrEqual(t, len(slug), taskSliceSlugBudget)
+}
+
+func TestUniqueTaskSliceSlug_WhenFirstWordExceedsBudget_HardCutsToNonEmptySlug(t *testing.T) {
+	title := strings.Repeat("a", 80)
+	used := map[string]int{}
+
+	slug := uniqueTaskSliceSlug(title, used)
+
+	assert.Equal(t, strings.Repeat("a", taskSliceSlugBudget), slug)
+}
+
+func TestUniqueTaskSliceSlug_WhenSlugRepeats_KeepsDeduplicationSuffixInsideBudget(t *testing.T) {
+	title := "Improve retrieval pack scout ranking for slice titles that mention environment overrides"
+	used := map[string]int{"improve-retrieval-pack-scout-ranking-for-slice-titles-that": 1}
+
+	slug := uniqueTaskSliceSlug(title, used)
+
+	assert.Equal(t, "improve-retrieval-pack-scout-ranking-for-slice-titles-that-2", slug)
+	assert.LessOrEqual(t, len(slug), taskSliceSlugBudget)
+}
+
+func TestSanitizeTaskFilename_WhenValueExceedsLegacyBudget_KeepsFortyEightCharacterCut(t *testing.T) {
+	value := "Improve retrieval pack scout ranking for slice titles that mention environment overrides"
+
+	slug := sanitizeTaskFilename(value)
+
+	assert.Equal(t, "improve-retrieval-pack-scout-ranking-for-slice-t", slug)
+}
+
+func TestTaskSliceAdd_WithLegacyTruncatedManifestSlug_LeavesRecordedSlugUnchanged(t *testing.T) {
+	fixture := setupLifecycleTask(t)
+	manifestPath := filepath.Join(fixture.Workspace, taskManifestFilename)
+	var before taskManifest
+	require.NoError(t, json.Unmarshal([]byte(mustReadFile(t, manifestPath)), &before))
+	require.Len(t, before.Artifacts.Slices, 1)
+	before.Artifacts.Slices[0].Plan = "B01-tune-slice-ranking-for-titles-with-environme-plan.md"
+	before.Artifacts.Slices[0].Result = "B01-tune-slice-ranking-for-titles-with-environme-result.md"
+	require.NoError(t, writeTaskManifest(manifestPath, before))
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"slice", "add", "lifecycle-add-test", "second lifecycle slice",
+		"--index=false",
+		"--json",
+	})
+	cmd.SetOut(&bytes.Buffer{})
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var after taskManifest
+	require.NoError(t, json.Unmarshal([]byte(mustReadFile(t, manifestPath)), &after))
+	require.Len(t, after.Artifacts.Slices, 2)
+	assert.Equal(t, "B01-tune-slice-ranking-for-titles-with-environme-plan.md", after.Artifacts.Slices[0].Plan)
+	assert.Equal(t, "B01-tune-slice-ranking-for-titles-with-environme-result.md", after.Artifacts.Slices[0].Result)
+	assert.Equal(t, "B02-second-lifecycle-slice-plan.md", after.Artifacts.Slices[1].Plan)
+}
+
+func TestTaskSliceAddAfter_WithLongTitle_CountsFollowUpOrdinalInSlugBudget(t *testing.T) {
+	setupLifecycleTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"slice", "add", "lifecycle-add-test",
+		"Repairing the lifecycle status projection for regulated pilot of two agent lanes",
+		"--after", "B01",
+		"--reason", "improve",
+		"--index=false",
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskArtifactAddOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Equal(t, "B01-1", out.Slice.ID)
+	assert.Equal(t, "B01-1-repairing-the-lifecycle-status-projection-for-regulated-pilot-plan.md", filepath.Base(out.Slice.PlanPath))
+}
+
+func TestTaskCheckpoint_WithWordSafeSliceSlugs_KeepsStageOnlyCheckpointStem(t *testing.T) {
+	setupLifecycleTask(t)
+	cmd := NewTaskCmd()
+	cmd.SetArgs([]string{
+		"checkpoint", "lifecycle-add-test",
+		"--slice", "B01",
+		"--stage", "implemented",
+		"--decision", "promote",
+		"--index=false",
+		"--json",
+	})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	var out taskCheckpointOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	assert.Regexp(t, `^\d{8}-\d{6}-implemented\.md$`, filepath.Base(out.CheckpointPath))
+	assert.Regexp(t, `^\d{8}-\d{6}-implemented\.json$`, filepath.Base(out.CheckpointJSONPath))
+}
+
+const (
+	taskSelectorLongTitle     = "Improve retrieval pack scout ranking for slice titles that mention environment overrides"
+	taskSelectorLongSlug      = "improve-retrieval-pack-scout-ranking-for-slice-titles-that"
+	taskSelectorLegacyTitle   = "Tune slice ranking for titles with environment overrides"
+	taskSelectorLegacySlug    = "tune-slice-ranking-for-titles-with-environment-o"
+	taskSelectorFollowUpTitle = "Repairing the lifecycle status projection for regulated pilot of two agent lanes"
+	taskSelectorFollowUpSlug  = "repairing-the-lifecycle-status-projection-for-regulated-pilot"
+)
+
+// taskSliceSelectorManifest builds a manifest whose recorded slugs are written
+// out literally: B01 under the word-safe rule, B02 under the legacy 48-char
+// rule, and B01-1 as a follow-up whose ID itself contains a hyphen.
+func taskSliceSelectorManifest() taskManifest {
+	return taskManifest{
+		Series: "B",
+		Artifacts: taskArtifactPaths{
+			Series: "B",
+			Index:  "B00-index.md",
+			Slices: []taskSliceArtifact{
+				taskSliceArtifactWithSlug("B01", taskSelectorLongTitle, taskSelectorLongSlug, "slice", "", ""),
+				taskSliceArtifactWithSlug("B02", taskSelectorLegacyTitle, taskSelectorLegacySlug, "slice", "", ""),
+				taskSliceArtifactWithSlug("B01-1", taskSelectorFollowUpTitle, taskSelectorFollowUpSlug, "iteration", "B01", "improve"),
+			},
+		},
+	}
+}
+
+func TestTaskSliceForCheckpoint_WhenSelectedByWordSafeSlug_ResolvesLongTitledSlice(t *testing.T) {
+	manifest := taskSliceSelectorManifest()
+
+	slice, err := taskSliceForCheckpoint(manifest, taskSelectorLongSlug)
+
+	require.NoError(t, err)
+	assert.Equal(t, "B01", slice.ID)
+}
+
+func TestTaskSliceForCheckpoint_WhenSelectedByID_ResolvesLongTitledSlice(t *testing.T) {
+	manifest := taskSliceSelectorManifest()
+
+	slice, err := taskSliceForCheckpoint(manifest, "B01")
+
+	require.NoError(t, err)
+	assert.Equal(t, "B01", slice.ID)
+}
+
+func TestTaskSliceForCheckpoint_WhenSelectedByTitle_ResolvesLongTitledSlice(t *testing.T) {
+	manifest := taskSliceSelectorManifest()
+
+	slice, err := taskSliceForCheckpoint(manifest, taskSelectorLongTitle)
+
+	require.NoError(t, err)
+	assert.Equal(t, "B01", slice.ID)
+}
+
+func TestTaskSliceForCheckpoint_WhenSelectedByPlanFileName_ResolvesLongTitledSlice(t *testing.T) {
+	manifest := taskSliceSelectorManifest()
+
+	slice, err := taskSliceForCheckpoint(manifest, "B01-"+taskSelectorLongSlug+"-plan.md")
+
+	require.NoError(t, err)
+	assert.Equal(t, "B01", slice.ID)
+}
+
+func TestTaskSliceForCheckpoint_WhenSelectedByLegacyFortyEightCharacterSlug_StillResolves(t *testing.T) {
+	manifest := taskSliceSelectorManifest()
+
+	slice, err := taskSliceForCheckpoint(manifest, taskSelectorLegacySlug)
+
+	require.NoError(t, err)
+	assert.Equal(t, "B02", slice.ID)
+}
+
+func TestTaskSliceForCheckpoint_WhenSelectedByFollowUpRecordedSlug_ResolvesIterationSlice(t *testing.T) {
+	manifest := taskSliceSelectorManifest()
+
+	slice, err := taskSliceForCheckpoint(manifest, taskSelectorFollowUpSlug)
+
+	require.NoError(t, err)
+	assert.Equal(t, "B01-1", slice.ID)
+}
+
+func TestTaskSliceRecordedSlug_WhenFollowUpIDContainsHyphen_StripsWholeIDPrefix(t *testing.T) {
+	slice := taskSliceArtifactWithSlug("B01-1", taskSelectorFollowUpTitle, taskSelectorFollowUpSlug, "iteration", "B01", "improve")
+
+	slug := taskSliceRecordedSlug(slice)
+
+	assert.Equal(t, taskSelectorFollowUpSlug, slug)
+}
+
+func TestTaskSliceRecordedSlug_WhenSlugCarriesDeduplicationSuffix_KeepsSuffix(t *testing.T) {
+	slice := taskSliceArtifactWithSlug("B03", taskSelectorLongTitle, taskSelectorLongSlug+"-2", "slice", "", "")
+
+	slug := taskSliceRecordedSlug(slice)
+
+	assert.Equal(t, taskSelectorLongSlug+"-2", slug)
 }
