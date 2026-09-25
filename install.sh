@@ -64,7 +64,7 @@ telemetry_install_completed() {
         0|false|False|FALSE|off|Off|OFF|no|No|NO|disabled|Disabled|DISABLED) return 0 ;;
     esac
 
-    TELEMETRY_URL="${DEVSPECS_TELEMETRY_URL:-${DS_TELEMETRY_URL:-https://devspecs.com/api/telemetry}}"
+    TELEMETRY_URL="${DEVSPECS_TELEMETRY_URL:-${DS_TELEMETRY_URL:-https://www.devspecs.com/api/telemetry}}"
     PAYLOAD=$(printf '{"event":"install_completed","properties":{"install_method":"install.sh","install_os":"%s","install_arch":"%s","install_version":"%s"}}' "$OS" "$ARCH" "$VERSION")
 
     if command -v curl >/dev/null 2>&1; then

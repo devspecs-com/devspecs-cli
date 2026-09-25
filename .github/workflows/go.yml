@@ -10,8 +10,10 @@ jobs:
   test:
     name: Lint & Test
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     env:
       DEVSPECS_TELEMETRY: '0'
+      DEVSPECS_TEST_TIMEOUT: '30m'
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +48,7 @@ jobs:
         run: go run ./scripts/ci/check-test-assertions
 
       - name: Unit tests
-        run: go test -v -race -coverprofile coverage.out ./...
+        run: go test -v -race -count=1 -timeout "$DEVSPECS_TEST_TIMEOUT" -coverprofile coverage.out ./...
 
       - name: Coverage floor (aggregate >=80%)
         env:
@@ -115,6 +117,6 @@ jobs:
           version: v2.17.1
           args: release --snapshot --clean
 
-      - name: Verify every release channel contains both binaries
+      - name: Verify every release channel contains the ds binary
         shell: bash
         run: bash ./scripts/ci/verify-release-package.sh dist

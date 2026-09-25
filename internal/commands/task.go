@@ -2239,7 +2239,7 @@ func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput, prior
 	}
 	fmt.Fprintf(&b, "Record the outcome in `%s` or with `%s`.\n", filepath.ToSlash(taskRelativePath(ctx.RepoRoot, target.ResultPath)), checkpointCommand)
 	fmt.Fprintln(&b, "Checkpoint fields that matter for handoff: `--next-target` and `--next-decision` record what should run next, `--missed-file` and `--noise-file` record what the packed context got wrong, and `--from-git` fills edited-file evidence from the worktree.")
-	fmt.Fprintf(&b, "Example: `%s --stage validated --decision continue --from-git --test-run \"<command>\" --next-target %s --next-decision promote`\n", checkpointCommand, taskPromptNextTargetPlaceholder(ctx.Manifest, target.Target))
+	fmt.Fprintf(&b, "Validated completion example: `%s --stage validated --decision promote --from-git --test-run \"<command>\"`\n", checkpointCommand)
 	fmt.Fprintln(&b, "Checklist edits are useful notes, but lifecycle state should be recorded with `ds task checkpoint`; legacy `finish` and `decide` shortcuts are compatibility-only.")
 	fmt.Fprintln(&b, "Command roles: use `ds find` to discover and pack evidence, `ds task status` to inspect lifecycle, `ds apply` to emit the current bounded prompt, and `ds workspace trace` only for known workspace change/task links. In trace output, `status` and `index_status` are separate signals.")
 	fmt.Fprintln(&b, "At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.")
@@ -2516,24 +2516,6 @@ func taskTargetTerminal(slice taskSliceArtifact) bool {
 	default:
 		return false
 	}
-}
-
-// taskPromptNextTargetPlaceholder returns the target that follows targetID in the
-// manifest slice order so the prompt example is copy-pasteable. When targetID is the
-// last target (or is unknown) it returns a neutral placeholder rather than an ID that
-// does not exist.
-func taskPromptNextTargetPlaceholder(manifest taskManifest, targetID string) string {
-	slices := taskSyncSlices(manifest)
-	for i, slice := range slices {
-		if !strings.EqualFold(slice.ID, targetID) {
-			continue
-		}
-		if i+1 < len(slices) {
-			return slices[i+1].ID
-		}
-		break
-	}
-	return "<next-target>"
 }
 
 func taskSiblingTargetIDs(manifest taskManifest, targetID string) []string {
@@ -6383,7 +6365,7 @@ func writeTaskCheckpointCompletionContract(b *strings.Builder, slice taskSliceAr
 	fmt.Fprintln(b, "## Completion Contract")
 	fmt.Fprintf(b, "- Attempted slice: `%s` - %s\n", slice.ID, slice.Title)
 	fmt.Fprintf(b, "- Gate tested: %s\n", emptyAsDash(opts.Decision))
-	fmt.Fprintf(b, "- What changed: %s\n", taskCheckpointChangeSummary(opts))
+	writeTaskCheckpointMarkdownField(b, "What changed", taskCheckpointChangeSummary(opts))
 	fmt.Fprintf(b, "- Evidence for decision: %s\n", taskCheckpointEvidenceSummary(opts))
 	fmt.Fprintf(b, "- What remains: %s\n", taskCheckpointRemainingSummary(opts))
 	fmt.Fprintf(b, "- Next iteration: %s\n", taskCheckpointNextSummary(slice, opts))
@@ -6514,9 +6496,9 @@ func renderTaskCheckpointResultAppend(checkpointPath, checkpointJSONPath, worksp
 	fmt.Fprintf(&b, "- Source: `%s`\n", rel)
 	fmt.Fprintf(&b, "- Structured Evidence: `%s`\n", jsonRel)
 	if strings.TrimSpace(opts.Note) != "" {
-		fmt.Fprintf(&b, "- Note: %s\n", strings.TrimSpace(opts.Note))
+		writeTaskCheckpointMarkdownField(&b, "Note", strings.TrimSpace(opts.Note))
 	}
-	fmt.Fprintf(&b, "- What changed: %s\n", taskCheckpointChangeSummary(opts))
+	writeTaskCheckpointMarkdownField(&b, "What changed", taskCheckpointChangeSummary(opts))
 	fmt.Fprintf(&b, "- Evidence for decision: %s\n", taskCheckpointEvidenceSummary(opts))
 	fmt.Fprintf(&b, "- What remains: %s\n", taskCheckpointRemainingSummary(opts))
 	fmt.Fprintf(&b, "- Next iteration: %s\n", taskCheckpointNextSummary(slice, opts))
@@ -6613,6 +6595,22 @@ func markdownHeadingIndex(body, heading string) int {
 			return start
 		}
 		searchFrom = after
+	}
+}
+
+func writeTaskCheckpointMarkdownField(b *strings.Builder, label, value string) {
+	if !strings.Contains(value, "\n") {
+		fmt.Fprintf(b, "- %s: %s\n", label, value)
+		return
+	}
+	fmt.Fprintf(b, "- %s:\n\n", label)
+	// Keep paragraphs, lists, and fenced blocks inside their parent list item.
+	for _, line := range strings.Split(value, "\n") {
+		if line == "" {
+			fmt.Fprintln(b)
+		} else {
+			fmt.Fprintf(b, "  %s\n", line)
+		}
 	}
 }
 

@@ -17,6 +17,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestInstallerTelemetry_WhenShellFallbackIsUsed_MatchesCanonicalEndpoint(t *testing.T) {
+	path := filepath.Join("..", "..", "install.sh")
+
+	body, err := os.ReadFile(path)
+
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `TELEMETRY_URL="${DEVSPECS_TELEMETRY_URL:-${DS_TELEMETRY_URL:-`+defaultEndpoint+`}}"`)
+}
+
+func TestInstallerTelemetry_WhenPowerShellFallbackIsUsed_MatchesCanonicalEndpoint(t *testing.T) {
+	path := filepath.Join("..", "..", "install.ps1")
+
+	body, err := os.ReadFile(path)
+
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `$url = if ($env:DEVSPECS_TELEMETRY_URL) { $env:DEVSPECS_TELEMETRY_URL } elseif ($env:DS_TELEMETRY_URL) { $env:DS_TELEMETRY_URL } else { "`+defaultEndpoint+`" }`)
+}
+
 func TestSanitizeProperties_WithSensitiveFields_KeepsOnlyAllowedCoarseFields(t *testing.T) {
 	input := map[string]any{
 		"command":             "scan",

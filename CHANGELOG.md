@@ -42,14 +42,18 @@
   may consume stdin per invocation, CRLF is normalised to LF, one trailing
   newline is trimmed, and interior newlines survive into the checkpoint JSON,
   the Markdown twin, and `--draft` previews.
+  Multiline notes and descriptions remain nested under their Markdown field
+  in result history and completion contracts.
 - Pointed default telemetry at the canonical `www.devspecs.com` endpoint so each
-  usage event costs one network round trip instead of following an apex-host 308
-  redirect, halving the network work on every command's exit path.
+  usage event avoids the apex-host redirect. The shell and PowerShell installers
+  use the same endpoint. Command telemetry still uses a bounded synchronous
+  request; this does not remove network waiting from command completion.
 - Surfaced the existing checkpoint handoff flags where agents actually read
   them. The bounded `ds apply` slice prompt and the closeout prompt now name
   `--next-target`, `--next-decision`, `--missed-file`, `--noise-file`, and
-  `--from-git`, with a copy-pasteable example that uses the real task and next
-  target IDs. The `ds tldr handoff` workflow lists the checkpoint command that
+  `--from-git`, with a validated-completion example using the real task and
+  current target IDs without guessing the next lane. The `ds tldr handoff`
+  workflow lists the checkpoint command that
   records the next target, and the generated Codex, Cursor, Claude, and
   Windsurf adapters name the same flags. Text only: no command, flag, or
   recorded field changed.

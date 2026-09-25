@@ -23,7 +23,7 @@ function Send-TelemetryInstallCompleted {
         return
     }
 
-    $url = if ($env:DEVSPECS_TELEMETRY_URL) { $env:DEVSPECS_TELEMETRY_URL } elseif ($env:DS_TELEMETRY_URL) { $env:DS_TELEMETRY_URL } else { "https://devspecs.com/api/telemetry" }
+    $url = if ($env:DEVSPECS_TELEMETRY_URL) { $env:DEVSPECS_TELEMETRY_URL } elseif ($env:DS_TELEMETRY_URL) { $env:DS_TELEMETRY_URL } else { "https://www.devspecs.com/api/telemetry" }
     $payload = @{
         event = "install_completed"
         properties = @{

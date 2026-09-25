@@ -246,5 +246,6 @@ func TestTaskCheckpointDraft_WhenDescriptionFromStdin_PreviewsWithoutWritingFile
 	assert.False(t, out.Mutates)
 	assert.Equal(t, "Draft description line one.\nDraft description line two.", out.CheckpointRecord.Description)
 	assert.Contains(t, out.CheckpointMarkdown, "Draft description line one.\nDraft description line two.")
+	assert.Contains(t, out.ResultAppendMarkdown, "- What changed:\n\n  Draft description line one.\n  Draft description line two.\n- Evidence for decision:")
 	assert.NoDirExists(t, checkpointsDir)
 }
