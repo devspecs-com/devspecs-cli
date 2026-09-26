@@ -96,6 +96,9 @@ jobs:
       - name: Test doctor and index recovery platform behavior
         run: go test ./internal/store ./internal/commands -run "^(TestInspectIndex|TestDoctorCommand|TestFindDoctorExecutableCandidates|TestSameDoctorExecutable|TestCreateIndexBackup|TestOpen_WithSupportedOlderSchema_PreservesVerifiedRollbackBackup|TestRestoreIndex|TestReplaceIndexWithStage|TestIndexBackupCommand|TestIndexRebuildCommand|TestScanRebuild)" -count=1
 
+      - name: Test hub process delivery and store integrity
+        run: go test ./internal/hubstore ./internal/commands -run "^(TestHubE2E|TestHubQuality)" -count=1
+
   release-package:
     name: Release package smoke
     runs-on: ubuntu-latest
