@@ -245,7 +245,7 @@ tree:
         purpose: Rescan repository intent docs, source, tests, and git evidence with progress and timing diagnostics.
       prune:
         status: maintenance
-        purpose: Remove missing-repository data and redundant capture history, and optionally compact the SQLite database.
+        purpose: Remove stale index data by default, or explicitly prune old local hub history with --hub and a cutoff.
       doctor:
         status: diagnostic
         purpose: Inspect executable precedence, installation inference, local index compatibility, writer state, and repository identity without mutation.

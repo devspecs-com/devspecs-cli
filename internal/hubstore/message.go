@@ -242,6 +242,13 @@ func (d *DB) replayMessage(ctx context.Context, tx *sql.Tx, scope, topic, actor,
 	var stored, entry string
 	err := tx.QueryRowContext(ctx, "SELECT fingerprint,entry_id FROM publication_idempotency WHERE scope_id=? AND topic_id=? AND actor_id=? AND key=?", scope, topic, actor, key).Scan(&stored, &entry)
 	if errors.Is(err, sql.ErrNoRows) {
+		purged, checkErr := prunedKey(ctx, tx, scope, topic, actor, key)
+		if checkErr != nil {
+			return Message{}, false, checkErr
+		}
+		if purged {
+			return Message{}, true, ErrReplayGap
+		}
 		return Message{}, false, nil
 	}
 	if err != nil {
@@ -802,7 +809,9 @@ func (d *DB) ScanPublications(ctx context.Context, repoPath string, after int64,
 			return PublicationPage{}, err
 		}
 		if entry.Sequence > page.NextScanPosition+1 {
-			page.Gaps = append(page.Gaps, PublicationGap{From: page.NextScanPosition + 1, To: entry.Sequence - 1, Reason: "unavailable"})
+			if err := addMissingGaps(ctx, tx, &page.Gaps, scope.ID, page.NextScanPosition+1, entry.Sequence-1); err != nil {
+				return PublicationPage{}, err
+			}
 		}
 		page.NextScanPosition = entry.Sequence
 		if !historical {

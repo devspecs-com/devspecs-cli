@@ -1,7 +1,7 @@
 package hubstore
 
 const applicationID = 0x44534842 // DSHB
-const schemaVersion = 4
+const schemaVersion = 5
 
 // v1 is deliberately hub-only. A later migration must advance user_version and
 // insert its digest in the same transaction.
@@ -256,4 +256,58 @@ BEGIN SELECT RAISE(ABORT, 'subscription definition is immutable'); END;
 CREATE TRIGGER subscriptions_no_delete BEFORE DELETE ON subscriptions BEGIN SELECT RAISE(ABORT, 'subscription is retained'); END;
 CREATE TRIGGER subscription_topics_no_update BEFORE UPDATE ON subscription_topics BEGIN SELECT RAISE(ABORT, 'subscription topic is immutable'); END;
 CREATE TRIGGER subscription_topics_no_delete BEFORE DELETE ON subscription_topics BEGIN SELECT RAISE(ABORT, 'subscription topic is retained'); END;
+`
+
+// v5 permits deletion only inside an explicit retention transaction. Durable
+// ranges and keyed tombstones survive after payload rows are reclaimed.
+const schemaV5 = `
+CREATE TABLE hub_meta_v5 (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  db_id TEXT NOT NULL,
+  format_version INTEGER NOT NULL CHECK (format_version = 5),
+  retention_epoch INTEGER NOT NULL DEFAULT 0 CHECK (retention_epoch >= 0)
+);
+INSERT INTO hub_meta_v5 SELECT singleton, db_id, 5, retention_epoch FROM hub_meta;
+DROP TABLE hub_meta;
+ALTER TABLE hub_meta_v5 RENAME TO hub_meta;
+CREATE TABLE retention_permission (singleton INTEGER PRIMARY KEY CHECK (singleton=1), enabled INTEGER NOT NULL CHECK (enabled IN (0,1)));
+INSERT INTO retention_permission VALUES (1,0);
+CREATE TABLE pruned_ranges (
+  scope_id TEXT NOT NULL REFERENCES repo_scopes(scope_id),
+  from_sequence INTEGER NOT NULL,
+  to_sequence INTEGER NOT NULL,
+  prune_id TEXT NOT NULL,
+  PRIMARY KEY(scope_id,from_sequence),
+  CHECK(from_sequence > 0 AND to_sequence >= from_sequence)
+);
+CREATE INDEX pruned_ranges_end ON pruned_ranges(scope_id,to_sequence);
+CREATE TABLE pruned_idempotency (
+  scope_id TEXT NOT NULL,
+  topic_id TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  prune_id TEXT NOT NULL,
+  PRIMARY KEY(scope_id,topic_id,actor_id,key),
+  FOREIGN KEY(scope_id,topic_id) REFERENCES topics(scope_id,topic_id)
+);
+CREATE TABLE prune_audit (
+  prune_id TEXT PRIMARY KEY,
+  cutoff_at INTEGER NOT NULL,
+  pruned_at INTEGER NOT NULL,
+  backup_path TEXT NOT NULL,
+  backup_available INTEGER NOT NULL DEFAULT 1 CHECK (backup_available IN (0,1)),
+  entry_count INTEGER NOT NULL,
+  payload_bytes INTEGER NOT NULL,
+  retention_epoch INTEGER NOT NULL
+);
+DROP TRIGGER publications_no_delete;
+DROP TRIGGER message_revisions_no_delete;
+DROP TRIGGER message_pin_audit_no_delete;
+DROP TRIGGER publication_idempotency_no_delete;
+DROP TRIGGER event_entries_no_delete;
+CREATE TRIGGER publications_no_delete BEFORE DELETE ON publications WHEN (SELECT enabled FROM retention_permission WHERE singleton=1) != 1 BEGIN SELECT RAISE(ABORT, 'publication is retained'); END;
+CREATE TRIGGER message_revisions_no_delete BEFORE DELETE ON message_revisions WHEN (SELECT enabled FROM retention_permission WHERE singleton=1) != 1 BEGIN SELECT RAISE(ABORT, 'revision is retained'); END;
+CREATE TRIGGER message_pin_audit_no_delete BEFORE DELETE ON message_pin_audit WHEN (SELECT enabled FROM retention_permission WHERE singleton=1) != 1 BEGIN SELECT RAISE(ABORT, 'pin audit is retained'); END;
+CREATE TRIGGER publication_idempotency_no_delete BEFORE DELETE ON publication_idempotency WHEN (SELECT enabled FROM retention_permission WHERE singleton=1) != 1 BEGIN SELECT RAISE(ABORT, 'idempotency is retained'); END;
+CREATE TRIGGER event_entries_no_delete BEFORE DELETE ON event_entries WHEN (SELECT enabled FROM retention_permission WHERE singleton=1) != 1 BEGIN SELECT RAISE(ABORT, 'event is retained'); END;
 `

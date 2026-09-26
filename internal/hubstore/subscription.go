@@ -476,7 +476,10 @@ func (d *DB) Pull(ctx context.Context, repoPath, consumerID, subscriptionID stri
 				return PullPage{}, err
 			}
 			if p.Sequence > position+1 {
-				addGap(&page.Gaps, position+1, p.Sequence-1, "unavailable")
+				if err := addMissingGaps(ctx, tx, &page.Gaps, scope.ID, position+1, p.Sequence-1); err != nil {
+					rows.Close()
+					return PullPage{}, err
+				}
 			}
 			position = p.Sequence
 			reason := ""
@@ -505,7 +508,9 @@ func (d *DB) Pull(ctx context.Context, repoPath, consumerID, subscriptionID stri
 		}
 		rows.Close()
 		if position < end {
-			addGap(&page.Gaps, position+1, end, "unavailable")
+			if err := addMissingGaps(ctx, tx, &page.Gaps, scope.ID, position+1, end); err != nil {
+				return PullPage{}, err
+			}
 		}
 		for i, id := range ids {
 			if kinds[i] == "message" {

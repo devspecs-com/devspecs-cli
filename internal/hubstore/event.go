@@ -546,6 +546,14 @@ func (d *DB) PublishEvent(ctx context.Context, repoPath, topicID, actorID string
 		if !errors.Is(err, sql.ErrNoRows) {
 			return Event{}, err
 		}
+		var purged int
+		err = d.sql.QueryRowContext(ctx, "SELECT 1 FROM pruned_idempotency WHERE scope_id=? AND topic_id=? AND actor_id=? AND key=?", scope.ID, topicID, actorID, in.IdempotencyKey).Scan(&purged)
+		if err == nil {
+			return Event{}, ErrReplayGap
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return Event{}, err
+		}
 	}
 	// Compilation and validation happen before entering SQLite's writer slot.
 	s, err := d.ShowEventSchema(ctx, repoPath, topicID, in.TypeKey, in.Version)
@@ -592,6 +600,13 @@ func (d *DB) PublishEvent(ctx context.Context, repoPath, topicID, actorID string
 			}
 			if !errors.Is(err, sql.ErrNoRows) {
 				return err
+			}
+			purged, err := prunedKey(ctx, tx, scope, topicID, actorID, in.IdempotencyKey)
+			if err != nil {
+				return err
+			}
+			if purged {
+				return ErrReplayGap
 			}
 		}
 		topic, err := scanTopic(tx.QueryRowContext(ctx, "SELECT "+topicColumns+" FROM topics WHERE scope_id=? AND topic_id=?", scope, topicID), now)

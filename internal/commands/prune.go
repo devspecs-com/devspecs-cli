@@ -19,7 +19,8 @@ const pruneProgressDelay = 750 * time.Millisecond
 
 // NewPruneCmd creates the ds prune maintenance command.
 func NewPruneCmd() *cobra.Command {
-	var dryRun, vacuum, asJSON bool
+	var dryRun, vacuum, asJSON, hub bool
+	var before string
 	cmd := &cobra.Command{
 		Use:   "prune",
 		Short: "Remove stale and redundant data from the local index",
@@ -31,15 +32,28 @@ exist. Consecutive capture revisions with identical content are collapsed while
 preserving the current revision and distinct content transitions. Deleted
 SQLite pages are reusable immediately; pass --vacuum to compact the database
 file and return unused space to the filesystem. Prune never deletes files from
-a repository, including ADRs, RFCs, PRDs, or DevSpecs task artifacts.`,
+a repository, including ADRs, RFCs, PRDs, or DevSpecs task artifacts.
+
+Pass --hub --before <RFC3339> to target old local coordination history instead.
+Hub pruning is never part of default index pruning and requires a cutoff. Use
+--dry-run to preview eligible entries. Live message heads and topic identity
+are retained; a verified hub backup is made before deletion.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if hub {
+				return runHubPrune(cmd, before, dryRun, vacuum, asJSON)
+			}
+			if before != "" {
+				return fmt.Errorf("--before requires --hub")
+			}
 			return runPrune(cmd, dryRun, vacuum, asJSON)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report stale repositories without changing the index")
 	cmd.Flags().BoolVar(&vacuum, "vacuum", false, "Compact the database after pruning to reclaim filesystem space")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
+	cmd.Flags().BoolVar(&hub, "hub", false, "Prune old local hub history instead of the rebuildable index")
+	cmd.Flags().StringVar(&before, "before", "", "Required UTC cutoff for --hub (RFC3339)")
 	return cmd
 }
 

@@ -55,7 +55,7 @@ func (d *DB) Close() error        { return d.sql.Close() }
 func (d *DB) Path() string        { return d.path }
 func (d *DB) AuthorityID() string { return d.authorityID }
 
-// Open creates a v4 authority or migrates a verified older authority.
+// Open creates a v5 authority or migrates a verified older authority.
 func Open(ctx context.Context, opts Options) (*DB, error) { return open(ctx, opts, false) }
 
 // OpenReadOnly never creates a home, database, or repository marker.
@@ -269,7 +269,7 @@ func (d *DB) probeVersion(ctx context.Context, allowV1 bool) error {
 	if appID == 0 && version == 0 {
 		return errInitializationPending
 	}
-	if appID != applicationID || (version != schemaVersion && !(allowV1 && (version == 1 || version == 2 || version == 3))) {
+	if appID != applicationID || (version != schemaVersion && !(allowV1 && (version == 1 || version == 2 || version == 3 || version == 4))) {
 		return fmt.Errorf("hub application_id=%d version=%d, supported=%d/%d: %w", appID, version, applicationID, schemaVersion, ErrUnsupportedFormat)
 	}
 	var id, digest string
@@ -318,6 +318,11 @@ func (d *DB) probeVersion(ctx context.Context, allowV1 bool) error {
 			return ErrUnsupportedFormat
 		}
 	}
+	if version >= 5 {
+		if err := tx.QueryRowContext(ctx, "SELECT digest FROM schema_migrations WHERE version=5").Scan(&digest); err != nil || digest != fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV5))) {
+			return ErrUnsupportedFormat
+		}
+	}
 	d.authorityID = id
 	return tx.Commit()
 }
@@ -347,7 +352,7 @@ func (d *DB) migrate(ctx context.Context) error {
 	if version == schemaVersion {
 		return nil
 	}
-	if version != 1 && version != 2 && version != 3 {
+	if version != 1 && version != 2 && version != 3 && version != 4 {
 		return ErrUnsupportedFormat
 	}
 	if err := tx.QueryRowContext(ctx, "SELECT db_id, format_version FROM hub_meta WHERE singleton=1").Scan(&id, &format); err != nil {
@@ -398,21 +403,35 @@ func (d *DB) migrate(ctx context.Context) error {
 			return ErrUnsupportedFormat
 		}
 	}
-	if _, err := tx.ExecContext(ctx, schemaV4); err != nil {
+	if version < 4 {
+		if _, err := tx.ExecContext(ctx, schemaV4); err != nil {
+			return err
+		}
+		secret := make([]byte, 32)
+		if _, err := rand.Read(secret); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO pull_token_secret VALUES (1, ?)", secret); err != nil {
+			return err
+		}
+		digest = fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV4)))
+		if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations VALUES (4, ?, ?)", digest, d.now().UTC().UnixMilli()); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version=4"); err != nil {
+			return err
+		}
+	} else if err := tx.QueryRowContext(ctx, "SELECT digest FROM schema_migrations WHERE version=4").Scan(&digest); err != nil || digest != fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV4))) {
+		return ErrUnsupportedFormat
+	}
+	if _, err := tx.ExecContext(ctx, schemaV5); err != nil {
 		return err
 	}
-	secret := make([]byte, 32)
-	if _, err := rand.Read(secret); err != nil {
+	digest = fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV5)))
+	if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations VALUES (5, ?, ?)", digest, d.now().UTC().UnixMilli()); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO pull_token_secret VALUES (1, ?)", secret); err != nil {
-		return err
-	}
-	digest = fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV4)))
-	if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations VALUES (4, ?, ?)", digest, d.now().UTC().UnixMilli()); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, "PRAGMA user_version=4"); err != nil {
+	if _, err := tx.ExecContext(ctx, "PRAGMA user_version=5"); err != nil {
 		return err
 	}
 	return tx.Commit()
