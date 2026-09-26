@@ -61,6 +61,274 @@ func TestPruneDryRunAndActualPreserveHeadAndExposeGap(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestPruneOldOneShotRemovesDependentsAndKeepsPinnedAndNew(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	ctx := context.Background()
+	old := f.post(t, "old", "old-key", nil)
+	_, err := f.d.PinMessage(ctx, f.repo, f.topic.ID, old.MessageID, "owner", f.d.AuthorityID(), f.topic.PolicyGeneration, old.Revision, true)
+	require.NoError(t, err)
+	_, err = f.d.PinMessage(ctx, f.repo, f.topic.ID, old.MessageID, "owner", f.d.AuthorityID(), f.topic.PolicyGeneration, old.Revision, false)
+	require.NoError(t, err)
+	voteForTest(t, f, old, "owner", 1)
+	pinned := f.post(t, "pinned", "pinned-key", nil)
+	_, err = f.d.PinMessage(ctx, f.repo, f.topic.ID, pinned.MessageID, "owner", f.d.AuthorityID(), f.topic.PolicyGeneration, pinned.Revision, true)
+	require.NoError(t, err)
+	*f.now = f.now.Add(2 * time.Minute)
+	newer := f.post(t, "new", "new-key", nil)
+	cutoff := f.now.Add(-time.Minute)
+
+	// Act
+	plan, err := f.d.PlanHubPrune(ctx, cutoff)
+	require.NoError(t, err)
+	actual, err := f.d.PruneHub(ctx, cutoff)
+	require.NoError(t, err)
+
+	// Assert
+	assert.Equal(t, 1, plan.Entries)
+	assert.Equal(t, plan.Entries, actual.Entries)
+	assert.Equal(t, plan.PayloadBytes, actual.PayloadBytes)
+	assert.Equal(t, plan.PlanDigest, actual.PlanDigest)
+	_, err = f.d.ReadMessage(ctx, f.repo, f.topic.ID, old.MessageID, true)
+	assert.ErrorIs(t, err, ErrNotFound)
+	pinnedRead, err := f.d.ReadMessage(ctx, f.repo, f.topic.ID, pinned.MessageID, true)
+	require.NoError(t, err)
+	assert.Equal(t, pinned.EntryID, pinnedRead.EntryID)
+	newerRead, err := f.d.ReadMessage(ctx, f.repo, f.topic.ID, newer.MessageID, true)
+	require.NoError(t, err)
+	assert.Equal(t, newer.EntryID, newerRead.EntryID)
+	var heads, revisions, votes, pins int
+	require.NoError(t, f.d.sql.QueryRow("SELECT COUNT(*) FROM message_heads WHERE message_id=?", old.MessageID).Scan(&heads))
+	require.NoError(t, f.d.sql.QueryRow("SELECT COUNT(*) FROM message_revisions WHERE message_id=?", old.MessageID).Scan(&revisions))
+	require.NoError(t, f.d.sql.QueryRow("SELECT COUNT(*) FROM message_votes WHERE message_id=?", old.MessageID).Scan(&votes))
+	require.NoError(t, f.d.sql.QueryRow("SELECT COUNT(*) FROM message_pin_audit WHERE message_id=?", old.MessageID).Scan(&pins))
+	assert.Zero(t, heads)
+	assert.Zero(t, revisions)
+	assert.Zero(t, votes)
+	assert.Zero(t, pins)
+	_, err = f.d.PostMessage(ctx, f.repo, f.topic.ID, "author", MessageInput{AuthorityID: f.d.AuthorityID(), Text: "old", IdempotencyKey: "old-key"})
+	assert.ErrorIs(t, err, ErrReplayGap)
+	assert.NoError(t, f.d.CheckIntegrity(ctx))
+}
+
+func TestPruneOldOneShotReportsGapAndRejectsStaleAck(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	ctx := context.Background()
+	enrollTestConsumer(t, f, "reader")
+	subscription := subscribeTest(t, f, "reader", true, nil, nil)
+	old := f.post(t, "old", "old-key", nil)
+	before, err := f.d.Pull(ctx, f.repo, "reader", subscription.ID, 1)
+	require.NoError(t, err)
+	*f.now = f.now.Add(2 * time.Minute)
+	newer := f.post(t, "new", "new-key", nil)
+	cutoff := f.now.Add(-time.Minute)
+
+	// Act
+	_, err = f.d.PruneHub(ctx, cutoff)
+	require.NoError(t, err)
+	_, staleAckErr := f.d.Ack(ctx, f.repo, "reader", subscription.ID, f.d.AuthorityID(), 0, before.NextScanPosition, before.AckToken)
+	page, pullErr := f.d.Pull(ctx, f.repo, "reader", subscription.ID, 2)
+
+	// Assert
+	assert.ErrorIs(t, staleAckErr, ErrReplayGap)
+	require.NoError(t, pullErr)
+	require.Len(t, page.Gaps, 1)
+	assert.Equal(t, old.Sequence, page.Gaps[0].From)
+	assert.Equal(t, old.Sequence, page.Gaps[0].To)
+	assert.Equal(t, "pruned", page.Gaps[0].Reason)
+	require.Len(t, page.Entries, 1)
+	assert.Equal(t, newer.EntryID, page.Entries[0].Message.EntryID)
+}
+
+func TestPruneWholeOldRevisionGroup(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	ctx := context.Background()
+	first := f.post(t, "first", "first-key", nil)
+	voteForTest(t, f, first, "owner", 1)
+	*f.now = f.now.Add(time.Minute)
+	second, err := f.d.ReviseMessage(ctx, f.repo, f.topic.ID, first.MessageID, "author", MessageRevisionInput{MessageInput: MessageInput{AuthorityID: f.d.AuthorityID(), Text: "second", IdempotencyKey: "second-key"}, ExpectedRevision: 1})
+	require.NoError(t, err)
+	voteForTest(t, f, second, "owner", -1)
+	*f.now = f.now.Add(time.Minute)
+	cutoff := f.now.Add(-time.Second)
+
+	// Act
+	plan, err := f.d.PlanHubPrune(ctx, cutoff)
+	require.NoError(t, err)
+	actual, err := f.d.PruneHub(ctx, cutoff)
+	require.NoError(t, err)
+
+	// Assert
+	assert.Equal(t, 2, plan.Entries)
+	assert.Equal(t, plan.Entries, actual.Entries)
+	assert.Equal(t, plan.PlanDigest, actual.PlanDigest)
+	_, firstReadErr := f.d.ReadPublication(ctx, f.repo, first.EntryID, true)
+	_, secondReadErr := f.d.ReadPublication(ctx, f.repo, second.EntryID, true)
+	assert.ErrorIs(t, firstReadErr, ErrNotFound)
+	assert.ErrorIs(t, secondReadErr, ErrNotFound)
+	var votes int
+	require.NoError(t, f.d.sql.QueryRow("SELECT COUNT(*) FROM message_votes WHERE message_id=?", first.MessageID).Scan(&votes))
+	assert.Zero(t, votes)
+	assert.NoError(t, f.d.CheckIntegrity(ctx))
+}
+
+func TestPruneClosedCorrectionChain(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	ctx := context.Background()
+	registerJob(t, f)
+	firstInput := jobInput(f, `{"job":"first","duration":1}`, "first-key")
+	first, err := f.d.PublishEvent(ctx, f.repo, f.topic.ID, "author", firstInput)
+	require.NoError(t, err)
+	secondInput := jobInput(f, `{"job":"second","duration":2}`, "second-key")
+	secondInput.CorrectsEntryID = first.EntryID
+	second, err := f.d.PublishEvent(ctx, f.repo, f.topic.ID, "author", secondInput)
+	require.NoError(t, err)
+	thirdInput := jobInput(f, `{"job":"third","duration":3}`, "third-key")
+	thirdInput.CorrectsEntryID = second.EntryID
+	third, err := f.d.PublishEvent(ctx, f.repo, f.topic.ID, "author", thirdInput)
+	require.NoError(t, err)
+	*f.now = f.now.Add(time.Minute)
+	cutoff := f.now.Add(-time.Second)
+
+	// Act
+	plan, err := f.d.PlanHubPrune(ctx, cutoff)
+	require.NoError(t, err)
+	actual, err := f.d.PruneHub(ctx, cutoff)
+	require.NoError(t, err)
+
+	// Assert
+	assert.Equal(t, 3, plan.Entries)
+	assert.Equal(t, plan.Entries, actual.Entries)
+	assert.Equal(t, plan.PlanDigest, actual.PlanDigest)
+	_, firstReadErr := f.d.ReadEvent(ctx, f.repo, first.EntryID, true)
+	_, secondReadErr := f.d.ReadEvent(ctx, f.repo, second.EntryID, true)
+	_, thirdReadErr := f.d.ReadEvent(ctx, f.repo, third.EntryID, true)
+	assert.ErrorIs(t, firstReadErr, ErrNotFound)
+	assert.ErrorIs(t, secondReadErr, ErrNotFound)
+	assert.ErrorIs(t, thirdReadErr, ErrNotFound)
+	_, err = f.d.PublishEvent(ctx, f.repo, f.topic.ID, "author", firstInput)
+	assert.ErrorIs(t, err, ErrReplayGap)
+	_, err = f.d.ShowEventSchema(ctx, f.repo, f.topic.ID, "job.finished", 1)
+	assert.NoError(t, err)
+	assert.NoError(t, f.d.CheckIntegrity(ctx))
+}
+
+func TestPruneKeepsCorrectionChainWithNewMember(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	ctx := context.Background()
+	registerJob(t, f)
+	first, err := f.d.PublishEvent(ctx, f.repo, f.topic.ID, "author", jobInput(f, `{"job":"first","duration":1}`, "first-key"))
+	require.NoError(t, err)
+	standalone, err := f.d.PublishEvent(ctx, f.repo, f.topic.ID, "author", jobInput(f, `{"job":"standalone","duration":1}`, "standalone-key"))
+	require.NoError(t, err)
+	*f.now = f.now.Add(time.Minute)
+	cutoff := f.now.Add(-time.Second)
+	secondInput := jobInput(f, `{"job":"second","duration":2}`, "second-key")
+	secondInput.CorrectsEntryID = first.EntryID
+	second, err := f.d.PublishEvent(ctx, f.repo, f.topic.ID, "author", secondInput)
+	require.NoError(t, err)
+
+	// Act
+	plan, err := f.d.PlanHubPrune(ctx, cutoff)
+	require.NoError(t, err)
+	actual, err := f.d.PruneHub(ctx, cutoff)
+	require.NoError(t, err)
+
+	// Assert
+	assert.Equal(t, 1, plan.Entries)
+	assert.Equal(t, plan.Entries, actual.Entries)
+	_, err = f.d.ReadEvent(ctx, f.repo, standalone.EntryID, true)
+	assert.ErrorIs(t, err, ErrNotFound)
+	firstRead, err := f.d.ReadEvent(ctx, f.repo, first.EntryID, true)
+	require.NoError(t, err)
+	assert.Equal(t, first.EntryID, firstRead.EntryID)
+	secondRead, err := f.d.ReadEvent(ctx, f.repo, second.EntryID, true)
+	require.NoError(t, err)
+	assert.Equal(t, second.EntryID, secondRead.EntryID)
+	assert.NoError(t, f.d.CheckIntegrity(ctx))
+}
+
+func TestPrunePlanChangesForVoteAndPin(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	ctx := context.Background()
+	old := f.post(t, "old", "old-key", nil)
+	*f.now = f.now.Add(time.Minute)
+	cutoff := f.now.Add(-time.Second)
+	before, err := f.d.PlanHubPrune(ctx, cutoff)
+	require.NoError(t, err)
+
+	// Act
+	voteForTest(t, f, old, "owner", 1)
+	withVote, err := f.d.PlanHubPrune(ctx, cutoff)
+	require.NoError(t, err)
+	_, err = f.d.PinMessage(ctx, f.repo, f.topic.ID, old.MessageID, "owner", f.d.AuthorityID(), f.topic.PolicyGeneration, old.Revision, true)
+	require.NoError(t, err)
+	withPin, err := f.d.PlanHubPrune(ctx, cutoff)
+	require.NoError(t, err)
+
+	// Assert
+	assert.Equal(t, 1, before.Entries)
+	assert.Equal(t, 1, withVote.Entries)
+	assert.NotEqual(t, before.PlanDigest, withVote.PlanDigest)
+	assert.Zero(t, withPin.Entries)
+}
+
+func TestPruneArchivedTopicMessageKeepsTopicAudit(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	ctx := context.Background()
+	old := f.post(t, "old", "old-key", nil)
+	archived, err := f.d.ArchiveTopic(ctx, f.repo, f.topic.ID, "owner", f.topic.PolicyGeneration, "closed")
+	require.NoError(t, err)
+	*f.now = f.now.Add(time.Minute)
+	cutoff := f.now.Add(-time.Second)
+
+	// Act
+	report, err := f.d.PruneHub(ctx, cutoff)
+	require.NoError(t, err)
+
+	// Assert
+	assert.Equal(t, 1, report.Entries)
+	_, err = f.d.ReadMessage(ctx, f.repo, f.topic.ID, old.MessageID, true)
+	assert.ErrorIs(t, err, ErrNotFound)
+	got, err := f.d.ShowTopic(ctx, f.repo, f.topic.ID)
+	require.NoError(t, err)
+	assert.Equal(t, archived.ID, got.ID)
+	assert.Equal(t, "archived", got.State)
+	var audits int
+	require.NoError(t, f.d.sql.QueryRow("SELECT COUNT(*) FROM topic_audit WHERE topic_id=?", f.topic.ID).Scan(&audits))
+	assert.Positive(t, audits)
+	assert.NoError(t, f.d.CheckIntegrity(ctx))
+}
+
+func TestPruneExpiredOneShot(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	ctx := context.Background()
+	expiry := f.now.Add(30 * time.Second)
+	old := f.post(t, "expires", "expiry-key", &expiry)
+	*f.now = f.now.Add(time.Minute)
+	cutoff := f.now.Add(-time.Second)
+
+	// Act
+	plan, err := f.d.PlanHubPrune(ctx, cutoff)
+	require.NoError(t, err)
+	actual, err := f.d.PruneHub(ctx, cutoff)
+	require.NoError(t, err)
+
+	// Assert
+	assert.Equal(t, 1, plan.Entries)
+	assert.Equal(t, plan.Entries, actual.Entries)
+	_, err = f.d.ReadMessage(ctx, f.repo, f.topic.ID, old.MessageID, true)
+	assert.ErrorIs(t, err, ErrNotFound)
+	assert.NoError(t, f.d.CheckIntegrity(ctx))
+}
+
 func TestPruneReadOnlyFailsClosed(t *testing.T) {
 	// Arrange
 	f := newMessageFixture(t)
@@ -248,6 +516,8 @@ func TestSparsePruneReportsGapBeyondOldLiveHead(t *testing.T) {
 	enrollTestConsumer(t, f, "reader")
 	s := subscribeTest(t, f, "reader", true, nil, nil)
 	kept := f.post(t, "older live head", "keep", nil)
+	_, err := f.d.PinMessage(ctx, f.repo, f.topic.ID, kept.MessageID, "owner", f.d.AuthorityID(), f.topic.PolicyGeneration, kept.Revision, true)
+	require.NoError(t, err)
 	old := f.post(t, "old revision", "remove", nil)
 	*f.now = f.now.Add(time.Minute)
 	newHead, err := f.d.ReviseMessage(ctx, f.repo, f.topic.ID, old.MessageID, "author", MessageRevisionInput{MessageInput: MessageInput{AuthorityID: f.d.AuthorityID(), Text: "new head"}, ExpectedRevision: 1})

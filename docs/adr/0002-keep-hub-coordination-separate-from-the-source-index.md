@@ -25,8 +25,9 @@ resource lock. An optional workspace does not change ordinary repo ownership.
 Hub publications are local coordination, not durable architectural records.
 The operator may explicitly prune eligible old publications by cutoff after a
 verified backup; default source-index pruning never touches the hub. Current
-heads, schema definitions, replay-gap evidence, and idempotency tombstones
-remain until a separately reviewed retention policy can safely remove them.
+heads are eligible only when cutoff-aged and unpinned. Schema definitions,
+replay-gap evidence, and idempotency tombstones remain until a separately
+reviewed retention policy can safely remove them.
 Decisions that must survive local home loss belong in Git-owned task receipts
 or composed documents.
 

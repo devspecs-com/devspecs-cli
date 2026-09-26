@@ -12,10 +12,11 @@
 - Added explicit `ds prune --hub --before <RFC3339>` with dry-run, 10,000-entry
   batches, a verified pre-deletion backup, and replay-gap preservation.
   Default `ds prune` remains index-only. Optional `--vacuum` compacts the hub
-  file and reports measured bytes reclaimed. Large-hub cost and metadata
-  growth remain under review. Current message heads, including ordinary
-  one-shot messages, are not yet eligible, so this is not complete hub garbage
-  collection.
+  file and reports measured bytes reclaimed. Explicit cutoff pruning now
+  includes old unpinned one-shot messages and complete old event correction
+  chains. Large-hub cost, retained metadata growth, and groups exceeding the
+  10,000-publication batch limit remain under review; this is not automatic
+  garbage collection.
 - Made `ds map` and `ds recent` fail with a bounded Git evidence error instead
   of silently omitting receipts after a timeout or cancellation. Existing map
   output caches are rebuilt so incomplete cached evidence is not reused.

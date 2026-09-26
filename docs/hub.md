@@ -70,15 +70,16 @@ ds prune --hub --before 2026-09-01T00:00:00Z --vacuum --json
 
 The cutoff is explicit; hub is never pruned by default. A run processes at
 most 10,000 eligible old publications and creates a verified SQLite backup
-before deletion. Current message heads, event correction targets, schemas,
-replay-gap evidence, and old idempotency keys are preserved. Repeat if `more`
-is true. Deleted rows make pages reusable but do not necessarily return disk
-space to the OS. `--vacuum` is explicit, performs a separate verified backup,
-and reports measured file bytes before/after and reclaimed bytes; zero reclaim
+before deletion. Old unpinned messages, including one-shot messages, and
+whole old event correction chains can be removed. Pinned messages, newer
+chains, schemas, replay-gap evidence, and old idempotency keys are preserved.
+Repeat if `more` is true. Deleted rows make pages reusable but do not
+necessarily return disk space to the OS. `--vacuum` is explicit, performs a
+separate verified backup, and reports measured file bytes before/after and
+reclaimed bytes; zero reclaim
 is possible. Backup and compaction need substantial free space and can fail
 after the prune batch commits, with the committed count and backup path
-reported. Repeated full backups may be costly on large hubs. Retained heads and
-metadata can still grow. In particular, ordinary one-shot messages remain
-current heads even when old or expired, so this release's prune does not erase
-them yet. Do not treat this as automatic garbage collection or a substitute
-for durable Git records.
+reported. Repeated full backups may be costly on large hubs. A single message
+or correction group above 10,000 publications cannot be pruned yet. Pinned
+heads and metadata can still grow. Do not treat this as automatic garbage
+collection or a substitute for durable Git records.

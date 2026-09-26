@@ -57,10 +57,11 @@ ds prune --hub --before 2026-09-01T00:00:00Z
 ```
 
 Each run deletes at most 10,000 eligible old publications after a verified
-SQLite backup. It retains current message heads, event correction targets,
-event schemas, replay-gap records, and idempotency tombstones. Repeat while
-the report says `more` to continue. A normal `ds prune` never touches hub.
-One-shot messages remain current heads and are not yet reclaimed by this mode.
+SQLite backup. Old unpinned message heads and whole old event correction
+chains are eligible; pinned heads, newer chains, event schemas, replay-gap
+records, and idempotency tombstones remain. Repeat while the report says
+`more` to continue. A group above 10,000 publications is not yet supported.
+A normal `ds prune` never touches hub.
 Hub row deletion reuses SQLite pages; it does not by itself shrink the live
 file. Add `--vacuum` to the non-dry-run hub command to compact explicitly and
 report measured before/after bytes. It needs extra disk headroom and may wait

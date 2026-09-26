@@ -281,7 +281,7 @@ and update guidance; it does not install anything.
 - Existing repository files remain the source of truth.
 - `ds prune` removes derived index state by default, never repository files.
   `ds prune --hub --before <RFC3339>` separately deletes eligible old local
-  hub publications after a verified backup; it does not remove live heads.
+  hub publications after a verified backup; pinned messages stay.
 
 Commit task artifacts when they explain durable work or should be reviewed with
 the change. Use `--dir .devspecs/tasks` for deliberately local scratch work.

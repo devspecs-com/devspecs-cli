@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -45,12 +46,11 @@ type VacuumReport struct {
 }
 
 type pruneEntry struct {
-	id, scope, topic, actor, key, kind string
-	sequence, bytes                    int64
+	id, scope, topic, actor, key, kind, group, dependencies string
+	sequence, bytes, depth                                  int64
 }
 
-// PlanHubPrune reports only physically eligible publications. A retained
-// current message revision or event correction target is never counted.
+// PlanHubPrune reports complete eligible message and event-correction groups.
 func (d *DB) PlanHubPrune(ctx context.Context, cutoff time.Time) (PruneReport, error) {
 	if err := validPruneCutoff(cutoff); err != nil {
 		return PruneReport{}, err
@@ -142,14 +142,47 @@ func (d *DB) PruneHub(ctx context.Context, cutoff time.Time) (PruneReport, error
 				if _, err = tx.ExecContext(ctx, "DELETE FROM message_pin_audit WHERE (message_id,revision) IN (SELECT message_id,revision FROM message_revisions WHERE entry_id=?)", e.id); err != nil {
 					return err
 				}
+			}
+		}
+		for _, e := range entries {
+			if e.kind == "message" {
 				if _, err = tx.ExecContext(ctx, "DELETE FROM message_revisions WHERE entry_id=?", e.id); err != nil {
 					return err
 				}
-			} else {
+			}
+		}
+		deletedHeads := make(map[string]bool)
+		for _, e := range entries {
+			if strings.HasPrefix(e.group, "M:") {
+				messageID := strings.TrimPrefix(e.group, "M:")
+				if deletedHeads[messageID] {
+					continue
+				}
+				res, deleteErr := tx.ExecContext(ctx, "DELETE FROM message_heads WHERE message_id=?", messageID)
+				if deleteErr != nil {
+					return deleteErr
+				}
+				n, rowsErr := res.RowsAffected()
+				if rowsErr != nil {
+					return rowsErr
+				}
+				if n != 1 {
+					return ErrConflict
+				}
+				deletedHeads[messageID] = true
+			}
+		}
+		// A correction references its parent, so children must go first.
+		childrenFirst := append([]pruneEntry(nil), entries...)
+		sort.Slice(childrenFirst, func(i, j int) bool { return childrenFirst[i].depth > childrenFirst[j].depth })
+		for _, e := range childrenFirst {
+			if e.kind == "event" {
 				if _, err = tx.ExecContext(ctx, "DELETE FROM event_entries WHERE entry_id=?", e.id); err != nil {
 					return err
 				}
 			}
+		}
+		for _, e := range entries {
 			res, deleteErr := tx.ExecContext(ctx, "DELETE FROM publications WHERE entry_id=?", e.id)
 			if deleteErr != nil {
 				return deleteErr
@@ -210,30 +243,70 @@ func validPruneCutoff(cutoff time.Time) error {
 }
 
 func pruneCandidates(ctx context.Context, tx *sql.Tx, cutoff int64) ([]pruneEntry, bool, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT p.entry_id,p.scope_id,p.topic_id,p.actor_id,COALESCE(p.idempotency_key,''),p.kind,p.sequence,
-	 length(CAST(p.source_refs AS BLOB))+length(CAST(p.correlation_refs AS BLOB))+COALESCE(length(CAST(e.payload_json AS BLOB)),0)+COALESCE(length(CAST(r.text AS BLOB)),0)
-	 FROM publications p LEFT JOIN event_entries e ON e.entry_id=p.entry_id LEFT JOIN message_revisions r ON r.entry_id=p.entry_id
-	 WHERE p.committed_at<? AND NOT EXISTS (SELECT 1 FROM message_heads h WHERE h.current_entry_id=p.entry_id)
-	 AND NOT EXISTS (SELECT 1 FROM event_entries corrected WHERE corrected.corrects_entry_id=p.entry_id)
-	 ORDER BY p.scope_id,p.sequence LIMIT ?`, cutoff, PruneBatchLimit+1)
+	rows, err := tx.QueryContext(ctx, `WITH RECURSIVE event_roots(entry_id,root_id,depth) AS (
+	 SELECT entry_id,entry_id,0 FROM event_entries WHERE corrects_entry_id IS NULL
+	 UNION ALL
+	 SELECT child.entry_id,parent.root_id,parent.depth+1 FROM event_entries child JOIN event_roots parent ON child.corrects_entry_id=parent.entry_id
+	 ), old_chains AS (
+	 SELECT root_id FROM event_roots roots JOIN publications p ON p.entry_id=roots.entry_id
+	 GROUP BY root_id HAVING MAX(p.committed_at)<?
+	 ), old_heads AS (
+	 SELECT h.message_id FROM message_heads h JOIN publications p ON p.entry_id=h.current_entry_id
+	 WHERE h.pinned=0 AND p.committed_at<? AND NOT EXISTS (
+	   SELECT 1 FROM message_revisions r JOIN publications member ON member.entry_id=r.entry_id
+	   WHERE r.message_id=h.message_id AND member.committed_at>=?)
+	 ), candidates(group_id,entry_id,depth) AS (
+	 SELECT 'M:'||r.message_id,r.entry_id,0 FROM message_revisions r JOIN old_heads h ON h.message_id=r.message_id
+	 UNION ALL
+	 SELECT 'R:'||r.entry_id,r.entry_id,0 FROM message_revisions r JOIN message_heads h ON h.message_id=r.message_id
+	 JOIN publications p ON p.entry_id=r.entry_id LEFT JOIN old_heads old ON old.message_id=r.message_id
+	 WHERE p.committed_at<? AND h.current_entry_id<>r.entry_id AND old.message_id IS NULL
+	 UNION ALL
+	 SELECT 'E:'||roots.root_id,roots.entry_id,roots.depth FROM event_roots roots JOIN old_chains old ON old.root_id=roots.root_id
+	 ), ordered AS (
+	 SELECT c.*,MIN(p.sequence) OVER (PARTITION BY c.group_id) first_sequence,
+	 COUNT(*) OVER (PARTITION BY c.group_id) group_size
+	 FROM candidates c JOIN publications p ON p.entry_id=c.entry_id
+	 )
+	 SELECT p.entry_id,p.scope_id,p.topic_id,p.actor_id,COALESCE(p.idempotency_key,''),p.kind,p.sequence,
+	 length(CAST(p.source_refs AS BLOB))+length(CAST(p.correlation_refs AS BLOB))+COALESCE(length(CAST(e.payload_json AS BLOB)),0)+COALESCE(length(CAST(r.text AS BLOB)),0),
+	 o.group_id,o.depth,o.group_size,
+	 COALESCE(h.current_entry_id,'')||':'||COALESCE(h.current_revision,0)||':'||COALESCE(h.pinned,0)||':'||
+	 COALESCE((SELECT json_group_array(json_array(actor_id,value)) FROM (
+	   SELECT v.actor_id,v.value FROM message_votes v WHERE v.message_id=r.message_id AND v.revision=r.revision ORDER BY v.actor_id)), '[]')||':'||
+	 COALESCE((SELECT json_group_array(json_array(pin_id,pinned)) FROM (
+	   SELECT a.pin_id,a.pinned FROM message_pin_audit a WHERE a.message_id=r.message_id AND a.revision=r.revision ORDER BY a.pin_id)), '[]')
+	 FROM ordered o JOIN publications p ON p.entry_id=o.entry_id
+	 LEFT JOIN event_entries e ON e.entry_id=p.entry_id LEFT JOIN message_revisions r ON r.entry_id=p.entry_id
+	 LEFT JOIN message_heads h ON h.message_id=r.message_id
+	 ORDER BY p.scope_id,o.first_sequence,o.group_id,p.sequence`, cutoff, cutoff, cutoff, cutoff)
 	if err != nil {
 		return nil, false, err
 	}
 	defer rows.Close()
 	entries := make([]pruneEntry, 0)
+	group := ""
+	more := false
 	for rows.Next() {
 		var e pruneEntry
-		if err := rows.Scan(&e.id, &e.scope, &e.topic, &e.actor, &e.key, &e.kind, &e.sequence, &e.bytes); err != nil {
+		var groupSize int
+		if err := rows.Scan(&e.id, &e.scope, &e.topic, &e.actor, &e.key, &e.kind, &e.sequence, &e.bytes, &e.group, &e.depth, &groupSize, &e.dependencies); err != nil {
 			return nil, false, err
+		}
+		if e.group != group {
+			if len(entries) > 0 && len(entries)+groupSize > PruneBatchLimit {
+				more = true
+				break
+			}
+			if groupSize > PruneBatchLimit {
+				return nil, false, fmt.Errorf("hub prune group %s has %d publications (limit %d): %w", e.group, groupSize, PruneBatchLimit, ErrInvalidInput)
+			}
+			group = e.group
 		}
 		entries = append(entries, e)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, false, err
-	}
-	more := len(entries) > PruneBatchLimit
-	if more {
-		entries = entries[:PruneBatchLimit]
 	}
 	return entries, more, nil
 }
@@ -243,7 +316,14 @@ func pruneReport(ctx context.Context, tx *sql.Tx, cutoff time.Time, entries []pr
 	if err := tx.QueryRowContext(ctx, "SELECT retention_epoch FROM hub_meta WHERE singleton=1").Scan(&r.RetentionEpoch); err != nil {
 		return r, err
 	}
-	for _, e := range entries {
+	bySequence := append([]pruneEntry(nil), entries...)
+	sort.Slice(bySequence, func(i, j int) bool {
+		if bySequence[i].scope != bySequence[j].scope {
+			return bySequence[i].scope < bySequence[j].scope
+		}
+		return bySequence[i].sequence < bySequence[j].sequence
+	})
+	for _, e := range bySequence {
 		r.PayloadBytes += e.bytes
 		if len(r.Scopes) == 0 || r.Scopes[len(r.Scopes)-1].ScopeID != e.scope {
 			r.Scopes = append(r.Scopes, PruneScope{ScopeID: e.scope, Gaps: []PublicationGap{}})
@@ -259,7 +339,7 @@ func pruneReport(ctx context.Context, tx *sql.Tx, cutoff time.Time, entries []pr
 func candidateDigest(entries []pruneEntry) string {
 	h := sha256.New()
 	for _, e := range entries {
-		fmt.Fprintf(h, "%q\t%q\t%q\t%q\t%q\t%q\t%d\t%d\n", e.id, e.scope, e.topic, e.actor, e.key, e.kind, e.sequence, e.bytes)
+		fmt.Fprintf(h, "%q\t%q\t%q\t%q\t%q\t%q\t%d\t%d\t%q\t%d\t%q\n", e.id, e.scope, e.topic, e.actor, e.key, e.kind, e.sequence, e.bytes, e.group, e.depth, e.dependencies)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
