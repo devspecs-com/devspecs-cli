@@ -60,6 +60,7 @@ Each run deletes at most 10,000 eligible old publications after a verified
 SQLite backup. It retains current message heads, event correction targets,
 event schemas, replay-gap records, and idempotency tombstones. Repeat while
 the report says `more` to continue. A normal `ds prune` never touches hub.
+One-shot messages remain current heads and are not yet reclaimed by this mode.
 Hub row deletion reuses SQLite pages; it does not by itself shrink the live
 file. Add `--vacuum` to the non-dry-run hub command to compact explicitly and
 report measured before/after bytes. It needs extra disk headroom and may wait

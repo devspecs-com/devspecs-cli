@@ -21,6 +21,18 @@ author and pinned by an owner or maintainer; a pin is visibility, not a lease.
 Use `--expires-at` on a topic or publication for a deadline. Expired entries
 remain historical until explicitly pruned.
 
+Any enrolled actor can replace or clear one advisory vote on the current
+message revision. `ds hub message list <topic-id>` stays pinned-first and
+chronological within pin groups; `--ranked` sorts within each group by score
+(`upvotes - downvotes`), then newest first. A downvoted message remains
+inspectable, and votes never change pull or acknowledgement order. Actor IDs
+are local attribution, not independently verified people.
+
+```bash
+ds hub message vote <topic-id> <message-id> --actor agent-a --revision <n> --value up
+ds hub message list <topic-id> --ranked
+```
+
 For machine-validated events, the owner or maintainer registers a versioned
 local JSON Schema, then publishers provide a JSON payload:
 
@@ -66,5 +78,7 @@ and reports measured file bytes before/after and reclaimed bytes; zero reclaim
 is possible. Backup and compaction need substantial free space and can fail
 after the prune batch commits, with the committed count and backup path
 reported. Repeated full backups may be costly on large hubs. Retained heads and
-metadata can still grow, so do not treat this as automatic garbage collection
-or a substitute for durable Git records.
+metadata can still grow. In particular, ordinary one-shot messages remain
+current heads even when old or expired, so this release's prune does not erase
+them yet. Do not treat this as automatic garbage collection or a substitute
+for durable Git records.

@@ -1,7 +1,7 @@
 package hubstore
 
 const applicationID = 0x44534842 // DSHB
-const schemaVersion = 5
+const schemaVersion = 6
 
 // v1 is deliberately hub-only. A later migration must advance user_version and
 // insert its digest in the same transaction.
@@ -310,4 +310,26 @@ CREATE TRIGGER message_revisions_no_delete BEFORE DELETE ON message_revisions WH
 CREATE TRIGGER message_pin_audit_no_delete BEFORE DELETE ON message_pin_audit WHEN (SELECT enabled FROM retention_permission WHERE singleton=1) != 1 BEGIN SELECT RAISE(ABORT, 'pin audit is retained'); END;
 CREATE TRIGGER publication_idempotency_no_delete BEFORE DELETE ON publication_idempotency WHEN (SELECT enabled FROM retention_permission WHERE singleton=1) != 1 BEGIN SELECT RAISE(ABORT, 'idempotency is retained'); END;
 CREATE TRIGGER event_entries_no_delete BEFORE DELETE ON event_entries WHEN (SELECT enabled FROM retention_permission WHERE singleton=1) != 1 BEGIN SELECT RAISE(ABORT, 'event is retained'); END;
+`
+
+// Votes are mutable advisory state for one actor and one exact revision.
+// Retention removes them explicitly before deleting their revision.
+const schemaV6 = `
+CREATE TABLE hub_meta_v6 (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  db_id TEXT NOT NULL,
+  format_version INTEGER NOT NULL CHECK (format_version = 6),
+  retention_epoch INTEGER NOT NULL DEFAULT 0 CHECK (retention_epoch >= 0)
+);
+INSERT INTO hub_meta_v6 SELECT singleton, db_id, 6, retention_epoch FROM hub_meta;
+DROP TABLE hub_meta;
+ALTER TABLE hub_meta_v6 RENAME TO hub_meta;
+CREATE TABLE message_votes (
+  message_id TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  actor_id TEXT NOT NULL REFERENCES actors(actor_id),
+  value INTEGER NOT NULL CHECK (value IN (-1,1)),
+  PRIMARY KEY (message_id,revision,actor_id),
+  FOREIGN KEY (message_id,revision) REFERENCES message_revisions(message_id,revision) ON DELETE CASCADE
+);
 `

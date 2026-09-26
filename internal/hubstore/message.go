@@ -43,6 +43,9 @@ type Message struct {
 	Revision  int64  `json:"revision"`
 	Text      string `json:"text"`
 	Pinned    bool   `json:"pinned"`
+	Upvotes   int64  `json:"upvotes"`
+	Downvotes int64  `json:"downvotes"`
+	Score     int64  `json:"score"`
 }
 
 type MessageInput struct {
@@ -64,9 +67,14 @@ type MessageRevisionInput struct {
 type MessageList struct {
 	Limit  int
 	Offset int
+	Ranked bool
 }
 
-const messageColumns = "p.entry_id,p.scope_id,p.topic_id,p.actor_id,p.kind,p.sequence,p.committed_at,p.occurred_at,p.expires_at,p.source_refs,p.correlation_refs,p.idempotency_key,r.message_id,r.revision,r.text,h.pinned,h.current_entry_id"
+const messageColumns = "p.entry_id,p.scope_id,p.topic_id,p.actor_id,p.kind,p.sequence,p.committed_at,p.occurred_at,p.expires_at,p.source_refs,p.correlation_refs,p.idempotency_key,r.message_id,r.revision,r.text,h.pinned,h.current_entry_id," +
+	"(SELECT COUNT(*) FROM message_votes v WHERE v.message_id=r.message_id AND v.revision=r.revision AND v.value=1)," +
+	"(SELECT COUNT(*) FROM message_votes v WHERE v.message_id=r.message_id AND v.revision=r.revision AND v.value=-1)"
+
+const messageScore = "(SELECT COALESCE(SUM(v.value),0) FROM message_votes v WHERE v.message_id=r.message_id AND v.revision=r.revision)"
 
 func scanMessage(row rowScanner, extra ...any) (Message, error) {
 	var m Message
@@ -76,7 +84,7 @@ func scanMessage(row rowScanner, extra ...any) (Message, error) {
 	var sources, correlations string
 	var pinned int
 	var currentID string
-	targets := []any{&m.EntryID, &m.ScopeID, &m.TopicID, &m.ActorID, &m.Kind, &m.Sequence, &committed, &occurred, &expiry, &sources, &correlations, &key, &m.MessageID, &m.Revision, &m.Text, &pinned, &currentID}
+	targets := []any{&m.EntryID, &m.ScopeID, &m.TopicID, &m.ActorID, &m.Kind, &m.Sequence, &committed, &occurred, &expiry, &sources, &correlations, &key, &m.MessageID, &m.Revision, &m.Text, &pinned, &currentID, &m.Upvotes, &m.Downvotes}
 	err := row.Scan(append(targets, extra...)...)
 	if err != nil {
 		return Message{}, err
@@ -98,6 +106,7 @@ func scanMessage(row rowScanner, extra ...any) (Message, error) {
 	}
 	m.IdempotencyKey = key.String
 	m.Pinned = pinned == 1 && currentID == m.EntryID
+	m.Score = m.Upvotes - m.Downvotes
 	return m, nil
 }
 
@@ -594,7 +603,8 @@ func messageListBounds(opts MessageList) (MessageList, error) {
 	return opts, nil
 }
 
-// ListMessages is the current-message discovery view; pins only affect order.
+// ListMessages defaults to pinned-first, newest-first discovery. Ranked mode
+// orders by pin, then score (upvotes minus downvotes), then sequence and ID.
 func (d *DB) ListMessages(ctx context.Context, repoPath, topicID string, opts MessageList) ([]Message, error) {
 	opts, err := messageListBounds(opts)
 	if err != nil {
@@ -612,7 +622,11 @@ func (d *DB) ListMessages(ctx context.Context, repoPath, topicID string, opts Me
 	if topic.State != "active" {
 		return []Message{}, nil
 	}
-	rows, err := d.sql.QueryContext(ctx, "SELECT "+messageColumns+" FROM message_heads h JOIN message_revisions r ON r.entry_id=h.current_entry_id JOIN publications p ON p.entry_id=r.entry_id WHERE h.scope_id=? AND h.topic_id=? AND (p.expires_at IS NULL OR p.expires_at>?) ORDER BY h.pinned DESC,p.sequence DESC LIMIT ? OFFSET ?", scope.ID, topicID, now, opts.Limit, opts.Offset)
+	order := "h.pinned DESC,p.sequence DESC,p.entry_id DESC"
+	if opts.Ranked {
+		order = "h.pinned DESC," + messageScore + " DESC,p.sequence DESC,p.entry_id DESC"
+	}
+	rows, err := d.sql.QueryContext(ctx, "SELECT "+messageColumns+" FROM message_heads h JOIN message_revisions r ON r.entry_id=h.current_entry_id JOIN publications p ON p.entry_id=r.entry_id WHERE h.scope_id=? AND h.topic_id=? AND (p.expires_at IS NULL OR p.expires_at>?) ORDER BY "+order+" LIMIT ? OFFSET ?", scope.ID, topicID, now, opts.Limit, opts.Offset)
 	if err != nil {
 		return nil, err
 	}

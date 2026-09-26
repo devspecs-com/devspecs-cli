@@ -136,6 +136,9 @@ func (d *DB) PruneHub(ctx context.Context, cutoff time.Time) (PruneReport, error
 				}
 			}
 			if e.kind == "message" {
+				if _, err = tx.ExecContext(ctx, "DELETE FROM message_votes WHERE (message_id,revision) IN (SELECT message_id,revision FROM message_revisions WHERE entry_id=?)", e.id); err != nil {
+					return err
+				}
 				if _, err = tx.ExecContext(ctx, "DELETE FROM message_pin_audit WHERE (message_id,revision) IN (SELECT message_id,revision FROM message_revisions WHERE entry_id=?)", e.id); err != nil {
 					return err
 				}

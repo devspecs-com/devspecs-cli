@@ -25,6 +25,40 @@ func hubRepoFixture(t *testing.T) string {
 	return repo
 }
 
+func TestHubMessageVoteCommandReportsRevisionScore(t *testing.T) {
+	// Arrange
+	repo := hubRepoFixture(t)
+	ctx := context.Background()
+	db, err := hubstore.Open(ctx, hubstore.Options{})
+	require.NoError(t, err)
+	_, err = db.EnrollRepo(ctx, repo)
+	require.NoError(t, err)
+	_, err = db.EnrollActor(ctx, "actor")
+	require.NoError(t, err)
+	topic, err := db.CreateTopic(ctx, repo, "actor", hubstore.TopicInput{Key: "discussion", Name: "Discussion", Description: "Release discussion"})
+	require.NoError(t, err)
+	message, err := db.PostMessage(ctx, repo, topic.ID, "actor", hubstore.MessageInput{AuthorityID: db.AuthorityID(), Text: "Check this"})
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+	cmd := NewHubCmd()
+	cmd.SetArgs([]string{"message", "vote", topic.ID, message.MessageID, "--repo", repo, "--actor", "actor", "--revision", "1", "--value", "up", "--json"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	// Act
+	err = cmd.Execute()
+	var response hubJSONResponse[hubstore.Message]
+	decodeErr := json.Unmarshal(out.Bytes(), &response)
+
+	// Assert
+	require.NoError(t, err)
+	require.NoError(t, decodeErr)
+	assert.Equal(t, message.MessageID, response.Result.MessageID)
+	assert.Equal(t, int64(1), response.Result.Upvotes)
+	assert.Equal(t, int64(0), response.Result.Downvotes)
+	assert.Equal(t, int64(1), response.Result.Score)
+}
+
 func TestHubTopicCreate_WithEnrolledActor_PrintsExactTopic(t *testing.T) {
 	// Arrange
 	repo := hubRepoFixture(t)

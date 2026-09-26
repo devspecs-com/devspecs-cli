@@ -340,7 +340,7 @@ func TestShowEventSchemaIncludesDigest(t *testing.T) {
 	assert.Equal(t, EventDialect, shown.Dialect)
 }
 
-func TestOpenMigratesVerifiedV2AuthorityToV4(t *testing.T) {
+func TestOpenMigratesVerifiedV2AuthorityToCurrent(t *testing.T) {
 	// Arrange
 	home := filepath.Join(t.TempDir(), "home")
 	require.NoError(t, os.MkdirAll(home, 0o700))
@@ -370,8 +370,8 @@ func TestOpenMigratesVerifiedV2AuthorityToV4(t *testing.T) {
 	var version, count int
 	require.NoError(t, d.sql.QueryRow("PRAGMA user_version").Scan(&version))
 	require.NoError(t, d.sql.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count))
-	assert.Equal(t, 5, version)
-	assert.Equal(t, 5, count)
+	assert.Equal(t, schemaVersion, version)
+	assert.Equal(t, schemaVersion, count)
 }
 
 func TestOpenMigratesVerifiedV3AuthorityWithPullSecret(t *testing.T) {
@@ -412,7 +412,7 @@ func TestOpenMigratesVerifiedV3AuthorityWithPullSecret(t *testing.T) {
 	require.NoError(t, d.sql.QueryRow("PRAGMA user_version").Scan(&version))
 	require.NoError(t, d.sql.QueryRow("SELECT length(secret) FROM pull_token_secret WHERE singleton=1").Scan(&secretLength))
 	require.NoError(t, d.sql.QueryRow("SELECT digest FROM schema_migrations WHERE version=4").Scan(&digest))
-	assert.Equal(t, 5, version)
+	assert.Equal(t, schemaVersion, version)
 	assert.Equal(t, 32, secretLength)
 	assert.Equal(t, fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV4))), digest)
 }

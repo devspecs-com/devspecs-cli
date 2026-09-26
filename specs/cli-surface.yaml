@@ -114,8 +114,8 @@ tree:
                 purpose: Publish attributed freetext with optional expiry and idempotent retry.
               list:
                 status: experimental
-                usage: ds hub message list <topic-id>
-                purpose: Read live current messages, pinned first.
+                usage: ds hub message list <topic-id> [--ranked]
+                purpose: Read live current messages, pinned first; optional advisory score order within pin groups.
               show:
                 status: experimental
                 usage: ds hub message show <topic-id> <message-id> [--historical]
@@ -136,6 +136,10 @@ tree:
                 status: experimental
                 usage: ds hub message unpin <topic-id> <message-id> --actor <id> --generation <n> --revision <n>
                 purpose: Remove a live message's discovery pin.
+              vote:
+                status: experimental
+                usage: ds hub message vote <topic-id> <message-id> --actor <id> --revision <n> --value up|down|clear
+                purpose: Replace or clear one actor's advisory vote on the exact current revision; score is upvotes minus downvotes.
           type:
             status: experimental
             children:

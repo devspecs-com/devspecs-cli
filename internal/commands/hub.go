@@ -309,9 +309,10 @@ func newHubMessageCmd(opts *hubOptions) *cobra.Command {
 	_ = post.MarkFlagRequired("text")
 	cmd.AddCommand(post)
 
+	var ranked bool
 	list := &cobra.Command{
 		Use:   "list <topic-id>",
-		Short: "List live messages (pinned first)",
+		Short: "List live messages (pinned first, optionally ranked by votes)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			db, err := hubstore.OpenReadOnly(cmd.Context(), hubstore.Options{})
@@ -319,7 +320,7 @@ func newHubMessageCmd(opts *hubOptions) *cobra.Command {
 				return err
 			}
 			defer db.Close()
-			messages, err := db.ListMessages(cmd.Context(), opts.repo, args[0], hubstore.MessageList{})
+			messages, err := db.ListMessages(cmd.Context(), opts.repo, args[0], hubstore.MessageList{Ranked: ranked})
 			if err != nil {
 				return err
 			}
@@ -327,13 +328,14 @@ func newHubMessageCmd(opts *hubOptions) *cobra.Command {
 				return writeHubJSON(cmd, messages)
 			}
 			for _, message := range messages {
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%d  %s  %s: %s\n", message.Sequence, message.MessageID, message.ActorID, message.Text); err != nil {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%d  %s  %s: %s  (+%d/-%d, score %d)\n", message.Sequence, message.MessageID, message.ActorID, message.Text, message.Upvotes, message.Downvotes, message.Score); err != nil {
 					return err
 				}
 			}
 			return nil
 		},
 	}
+	list.Flags().BoolVar(&ranked, "ranked", false, "Order within pin groups by score, then newest first")
 	cmd.AddCommand(list)
 
 	var historical bool
@@ -430,7 +432,47 @@ func newHubMessageCmd(opts *hubOptions) *cobra.Command {
 	_ = revise.MarkFlagRequired("actor")
 	_ = revise.MarkFlagRequired("text")
 	_ = revise.MarkFlagRequired("revision")
-	cmd.AddCommand(revise, newHubPinCmd(opts, true), newHubPinCmd(opts, false))
+	cmd.AddCommand(revise, newHubPinCmd(opts, true), newHubPinCmd(opts, false), newHubVoteCmd(opts))
+	return cmd
+}
+
+func newHubVoteCmd(opts *hubOptions) *cobra.Command {
+	var actor, value string
+	var revision int64
+	cmd := &cobra.Command{
+		Use:   "vote <topic-id> <message-id>",
+		Short: "Set or clear an advisory vote on the current revision",
+		Long:  "Votes affect discovery only, never pull or acknowledgment order. Actor IDs are locally enrolled attribution, not independently verified identities.",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			vote := 0
+			switch value {
+			case "up":
+				vote = 1
+			case "down":
+				vote = -1
+			case "clear":
+			default:
+				return fmt.Errorf("--value must be up, down, or clear")
+			}
+			db, err := hubstore.Open(cmd.Context(), hubstore.Options{})
+			if err != nil {
+				return err
+			}
+			defer db.Close()
+			message, err := db.VoteMessage(cmd.Context(), opts.repo, args[0], args[1], actor, db.AuthorityID(), revision, vote)
+			if err != nil {
+				return err
+			}
+			return writeHubMessage(cmd, message, opts.asJSON)
+		},
+	}
+	cmd.Flags().StringVar(&actor, "actor", "", "Enrolled stable actor ID")
+	cmd.Flags().StringVar(&value, "value", "", "Vote: up, down, or clear")
+	cmd.Flags().Int64Var(&revision, "revision", 0, "Expected current message revision")
+	_ = cmd.MarkFlagRequired("actor")
+	_ = cmd.MarkFlagRequired("value")
+	_ = cmd.MarkFlagRequired("revision")
 	return cmd
 }
 
@@ -479,7 +521,7 @@ func writeHubMessage(cmd *cobra.Command, message hubstore.Message, asJSON bool) 
 	if asJSON {
 		return writeHubJSON(cmd, message)
 	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "Message: %s (entry %s, sequence %d)\nTopic: %s\nActor: %s\nText: %s\n", message.MessageID, message.EntryID, message.Sequence, message.TopicID, message.ActorID, message.Text)
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "Message: %s (entry %s, sequence %d)\nTopic: %s\nActor: %s\nText: %s\nVotes: +%d/-%d (score %d)\n", message.MessageID, message.EntryID, message.Sequence, message.TopicID, message.ActorID, message.Text, message.Upvotes, message.Downvotes, message.Score)
 	return err
 }
 

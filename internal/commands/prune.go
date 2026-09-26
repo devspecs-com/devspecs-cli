@@ -37,7 +37,10 @@ a repository, including ADRs, RFCs, PRDs, or DevSpecs task artifacts.
 Pass --hub --before <RFC3339> to target old local coordination history instead.
 Hub pruning is never part of default index pruning and requires a cutoff. Use
 --dry-run to preview eligible entries. Live message heads and topic identity
-are retained; a verified hub backup is made before deletion.`,
+are retained, including old one-shot messages; a verified hub backup is made
+before deletion. Add --vacuum to
+compact the hub file and report reclaimed bytes. Vacuum runs after deletion,
+so a vacuum error can leave the prune batch committed.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if hub {

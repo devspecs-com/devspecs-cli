@@ -6,12 +6,16 @@
   topics, free-text messages, owner-managed JSON Schema event types, validated
   events, and durable filtered pull/ack subscriptions. The hub has its own
   SQLite authority and is not rebuilt from the source index or synchronized
-  across machines. Listener processes and blocking locks are not included.
+  across machines. One replaceable actor vote per message revision supplies
+  advisory up/down counts and optional ranked discovery without changing pull
+  order. Listener processes and blocking locks are not included.
 - Added explicit `ds prune --hub --before <RFC3339>` with dry-run, 10,000-entry
   batches, a verified pre-deletion backup, and replay-gap preservation.
   Default `ds prune` remains index-only. Optional `--vacuum` compacts the hub
   file and reports measured bytes reclaimed. Large-hub cost and metadata
-  growth remain under review; pruning is not automatic garbage collection.
+  growth remain under review. Current message heads, including ordinary
+  one-shot messages, are not yet eligible, so this is not complete hub garbage
+  collection.
 - Made `ds map` and `ds recent` fail with a bounded Git evidence error instead
   of silently omitting receipts after a timeout or cancellation. Existing map
   output caches are rebuilt so incomplete cached evidence is not reused.
