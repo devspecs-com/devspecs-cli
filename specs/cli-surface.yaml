@@ -4,7 +4,7 @@ kind: cli_surface_tree
 metadata:
   product: devspecs-cli
   binary: ds
-  audited_at: "2026-08-13"
+  audited_at: "2026-09-26"
   source:
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds --help
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds task --help
@@ -13,6 +13,7 @@ metadata:
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds dispatch --help
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds prune --help
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds doctor --help
+    - bash scripts/dev.sh --worktree -- go run ./cmd/ds hub --help
     - cmd/ds/main.go
     - internal/commands
   intent: >
@@ -51,6 +52,63 @@ tree:
             status: experimental
             usage: ds thread remove <owner> <key>
             purpose: Remove a lane only while checkpoint history still permits the graph mutation.
+      hub:
+        status: experimental
+        purpose: Share short-lived repo-scoped coordination without replacing task checkpoints or Git-owned decisions.
+        children:
+          actor:
+            status: experimental
+            children:
+              enroll:
+                status: experimental
+                usage: ds hub actor enroll [actor-id]
+                purpose: Enroll stable local attribution for topic ownership and publication.
+          topic:
+            status: experimental
+            children:
+              create:
+                status: experimental
+                usage: ds hub topic create <key> --actor <id> --name <name> --description <text>
+                purpose: Create one discoverable repository topic.
+              list:
+                status: experimental
+                usage: ds hub topic list [--query <text>] [--all]
+                purpose: Discover active repository topics and optionally inspect archived ones.
+              show:
+                status: experimental
+                usage: ds hub topic show <topic-id>
+                purpose: Inspect one exact repository topic.
+              edit:
+                status: experimental
+                usage: ds hub topic edit <topic-id> --actor <id> --generation <n>
+                purpose: Update discovery text or deadline with a policy compare-and-swap guard.
+              archive:
+                status: experimental
+                usage: ds hub topic archive <topic-id> --actor <id> --generation <n> --reason <text>
+                purpose: Stop new publication while retaining topic identity and history.
+              restore:
+                status: experimental
+                usage: ds hub topic restore <topic-id> --actor <id> --generation <n> --reason <text>
+                purpose: Reopen a topic with an auditable reason and valid deadline.
+          message:
+            status: experimental
+            children:
+              post:
+                status: experimental
+                usage: ds hub message post <topic-id> --actor <id> --text <text> [--key <retry-key>]
+                purpose: Publish attributed freetext with optional expiry and idempotent retry.
+              list:
+                status: experimental
+                usage: ds hub message list <topic-id>
+                purpose: Read live current messages, pinned first.
+              show:
+                status: experimental
+                usage: ds hub message show <topic-id> <message-id> [--historical]
+                purpose: Read one current message by exact ID.
+              history:
+                status: experimental
+                usage: ds hub message history <topic-id> <message-id>
+                purpose: Read retained attributed message revisions.
       compose:
         status: experimental
         purpose: Create repo-owned ADR, RFC, and PRD drafts using existing repository conventions.

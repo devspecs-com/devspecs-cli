@@ -22,15 +22,17 @@ import (
 )
 
 var (
-	ErrNotFound          = errors.New("hub: not found")
-	ErrConflict          = errors.New("hub: conflict")
-	ErrUnauthorized      = errors.New("hub: unauthorized")
-	ErrInvalidInput      = errors.New("hub: invalid input")
-	ErrArchived          = errors.New("hub: archived")
-	ErrExpired           = errors.New("hub: expired")
-	ErrUnsupportedFormat = errors.New("hub: unsupported or damaged format")
-	ErrBindingConflict   = errors.New("hub: repository binding conflict")
-	ErrBusyRetryable     = errors.New("hub: busy; retryable")
+	ErrNotFound            = errors.New("hub: not found")
+	ErrConflict            = errors.New("hub: conflict")
+	ErrUnauthorized        = errors.New("hub: unauthorized")
+	ErrInvalidInput        = errors.New("hub: invalid input")
+	ErrArchived            = errors.New("hub: archived")
+	ErrExpired             = errors.New("hub: expired")
+	ErrUnsupportedFormat   = errors.New("hub: unsupported or damaged format")
+	ErrBindingConflict     = errors.New("hub: repository binding conflict")
+	ErrBusyRetryable       = errors.New("hub: busy; retryable")
+	ErrIdempotencyConflict = errors.New("hub: idempotency conflict")
+	ErrReplayGap           = errors.New("hub: replay gap")
 )
 
 type Options struct {
@@ -52,7 +54,7 @@ func (d *DB) Close() error        { return d.sql.Close() }
 func (d *DB) Path() string        { return d.path }
 func (d *DB) AuthorityID() string { return d.authorityID }
 
-// Open creates an empty v1 authority or opens a supported existing one.
+// Open creates a v2 authority or migrates a verified v1 authority.
 func Open(ctx context.Context, opts Options) (*DB, error) { return open(ctx, opts, false) }
 
 // OpenReadOnly never creates a home, database, or repository marker.
@@ -134,11 +136,17 @@ func open(ctx context.Context, opts Options, readOnly bool) (_ *DB, err error) {
 		if err = d.configure(ctx); err != nil {
 			return nil, err
 		}
+		if err = d.migrate(ctx); err != nil {
+			return nil, err
+		}
 		// A migration by another process cannot leave this handle writing a newer format.
 		if err = d.probe(ctx); err != nil {
 			return nil, err
 		}
 	} else {
+		if err = d.probe(ctx); err != nil {
+			return nil, err
+		}
 		// This is a connection-local safety setting and does not mutate the file.
 		if _, err = d.sql.ExecContext(ctx, "PRAGMA foreign_keys=ON"); err != nil {
 			return nil, err
@@ -196,22 +204,25 @@ func (d *DB) initialize(ctx context.Context) error {
 	}
 	now := d.now().UTC().UnixMilli()
 	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV1)))
-	if _, err = tx.ExecContext(ctx, "INSERT INTO hub_meta (singleton, db_id, format_version) VALUES (1, ?, ?)", id, schemaVersion); err != nil {
+	if _, err = tx.ExecContext(ctx, "INSERT INTO hub_meta (singleton, db_id, format_version) VALUES (1, ?, 1)", id); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO schema_migrations VALUES (?, ?, ?)", schemaVersion, digest, now); err != nil {
+	if _, err = tx.ExecContext(ctx, "INSERT INTO schema_migrations VALUES (1, ?, ?)", digest, now); err != nil {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, fmt.Sprintf("PRAGMA application_id=%d", applicationID)); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", schemaVersion)); err != nil {
+	if _, err = tx.ExecContext(ctx, "PRAGMA user_version=1"); err != nil {
 		return err
 	}
 	if err = tx.Commit(); err != nil {
 		return err
 	}
 	d.authorityID = id
+	if err := d.migrate(ctx); err != nil {
+		return err
+	}
 	return d.checkIntegrity(ctx)
 }
 
@@ -221,7 +232,7 @@ func (d *DB) probeReady(ctx context.Context) error {
 	deadline := time.NewTimer(2 * time.Second)
 	defer deadline.Stop()
 	for {
-		err := d.probe(ctx)
+		err := d.probeVersion(ctx, true)
 		if !errors.Is(err, errInitializationPending) && !errors.Is(classifySQLite(err), ErrBusyRetryable) {
 			return err
 		}
@@ -238,39 +249,110 @@ func (d *DB) probeReady(ctx context.Context) error {
 var errInitializationPending = errors.New("hub: initialization pending")
 
 func (d *DB) probe(ctx context.Context) error {
-	var appID, version int
-	if err := d.sql.QueryRowContext(ctx, "PRAGMA application_id").Scan(&appID); err != nil {
+	return d.probeVersion(ctx, false)
+}
+
+func (d *DB) probeVersion(ctx context.Context, allowV1 bool) error {
+	tx, err := d.sql.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
 		return err
 	}
-	if err := d.sql.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+	defer tx.Rollback()
+	var appID, version int
+	if err := tx.QueryRowContext(ctx, "PRAGMA application_id").Scan(&appID); err != nil {
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
 	if appID == 0 && version == 0 {
 		return errInitializationPending
 	}
-	if appID != applicationID || version != schemaVersion {
+	if appID != applicationID || (version != schemaVersion && !(allowV1 && version == 1)) {
 		return fmt.Errorf("hub application_id=%d version=%d, supported=%d/%d: %w", appID, version, applicationID, schemaVersion, ErrUnsupportedFormat)
 	}
 	var id, digest string
 	var format int
-	if err := d.sql.QueryRowContext(ctx, "SELECT db_id, format_version FROM hub_meta WHERE singleton=1").Scan(&id, &format); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT db_id, format_version FROM hub_meta WHERE singleton=1").Scan(&id, &format); err != nil {
 		return fmt.Errorf("hub metadata: %w: %w", ErrUnsupportedFormat, err)
 	}
-	if err := d.sql.QueryRowContext(ctx, "SELECT digest FROM schema_migrations WHERE version=?", schemaVersion).Scan(&digest); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT digest FROM schema_migrations WHERE version=1").Scan(&digest); err != nil {
 		return fmt.Errorf("hub migration: %w: %w", ErrUnsupportedFormat, err)
 	}
-	if format != schemaVersion || digest != fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV1))) || id == "" {
+	if format != version || digest != fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV1))) || id == "" {
 		return ErrUnsupportedFormat
 	}
 	var migrationCount int
-	if err := d.sql.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&migrationCount); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&migrationCount); err != nil {
 		return err
 	}
-	if migrationCount != 1 {
+	if migrationCount != version {
 		return ErrUnsupportedFormat
 	}
+	if version == 2 {
+		if err := tx.QueryRowContext(ctx, "SELECT digest FROM schema_migrations WHERE version=2").Scan(&digest); err != nil {
+			return ErrUnsupportedFormat
+		}
+		if digest != fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV2))) {
+			return ErrUnsupportedFormat
+		}
+	}
 	d.authorityID = id
-	return nil
+	return tx.Commit()
+}
+
+func (d *DB) migrate(ctx context.Context) error {
+	var currentVersion int
+	if err := d.sql.QueryRowContext(ctx, "PRAGMA user_version").Scan(&currentVersion); err != nil {
+		return err
+	}
+	if currentVersion == schemaVersion {
+		return nil
+	}
+	tx, err := d.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return classifySQLite(err)
+	}
+	defer tx.Rollback()
+	// Serialize concurrent openers before inspecting the version.
+	if _, err := tx.ExecContext(ctx, "UPDATE hub_meta SET format_version=format_version WHERE singleton=1"); err != nil {
+		return classifySQLite(err)
+	}
+	var version, format int
+	var id, digest string
+	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return err
+	}
+	if version == 2 {
+		return nil
+	}
+	if version != 1 {
+		return ErrUnsupportedFormat
+	}
+	if err := tx.QueryRowContext(ctx, "SELECT db_id, format_version FROM hub_meta WHERE singleton=1").Scan(&id, &format); err != nil {
+		return ErrUnsupportedFormat
+	}
+	if err := tx.QueryRowContext(ctx, "SELECT digest FROM schema_migrations WHERE version=1").Scan(&digest); err != nil {
+		return ErrUnsupportedFormat
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
+		return err
+	}
+	if id == "" || format != 1 || count != 1 || digest != fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV1))) {
+		return ErrUnsupportedFormat
+	}
+	if _, err := tx.ExecContext(ctx, schemaV2); err != nil {
+		return err
+	}
+	digest = fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV2)))
+	if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations VALUES (2, ?, ?)", digest, d.now().UTC().UnixMilli()); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "PRAGMA user_version=2"); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // CheckIntegrity runs a full SQLite integrity and foreign key check. Call it

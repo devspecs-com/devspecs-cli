@@ -52,7 +52,8 @@ ds map when you need subsystem boundaries.
 Human work setup: use ds task for repo-local bounded work, ds compose for
 repo-owned ADRs, RFCs, and PRDs, and ds workspace for explicit multi-repo
 coordination. Use ds thread only when one task or linked workspace change has
-multiple runnable execution lanes.
+multiple runnable execution lanes. Use ds hub for ephemeral repo-scoped
+coordination; preserve lasting decisions in Git or docs.
 
 AI execution: agents should consume bounded prompts with ds apply or run one
 through an explicitly configured orchestration provider with ds dispatch. Record
@@ -91,6 +92,7 @@ remotes, document text, or raw queries. Disable with DEVSPECS_TELEMETRY=0.`,
 	rootCmd.AddCommand(commands.NewApplyCmd())
 	rootCmd.AddCommand(commands.NewDispatchCmd())
 	rootCmd.AddCommand(commands.NewWorkspaceCmd())
+	rootCmd.AddCommand(commands.NewHubCmd())
 	addHiddenWorkspaceCompatibilityCommand(rootCmd, commands.NewChangeCmd(), "ds workspace change")
 	addHiddenWorkspaceCompatibilityCommand(rootCmd, commands.NewSliceCmd(), "ds workspace slice")
 	addHiddenWorkspaceCompatibilityCommand(rootCmd, commands.NewTraceCmd(), "ds workspace trace")
@@ -136,6 +138,7 @@ func assignRootCommandGroups(rootCmd *cobra.Command) {
 		"thread":    rootGroupHumanWorkSetup,
 		"compose":   rootGroupHumanWorkSetup,
 		"workspace": rootGroupHumanWorkSetup,
+		"hub":       rootGroupHumanWorkSetup,
 		"apply":     rootGroupAIExecution,
 		"dispatch":  rootGroupAIExecution,
 		"tldr":      rootGroupAIExecution,

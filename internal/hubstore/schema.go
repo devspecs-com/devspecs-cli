@@ -1,7 +1,7 @@
 package hubstore
 
 const applicationID = 0x44534842 // DSHB
-const schemaVersion = 1
+const schemaVersion = 2
 
 // v1 is deliberately hub-only. A later migration must advance user_version and
 // insert its digest in the same transaction.
@@ -77,4 +77,94 @@ CREATE TRIGGER topic_audit_no_update BEFORE UPDATE ON topic_audit
 BEGIN SELECT RAISE(ABORT, 'audit is immutable'); END;
 CREATE TRIGGER topic_audit_no_delete BEFORE DELETE ON topic_audit
 BEGIN SELECT RAISE(ABORT, 'audit is retained'); END;
+`
+
+// v2 adds the append-only publication stream. Sequence counters and low-water
+// markers are never reset by expiry or archive; physical pruning is not here.
+const schemaV2 = `
+CREATE TABLE hub_meta_v2 (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  db_id TEXT NOT NULL,
+  format_version INTEGER NOT NULL CHECK (format_version = 2),
+  retention_epoch INTEGER NOT NULL DEFAULT 0 CHECK (retention_epoch >= 0)
+);
+INSERT INTO hub_meta_v2 SELECT singleton, db_id, 2, retention_epoch FROM hub_meta;
+DROP TABLE hub_meta;
+ALTER TABLE hub_meta_v2 RENAME TO hub_meta;
+CREATE TABLE scope_counters (
+  scope_id TEXT PRIMARY KEY REFERENCES repo_scopes(scope_id),
+  next_sequence INTEGER NOT NULL DEFAULT 1 CHECK (next_sequence > 0)
+);
+INSERT INTO scope_counters (scope_id) SELECT scope_id FROM repo_scopes;
+CREATE TABLE publications (
+  entry_id TEXT PRIMARY KEY,
+  scope_id TEXT NOT NULL,
+  topic_id TEXT NOT NULL,
+  actor_id TEXT NOT NULL REFERENCES actors(actor_id),
+  kind TEXT NOT NULL CHECK (kind IN ('message','event')),
+  sequence INTEGER NOT NULL CHECK (sequence > 0),
+  committed_at INTEGER NOT NULL,
+  occurred_at INTEGER,
+  expires_at INTEGER,
+  source_refs TEXT NOT NULL,
+  correlation_refs TEXT NOT NULL,
+  idempotency_key TEXT,
+  FOREIGN KEY (scope_id, topic_id) REFERENCES topics(scope_id, topic_id),
+  UNIQUE(scope_id, sequence),
+  UNIQUE(entry_id, scope_id, topic_id),
+  UNIQUE(entry_id, scope_id, topic_id, actor_id),
+  UNIQUE(entry_id, scope_id, topic_id, expires_at)
+);
+CREATE INDEX publications_topic_sequence ON publications(scope_id, topic_id, sequence);
+CREATE TABLE message_heads (
+  message_id TEXT PRIMARY KEY,
+  scope_id TEXT NOT NULL,
+  topic_id TEXT NOT NULL,
+  author_actor_id TEXT NOT NULL REFERENCES actors(actor_id),
+  current_revision INTEGER NOT NULL CHECK (current_revision > 0),
+  current_entry_id TEXT NOT NULL REFERENCES publications(entry_id),
+  pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0,1)),
+  FOREIGN KEY (scope_id, topic_id) REFERENCES topics(scope_id, topic_id),
+  UNIQUE(message_id, scope_id, topic_id)
+);
+CREATE TABLE message_revisions (
+  message_id TEXT NOT NULL,
+  scope_id TEXT NOT NULL,
+  topic_id TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK (revision > 0),
+  entry_id TEXT NOT NULL UNIQUE,
+  text TEXT NOT NULL,
+  expires_at INTEGER,
+  PRIMARY KEY (message_id, revision),
+  FOREIGN KEY (message_id, scope_id, topic_id) REFERENCES message_heads(message_id, scope_id, topic_id),
+  FOREIGN KEY (entry_id, scope_id, topic_id) REFERENCES publications(entry_id, scope_id, topic_id),
+  FOREIGN KEY (entry_id, scope_id, topic_id, expires_at) REFERENCES publications(entry_id, scope_id, topic_id, expires_at)
+);
+CREATE TABLE message_pin_audit (
+  pin_id TEXT PRIMARY KEY,
+  message_id TEXT NOT NULL REFERENCES message_heads(message_id),
+  revision INTEGER NOT NULL,
+  actor_id TEXT NOT NULL REFERENCES actors(actor_id),
+  pinned INTEGER NOT NULL CHECK (pinned IN (0,1)),
+  at INTEGER NOT NULL,
+  FOREIGN KEY (message_id, revision) REFERENCES message_revisions(message_id, revision)
+);
+CREATE TABLE publication_idempotency (
+  scope_id TEXT NOT NULL,
+  topic_id TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  entry_id TEXT NOT NULL REFERENCES publications(entry_id),
+  PRIMARY KEY(scope_id, topic_id, actor_id, key),
+  FOREIGN KEY (scope_id, topic_id) REFERENCES topics(scope_id, topic_id)
+);
+CREATE TRIGGER publications_no_update BEFORE UPDATE ON publications BEGIN SELECT RAISE(ABORT, 'publication is immutable'); END;
+CREATE TRIGGER publications_no_delete BEFORE DELETE ON publications BEGIN SELECT RAISE(ABORT, 'publication is retained'); END;
+CREATE TRIGGER message_revisions_no_update BEFORE UPDATE ON message_revisions BEGIN SELECT RAISE(ABORT, 'revision is immutable'); END;
+CREATE TRIGGER message_revisions_no_delete BEFORE DELETE ON message_revisions BEGIN SELECT RAISE(ABORT, 'revision is retained'); END;
+CREATE TRIGGER message_pin_audit_no_update BEFORE UPDATE ON message_pin_audit BEGIN SELECT RAISE(ABORT, 'pin audit is immutable'); END;
+CREATE TRIGGER message_pin_audit_no_delete BEFORE DELETE ON message_pin_audit BEGIN SELECT RAISE(ABORT, 'pin audit is retained'); END;
+CREATE TRIGGER publication_idempotency_no_update BEFORE UPDATE ON publication_idempotency BEGIN SELECT RAISE(ABORT, 'idempotency is immutable'); END;
+CREATE TRIGGER publication_idempotency_no_delete BEFORE DELETE ON publication_idempotency BEGIN SELECT RAISE(ABORT, 'idempotency is retained'); END;
 `
