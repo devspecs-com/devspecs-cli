@@ -31,7 +31,7 @@ durable architectural decisions; promote lasting decisions to Git or docs.`,
 	}
 	cmd.PersistentFlags().StringVar(&opts.repo, "repo", ".", "Repository path (defaults to current directory)")
 	cmd.PersistentFlags().BoolVar(&opts.asJSON, "json", false, "Output machine-readable JSON")
-	cmd.AddCommand(newHubActorCmd(opts), newHubTopicCmd(opts), newHubMessageCmd(opts))
+	cmd.AddCommand(newHubActorCmd(opts), newHubTopicCmd(opts), newHubMessageCmd(opts), newHubTypeCmd(opts), newHubEventCmd(opts))
 	return cmd
 }
 
@@ -382,6 +382,87 @@ func newHubMessageCmd(opts *hubOptions) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(history)
+
+	var reviseActor, reviseText, reviseKey, reviseExpiryText string
+	var expectedRevision int64
+	var clearExpiry bool
+	revise := &cobra.Command{
+		Use:   "revise <topic-id> <message-id>",
+		Short: "Append an attributed correction to a live message",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if clearExpiry && cmd.Flags().Changed("expires-at") {
+				return fmt.Errorf("--clear-expiry and --expires-at cannot be combined")
+			}
+			input := hubstore.MessageRevisionInput{
+				MessageInput:     hubstore.MessageInput{Text: reviseText, IdempotencyKey: reviseKey},
+				ExpectedRevision: expectedRevision,
+				ChangeExpiry:     clearExpiry,
+			}
+			if cmd.Flags().Changed("expires-at") {
+				expiry, err := time.Parse(time.RFC3339, reviseExpiryText)
+				if err != nil {
+					return fmt.Errorf("--expires-at must be RFC3339: %w", err)
+				}
+				input.ChangeExpiry = true
+				input.ExpiresAt = &expiry
+			}
+			db, err := hubstore.Open(cmd.Context(), hubstore.Options{})
+			if err != nil {
+				return err
+			}
+			defer db.Close()
+			input.AuthorityID = db.AuthorityID()
+			message, err := db.ReviseMessage(cmd.Context(), opts.repo, args[0], args[1], reviseActor, input)
+			if err != nil {
+				return err
+			}
+			return writeHubMessage(cmd, message, opts.asJSON)
+		},
+	}
+	revise.Flags().StringVar(&reviseActor, "actor", "", "Original author actor ID")
+	revise.Flags().StringVar(&reviseText, "text", "", "Corrected text")
+	revise.Flags().StringVar(&reviseKey, "key", "", "Optional idempotency key for safe retries")
+	revise.Flags().Int64Var(&expectedRevision, "revision", 0, "Expected current message revision")
+	revise.Flags().StringVar(&reviseExpiryText, "expires-at", "", "New expiry in RFC3339 format")
+	revise.Flags().BoolVar(&clearExpiry, "clear-expiry", false, "Remove the message deadline")
+	_ = revise.MarkFlagRequired("actor")
+	_ = revise.MarkFlagRequired("text")
+	_ = revise.MarkFlagRequired("revision")
+	cmd.AddCommand(revise, newHubPinCmd(opts, true), newHubPinCmd(opts, false))
+	return cmd
+}
+
+func newHubPinCmd(opts *hubOptions, pin bool) *cobra.Command {
+	verb := "pin"
+	if !pin {
+		verb = "unpin"
+	}
+	var actor string
+	var generation, revision int64
+	cmd := &cobra.Command{
+		Use:   verb + " <topic-id> <message-id>",
+		Short: verb + " a live current message",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			db, err := hubstore.Open(cmd.Context(), hubstore.Options{})
+			if err != nil {
+				return err
+			}
+			defer db.Close()
+			message, err := db.PinMessage(cmd.Context(), opts.repo, args[0], args[1], actor, db.AuthorityID(), generation, revision, pin)
+			if err != nil {
+				return err
+			}
+			return writeHubMessage(cmd, message, opts.asJSON)
+		},
+	}
+	cmd.Flags().StringVar(&actor, "actor", "", "Topic owner or maintainer actor ID")
+	cmd.Flags().Int64Var(&generation, "generation", 0, "Expected topic policy generation")
+	cmd.Flags().Int64Var(&revision, "revision", 0, "Expected current message revision")
+	_ = cmd.MarkFlagRequired("actor")
+	_ = cmd.MarkFlagRequired("generation")
+	_ = cmd.MarkFlagRequired("revision")
 	return cmd
 }
 
@@ -404,5 +485,10 @@ func writeHubMessage(cmd *cobra.Command, message hubstore.Message, asJSON bool) 
 func writeHubJSON(cmd *cobra.Command, value any) error {
 	encoder := json.NewEncoder(cmd.OutOrStdout())
 	encoder.SetIndent("", "  ")
-	return encoder.Encode(value)
+	return encoder.Encode(hubJSONResponse[any]{ContractVersion: "devspecs.hub/v1", Result: value})
+}
+
+type hubJSONResponse[T any] struct {
+	ContractVersion string `json:"contract_version"`
+	Result          T      `json:"result"`
 }

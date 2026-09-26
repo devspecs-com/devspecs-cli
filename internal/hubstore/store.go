@@ -54,7 +54,7 @@ func (d *DB) Close() error        { return d.sql.Close() }
 func (d *DB) Path() string        { return d.path }
 func (d *DB) AuthorityID() string { return d.authorityID }
 
-// Open creates a v2 authority or migrates a verified v1 authority.
+// Open creates a v3 authority or migrates a verified older authority.
 func Open(ctx context.Context, opts Options) (*DB, error) { return open(ctx, opts, false) }
 
 // OpenReadOnly never creates a home, database, or repository marker.
@@ -268,7 +268,7 @@ func (d *DB) probeVersion(ctx context.Context, allowV1 bool) error {
 	if appID == 0 && version == 0 {
 		return errInitializationPending
 	}
-	if appID != applicationID || (version != schemaVersion && !(allowV1 && version == 1)) {
+	if appID != applicationID || (version != schemaVersion && !(allowV1 && (version == 1 || version == 2))) {
 		return fmt.Errorf("hub application_id=%d version=%d, supported=%d/%d: %w", appID, version, applicationID, schemaVersion, ErrUnsupportedFormat)
 	}
 	var id, digest string
@@ -289,11 +289,19 @@ func (d *DB) probeVersion(ctx context.Context, allowV1 bool) error {
 	if migrationCount != version {
 		return ErrUnsupportedFormat
 	}
-	if version == 2 {
+	if version >= 2 {
 		if err := tx.QueryRowContext(ctx, "SELECT digest FROM schema_migrations WHERE version=2").Scan(&digest); err != nil {
 			return ErrUnsupportedFormat
 		}
 		if digest != fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV2))) {
+			return ErrUnsupportedFormat
+		}
+	}
+	if version >= 3 {
+		if err := tx.QueryRowContext(ctx, "SELECT digest FROM schema_migrations WHERE version=3").Scan(&digest); err != nil {
+			return ErrUnsupportedFormat
+		}
+		if digest != fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV3))) {
 			return ErrUnsupportedFormat
 		}
 	}
@@ -323,10 +331,10 @@ func (d *DB) migrate(ctx context.Context) error {
 	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version == 2 {
+	if version == schemaVersion {
 		return nil
 	}
-	if version != 1 {
+	if version != 1 && version != 2 {
 		return ErrUnsupportedFormat
 	}
 	if err := tx.QueryRowContext(ctx, "SELECT db_id, format_version FROM hub_meta WHERE singleton=1").Scan(&id, &format); err != nil {
@@ -339,17 +347,36 @@ func (d *DB) migrate(ctx context.Context) error {
 	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
 		return err
 	}
-	if id == "" || format != 1 || count != 1 || digest != fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV1))) {
+	if id == "" || format != version || count != version || digest != fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV1))) {
 		return ErrUnsupportedFormat
 	}
-	if _, err := tx.ExecContext(ctx, schemaV2); err != nil {
+	if version == 1 {
+		if _, err := tx.ExecContext(ctx, schemaV2); err != nil {
+			return err
+		}
+		digest = fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV2)))
+		if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations VALUES (2, ?, ?)", digest, d.now().UTC().UnixMilli()); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version=2"); err != nil {
+			return err
+		}
+	} else {
+		if err := tx.QueryRowContext(ctx, "SELECT digest FROM schema_migrations WHERE version=2").Scan(&digest); err != nil {
+			return ErrUnsupportedFormat
+		}
+		if digest != fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV2))) {
+			return ErrUnsupportedFormat
+		}
+	}
+	if _, err := tx.ExecContext(ctx, schemaV3); err != nil {
 		return err
 	}
-	digest = fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV2)))
-	if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations VALUES (2, ?, ?)", digest, d.now().UTC().UnixMilli()); err != nil {
+	digest = fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV3)))
+	if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations VALUES (3, ?, ?)", digest, d.now().UTC().UnixMilli()); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "PRAGMA user_version=2"); err != nil {
+	if _, err := tx.ExecContext(ctx, "PRAGMA user_version=3"); err != nil {
 		return err
 	}
 	return tx.Commit()

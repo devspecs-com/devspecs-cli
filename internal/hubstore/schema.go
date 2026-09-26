@@ -1,7 +1,7 @@
 package hubstore
 
 const applicationID = 0x44534842 // DSHB
-const schemaVersion = 2
+const schemaVersion = 3
 
 // v1 is deliberately hub-only. A later migration must advance user_version and
 // insert its digest in the same transaction.
@@ -167,4 +167,46 @@ CREATE TRIGGER message_pin_audit_no_update BEFORE UPDATE ON message_pin_audit BE
 CREATE TRIGGER message_pin_audit_no_delete BEFORE DELETE ON message_pin_audit BEGIN SELECT RAISE(ABORT, 'pin audit is retained'); END;
 CREATE TRIGGER publication_idempotency_no_update BEFORE UPDATE ON publication_idempotency BEGIN SELECT RAISE(ABORT, 'idempotency is immutable'); END;
 CREATE TRIGGER publication_idempotency_no_delete BEFORE DELETE ON publication_idempotency BEGIN SELECT RAISE(ABORT, 'idempotency is retained'); END;
+`
+
+const schemaV3 = `
+CREATE TABLE hub_meta_v3 (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  db_id TEXT NOT NULL,
+  format_version INTEGER NOT NULL CHECK (format_version = 3),
+  retention_epoch INTEGER NOT NULL DEFAULT 0 CHECK (retention_epoch >= 0)
+);
+INSERT INTO hub_meta_v3 SELECT singleton, db_id, 3, retention_epoch FROM hub_meta;
+DROP TABLE hub_meta;
+ALTER TABLE hub_meta_v3 RENAME TO hub_meta;
+CREATE TABLE event_schemas (
+  topic_id TEXT NOT NULL REFERENCES topics(topic_id),
+  type_key TEXT NOT NULL,
+  version INTEGER NOT NULL CHECK (version > 0),
+  dialect TEXT NOT NULL,
+  schema_json TEXT NOT NULL,
+  schema_sha256 TEXT NOT NULL,
+  registered_by TEXT NOT NULL REFERENCES actors(actor_id),
+  registered_at INTEGER NOT NULL,
+  retired_by TEXT REFERENCES actors(actor_id),
+  retired_at INTEGER,
+  PRIMARY KEY(topic_id,type_key,version),
+  CHECK ((retired_by IS NULL) = (retired_at IS NULL))
+);
+CREATE TABLE event_entries (
+  entry_id TEXT PRIMARY KEY REFERENCES publications(entry_id),
+  topic_id TEXT NOT NULL,
+  type_key TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  schema_sha256 TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  corrects_entry_id TEXT REFERENCES event_entries(entry_id),
+  FOREIGN KEY(topic_id,type_key,version) REFERENCES event_schemas(topic_id,type_key,version)
+);
+CREATE INDEX event_entries_topic ON event_entries(topic_id,type_key,version);
+CREATE TRIGGER event_schemas_no_delete BEFORE DELETE ON event_schemas BEGIN SELECT RAISE(ABORT, 'schema is retained'); END;
+CREATE TRIGGER event_schemas_immutable BEFORE UPDATE OF topic_id,type_key,version,dialect,schema_json,schema_sha256,registered_by,registered_at ON event_schemas BEGIN SELECT RAISE(ABORT, 'schema is immutable'); END;
+CREATE TRIGGER event_schemas_retirement_immutable BEFORE UPDATE OF retired_by,retired_at ON event_schemas WHEN OLD.retired_at IS NOT NULL OR NEW.retired_at IS NULL OR NEW.retired_by IS NULL BEGIN SELECT RAISE(ABORT, 'retirement is immutable'); END;
+CREATE TRIGGER event_entries_no_update BEFORE UPDATE ON event_entries BEGIN SELECT RAISE(ABORT, 'event is immutable'); END;
+CREATE TRIGGER event_entries_no_delete BEFORE DELETE ON event_entries BEGIN SELECT RAISE(ABORT, 'event is retained'); END;
 `

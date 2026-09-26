@@ -109,6 +109,48 @@ tree:
                 status: experimental
                 usage: ds hub message history <topic-id> <message-id>
                 purpose: Read retained attributed message revisions.
+              revise:
+                status: experimental
+                usage: ds hub message revise <topic-id> <message-id> --actor <id> --revision <n> --text <text>
+                purpose: Append an attributed correction without rewriting older publications.
+              pin:
+                status: experimental
+                usage: ds hub message pin <topic-id> <message-id> --actor <id> --generation <n> --revision <n>
+                purpose: Raise a live message in discovery without extending its expiry.
+              unpin:
+                status: experimental
+                usage: ds hub message unpin <topic-id> <message-id> --actor <id> --generation <n> --revision <n>
+                purpose: Remove a live message's discovery pin.
+          type:
+            status: experimental
+            children:
+              register:
+                status: experimental
+                usage: ds hub type register <topic-id> <type-key> <version> --schema-file <path> --actor <id> --generation <n>
+                purpose: Register one immutable JSON Schema event version.
+              retire:
+                status: experimental
+                usage: ds hub type retire <topic-id> <type-key> <version> --actor <id> --generation <n>
+                purpose: Stop new events for a version while preserving its historical schema.
+              list:
+                status: experimental
+                usage: ds hub type list <topic-id>
+                purpose: Discover registered event types and versions.
+              show:
+                status: experimental
+                usage: ds hub type show <topic-id> <type-key> <version>
+                purpose: Inspect one exact registered schema.
+          event:
+            status: experimental
+            children:
+              publish:
+                status: experimental
+                usage: ds hub event publish <topic-id> --type <key> --version <n> --payload-file <path> --actor <id>
+                purpose: Validate and atomically publish a typed event.
+              show:
+                status: experimental
+                usage: ds hub event show <entry-id> [--historical]
+                purpose: Read an exact event, including retained history when requested.
       compose:
         status: experimental
         purpose: Create repo-owned ADR, RFC, and PRD drafts using existing repository conventions.
