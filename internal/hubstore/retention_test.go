@@ -2,9 +2,11 @@ package hubstore
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -281,4 +283,87 @@ func TestBackupHeadroomRejectsLowDisk(t *testing.T) {
 	assert.False(t, tooLow)
 	assert.False(t, insufficient)
 	assert.True(t, sufficient)
+}
+
+func TestVacuumHubShrinksDeletedPagesAndPreservesReplay(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	ctx := context.Background()
+	enrollTestConsumer(t, f, "reader")
+	s := subscribeTest(t, f, "reader", true, nil, nil)
+	old := f.post(t, strings.Repeat("x", 60*1024), "old-key", nil)
+	for revision := 1; revision < 24; revision++ {
+		_, err := f.d.ReviseMessage(ctx, f.repo, f.topic.ID, old.MessageID, "author", MessageRevisionInput{MessageInput: MessageInput{AuthorityID: f.d.AuthorityID(), Text: strings.Repeat("x", 60*1024)}, ExpectedRevision: int64(revision)})
+		require.NoError(t, err)
+	}
+	*f.now = f.now.Add(time.Minute)
+	newHead, err := f.d.ReviseMessage(ctx, f.repo, f.topic.ID, old.MessageID, "author", MessageRevisionInput{MessageInput: MessageInput{AuthorityID: f.d.AuthorityID(), Text: "current"}, ExpectedRevision: 24})
+	require.NoError(t, err)
+	pruned, err := f.d.PruneHub(ctx, f.now.Add(-time.Second))
+	require.NoError(t, err)
+	assert.Positive(t, pruned.PayloadBytes)
+	require.NoError(t, f.d.checkpointForVacuum(ctx))
+	uncompacted, err := os.Stat(f.d.Path())
+	require.NoError(t, err)
+
+	// Act
+	vacuumed, err := f.d.VacuumHub(ctx)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, uncompacted.Size(), vacuumed.BytesBefore)
+	assert.Less(t, vacuumed.BytesAfter, vacuumed.BytesBefore)
+	assert.Positive(t, vacuumed.ReclaimedBytes)
+	_, err = os.Stat(vacuumed.BackupPath)
+	require.NoError(t, err)
+	_, err = os.Stat(pruned.BackupPath)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+	page, err := f.d.Pull(ctx, f.repo, "reader", s.ID, 2)
+	require.NoError(t, err)
+	require.Len(t, page.Gaps, 1)
+	assert.Equal(t, "pruned", page.Gaps[0].Reason)
+	require.Len(t, page.Entries, 1)
+	assert.Equal(t, newHead.EntryID, page.Entries[0].Message.EntryID)
+	_, err = f.d.PostMessage(ctx, f.repo, f.topic.ID, "author", MessageInput{AuthorityID: f.d.AuthorityID(), Text: "again", IdempotencyKey: "old-key"})
+	assert.ErrorIs(t, err, ErrReplayGap)
+}
+
+func TestVacuumHubCanceledLeavesAuthorityUnchanged(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	f.post(t, "current", "key", nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	_, err := f.d.VacuumHub(ctx)
+
+	// Assert
+	assert.ErrorIs(t, err, context.Canceled)
+	var count int
+	require.NoError(t, f.d.sql.QueryRow("SELECT COUNT(*) FROM publications").Scan(&count))
+	assert.Equal(t, 1, count)
+}
+
+func TestVacuumHubBusyReaderLeavesAuthorityUnchanged(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	f.post(t, "current", "key", nil)
+	reader, err := OpenReadOnly(context.Background(), Options{Home: filepath.Dir(f.d.Path())})
+	require.NoError(t, err)
+	defer reader.Close()
+	tx, err := reader.sql.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	require.NoError(t, err)
+	defer tx.Rollback()
+	var count int
+	require.NoError(t, tx.QueryRow("SELECT COUNT(*) FROM publications").Scan(&count))
+	require.Equal(t, 1, count)
+
+	// Act
+	_, err = f.d.VacuumHub(context.Background())
+
+	// Assert
+	assert.ErrorIs(t, err, ErrBusyRetryable)
+	require.NoError(t, f.d.sql.QueryRow("SELECT COUNT(*) FROM publications").Scan(&count))
+	assert.Equal(t, 1, count)
 }

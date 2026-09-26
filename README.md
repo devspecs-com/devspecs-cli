@@ -185,8 +185,8 @@ use pinned open-source commits and reviewed CLI output.
   Pass `--slice` arguments or let your agent formulate them first.
 - Full task tracks add unnecessary ceremony to tiny fixes. Use `--quick` when
   the receipt would cost more than the change.
-- Workspace coordination, named execution threads, and composed documents are
-  experimental surfaces.
+- Workspace coordination, named execution threads, composed documents, and
+  local hub coordination are experimental surfaces.
 
 The trust layer should route you to owner intent and concrete evidence. It does
 not replace reading the owner decision document when one exists.
@@ -215,13 +215,15 @@ complete surface.
 ## Advanced Workflows
 
 Named execution threads, repo-owned ADR/RFC/PRD drafts, umbrella workspaces,
-and provider-configured dispatch are experimental. Ordinary tasks remain
-repo-owned; merely living under a workspace does not change ownership.
+local hub coordination, and provider-configured dispatch are experimental.
+Ordinary tasks remain repo-owned; merely living under a workspace does not
+change ownership.
 
 ```bash
 ds thread task:<task-id>
 ds compose adr "title"
 ds workspace init .
+ds hub actor enroll
 ```
 
 Opt-in `ds dispatch` freezes one apply target and uses the configured
@@ -231,6 +233,8 @@ changes to Waspflow itself. Configuration alone never starts an agent.
 
 - [Workflow reference](docs/workflows.md): threads, workspaces, compose,
   dispatch configuration, checkpoint handoffs, and the command map.
+- [Hub reference](docs/hub.md): repo-scoped topics, messages, validated events,
+  pull subscriptions, and explicit history retention.
 - [Index maintenance](docs/index-maintenance.md): read-only diagnostics,
   backup-first recovery, and the v1.4.0 rebuild caveat.
 
@@ -270,10 +274,14 @@ and update guidance; it does not install anything.
 ## Storage And Privacy
 
 - `~/.devspecs/devspecs.db` is a local, rebuildable SQLite index.
+- `~/.devspecs/hub.sqlite` holds local hub publications and subscription state;
+  it is not rebuilt from the repository index.
 - `.devspecs/config.yaml` stores repository discovery configuration.
 - `devspecs/tasks/<task-id>/` is the default visible task workspace.
 - Existing repository files remain the source of truth.
-- `ds prune` removes derived index state, never repository files.
+- `ds prune` removes derived index state by default, never repository files.
+  `ds prune --hub --before <RFC3339>` separately deletes eligible old local
+  hub publications after a verified backup; it does not remove live heads.
 
 Commit task artifacts when they explain durable work or should be reviewed with
 the change. Use `--dir .devspecs/tasks` for deliberately local scratch work.

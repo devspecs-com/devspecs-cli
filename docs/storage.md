@@ -3,6 +3,8 @@
 | Location | Role | Commit? |
 | --- | --- | --- |
 | `~/.devspecs/devspecs.db` | Local SQLite index and cache. | No. |
+| `~/.devspecs/hub.sqlite` | Local, authoritative repo-scoped hub topics, messages, events, and subscription cursors. Not reconstructed from the index. | No. |
+| `~/.devspecs/hub-prune-*.sqlite` | Verified snapshot made before an explicit hub history prune; managed by the CLI. | No. |
 | `~/.devspecs/backups/index/` | Verified manual and automatic index recovery snapshots. | No. |
 | `~/.devspecs/dispatches/<dispatch-id>/` | Frozen dispatch requests, provider handles, and normalized receipts. | No. |
 | `.devspecs/config.yaml` | Repo discovery configuration. | Usually yes. |
@@ -23,8 +25,9 @@ immutable events, but would not become authoritative.
 
 The product boundaries are deliberate: tasks hold bounded execution evidence,
 threads schedule existing targets, compose creates durable ADR/RFC/PRD files,
-workspaces optionally coordinate explicitly linked repositories, and prune
-maintains derived index state without deleting those repository artifacts.
+workspaces optionally coordinate explicitly linked repositories, and hub
+holds local, short-lived coordination. The default prune maintains derived
+index state without deleting repository artifacts.
 
 The global index records every physical root observed for a logical Git
 repository. This lets temporary agent worktrees reuse the repository's index.
@@ -45,6 +48,23 @@ Normal pruning makes freed SQLite pages reusable. `--vacuum` also rewrites the
 database to return unused space to the filesystem, which can take time and
 require temporary free disk space on a large index. Long human-mode maintenance
 operations report bounded progress on stderr; JSON output remains clean.
+
+Hub history has a separate, explicit retention path:
+
+```bash
+ds prune --hub --before 2026-09-01T00:00:00Z --dry-run
+ds prune --hub --before 2026-09-01T00:00:00Z
+```
+
+Each run deletes at most 10,000 eligible old publications after a verified
+SQLite backup. It retains current message heads, event correction targets,
+event schemas, replay-gap records, and idempotency tombstones. Repeat while
+the report says `more` to continue. A normal `ds prune` never touches hub.
+Hub row deletion reuses SQLite pages; it does not by itself shrink the live
+file. Add `--vacuum` to the non-dry-run hub command to compact explicitly and
+report measured before/after bytes. It needs extra disk headroom and may wait
+on other readers/writers. Use [the hub reference](hub.md) for current retention
+limitations.
 
 Commit task artifacts when they explain durable work, should be reviewed with a
 change, or are useful to the next person or agent. If a task is scratch-only,

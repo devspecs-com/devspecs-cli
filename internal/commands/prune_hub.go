@@ -12,8 +12,8 @@ func runHubPrune(cmd *cobra.Command, before string, dryRun, vacuum, asJSON bool)
 	if before == "" {
 		return fmt.Errorf("--hub requires --before <RFC3339>")
 	}
-	if vacuum {
-		return fmt.Errorf("--vacuum is not yet supported with --hub; deleted pages remain reusable by SQLite")
+	if vacuum && dryRun {
+		return fmt.Errorf("--dry-run and --vacuum cannot be used together")
 	}
 	cutoff, err := time.Parse(time.RFC3339, before)
 	if err != nil {
@@ -41,6 +41,21 @@ func runHubPrune(cmd *cobra.Command, before string, dryRun, vacuum, asJSON bool)
 	if err != nil {
 		return err
 	}
+	if vacuum {
+		compaction, compactErr := db.VacuumHub(cmd.Context())
+		if compactErr != nil {
+			backup := compaction.BackupPath
+			if backup == "" {
+				backup = report.BackupPath
+			}
+			if backup == "" {
+				return fmt.Errorf("hub prune committed %d entries; vacuum failed before backup: %w", report.Entries, compactErr)
+			}
+			return fmt.Errorf("hub prune committed %d entries; vacuum failed (verified backup: %s): %w", report.Entries, backup, compactErr)
+		}
+		report.Vacuum = &compaction
+		report.BackupPath = compaction.BackupPath
+	}
 	if asJSON {
 		return writeHubJSON(cmd, report)
 	}
@@ -58,6 +73,10 @@ func runHubPrune(cmd *cobra.Command, before string, dryRun, vacuum, asJSON bool)
 	}
 	if report.BackupPath != "" {
 		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Backup: %s\n", report.BackupPath); err != nil {
+			return err
+		}
+		if report.Vacuum != nil {
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Hub file: %s -> %s; reclaimed: %s\n", formatByteSize(report.Vacuum.BytesBefore), formatByteSize(report.Vacuum.BytesAfter), formatByteSize(report.Vacuum.ReclaimedBytes))
 			return err
 		}
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), "Deleted pages are reusable by SQLite; the hub file is not vacuumed.")

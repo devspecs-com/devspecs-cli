@@ -25,15 +25,23 @@ type PruneScope struct {
 }
 
 type PruneReport struct {
-	Cutoff         time.Time    `json:"cutoff"`
-	DryRun         bool         `json:"dry_run"`
-	Entries        int          `json:"entries"`
-	PayloadBytes   int64        `json:"payload_bytes"`
-	More           bool         `json:"more"`
-	PlanDigest     string       `json:"plan_digest"`
-	Scopes         []PruneScope `json:"scopes"`
-	BackupPath     string       `json:"backup_path,omitempty"`
-	RetentionEpoch int64        `json:"retention_epoch"`
+	Cutoff         time.Time     `json:"cutoff"`
+	DryRun         bool          `json:"dry_run"`
+	Entries        int           `json:"entries"`
+	PayloadBytes   int64         `json:"payload_bytes"`
+	More           bool          `json:"more"`
+	PlanDigest     string        `json:"plan_digest"`
+	Scopes         []PruneScope  `json:"scopes"`
+	BackupPath     string        `json:"backup_path,omitempty"`
+	RetentionEpoch int64         `json:"retention_epoch"`
+	Vacuum         *VacuumReport `json:"vacuum,omitempty"`
+}
+
+type VacuumReport struct {
+	BytesBefore    int64  `json:"bytes_before"`
+	BytesAfter     int64  `json:"bytes_after"`
+	ReclaimedBytes int64  `json:"reclaimed_bytes"`
+	BackupPath     string `json:"backup_path"`
 }
 
 type pruneEntry struct {
@@ -294,7 +302,7 @@ func mergePrunedRange(ctx context.Context, tx *sql.Tx, scope string, first, last
 }
 
 func (d *DB) cleanupPruneBackups(ctx context.Context, keep string, epoch int64) {
-	rows, err := d.sql.QueryContext(ctx, "SELECT prune_id,backup_path FROM prune_audit WHERE backup_available=1 AND retention_epoch<? AND backup_path<>?", epoch, keep)
+	rows, err := d.sql.QueryContext(ctx, "SELECT prune_id,backup_path FROM prune_audit WHERE backup_available=1 AND retention_epoch<=? AND backup_path<>?", epoch, keep)
 	if err != nil {
 		return
 	}
@@ -327,6 +335,89 @@ func (d *DB) cleanupPruneBackups(ctx context.Context, keep string, epoch int64) 
 		}
 		_, _ = d.sql.ExecContext(ctx, "UPDATE prune_audit SET backup_available=0 WHERE prune_id=? AND backup_path=?", b.id, b.path)
 	}
+}
+
+// VacuumHub is explicit maintenance. The snapshot is recorded before VACUUM,
+// so a failed or interrupted compaction still leaves a restorable authority.
+// SQLite serializes VACUUM with writers and commits it atomically.
+func (d *DB) VacuumHub(ctx context.Context) (VacuumReport, error) {
+	if d.readOnly {
+		return VacuumReport{}, ErrUnauthorized
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	if err := d.probe(ctx); err != nil {
+		return VacuumReport{}, err
+	}
+	if err := d.checkpointForVacuum(ctx); err != nil {
+		return VacuumReport{}, err
+	}
+	info, err := os.Stat(d.path)
+	if err != nil {
+		return VacuumReport{}, err
+	}
+	result := VacuumReport{BytesBefore: info.Size()}
+	free, err := availableDiskBytes(filepath.Dir(d.path))
+	if err != nil {
+		return result, err
+	}
+	// Reserve room for both the verified snapshot and SQLite's VACUUM work.
+	if !sufficientBackupHeadroom(free, uint64(info.Size())) {
+		return result, fmt.Errorf("hub vacuum needs disk headroom: %w", ErrBusyRetryable)
+	}
+	backup, err := d.backupForPrune(ctx)
+	if err != nil {
+		return result, err
+	}
+	result.BackupPath = backup
+	id, err := randomID()
+	if err != nil {
+		_ = os.Remove(backup)
+		result.BackupPath = ""
+		return result, err
+	}
+	var backupEpoch int64
+	if err := d.write(ctx, func(tx *sql.Tx, now int64) error {
+		if err := tx.QueryRowContext(ctx, "SELECT retention_epoch FROM hub_meta WHERE singleton=1").Scan(&backupEpoch); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO prune_audit (prune_id,cutoff_at,pruned_at,backup_path,entry_count,payload_bytes,retention_epoch) VALUES (?,?,?,?,0,0,?)", id, now, now, backup, backupEpoch)
+		return err
+	}); err != nil {
+		_ = os.Remove(backup)
+		result.BackupPath = ""
+		return result, err
+	}
+	if _, err := d.sql.ExecContext(ctx, "VACUUM"); err != nil {
+		return result, classifySQLite(err)
+	}
+	if err := d.checkpointForVacuum(ctx); err != nil {
+		return result, err
+	}
+	if err := d.CheckIntegrity(ctx); err != nil {
+		return result, err
+	}
+	info, err = os.Stat(d.path)
+	if err != nil {
+		return result, err
+	}
+	result.BytesAfter = info.Size()
+	if result.BytesBefore > result.BytesAfter {
+		result.ReclaimedBytes = result.BytesBefore - result.BytesAfter
+	}
+	d.cleanupPruneBackups(ctx, backup, backupEpoch)
+	return result, nil
+}
+
+func (d *DB) checkpointForVacuum(ctx context.Context) error {
+	var busy, log, checkpointed int
+	if err := d.sql.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &log, &checkpointed); err != nil {
+		return classifySQLite(err)
+	}
+	if busy != 0 {
+		return ErrBusyRetryable
+	}
+	return nil
 }
 
 func (d *DB) backupForPrune(ctx context.Context) (out string, err error) {
