@@ -340,7 +340,7 @@ func TestShowEventSchemaIncludesDigest(t *testing.T) {
 	assert.Equal(t, EventDialect, shown.Dialect)
 }
 
-func TestOpenMigratesVerifiedV2AuthorityToV3(t *testing.T) {
+func TestOpenMigratesVerifiedV2AuthorityToV4(t *testing.T) {
 	// Arrange
 	home := filepath.Join(t.TempDir(), "home")
 	require.NoError(t, os.MkdirAll(home, 0o700))
@@ -370,8 +370,51 @@ func TestOpenMigratesVerifiedV2AuthorityToV3(t *testing.T) {
 	var version, count int
 	require.NoError(t, d.sql.QueryRow("PRAGMA user_version").Scan(&version))
 	require.NoError(t, d.sql.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count))
-	assert.Equal(t, 3, version)
-	assert.Equal(t, 3, count)
+	assert.Equal(t, 4, version)
+	assert.Equal(t, 4, count)
+}
+
+func TestOpenMigratesVerifiedV3AuthorityWithPullSecret(t *testing.T) {
+	// Arrange
+	home := filepath.Join(t.TempDir(), "home")
+	require.NoError(t, os.MkdirAll(home, 0o700))
+	raw, err := sql.Open("sqlite", filepath.Join(home, "hub.sqlite"))
+	require.NoError(t, err)
+	_, err = raw.Exec(schemaV1)
+	require.NoError(t, err)
+	_, err = raw.Exec("INSERT INTO hub_meta (singleton,db_id,format_version) VALUES (1,'v3-authority',1)")
+	require.NoError(t, err)
+	_, err = raw.Exec("INSERT INTO schema_migrations VALUES (1,?,0)", fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV1))))
+	require.NoError(t, err)
+	_, err = raw.Exec(schemaV2)
+	require.NoError(t, err)
+	_, err = raw.Exec("INSERT INTO schema_migrations VALUES (2,?,0)", fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV2))))
+	require.NoError(t, err)
+	_, err = raw.Exec(schemaV3)
+	require.NoError(t, err)
+	_, err = raw.Exec("INSERT INTO schema_migrations VALUES (3,?,0)", fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV3))))
+	require.NoError(t, err)
+	_, err = raw.Exec(fmt.Sprintf("PRAGMA application_id=%d", applicationID))
+	require.NoError(t, err)
+	_, err = raw.Exec("PRAGMA user_version=3")
+	require.NoError(t, err)
+	require.NoError(t, raw.Close())
+
+	// Act
+	d, err := Open(context.Background(), Options{Home: home})
+
+	// Assert
+	require.NoError(t, err)
+	defer d.Close()
+	assert.Equal(t, "v3-authority", d.AuthorityID())
+	var version, secretLength int
+	var digest string
+	require.NoError(t, d.sql.QueryRow("PRAGMA user_version").Scan(&version))
+	require.NoError(t, d.sql.QueryRow("SELECT length(secret) FROM pull_token_secret WHERE singleton=1").Scan(&secretLength))
+	require.NoError(t, d.sql.QueryRow("SELECT digest FROM schema_migrations WHERE version=4").Scan(&digest))
+	assert.Equal(t, 4, version)
+	assert.Equal(t, 32, secretLength)
+	assert.Equal(t, fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV4))), digest)
 }
 
 func TestSchemaWorkHonorsCancellation(t *testing.T) {

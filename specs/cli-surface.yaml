@@ -90,6 +90,21 @@ tree:
                 status: experimental
                 usage: ds hub topic restore <topic-id> --actor <id> --generation <n> --reason <text>
                 purpose: Reopen a topic with an auditable reason and valid deadline.
+              owner:
+                status: experimental
+                children:
+                  grant:
+                    status: experimental
+                    usage: ds hub topic owner grant <topic-id> <maintainer-actor-id> --actor <owner-id> --generation <n>
+                    purpose: Delegate metadata/schema/pin management to an enrolled actor.
+                  revoke:
+                    status: experimental
+                    usage: ds hub topic owner revoke <topic-id> <maintainer-actor-id> --actor <owner-id> --generation <n>
+                    purpose: Remove delegated maintainer rights.
+                  list:
+                    status: experimental
+                    usage: ds hub topic owner list <topic-id>
+                    purpose: Inspect current delegated maintainers.
           message:
             status: experimental
             children:
@@ -151,6 +166,36 @@ tree:
                 status: experimental
                 usage: ds hub event show <entry-id> [--historical]
                 purpose: Read an exact event, including retained history when requested.
+          consumer:
+            status: experimental
+            children:
+              enroll:
+                status: experimental
+                usage: ds hub consumer enroll [consumer-id]
+                purpose: Enroll a durable consumer identity that may be shared by cooperating workers.
+          subscribe:
+            status: experimental
+            children:
+              add:
+                status: experimental
+                usage: ds hub subscribe add --consumer <id> --topic <topic-id> [--kind message|event] [--event-type key@version]
+                purpose: Create a filtered durable subscription from current high-water or retained history.
+              list:
+                status: experimental
+                usage: ds hub subscribe list --consumer <id>
+                purpose: Inspect a consumer's repository subscriptions and cursors.
+              remove:
+                status: experimental
+                usage: ds hub subscribe remove <subscription-id> --consumer <id>
+                purpose: Stop a subscription without deleting hub publications.
+          pull:
+            status: experimental
+            usage: ds hub pull <subscription-id> --consumer <id> [--limit <n>]
+            purpose: Read a bounded page with entries, gaps and an ack token without advancing the cursor.
+          ack:
+            status: experimental
+            usage: ds hub ack <subscription-id> --consumer <id> --prior <n> --next <n> --token <token>
+            purpose: Advance one subscription cursor with a validated compare-and-swap acknowledgement.
       compose:
         status: experimental
         purpose: Create repo-owned ADR, RFC, and PRD drafts using existing repository conventions.

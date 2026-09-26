@@ -31,7 +31,7 @@ durable architectural decisions; promote lasting decisions to Git or docs.`,
 	}
 	cmd.PersistentFlags().StringVar(&opts.repo, "repo", ".", "Repository path (defaults to current directory)")
 	cmd.PersistentFlags().BoolVar(&opts.asJSON, "json", false, "Output machine-readable JSON")
-	cmd.AddCommand(newHubActorCmd(opts), newHubTopicCmd(opts), newHubMessageCmd(opts), newHubTypeCmd(opts), newHubEventCmd(opts))
+	cmd.AddCommand(newHubActorCmd(opts), newHubTopicCmd(opts), newHubMessageCmd(opts), newHubTypeCmd(opts), newHubEventCmd(opts), newHubConsumerCmd(opts), newHubSubscribeCmd(opts), newHubPullCmd(opts), newHubAckCmd(opts))
 	return cmd
 }
 
@@ -268,6 +268,7 @@ func newHubTopicCmd(opts *hubOptions) *cobra.Command {
 	_ = restore.MarkFlagRequired("generation")
 	_ = restore.MarkFlagRequired("reason")
 	cmd.AddCommand(restore)
+	cmd.AddCommand(newHubOwnerCmd(opts))
 	return cmd
 }
 

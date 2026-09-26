@@ -305,8 +305,8 @@ func TestOpenMigratesVerifiedV1Authority(t *testing.T) {
 	var version, count int
 	require.NoError(t, d.sql.QueryRow("PRAGMA user_version").Scan(&version))
 	require.NoError(t, d.sql.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count))
-	assert.Equal(t, 3, version)
-	assert.Equal(t, 3, count)
+	assert.Equal(t, 4, version)
+	assert.Equal(t, 4, count)
 	var topicName string
 	var next int64
 	require.NoError(t, d.sql.QueryRow("SELECT name FROM topics WHERE topic_id='topic'").Scan(&topicName))

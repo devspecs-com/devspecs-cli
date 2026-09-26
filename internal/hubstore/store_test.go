@@ -198,7 +198,7 @@ func TestOpenRejectsNewerFormatBeforeMutation(t *testing.T) {
 	path := d.Path()
 	raw, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
-	_, err = raw.Exec("PRAGMA user_version=4")
+	_, err = raw.Exec("PRAGMA user_version=5")
 	require.NoError(t, err)
 	require.NoError(t, raw.Close())
 	before, err := os.ReadFile(path)

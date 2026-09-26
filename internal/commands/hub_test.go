@@ -101,6 +101,36 @@ func TestHubTopicArchive_WithCurrentGeneration_ReportsArchived(t *testing.T) {
 	assert.Equal(t, int64(2), archived.PolicyGeneration)
 }
 
+func TestHubTopicOwnerGrant_WithCurrentGeneration_DelegatesMaintainer(t *testing.T) {
+	// Arrange
+	repo := hubRepoFixture(t)
+	db, err := hubstore.Open(context.Background(), hubstore.Options{})
+	require.NoError(t, err)
+	_, err = db.EnrollActor(context.Background(), "owner")
+	require.NoError(t, err)
+	_, err = db.EnrollActor(context.Background(), "editor")
+	require.NoError(t, err)
+	_, err = db.EnrollRepo(context.Background(), repo)
+	require.NoError(t, err)
+	topic, err := db.CreateTopic(context.Background(), repo, "owner", hubstore.TopicInput{Key: "local-go", Name: "Local Go", Description: "Coordinate expensive local Go jobs"})
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+	cmd := NewHubCmd()
+	cmd.SetArgs([]string{"topic", "owner", "grant", topic.ID, "editor", "--repo", repo, "--actor", "owner", "--generation", "1", "--json"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	// Act
+	err = cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	var response hubJSONResponse[hubstore.Topic]
+	require.NoError(t, json.Unmarshal(out.Bytes(), &response))
+	assert.Equal(t, topic.ID, response.Result.ID)
+	assert.Equal(t, int64(2), response.Result.PolicyGeneration)
+}
+
 func TestHubMessagePost_WithIdempotencyKey_ReturnsPublicationIdentity(t *testing.T) {
 	// Arrange
 	repo := hubRepoFixture(t)
@@ -228,4 +258,113 @@ func TestHubEventPublish_WithValidPayload_ReturnsOrderedEntry(t *testing.T) {
 	assert.Equal(t, "job.finished", response.Result.TypeKey)
 	assert.Equal(t, int64(1), response.Result.Sequence)
 	assert.NotEmpty(t, response.Result.EntryID)
+}
+
+func TestHubSubscribeAdd_WithEnrolledConsumer_ReturnsDurableSubscription(t *testing.T) {
+	// Arrange
+	repo := hubRepoFixture(t)
+	db, err := hubstore.Open(context.Background(), hubstore.Options{})
+	require.NoError(t, err)
+	_, err = db.EnrollActor(context.Background(), "agent-a")
+	require.NoError(t, err)
+	_, err = db.EnrollRepo(context.Background(), repo)
+	require.NoError(t, err)
+	topic, err := db.CreateTopic(context.Background(), repo, "agent-a", hubstore.TopicInput{Key: "local-go", Name: "Local Go", Description: "Coordinate expensive local Go jobs"})
+	require.NoError(t, err)
+	_, err = db.EnrollConsumer(context.Background(), db.AuthorityID(), "agent-a-inbox")
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+	cmd := NewHubCmd()
+	cmd.SetArgs([]string{"subscribe", "add", "--repo", repo, "--consumer", "agent-a-inbox", "--topic", topic.ID, "--kind", "message", "--json"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	// Act
+	err = cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	var response hubJSONResponse[hubstore.Subscription]
+	require.NoError(t, json.Unmarshal(out.Bytes(), &response))
+	assert.Equal(t, "agent-a-inbox", response.Result.ConsumerID)
+	require.Len(t, response.Result.TopicIDs, 1)
+	assert.Equal(t, topic.ID, response.Result.TopicIDs[0])
+	assert.NotEmpty(t, response.Result.ID)
+}
+
+func TestHubPull_WithUnreadMessage_ReturnsNonDestructivePage(t *testing.T) {
+	// Arrange
+	repo := hubRepoFixture(t)
+	db, err := hubstore.Open(context.Background(), hubstore.Options{})
+	require.NoError(t, err)
+	_, err = db.EnrollActor(context.Background(), "agent-a")
+	require.NoError(t, err)
+	_, err = db.EnrollRepo(context.Background(), repo)
+	require.NoError(t, err)
+	topic, err := db.CreateTopic(context.Background(), repo, "agent-a", hubstore.TopicInput{Key: "local-go", Name: "Local Go", Description: "Coordinate expensive local Go jobs"})
+	require.NoError(t, err)
+	_, err = db.EnrollConsumer(context.Background(), db.AuthorityID(), "agent-a-inbox")
+	require.NoError(t, err)
+	sub, err := db.Subscribe(context.Background(), repo, hubstore.SubscribeInput{AuthorityID: db.AuthorityID(), ConsumerID: "agent-a-inbox", TopicIDs: []string{topic.ID}})
+	require.NoError(t, err)
+	_, err = db.PostMessage(context.Background(), repo, topic.ID, "agent-a", hubstore.MessageInput{AuthorityID: db.AuthorityID(), Text: "Running fat-25"})
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+	cmd := NewHubCmd()
+	cmd.SetArgs([]string{"pull", sub.ID, "--repo", repo, "--consumer", "agent-a-inbox", "--json"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	// Act
+	err = cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	var response hubJSONResponse[hubstore.PullPage]
+	require.NoError(t, json.Unmarshal(out.Bytes(), &response))
+	assert.Equal(t, int64(0), response.Result.PriorAcknowledged)
+	assert.Equal(t, int64(1), response.Result.NextScanPosition)
+	require.Len(t, response.Result.Entries, 1)
+	require.NotNil(t, response.Result.Entries[0].Message)
+	assert.Equal(t, "Running fat-25", response.Result.Entries[0].Message.Text)
+	assert.NotEmpty(t, response.Result.AckToken)
+}
+
+func TestHubAck_WithPulledToken_AdvancesCursor(t *testing.T) {
+	// Arrange
+	repo := hubRepoFixture(t)
+	db, err := hubstore.Open(context.Background(), hubstore.Options{})
+	require.NoError(t, err)
+	_, err = db.EnrollActor(context.Background(), "agent-a")
+	require.NoError(t, err)
+	_, err = db.EnrollRepo(context.Background(), repo)
+	require.NoError(t, err)
+	topic, err := db.CreateTopic(context.Background(), repo, "agent-a", hubstore.TopicInput{Key: "local-go", Name: "Local Go", Description: "Coordinate expensive local Go jobs"})
+	require.NoError(t, err)
+	_, err = db.EnrollConsumer(context.Background(), db.AuthorityID(), "agent-a-inbox")
+	require.NoError(t, err)
+	sub, err := db.Subscribe(context.Background(), repo, hubstore.SubscribeInput{AuthorityID: db.AuthorityID(), ConsumerID: "agent-a-inbox", TopicIDs: []string{topic.ID}})
+	require.NoError(t, err)
+	_, err = db.PostMessage(context.Background(), repo, topic.ID, "agent-a", hubstore.MessageInput{AuthorityID: db.AuthorityID(), Text: "Running fat-25"})
+	require.NoError(t, err)
+	page, err := db.Pull(context.Background(), repo, "agent-a-inbox", sub.ID, 50)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+	cmd := NewHubCmd()
+	cmd.SetArgs([]string{"ack", sub.ID, "--repo", repo, "--consumer", "agent-a-inbox", "--prior", "0", "--next", "1", "--token", page.AckToken, "--json"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	// Act
+	err = cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	var response hubJSONResponse[struct {
+		SubscriptionID       string `json:"subscription_id"`
+		AcknowledgedSequence int64  `json:"acknowledged_sequence"`
+	}]
+	require.NoError(t, json.Unmarshal(out.Bytes(), &response))
+	assert.Equal(t, int64(1), response.Result.AcknowledgedSequence)
+	assert.Equal(t, sub.ID, response.Result.SubscriptionID)
 }

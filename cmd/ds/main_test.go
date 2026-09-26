@@ -472,12 +472,18 @@ func TestRootCmd_LiveSurfaceMatchesCLISurfaceSpec(t *testing.T) {
 	assertCommandSurface(t, "ds hub actor", actor, spec.Tree["ds"].Children["hub"].Children["actor"].Children, nil, nil)
 	topic := mustFindCommand(t, hub, "topic")
 	assertCommandSurface(t, "ds hub topic", topic, spec.Tree["ds"].Children["hub"].Children["topic"].Children, nil, nil)
+	owner := mustFindCommand(t, topic, "owner")
+	assertCommandSurface(t, "ds hub topic owner", owner, spec.Tree["ds"].Children["hub"].Children["topic"].Children["owner"].Children, nil, nil)
 	message := mustFindCommand(t, hub, "message")
 	assertCommandSurface(t, "ds hub message", message, spec.Tree["ds"].Children["hub"].Children["message"].Children, nil, nil)
 	eventType := mustFindCommand(t, hub, "type")
 	assertCommandSurface(t, "ds hub type", eventType, spec.Tree["ds"].Children["hub"].Children["type"].Children, nil, nil)
 	event := mustFindCommand(t, hub, "event")
 	assertCommandSurface(t, "ds hub event", event, spec.Tree["ds"].Children["hub"].Children["event"].Children, nil, nil)
+	consumer := mustFindCommand(t, hub, "consumer")
+	assertCommandSurface(t, "ds hub consumer", consumer, spec.Tree["ds"].Children["hub"].Children["consumer"].Children, nil, nil)
+	subscribe := mustFindCommand(t, hub, "subscribe")
+	assertCommandSurface(t, "ds hub subscribe", subscribe, spec.Tree["ds"].Children["hub"].Children["subscribe"].Children, nil, nil)
 }
 
 func TestRootCmd_NamedThreadsHaveNoTaskOrWorkspaceCommandDuplicate(t *testing.T) {

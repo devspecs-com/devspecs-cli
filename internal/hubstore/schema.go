@@ -1,7 +1,7 @@
 package hubstore
 
 const applicationID = 0x44534842 // DSHB
-const schemaVersion = 3
+const schemaVersion = 4
 
 // v1 is deliberately hub-only. A later migration must advance user_version and
 // insert its digest in the same transaction.
@@ -209,4 +209,51 @@ CREATE TRIGGER event_schemas_immutable BEFORE UPDATE OF topic_id,type_key,versio
 CREATE TRIGGER event_schemas_retirement_immutable BEFORE UPDATE OF retired_by,retired_at ON event_schemas WHEN OLD.retired_at IS NOT NULL OR NEW.retired_at IS NULL OR NEW.retired_by IS NULL BEGIN SELECT RAISE(ABORT, 'retirement is immutable'); END;
 CREATE TRIGGER event_entries_no_update BEFORE UPDATE ON event_entries BEGIN SELECT RAISE(ABORT, 'event is immutable'); END;
 CREATE TRIGGER event_entries_no_delete BEFORE DELETE ON event_entries BEGIN SELECT RAISE(ABORT, 'event is retained'); END;
+`
+
+// v4 owns durable consumers and cursors. Subscription definitions are immutable;
+// changing filters requires a new subscription. No retention deletion is added.
+const schemaV4 = `
+CREATE TABLE hub_meta_v4 (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  db_id TEXT NOT NULL,
+  format_version INTEGER NOT NULL CHECK (format_version = 4),
+  retention_epoch INTEGER NOT NULL DEFAULT 0 CHECK (retention_epoch >= 0)
+);
+INSERT INTO hub_meta_v4 SELECT singleton, db_id, 4, retention_epoch FROM hub_meta;
+DROP TABLE hub_meta;
+ALTER TABLE hub_meta_v4 RENAME TO hub_meta;
+CREATE TABLE pull_token_secret (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  secret BLOB NOT NULL CHECK (length(secret) = 32)
+);
+CREATE TABLE consumers (
+  consumer_id TEXT PRIMARY KEY,
+  enrolled_at INTEGER NOT NULL
+);
+CREATE TABLE subscriptions (
+  subscription_id TEXT PRIMARY KEY,
+  consumer_id TEXT NOT NULL REFERENCES consumers(consumer_id),
+  scope_id TEXT NOT NULL REFERENCES repo_scopes(scope_id),
+  kinds TEXT NOT NULL,
+  event_types TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  acknowledged_sequence INTEGER NOT NULL CHECK (acknowledged_sequence >= 0),
+  removed_at INTEGER,
+  CHECK (removed_at IS NULL OR removed_at >= created_at)
+);
+CREATE INDEX subscriptions_by_consumer ON subscriptions(consumer_id,scope_id,created_at,subscription_id);
+CREATE TABLE subscription_topics (
+  subscription_id TEXT NOT NULL REFERENCES subscriptions(subscription_id),
+  scope_id TEXT NOT NULL,
+  topic_id TEXT NOT NULL,
+  PRIMARY KEY(subscription_id,topic_id),
+  FOREIGN KEY(scope_id,topic_id) REFERENCES topics(scope_id,topic_id)
+);
+CREATE INDEX subscription_topics_by_topic ON subscription_topics(scope_id,topic_id);
+CREATE TRIGGER subscription_definition_immutable BEFORE UPDATE OF subscription_id,consumer_id,scope_id,kinds,event_types,created_at ON subscriptions
+BEGIN SELECT RAISE(ABORT, 'subscription definition is immutable'); END;
+CREATE TRIGGER subscriptions_no_delete BEFORE DELETE ON subscriptions BEGIN SELECT RAISE(ABORT, 'subscription is retained'); END;
+CREATE TRIGGER subscription_topics_no_update BEFORE UPDATE ON subscription_topics BEGIN SELECT RAISE(ABORT, 'subscription topic is immutable'); END;
+CREATE TRIGGER subscription_topics_no_delete BEFORE DELETE ON subscription_topics BEGIN SELECT RAISE(ABORT, 'subscription topic is retained'); END;
 `
