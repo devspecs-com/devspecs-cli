@@ -100,7 +100,11 @@ func TestHubTopicList_WithoutHub_DoesNotCreateAuthority(t *testing.T) {
 	err := cmd.Execute()
 
 	// Assert
-	assert.ErrorIs(t, err, hubstore.ErrNotFound)
+	require.NoError(t, err)
+	var response hubJSONResponse[[]hubstore.Topic]
+	require.NoError(t, json.Unmarshal(out.Bytes(), &response))
+	assert.NotNil(t, response.Result)
+	assert.Empty(t, response.Result)
 	_, statErr := os.Stat(filepath.Join(home, "hub.sqlite"))
 	assert.ErrorIs(t, statErr, os.ErrNotExist)
 }

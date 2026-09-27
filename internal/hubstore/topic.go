@@ -266,19 +266,19 @@ func (d *DB) ShowTopic(ctx context.Context, repoPath, topicID string) (Topic, er
 
 // ListTopics has stable newest-first ordering and bounds each page to 100 rows.
 func (d *DB) ListTopics(ctx context.Context, repoPath string, opts TopicList) ([]Topic, error) {
-	scope, err := d.LookupRepo(ctx, repoPath)
-	if err != nil {
+	if err := ValidateTopicListOptions(opts); err != nil {
 		return nil, err
 	}
 	if opts.Limit == 0 {
 		opts.Limit = 50
 	}
-	if opts.Limit < 1 || opts.Limit > 100 || opts.Offset < 0 {
-		return nil, ErrInvalidInput
-	}
 	query := strings.TrimSpace(opts.Query)
-	if len(query) > 256 {
-		return nil, ErrInvalidInput
+	scope, err := d.LookupRepo(ctx, repoPath)
+	if errors.Is(err, ErrNotFound) {
+		return []Topic{}, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	now := d.now().UTC().UnixMilli()
 	sqlText := "SELECT " + topicColumns + " FROM topics WHERE scope_id=?"
@@ -309,6 +309,24 @@ func (d *DB) ListTopics(ctx context.Context, repoPath string, opts TopicList) ([
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// ValidateTopicListOptions applies the same input limits with or without an authority.
+func ValidateTopicListOptions(opts TopicList) error {
+	if opts.Limit < 0 || opts.Limit > 100 || opts.Offset < 0 || len(strings.TrimSpace(opts.Query)) > 256 {
+		return ErrInvalidInput
+	}
+	return nil
+}
+
+// ValidateTopicListRepo checks a repository when no hub authority exists yet.
+// A missing marker is expected on first use; malformed markers still fail closed.
+func ValidateTopicListRepo(ctx context.Context, repoPath string) error {
+	_, err := resolveGit(ctx, repoPath, false)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
 }
 
 // ListTopicAudit returns available authority changes in commit order.

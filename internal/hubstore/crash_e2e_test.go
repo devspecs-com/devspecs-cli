@@ -2,7 +2,6 @@ package hubstore
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -33,8 +32,7 @@ func TestKilledWriterRollsBackAndReopenedAuthorityAcceptsWrites(t *testing.T) {
 	defer stdin.Close()
 	stdout, err := cmd.StdoutPipe()
 	require.NoError(t, err)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	cmd.Stderr = os.Stderr
 	require.NoError(t, cmd.Start())
 	reaped := false
 	defer func() {
@@ -46,8 +44,8 @@ func TestKilledWriterRollsBackAndReopenedAuthorityAcceptsWrites(t *testing.T) {
 
 	// Act
 	ready, err := bufio.NewReader(stdout).ReadString('\n')
-	require.NoError(t, err, stderr.String())
-	require.Equal(t, "HUB_CRASH_READY\n", ready, stderr.String())
+	require.NoError(t, err)
+	require.Equal(t, "HUB_CRASH_READY\n", ready)
 	require.NoError(t, cmd.Process.Kill())
 	waitErr := cmd.Wait()
 	reaped = true

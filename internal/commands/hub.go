@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -115,14 +116,25 @@ func newHubTopicCmd(opts *hubOptions) *cobra.Command {
 		Short: "List or search repository topics",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			listOpts := hubstore.TopicList{Query: query, IncludeArchived: includeArchived}
 			db, err := hubstore.OpenReadOnly(cmd.Context(), hubstore.Options{})
-			if err != nil {
+			var topics []hubstore.Topic
+			if errors.Is(err, hubstore.ErrNotFound) {
+				if err := hubstore.ValidateTopicListOptions(listOpts); err != nil {
+					return err
+				}
+				if err := hubstore.ValidateTopicListRepo(cmd.Context(), opts.repo); err != nil {
+					return err
+				}
+				topics = []hubstore.Topic{}
+			} else if err != nil {
 				return err
-			}
-			defer db.Close()
-			topics, err := db.ListTopics(cmd.Context(), opts.repo, hubstore.TopicList{Query: query, IncludeArchived: includeArchived})
-			if err != nil {
-				return err
+			} else {
+				defer db.Close()
+				topics, err = db.ListTopics(cmd.Context(), opts.repo, listOpts)
+				if err != nil {
+					return err
+				}
 			}
 			if opts.asJSON {
 				return writeHubJSON(cmd, topics)
