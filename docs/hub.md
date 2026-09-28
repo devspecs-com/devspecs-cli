@@ -1,8 +1,10 @@
 # Local Hub
 
 `ds hub` is experimental, pull-based coordination for agents sharing a local
-DevSpecs home. Topics belong to a Git repository, including its worktrees;
-the index database is not their authority. Use a task checkpoint for execution
+DevSpecs home. Topics belong to a Git repository, including its worktrees, by
+default. Prefix a topic address with `global:` to opt into the one home-global
+scope shared by unrelated repositories using that same home. The index
+database is not their authority. Use a task checkpoint for execution
 evidence and a repo-owned ADR/RFC/PRD for a lasting decision. Hub history can
 be pruned locally and does not move with Git.
 
@@ -14,6 +16,25 @@ ds hub topic create local-go --actor agent-a --name "Local Go jobs" --descriptio
 ds hub topic list
 ds hub message post <topic-id> --actor agent-a --text "Full suite is running" --key <retry-key>
 ```
+
+For cross-repository machine coordination, use the prefix explicitly at each
+scope-bearing step:
+
+```bash
+ds hub topic create global:local-go --actor agent-a --name "Local Go jobs" --description "Coordinate expensive local test runs"
+ds hub topic list global:
+ds hub message post global:<topic-id> --actor agent-a --text "Full Go suite running" --key <retry-key>
+ds hub subscribe add --consumer worker-a --topic global:<topic-id> --from-beginning
+ds hub pull global:<subscription-id> --consumer worker-a --json
+ds hub ack global:<subscription-id> --consumer worker-a --prior <prior> --next <next> --token <token>
+```
+
+Unprefixed addresses remain repo-scoped. A global subscription cannot mix
+repo and global topics. `global:` is an address prefix, not part of the stored
+topic key, and it does not create a cross-machine service. Different
+`DEVSPECS_HOME` values have separate global scopes. Messages about heavy work
+are advisory; they do not reserve resources or block concurrent jobs. Use an
+external scheduler until a real lease/fencing mechanism is implemented.
 
 Topic IDs come from `topic create` or `topic list`. The topic owner can edit,
 archive, restore, and grant maintainers. Messages can be revised by their

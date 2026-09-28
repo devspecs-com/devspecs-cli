@@ -3,6 +3,7 @@ package hubstore
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
@@ -198,7 +199,7 @@ func TestOpenRejectsNewerFormatBeforeMutation(t *testing.T) {
 	path := d.Path()
 	raw, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
-	_, err = raw.Exec("PRAGMA user_version=7")
+	_, err = raw.Exec(fmt.Sprintf("PRAGMA user_version=%d", schemaVersion+1))
 	require.NoError(t, err)
 	require.NoError(t, raw.Close())
 	before, err := os.ReadFile(path)

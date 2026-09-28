@@ -16,6 +16,7 @@ import (
 type Topic struct {
 	ID                  string     `json:"topic_id"`
 	ScopeID             string     `json:"repo_scope_id"`
+	ScopeKind           string     `json:"scope_kind"`
 	Key                 string     `json:"key"`
 	Name                string     `json:"name"`
 	Description         string     `json:"description"`
@@ -71,7 +72,7 @@ func uniqueOrOriginal(err error) error {
 	return err
 }
 
-const topicColumns = "topic_id, scope_id, key, name, description, owner_actor_id, created_at, expires_at, archived_at, archive_actor_id, archive_reason, policy_generation"
+const topicColumns = "topic_id, scope_id, key, name, description, owner_actor_id, created_at, expires_at, archived_at, archive_actor_id, archive_reason, policy_generation, (SELECT kind FROM repo_scopes WHERE repo_scopes.scope_id=topics.scope_id)"
 
 type rowScanner interface{ Scan(...any) error }
 
@@ -80,7 +81,7 @@ func scanTopic(row rowScanner, now int64) (Topic, error) {
 	var created int64
 	var expiry, archive sql.NullInt64
 	var actor, reason sql.NullString
-	err := row.Scan(&t.ID, &t.ScopeID, &t.Key, &t.Name, &t.Description, &t.OwnerActorID, &created, &expiry, &archive, &actor, &reason, &t.PolicyGeneration)
+	err := row.Scan(&t.ID, &t.ScopeID, &t.Key, &t.Name, &t.Description, &t.OwnerActorID, &created, &expiry, &archive, &actor, &reason, &t.PolicyGeneration, &t.ScopeKind)
 	if err != nil {
 		return Topic{}, err
 	}
@@ -162,6 +163,14 @@ func expiryMillis(expiry *time.Time, now int64) (any, error) {
 }
 
 func (d *DB) boundScope(ctx context.Context, tx *sql.Tx, ev repoEvidence) (string, error) {
+	if ev.kind == "global" {
+		var scope string
+		err := tx.QueryRowContext(ctx, "SELECT scope_id FROM repo_scopes WHERE kind='global'").Scan(&scope)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return scope, err
+	}
 	if err := checkEvidence(ev); err != nil {
 		return "", err
 	}

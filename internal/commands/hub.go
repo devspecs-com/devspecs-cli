@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/devspecs-com/devspecs-cli/internal/hubstore"
@@ -15,25 +16,87 @@ type hubOptions struct {
 	asJSON bool
 }
 
-// NewHubCmd exposes the repo-local coordination authority separately from the
+// NewHubCmd exposes the local coordination authority separately from the
 // rebuildable source index and task checkpoint lifecycle.
 func NewHubCmd() *cobra.Command {
 	opts := &hubOptions{repo: "."}
 	cmd := &cobra.Command{
 		Use:   "hub",
-		Short: "Share repo-scoped coordination topics and messages",
+		Short: "Share repo or opt-in home-global coordination topics",
 		Long: `Share short-lived coordination in a local SQLite hub. Topics belong to a
-Git repository across its worktrees. Hub entries are not task checkpoints or
-durable architectural decisions; promote lasting decisions to Git or docs.`,
+Git repository across its worktrees by default. Prefix a topic or subscription
+address with global: to opt into the home-local global scope. Global messages
+are advisory, not locks. Promote lasting decisions to Git or docs.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
-	cmd.PersistentFlags().StringVar(&opts.repo, "repo", ".", "Repository path (defaults to current directory)")
+	cmd.PersistentFlags().StringVar(&opts.repo, "repo", ".", "Repository path (default current directory; incompatible with global:)")
 	cmd.PersistentFlags().BoolVar(&opts.asJSON, "json", false, "Output machine-readable JSON")
 	cmd.AddCommand(newHubActorCmd(opts), newHubTopicCmd(opts), newHubMessageCmd(opts), newHubTypeCmd(opts), newHubEventCmd(opts), newHubConsumerCmd(opts), newHubSubscribeCmd(opts), newHubPullCmd(opts), newHubAckCmd(opts))
 	return cmd
+}
+
+func hubAddress(cmd *cobra.Command, opts *hubOptions, address string) (string, string, error) {
+	if !strings.HasPrefix(address, hubstore.GlobalScopeSelector) {
+		return opts.repo, address, nil
+	}
+	if cmd.Flag("repo").Changed {
+		return "", "", fmt.Errorf("--repo cannot be combined with a global: address")
+	}
+	id := strings.TrimPrefix(address, hubstore.GlobalScopeSelector)
+	if id == "" || strings.Contains(id, ":") {
+		return "", "", fmt.Errorf("global: address requires one ID or key")
+	}
+	return hubstore.GlobalScopeSelector, id, nil
+}
+
+func hubListScope(cmd *cobra.Command, opts *hubOptions, args []string) (string, error) {
+	if len(args) == 0 {
+		return opts.repo, nil
+	}
+	if args[0] != hubstore.GlobalScopeSelector {
+		return "", fmt.Errorf("scope selector must be the global: scope")
+	}
+	if cmd.Flag("repo").Changed {
+		return "", fmt.Errorf("--repo cannot be combined with the global: scope")
+	}
+	return hubstore.GlobalScopeSelector, nil
+}
+
+func hubScopeKind(scope string) string {
+	if scope == hubstore.GlobalScopeSelector {
+		return "global"
+	}
+	return "git"
+}
+
+func hubDisplayID(scope, id string) string {
+	if scope == hubstore.GlobalScopeSelector {
+		return scope + id
+	}
+	return id
+}
+
+func hubRelatedID(scope, address string) (string, error) {
+	if strings.HasPrefix(address, hubstore.GlobalScopeSelector) {
+		if scope != hubstore.GlobalScopeSelector {
+			return "", fmt.Errorf("global: ID requires a global: topic")
+		}
+		id := strings.TrimPrefix(address, hubstore.GlobalScopeSelector)
+		if id == "" || strings.Contains(id, ":") {
+			return "", fmt.Errorf("global: address requires one ID")
+		}
+		return id, nil
+	}
+	return address, nil
+}
+
+func writeHubScopedJSON(cmd *cobra.Command, value any, scope string) error {
+	encoder := json.NewEncoder(cmd.OutOrStdout())
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(hubJSONResponse[any]{ContractVersion: "devspecs.hub/v1", ScopeKind: hubScopeKind(scope), Result: value})
 }
 
 func newHubActorCmd(opts *hubOptions) *cobra.Command {
@@ -67,17 +130,21 @@ func newHubActorCmd(opts *hubOptions) *cobra.Command {
 }
 
 func newHubTopicCmd(opts *hubOptions) *cobra.Command {
-	cmd := &cobra.Command{Use: "topic", Short: "Discover and manage repository topics", Args: cobra.NoArgs}
+	cmd := &cobra.Command{Use: "topic", Short: "Discover and manage repo or global topics", Args: cobra.NoArgs}
 	var actor, name, description, expiryText string
 	create := &cobra.Command{
 		Use:   "create <key>",
-		Short: "Create a named repository topic",
+		Short: "Create a named topic (prefix key with global: for home-global)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if actor == "" {
 				return fmt.Errorf("--actor is required; enroll with ds hub actor enroll")
 			}
-			input := hubstore.TopicInput{Key: args[0], Name: name, Description: description}
+			scope, topicKey, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
+			input := hubstore.TopicInput{Key: topicKey, Name: name, Description: description}
 			if cmd.Flags().Changed("expires-at") {
 				expiry, err := time.Parse(time.RFC3339, expiryText)
 				if err != nil {
@@ -90,14 +157,14 @@ func newHubTopicCmd(opts *hubOptions) *cobra.Command {
 				return err
 			}
 			defer db.Close()
-			if _, err := db.EnrollRepo(cmd.Context(), opts.repo); err != nil {
+			if _, err := db.EnrollRepo(cmd.Context(), scope); err != nil {
 				return err
 			}
-			topic, err := db.CreateTopic(cmd.Context(), opts.repo, actor, input)
+			topic, err := db.CreateTopic(cmd.Context(), scope, actor, input)
 			if err != nil {
 				return err
 			}
-			return writeHubTopic(cmd, topic, opts.asJSON)
+			return writeHubTopic(cmd, topic, opts.asJSON, scope)
 		},
 	}
 	create.Flags().StringVar(&actor, "actor", "", "Enrolled actor ID that owns the topic")
@@ -112,10 +179,14 @@ func newHubTopicCmd(opts *hubOptions) *cobra.Command {
 	var query string
 	var includeArchived bool
 	list := &cobra.Command{
-		Use:   "list",
-		Short: "List or search repository topics",
-		Args:  cobra.NoArgs,
+		Use:   "list [global:]",
+		Short: "List repo topics or explicitly select global:",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, err := hubListScope(cmd, opts, args)
+			if err != nil {
+				return err
+			}
 			listOpts := hubstore.TopicList{Query: query, IncludeArchived: includeArchived}
 			db, err := hubstore.OpenReadOnly(cmd.Context(), hubstore.Options{})
 			var topics []hubstore.Topic
@@ -123,24 +194,26 @@ func newHubTopicCmd(opts *hubOptions) *cobra.Command {
 				if err := hubstore.ValidateTopicListOptions(listOpts); err != nil {
 					return err
 				}
-				if err := hubstore.ValidateTopicListRepo(cmd.Context(), opts.repo); err != nil {
-					return err
+				if scope != hubstore.GlobalScopeSelector {
+					if err := hubstore.ValidateTopicListRepo(cmd.Context(), scope); err != nil {
+						return err
+					}
 				}
 				topics = []hubstore.Topic{}
 			} else if err != nil {
 				return err
 			} else {
 				defer db.Close()
-				topics, err = db.ListTopics(cmd.Context(), opts.repo, listOpts)
+				topics, err = db.ListTopics(cmd.Context(), scope, listOpts)
 				if err != nil {
 					return err
 				}
 			}
 			if opts.asJSON {
-				return writeHubJSON(cmd, topics)
+				return writeHubScopedJSON(cmd, topics, scope)
 			}
 			for _, topic := range topics {
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s  %s  %s (%s)\n", topic.ID, topic.Key, topic.Name, topic.State); err != nil {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s  %s  %s (%s)\n", hubDisplayID(scope, topic.ID), hubDisplayID(scope, topic.Key), topic.Name, topic.State); err != nil {
 					return err
 				}
 			}
@@ -156,16 +229,20 @@ func newHubTopicCmd(opts *hubOptions) *cobra.Command {
 		Short: "Inspect one exact topic",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, topicID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
 			db, err := hubstore.OpenReadOnly(cmd.Context(), hubstore.Options{})
 			if err != nil {
 				return err
 			}
 			defer db.Close()
-			topic, err := db.ShowTopic(cmd.Context(), opts.repo, args[0])
+			topic, err := db.ShowTopic(cmd.Context(), scope, topicID)
 			if err != nil {
 				return err
 			}
-			return writeHubTopic(cmd, topic, opts.asJSON)
+			return writeHubTopic(cmd, topic, opts.asJSON, scope)
 		},
 	})
 	var editActor, editName, editDescription, editExpiryText string
@@ -176,6 +253,10 @@ func newHubTopicCmd(opts *hubOptions) *cobra.Command {
 		Short: "Update topic discovery text or deadline",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, topicID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
 			if clearExpiry && cmd.Flags().Changed("expires-at") {
 				return fmt.Errorf("--clear-expiry and --expires-at cannot be combined")
 			}
@@ -196,11 +277,11 @@ func newHubTopicCmd(opts *hubOptions) *cobra.Command {
 				return err
 			}
 			defer db.Close()
-			topic, err := db.EditTopic(cmd.Context(), opts.repo, args[0], editActor, change)
+			topic, err := db.EditTopic(cmd.Context(), scope, topicID, editActor, change)
 			if err != nil {
 				return err
 			}
-			return writeHubTopic(cmd, topic, opts.asJSON)
+			return writeHubTopic(cmd, topic, opts.asJSON, scope)
 		},
 	}
 	edit.Flags().StringVar(&editActor, "actor", "", "Enrolled actor ID")
@@ -220,16 +301,20 @@ func newHubTopicCmd(opts *hubOptions) *cobra.Command {
 		Short: "Archive a topic without deleting its history",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, topicID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
 			db, err := hubstore.Open(cmd.Context(), hubstore.Options{})
 			if err != nil {
 				return err
 			}
 			defer db.Close()
-			topic, err := db.ArchiveTopic(cmd.Context(), opts.repo, args[0], archiveActor, archiveGeneration, archiveReason)
+			topic, err := db.ArchiveTopic(cmd.Context(), scope, topicID, archiveActor, archiveGeneration, archiveReason)
 			if err != nil {
 				return err
 			}
-			return writeHubTopic(cmd, topic, opts.asJSON)
+			return writeHubTopic(cmd, topic, opts.asJSON, scope)
 		},
 	}
 	archive.Flags().StringVar(&archiveActor, "actor", "", "Enrolled actor ID")
@@ -248,6 +333,10 @@ func newHubTopicCmd(opts *hubOptions) *cobra.Command {
 		Short: "Restore an archived topic with an audit reason",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, topicID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
 			if restoreClearExpiry && cmd.Flags().Changed("expires-at") {
 				return fmt.Errorf("--clear-expiry and --expires-at cannot be combined")
 			}
@@ -264,11 +353,11 @@ func newHubTopicCmd(opts *hubOptions) *cobra.Command {
 				return err
 			}
 			defer db.Close()
-			topic, err := db.RestoreTopic(cmd.Context(), opts.repo, args[0], restoreActor, restoreGeneration, restoreReason, restoreClearExpiry || expiry != nil, expiry)
+			topic, err := db.RestoreTopic(cmd.Context(), scope, topicID, restoreActor, restoreGeneration, restoreReason, restoreClearExpiry || expiry != nil, expiry)
 			if err != nil {
 				return err
 			}
-			return writeHubTopic(cmd, topic, opts.asJSON)
+			return writeHubTopic(cmd, topic, opts.asJSON, scope)
 		},
 	}
 	restore.Flags().StringVar(&restoreActor, "actor", "", "Enrolled actor ID")
@@ -292,6 +381,10 @@ func newHubMessageCmd(opts *hubOptions) *cobra.Command {
 		Short: "Post an attributed message to an active topic",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, topicID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
 			input := hubstore.MessageInput{Text: body, IdempotencyKey: key}
 			if cmd.Flags().Changed("expires-at") {
 				expiry, err := time.Parse(time.RFC3339, expiryText)
@@ -306,11 +399,11 @@ func newHubMessageCmd(opts *hubOptions) *cobra.Command {
 			}
 			defer db.Close()
 			input.AuthorityID = db.AuthorityID()
-			message, err := db.PostMessage(cmd.Context(), opts.repo, args[0], actor, input)
+			message, err := db.PostMessage(cmd.Context(), scope, topicID, actor, input)
 			if err != nil {
 				return err
 			}
-			return writeHubMessage(cmd, message, opts.asJSON)
+			return writeHubMessage(cmd, message, opts.asJSON, scope)
 		},
 	}
 	post.Flags().StringVar(&actor, "actor", "", "Enrolled actor ID")
@@ -327,20 +420,24 @@ func newHubMessageCmd(opts *hubOptions) *cobra.Command {
 		Short: "List live messages (pinned first, optionally ranked by votes)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, topicID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
 			db, err := hubstore.OpenReadOnly(cmd.Context(), hubstore.Options{})
 			if err != nil {
 				return err
 			}
 			defer db.Close()
-			messages, err := db.ListMessages(cmd.Context(), opts.repo, args[0], hubstore.MessageList{Ranked: ranked})
+			messages, err := db.ListMessages(cmd.Context(), scope, topicID, hubstore.MessageList{Ranked: ranked})
 			if err != nil {
 				return err
 			}
 			if opts.asJSON {
-				return writeHubJSON(cmd, messages)
+				return writeHubScopedJSON(cmd, messages, scope)
 			}
 			for _, message := range messages {
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%d  %s  %s: %s  (+%d/-%d, score %d)\n", message.Sequence, message.MessageID, message.ActorID, message.Text, message.Upvotes, message.Downvotes, message.Score); err != nil {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%d  %s  %s: %s  (+%d/-%d, score %d)\n", message.Sequence, hubDisplayID(scope, message.MessageID), message.ActorID, message.Text, message.Upvotes, message.Downvotes, message.Score); err != nil {
 					return err
 				}
 			}
@@ -356,16 +453,24 @@ func newHubMessageCmd(opts *hubOptions) *cobra.Command {
 		Short: "Read one current message",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, topicID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
+			messageID, err := hubRelatedID(scope, args[1])
+			if err != nil {
+				return err
+			}
 			db, err := hubstore.OpenReadOnly(cmd.Context(), hubstore.Options{})
 			if err != nil {
 				return err
 			}
 			defer db.Close()
-			message, err := db.ReadMessage(cmd.Context(), opts.repo, args[0], args[1], historical)
+			message, err := db.ReadMessage(cmd.Context(), scope, topicID, messageID, historical)
 			if err != nil {
 				return err
 			}
-			return writeHubMessage(cmd, message, opts.asJSON)
+			return writeHubMessage(cmd, message, opts.asJSON, scope)
 		},
 	}
 	show.Flags().BoolVar(&historical, "historical", false, "Include an expired or archived current message")
@@ -376,17 +481,25 @@ func newHubMessageCmd(opts *hubOptions) *cobra.Command {
 		Short: "Read attributed message revisions",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, topicID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
+			messageID, err := hubRelatedID(scope, args[1])
+			if err != nil {
+				return err
+			}
 			db, err := hubstore.OpenReadOnly(cmd.Context(), hubstore.Options{})
 			if err != nil {
 				return err
 			}
 			defer db.Close()
-			messages, err := db.MessageHistory(cmd.Context(), opts.repo, args[0], args[1], hubstore.MessageList{})
+			messages, err := db.MessageHistory(cmd.Context(), scope, topicID, messageID, hubstore.MessageList{})
 			if err != nil {
 				return err
 			}
 			if opts.asJSON {
-				return writeHubJSON(cmd, messages)
+				return writeHubScopedJSON(cmd, messages, scope)
 			}
 			for _, message := range messages {
 				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%d  r%d  %s: %s\n", message.Sequence, message.Revision, message.ActorID, message.Text); err != nil {
@@ -406,6 +519,14 @@ func newHubMessageCmd(opts *hubOptions) *cobra.Command {
 		Short: "Append an attributed correction to a live message",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, topicID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
+			messageID, err := hubRelatedID(scope, args[1])
+			if err != nil {
+				return err
+			}
 			if clearExpiry && cmd.Flags().Changed("expires-at") {
 				return fmt.Errorf("--clear-expiry and --expires-at cannot be combined")
 			}
@@ -428,11 +549,11 @@ func newHubMessageCmd(opts *hubOptions) *cobra.Command {
 			}
 			defer db.Close()
 			input.AuthorityID = db.AuthorityID()
-			message, err := db.ReviseMessage(cmd.Context(), opts.repo, args[0], args[1], reviseActor, input)
+			message, err := db.ReviseMessage(cmd.Context(), scope, topicID, messageID, reviseActor, input)
 			if err != nil {
 				return err
 			}
-			return writeHubMessage(cmd, message, opts.asJSON)
+			return writeHubMessage(cmd, message, opts.asJSON, scope)
 		},
 	}
 	revise.Flags().StringVar(&reviseActor, "actor", "", "Original author actor ID")
@@ -457,6 +578,14 @@ func newHubVoteCmd(opts *hubOptions) *cobra.Command {
 		Long:  "Votes affect discovery only, never pull or acknowledgment order. Actor IDs are locally enrolled attribution, not independently verified identities.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, topicID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
+			messageID, err := hubRelatedID(scope, args[1])
+			if err != nil {
+				return err
+			}
 			vote := 0
 			switch value {
 			case "up":
@@ -472,11 +601,11 @@ func newHubVoteCmd(opts *hubOptions) *cobra.Command {
 				return err
 			}
 			defer db.Close()
-			message, err := db.VoteMessage(cmd.Context(), opts.repo, args[0], args[1], actor, db.AuthorityID(), revision, vote)
+			message, err := db.VoteMessage(cmd.Context(), scope, topicID, messageID, actor, db.AuthorityID(), revision, vote)
 			if err != nil {
 				return err
 			}
-			return writeHubMessage(cmd, message, opts.asJSON)
+			return writeHubMessage(cmd, message, opts.asJSON, scope)
 		},
 	}
 	cmd.Flags().StringVar(&actor, "actor", "", "Enrolled stable actor ID")
@@ -500,16 +629,24 @@ func newHubPinCmd(opts *hubOptions, pin bool) *cobra.Command {
 		Short: verb + " a live current message",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, topicID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
+			messageID, err := hubRelatedID(scope, args[1])
+			if err != nil {
+				return err
+			}
 			db, err := hubstore.Open(cmd.Context(), hubstore.Options{})
 			if err != nil {
 				return err
 			}
 			defer db.Close()
-			message, err := db.PinMessage(cmd.Context(), opts.repo, args[0], args[1], actor, db.AuthorityID(), generation, revision, pin)
+			message, err := db.PinMessage(cmd.Context(), scope, topicID, messageID, actor, db.AuthorityID(), generation, revision, pin)
 			if err != nil {
 				return err
 			}
-			return writeHubMessage(cmd, message, opts.asJSON)
+			return writeHubMessage(cmd, message, opts.asJSON, scope)
 		},
 	}
 	cmd.Flags().StringVar(&actor, "actor", "", "Topic owner or maintainer actor ID")
@@ -521,19 +658,23 @@ func newHubPinCmd(opts *hubOptions, pin bool) *cobra.Command {
 	return cmd
 }
 
-func writeHubTopic(cmd *cobra.Command, topic hubstore.Topic, asJSON bool) error {
+func writeHubTopic(cmd *cobra.Command, topic hubstore.Topic, asJSON bool, scope string) error {
 	if asJSON {
-		return writeHubJSON(cmd, topic)
+		return writeHubScopedJSON(cmd, topic, scope)
+	}
+	if topic.ScopeKind == "global" {
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Topic: %s (%s)\nScope: global\nName: %s\nDescription: %s\nOwner: %s\nState: %s\n", hubDisplayID(scope, topic.Key), hubDisplayID(scope, topic.ID), topic.Name, topic.Description, topic.OwnerActorID, topic.State)
+		return err
 	}
 	_, err := fmt.Fprintf(cmd.OutOrStdout(), "Topic: %s (%s)\nName: %s\nDescription: %s\nOwner: %s\nState: %s\n", topic.Key, topic.ID, topic.Name, topic.Description, topic.OwnerActorID, topic.State)
 	return err
 }
 
-func writeHubMessage(cmd *cobra.Command, message hubstore.Message, asJSON bool) error {
+func writeHubMessage(cmd *cobra.Command, message hubstore.Message, asJSON bool, scope string) error {
 	if asJSON {
-		return writeHubJSON(cmd, message)
+		return writeHubScopedJSON(cmd, message, scope)
 	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "Message: %s (entry %s, sequence %d)\nTopic: %s\nActor: %s\nText: %s\nVotes: +%d/-%d (score %d)\n", message.MessageID, message.EntryID, message.Sequence, message.TopicID, message.ActorID, message.Text, message.Upvotes, message.Downvotes, message.Score)
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "Message: %s (entry %s, sequence %d)\nTopic: %s\nActor: %s\nText: %s\nVotes: +%d/-%d (score %d)\n", hubDisplayID(scope, message.MessageID), hubDisplayID(scope, message.EntryID), message.Sequence, hubDisplayID(scope, message.TopicID), message.ActorID, message.Text, message.Upvotes, message.Downvotes, message.Score)
 	return err
 }
 
@@ -545,5 +686,6 @@ func writeHubJSON(cmd *cobra.Command, value any) error {
 
 type hubJSONResponse[T any] struct {
 	ContractVersion string `json:"contract_version"`
+	ScopeKind       string `json:"scope_kind,omitempty"`
 	Result          T      `json:"result"`
 }

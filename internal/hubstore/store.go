@@ -55,7 +55,7 @@ func (d *DB) Close() error        { return d.sql.Close() }
 func (d *DB) Path() string        { return d.path }
 func (d *DB) AuthorityID() string { return d.authorityID }
 
-// Open creates a v6 authority or migrates a verified older authority.
+// Open creates a v7 authority or migrates a verified older authority.
 func Open(ctx context.Context, opts Options) (*DB, error) { return open(ctx, opts, false) }
 
 // OpenReadOnly never creates a home, database, or repository marker.
@@ -328,11 +328,16 @@ func (d *DB) probeVersion(ctx context.Context, allowV1 bool) error {
 			return ErrUnsupportedFormat
 		}
 	}
+	if version >= 7 {
+		if err := tx.QueryRowContext(ctx, "SELECT digest FROM schema_migrations WHERE version=7").Scan(&digest); err != nil || digest != fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV7))) {
+			return ErrUnsupportedFormat
+		}
+	}
 	d.authorityID = id
 	return tx.Commit()
 }
 
-func (d *DB) migrate(ctx context.Context) error {
+func (d *DB) migrate(ctx context.Context) (resultErr error) {
 	var currentVersion int
 	if err := d.sql.QueryRowContext(ctx, "PRAGMA user_version").Scan(&currentVersion); err != nil {
 		return err
@@ -340,6 +345,22 @@ func (d *DB) migrate(ctx context.Context) error {
 	if currentVersion == schemaVersion {
 		return nil
 	}
+	// SQLite cannot replace a referenced table while foreign keys are enabled.
+	// Keep the rebuild atomic, then validate every relationship before commit.
+	if _, err := d.sql.ExecContext(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
+		return err
+	}
+	defer func() {
+		if _, err := d.sql.ExecContext(context.Background(), "PRAGMA foreign_keys=ON"); err != nil && resultErr == nil {
+			resultErr = err
+		}
+		var enabled int
+		if err := d.sql.QueryRowContext(context.Background(), "PRAGMA foreign_keys").Scan(&enabled); err != nil && resultErr == nil {
+			resultErr = err
+		} else if enabled != 1 && resultErr == nil {
+			resultErr = ErrUnsupportedFormat
+		}
+	}()
 	tx, err := d.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return classifySQLite(err)
@@ -443,15 +464,45 @@ func (d *DB) migrate(ctx context.Context) error {
 	} else if err := tx.QueryRowContext(ctx, "SELECT digest FROM schema_migrations WHERE version=5").Scan(&digest); err != nil || digest != fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV5))) {
 		return ErrUnsupportedFormat
 	}
-	if _, err := tx.ExecContext(ctx, schemaV6); err != nil {
+	if version < 6 {
+		if _, err := tx.ExecContext(ctx, schemaV6); err != nil {
+			return err
+		}
+		digest = fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV6)))
+		if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations VALUES (6, ?, ?)", digest, d.now().UTC().UnixMilli()); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version=6"); err != nil {
+			return err
+		}
+	} else if err := tx.QueryRowContext(ctx, "SELECT digest FROM schema_migrations WHERE version=6").Scan(&digest); err != nil || digest != fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV6))) {
+		return ErrUnsupportedFormat
+	}
+	if _, err := tx.ExecContext(ctx, schemaV7); err != nil {
 		return err
 	}
-	digest = fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV6)))
-	if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations VALUES (6, ?, ?)", digest, d.now().UTC().UnixMilli()); err != nil {
+	digest = fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV7)))
+	if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations VALUES (7, ?, ?)", digest, d.now().UTC().UnixMilli()); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "PRAGMA user_version=6"); err != nil {
+	if _, err := tx.ExecContext(ctx, "PRAGMA user_version=7"); err != nil {
 		return err
+	}
+	rows, err := tx.QueryContext(ctx, "PRAGMA foreign_key_check")
+	if err != nil {
+		return err
+	}
+	invalid := rows.Next()
+	rowErr := rows.Err()
+	closeErr := rows.Close()
+	if rowErr != nil {
+		return rowErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if invalid {
+		return ErrUnsupportedFormat
 	}
 	return tx.Commit()
 }

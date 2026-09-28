@@ -45,9 +45,22 @@ func newHubSubscribeCmd(opts *hubOptions) *cobra.Command {
 	var fromBeginning bool
 	add := &cobra.Command{
 		Use:   "add",
-		Short: "Subscribe a consumer to repository topics",
+		Short: "Subscribe to repo topics or explicit global:<topic-id> addresses",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope := opts.repo
+			resolvedTopics := make([]string, 0, len(topics))
+			for i, address := range topics {
+				topicScope, topicID, err := hubAddress(cmd, opts, address)
+				if err != nil {
+					return err
+				}
+				if i > 0 && topicScope != scope {
+					return fmt.Errorf("subscription topics must all use the same repo or global: scope")
+				}
+				scope = topicScope
+				resolvedTopics = append(resolvedTopics, topicID)
+			}
 			filters := make([]hubstore.EventTypeFilter, 0, len(typeSelectors))
 			for _, selector := range typeSelectors {
 				at := strings.LastIndexByte(selector, '@')
@@ -65,14 +78,14 @@ func newHubSubscribeCmd(opts *hubOptions) *cobra.Command {
 				return err
 			}
 			defer db.Close()
-			sub, err := db.Subscribe(cmd.Context(), opts.repo, hubstore.SubscribeInput{
-				AuthorityID: db.AuthorityID(), ConsumerID: consumer, TopicIDs: topics,
+			sub, err := db.Subscribe(cmd.Context(), scope, hubstore.SubscribeInput{
+				AuthorityID: db.AuthorityID(), ConsumerID: consumer, TopicIDs: resolvedTopics,
 				Kinds: kinds, EventTypes: filters, FromBeginning: fromBeginning,
 			})
 			if err != nil {
 				return err
 			}
-			return writeHubSubscription(cmd, sub, opts.asJSON)
+			return writeHubSubscription(cmd, sub, opts.asJSON, scope)
 		},
 	}
 	add.Flags().StringVar(&consumer, "consumer", "", "Enrolled consumer ID")
@@ -87,24 +100,28 @@ func newHubSubscribeCmd(opts *hubOptions) *cobra.Command {
 	var listConsumer string
 	var includeRemoved bool
 	list := &cobra.Command{
-		Use:   "list",
-		Short: "List one consumer's repository subscriptions",
-		Args:  cobra.NoArgs,
+		Use:   "list [global:]",
+		Short: "List repo subscriptions or pass global: for home-global",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, err := hubListScope(cmd, opts, args)
+			if err != nil {
+				return err
+			}
 			db, err := hubstore.OpenReadOnly(cmd.Context(), hubstore.Options{})
 			if err != nil {
 				return err
 			}
 			defer db.Close()
-			subs, err := db.ListSubscriptions(cmd.Context(), opts.repo, listConsumer, includeRemoved)
+			subs, err := db.ListSubscriptions(cmd.Context(), scope, listConsumer, includeRemoved)
 			if err != nil {
 				return err
 			}
 			if opts.asJSON {
-				return writeHubJSON(cmd, subs)
+				return writeHubScopedJSON(cmd, subs, scope)
 			}
 			for _, sub := range subs {
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s  ack=%d  topics=%s\n", sub.ID, sub.AcknowledgedSequence, strings.Join(sub.TopicIDs, ",")); err != nil {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s  ack=%d  topics=%s\n", hubDisplayID(scope, sub.ID), sub.AcknowledgedSequence, hubDisplayIDs(scope, sub.TopicIDs)); err != nil {
 					return err
 				}
 			}
@@ -122,16 +139,20 @@ func newHubSubscribeCmd(opts *hubOptions) *cobra.Command {
 		Short: "Remove a subscription without deleting hub history",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, subscriptionID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
 			db, err := hubstore.Open(cmd.Context(), hubstore.Options{})
 			if err != nil {
 				return err
 			}
 			defer db.Close()
-			sub, err := db.RemoveSubscription(cmd.Context(), opts.repo, removeConsumer, args[0], db.AuthorityID())
+			sub, err := db.RemoveSubscription(cmd.Context(), scope, removeConsumer, subscriptionID, db.AuthorityID())
 			if err != nil {
 				return err
 			}
-			return writeHubSubscription(cmd, sub, opts.asJSON)
+			return writeHubSubscription(cmd, sub, opts.asJSON, scope)
 		},
 	}
 	remove.Flags().StringVar(&removeConsumer, "consumer", "", "Enrolled consumer ID")
@@ -145,22 +166,26 @@ func newHubPullCmd(opts *hubOptions) *cobra.Command {
 	var limit int
 	cmd := &cobra.Command{
 		Use:   "pull <subscription-id>",
-		Short: "Read one bounded page without advancing the consumer cursor",
+		Short: "Read one page; prefix a global subscription ID with global:",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, subscriptionID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
 			db, err := hubstore.OpenReadOnly(cmd.Context(), hubstore.Options{})
 			if err != nil {
 				return err
 			}
 			defer db.Close()
-			page, err := db.Pull(cmd.Context(), opts.repo, consumer, args[0], limit)
+			page, err := db.Pull(cmd.Context(), scope, consumer, subscriptionID, limit)
 			if err != nil {
 				return err
 			}
 			if opts.asJSON {
-				return writeHubJSON(cmd, page)
+				return writeHubScopedJSON(cmd, page, scope)
 			}
-			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Subscription: %s\nScanned: %d -> %d (high-water %d)\n", page.SubscriptionID, page.PriorAcknowledged, page.NextScanPosition, page.HighWater); err != nil {
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Subscription: %s\nScanned: %d -> %d (high-water %d)\n", hubDisplayID(scope, page.SubscriptionID), page.PriorAcknowledged, page.NextScanPosition, page.HighWater); err != nil {
 				return err
 			}
 			for _, entry := range page.Entries {
@@ -169,7 +194,7 @@ func newHubPullCmd(opts *hubOptions) *cobra.Command {
 						return err
 					}
 				} else if entry.Event != nil {
-					if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Event %d  %s@%d  %s\n", entry.Event.Sequence, entry.Event.TypeKey, entry.Event.Version, entry.Event.EntryID); err != nil {
+					if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Event %d  %s@%d  %s\n", entry.Event.Sequence, entry.Event.TypeKey, entry.Event.Version, hubDisplayID(scope, entry.Event.EntryID)); err != nil {
 						return err
 					}
 				}
@@ -194,20 +219,28 @@ func newHubAckCmd(opts *hubOptions) *cobra.Command {
 	var prior, next int64
 	cmd := &cobra.Command{
 		Use:   "ack <subscription-id>",
-		Short: "Acknowledge exactly one previously pulled scan range",
+		Short: "Acknowledge one scan range; use global:<subscription-id> for global",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, subscriptionID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
 			db, err := hubstore.Open(cmd.Context(), hubstore.Options{})
 			if err != nil {
 				return err
 			}
 			defer db.Close()
-			acknowledged, err := db.Ack(cmd.Context(), opts.repo, consumer, args[0], db.AuthorityID(), prior, next, token)
+			acknowledged, err := db.Ack(cmd.Context(), scope, consumer, subscriptionID, db.AuthorityID(), prior, next, token)
 			if err != nil {
 				return err
 			}
 			if opts.asJSON {
-				return writeHubJSON(cmd, map[string]any{"subscription_id": args[0], "acknowledged_sequence": acknowledged})
+				return writeHubScopedJSON(cmd, map[string]any{"subscription_id": subscriptionID, "acknowledged_sequence": acknowledged}, scope)
+			}
+			if scope == hubstore.GlobalScopeSelector {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "Subscription: %s\nAcknowledged: %d\n", hubDisplayID(scope, subscriptionID), acknowledged)
+				return err
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Acknowledged: %d\n", acknowledged)
 			return err
@@ -224,10 +257,22 @@ func newHubAckCmd(opts *hubOptions) *cobra.Command {
 	return cmd
 }
 
-func writeHubSubscription(cmd *cobra.Command, sub hubstore.Subscription, asJSON bool) error {
+func writeHubSubscription(cmd *cobra.Command, sub hubstore.Subscription, asJSON bool, scope string) error {
 	if asJSON {
-		return writeHubJSON(cmd, sub)
+		return writeHubScopedJSON(cmd, sub, scope)
+	}
+	if scope == hubstore.GlobalScopeSelector {
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "Subscription: %s\nConsumer: %s\nScope: global (%s)\nAcknowledged: %d\n", hubDisplayID(scope, sub.ID), sub.ConsumerID, sub.ScopeID, sub.AcknowledgedSequence)
+		return err
 	}
 	_, err := fmt.Fprintf(cmd.OutOrStdout(), "Subscription: %s\nConsumer: %s\nScope: %s\nAcknowledged: %d\n", sub.ID, sub.ConsumerID, sub.ScopeID, sub.AcknowledgedSequence)
 	return err
+}
+
+func hubDisplayIDs(scope string, ids []string) string {
+	display := make([]string, len(ids))
+	for i, id := range ids {
+		display[i] = hubDisplayID(scope, id)
+	}
+	return strings.Join(display, ",")
 }

@@ -322,7 +322,7 @@ CREATE TABLE hub_meta_v5 (singleton INTEGER PRIMARY KEY CHECK (singleton=1), db_
 INSERT INTO hub_meta_v5 SELECT singleton,db_id,5,retention_epoch FROM hub_meta;
 DROP TABLE hub_meta;
 ALTER TABLE hub_meta_v5 RENAME TO hub_meta;
-DELETE FROM schema_migrations WHERE version=6;
+DELETE FROM schema_migrations WHERE version>=6;
 PRAGMA user_version=5;`)
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
@@ -340,7 +340,7 @@ PRAGMA user_version=5;`)
 	require.NoError(t, versionErr)
 	require.NoError(t, tableErr)
 	assert.Equal(t, id, migrated.AuthorityID())
-	assert.Equal(t, 6, version)
+	assert.Equal(t, 7, version)
 	assert.Equal(t, 1, votesTable)
 	assert.NoError(t, migrated.CheckIntegrity(context.Background()))
 }

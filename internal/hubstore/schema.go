@@ -1,7 +1,7 @@
 package hubstore
 
 const applicationID = 0x44534842 // DSHB
-const schemaVersion = 6
+const schemaVersion = 7
 
 // v1 is deliberately hub-only. A later migration must advance user_version and
 // insert its digest in the same transaction.
@@ -332,4 +332,28 @@ CREATE TABLE message_votes (
   PRIMARY KEY (message_id,revision,actor_id),
   FOREIGN KEY (message_id,revision) REFERENCES message_revisions(message_id,revision) ON DELETE CASCADE
 );
+`
+
+// v7 adds one home-global scope without borrowing a Git repository binding.
+// Child foreign keys keep referencing repo_scopes after the table is replaced.
+const schemaV7 = `
+CREATE TABLE hub_meta_v7 (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  db_id TEXT NOT NULL,
+  format_version INTEGER NOT NULL CHECK (format_version = 7),
+  retention_epoch INTEGER NOT NULL DEFAULT 0 CHECK (retention_epoch >= 0)
+);
+INSERT INTO hub_meta_v7 SELECT singleton, db_id, 7, retention_epoch FROM hub_meta;
+DROP TABLE hub_meta;
+ALTER TABLE hub_meta_v7 RENAME TO hub_meta;
+CREATE TABLE repo_scopes_v7 (
+  scope_id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('git', 'global')),
+  enrolled_at INTEGER NOT NULL,
+  low_water_sequence INTEGER NOT NULL DEFAULT 0 CHECK (low_water_sequence >= 0)
+);
+INSERT INTO repo_scopes_v7 SELECT scope_id, kind, enrolled_at, low_water_sequence FROM repo_scopes;
+DROP TABLE repo_scopes;
+ALTER TABLE repo_scopes_v7 RENAME TO repo_scopes;
+CREATE UNIQUE INDEX repo_scopes_one_global ON repo_scopes(kind) WHERE kind='global';
 `

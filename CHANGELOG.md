@@ -9,6 +9,10 @@
   across machines. One replaceable actor vote per message revision supplies
   advisory up/down counts and optional ranked discovery without changing pull
   order. Listener processes and blocking locks are not included.
+- Added opt-in `global:` hub topic and subscription addresses shared by
+  unrelated repositories using the same DevSpecs home. Bare repository
+  commands stay isolated; this is advisory coordination, not a resource lock
+  or cross-machine service. Existing hub data migrates transactionally.
 - Added explicit `ds prune --hub --before <RFC3339>` with dry-run, 10,000-entry
   batches, a verified pre-deletion backup, and replay-gap preservation.
   Default `ds prune` remains index-only. Optional `--vacuum` compacts the hub

@@ -13,9 +13,11 @@ import (
 )
 
 const markerFile = ".devspecs-hub-incarnation"
+const GlobalScopeSelector = "global:"
 
 type Scope struct {
 	ID        string
+	Kind      string
 	CommonDir string
 }
 
@@ -24,9 +26,12 @@ type Actor struct {
 	EnrolledAt int64 // UTC milliseconds
 }
 
-type repoEvidence struct{ path, key, marker, identity string }
+type repoEvidence struct{ path, key, marker, identity, kind string }
 
 func checkEvidence(ev repoEvidence) error {
+	if ev.kind == "global" {
+		return nil
+	}
 	data, err := os.ReadFile(filepath.Join(ev.path, markerFile))
 	if err != nil {
 		return ErrBindingConflict
@@ -42,6 +47,9 @@ func checkEvidence(ev repoEvidence) error {
 }
 
 func resolveGit(ctx context.Context, repoPath string, createMarker bool) (repoEvidence, error) {
+	if repoPath == GlobalScopeSelector {
+		return repoEvidence{kind: "global"}, nil
+	}
 	if repoPath == "" {
 		return repoEvidence{}, ErrInvalidInput
 	}
@@ -132,6 +140,14 @@ func isHex(s string) bool {
 
 // LookupRepo checks a binding without creating a marker or enrolling a scope.
 func (d *DB) LookupRepo(ctx context.Context, repoPath string) (Scope, error) {
+	if repoPath == GlobalScopeSelector {
+		var scope Scope
+		err := d.sql.QueryRowContext(ctx, "SELECT scope_id, kind FROM repo_scopes WHERE kind='global'").Scan(&scope.ID, &scope.Kind)
+		if errors.Is(err, sql.ErrNoRows) {
+			return Scope{}, ErrNotFound
+		}
+		return scope, err
+	}
 	ev, err := resolveGit(ctx, repoPath, false)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return Scope{}, err
@@ -149,6 +165,7 @@ func (d *DB) LookupRepo(ctx context.Context, repoPath string) (Scope, error) {
 		return Scope{}, ErrBindingConflict
 	}
 	scope.CommonDir = ev.path
+	scope.Kind = "git"
 	return scope, nil
 }
 
@@ -156,6 +173,28 @@ func (d *DB) LookupRepo(ctx context.Context, repoPath string) (Scope, error) {
 func (d *DB) EnrollRepo(ctx context.Context, repoPath string) (Scope, error) {
 	if d.readOnly {
 		return Scope{}, ErrUnauthorized
+	}
+	if repoPath == GlobalScopeSelector {
+		var scope Scope
+		err := d.write(ctx, func(tx *sql.Tx, now int64) error {
+			err := tx.QueryRowContext(ctx, "SELECT scope_id, kind FROM repo_scopes WHERE kind='global'").Scan(&scope.ID, &scope.Kind)
+			if err == nil {
+				return nil
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			id, err := randomID()
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "INSERT INTO repo_scopes (scope_id,kind,enrolled_at) VALUES (?,'global',?)", id, now); err != nil {
+				return uniqueOrOriginal(err)
+			}
+			scope = Scope{ID: id, Kind: "global"}
+			return nil
+		})
+		return scope, err
 	}
 	ev, markerErr := resolveGit(ctx, repoPath, false)
 	if markerErr != nil && !errors.Is(markerErr, ErrNotFound) {
@@ -170,6 +209,7 @@ func (d *DB) EnrollRepo(ctx context.Context, repoPath string) (Scope, error) {
 				return ErrBindingConflict
 			}
 			scope.CommonDir = ev.path
+			scope.Kind = "git"
 			return nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -206,7 +246,7 @@ func (d *DB) EnrollRepo(ctx context.Context, repoPath string) (Scope, error) {
 		if _, err = tx.ExecContext(ctx, "INSERT INTO scope_bindings VALUES (?, ?, ?, ?)", id, ev.key, ev.marker, ev.identity); err != nil {
 			return err
 		}
-		scope = Scope{ID: id, CommonDir: ev.path}
+		scope = Scope{ID: id, Kind: "git", CommonDir: ev.path}
 		return nil
 	})
 	return scope, err

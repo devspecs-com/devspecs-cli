@@ -20,6 +20,10 @@ func newHubTypeCmd(opts *hubOptions) *cobra.Command {
 		Short: "Register an immutable JSON Schema event version",
 		Args:  cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, topicID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
 			version, err := parseHubVersion(args[2])
 			if err != nil {
 				return err
@@ -33,11 +37,11 @@ func newHubTypeCmd(opts *hubOptions) *cobra.Command {
 				return err
 			}
 			defer db.Close()
-			schema, err := db.RegisterEventSchema(cmd.Context(), opts.repo, args[0], actor, generation, args[1], version, data)
+			schema, err := db.RegisterEventSchema(cmd.Context(), scope, topicID, actor, generation, args[1], version, data)
 			if err != nil {
 				return err
 			}
-			return writeHubSchema(cmd, schema, opts.asJSON)
+			return writeHubSchema(cmd, schema, opts.asJSON, scope)
 		},
 	}
 	register.Flags().StringVar(&actor, "actor", "", "Topic owner or maintainer actor ID")
@@ -55,6 +59,10 @@ func newHubTypeCmd(opts *hubOptions) *cobra.Command {
 		Short: "Retire an event version while preserving historical schemas",
 		Args:  cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, topicID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
 			version, err := parseHubVersion(args[2])
 			if err != nil {
 				return err
@@ -64,11 +72,11 @@ func newHubTypeCmd(opts *hubOptions) *cobra.Command {
 				return err
 			}
 			defer db.Close()
-			schema, err := db.RetireEventSchema(cmd.Context(), opts.repo, args[0], retirementActor, retirementGeneration, args[1], version)
+			schema, err := db.RetireEventSchema(cmd.Context(), scope, topicID, retirementActor, retirementGeneration, args[1], version)
 			if err != nil {
 				return err
 			}
-			return writeHubSchema(cmd, schema, opts.asJSON)
+			return writeHubSchema(cmd, schema, opts.asJSON, scope)
 		},
 	}
 	retire.Flags().StringVar(&retirementActor, "actor", "", "Topic owner or maintainer actor ID")
@@ -82,6 +90,10 @@ func newHubTypeCmd(opts *hubOptions) *cobra.Command {
 		Short: "Inspect one registered event schema",
 		Args:  cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, topicID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
 			version, err := parseHubVersion(args[2])
 			if err != nil {
 				return err
@@ -91,11 +103,11 @@ func newHubTypeCmd(opts *hubOptions) *cobra.Command {
 				return err
 			}
 			defer db.Close()
-			schema, err := db.ShowEventSchema(cmd.Context(), opts.repo, args[0], args[1], version)
+			schema, err := db.ShowEventSchema(cmd.Context(), scope, topicID, args[1], version)
 			if err != nil {
 				return err
 			}
-			return writeHubSchema(cmd, schema, opts.asJSON)
+			return writeHubSchema(cmd, schema, opts.asJSON, scope)
 		},
 	})
 	cmd.AddCommand(&cobra.Command{
@@ -103,17 +115,21 @@ func newHubTypeCmd(opts *hubOptions) *cobra.Command {
 		Short: "Discover event types and versions for a topic",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, topicID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
 			db, err := hubstore.OpenReadOnly(cmd.Context(), hubstore.Options{})
 			if err != nil {
 				return err
 			}
 			defer db.Close()
-			schemas, err := db.ListEventSchemas(cmd.Context(), opts.repo, args[0], 50, 0)
+			schemas, err := db.ListEventSchemas(cmd.Context(), scope, topicID, 50, 0)
 			if err != nil {
 				return err
 			}
 			if opts.asJSON {
-				return writeHubJSON(cmd, schemas)
+				return writeHubScopedJSON(cmd, schemas, scope)
 			}
 			for _, schema := range schemas {
 				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s@%d  %s\n", schema.TypeKey, schema.Version, schema.SHA256); err != nil {
@@ -135,11 +151,22 @@ func newHubEventCmd(opts *hubOptions) *cobra.Command {
 		Short: "Validate and atomically publish one typed event",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, topicID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
 			payload, err := readHubFile(payloadFile, 64*1024)
 			if err != nil {
 				return err
 			}
-			input := hubstore.EventInput{TypeKey: typeKey, Version: version, Payload: payload, IdempotencyKey: key, CorrectsEntryID: corrects}
+			correctsID := corrects
+			if corrects != "" {
+				correctsID, err = hubRelatedID(scope, corrects)
+				if err != nil {
+					return err
+				}
+			}
+			input := hubstore.EventInput{TypeKey: typeKey, Version: version, Payload: payload, IdempotencyKey: key, CorrectsEntryID: correctsID}
 			if cmd.Flags().Changed("expires-at") {
 				expiry, err := time.Parse(time.RFC3339, expiryText)
 				if err != nil {
@@ -153,11 +180,11 @@ func newHubEventCmd(opts *hubOptions) *cobra.Command {
 			}
 			defer db.Close()
 			input.AuthorityID = db.AuthorityID()
-			event, err := db.PublishEvent(cmd.Context(), opts.repo, args[0], actor, input)
+			event, err := db.PublishEvent(cmd.Context(), scope, topicID, actor, input)
 			if err != nil {
 				return err
 			}
-			return writeHubEvent(cmd, event, opts.asJSON)
+			return writeHubEvent(cmd, event, opts.asJSON, scope)
 		},
 	}
 	publish.Flags().StringVar(&actor, "actor", "", "Enrolled publisher actor ID")
@@ -179,16 +206,20 @@ func newHubEventCmd(opts *hubOptions) *cobra.Command {
 		Short: "Read one exact event publication",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			scope, entryID, err := hubAddress(cmd, opts, args[0])
+			if err != nil {
+				return err
+			}
 			db, err := hubstore.OpenReadOnly(cmd.Context(), hubstore.Options{})
 			if err != nil {
 				return err
 			}
 			defer db.Close()
-			event, err := db.ReadEvent(cmd.Context(), opts.repo, args[0], historical)
+			event, err := db.ReadEvent(cmd.Context(), scope, entryID, historical)
 			if err != nil {
 				return err
 			}
-			return writeHubEvent(cmd, event, opts.asJSON)
+			return writeHubEvent(cmd, event, opts.asJSON, scope)
 		},
 	}
 	show.Flags().BoolVar(&historical, "historical", false, "Include an expired or archived event")
@@ -220,18 +251,18 @@ func readHubFile(path string, max int64) ([]byte, error) {
 	return data, nil
 }
 
-func writeHubSchema(cmd *cobra.Command, schema hubstore.EventSchema, asJSON bool) error {
+func writeHubSchema(cmd *cobra.Command, schema hubstore.EventSchema, asJSON bool, scope string) error {
 	if asJSON {
-		return writeHubJSON(cmd, schema)
+		return writeHubScopedJSON(cmd, schema, scope)
 	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "Type: %s@%d\nTopic: %s\nSchema SHA256: %s\n", schema.TypeKey, schema.Version, schema.TopicID, schema.SHA256)
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "Type: %s@%d\nTopic: %s\nSchema SHA256: %s\n", schema.TypeKey, schema.Version, hubDisplayID(scope, schema.TopicID), schema.SHA256)
 	return err
 }
 
-func writeHubEvent(cmd *cobra.Command, event hubstore.Event, asJSON bool) error {
+func writeHubEvent(cmd *cobra.Command, event hubstore.Event, asJSON bool, scope string) error {
 	if asJSON {
-		return writeHubJSON(cmd, event)
+		return writeHubScopedJSON(cmd, event, scope)
 	}
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "Event: %s (sequence %d)\nType: %s@%d\nTopic: %s\nActor: %s\n", event.EntryID, event.Sequence, event.TypeKey, event.Version, event.TopicID, event.ActorID)
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "Event: %s (sequence %d)\nType: %s@%d\nTopic: %s\nActor: %s\n", hubDisplayID(scope, event.EntryID), event.Sequence, event.TypeKey, event.Version, hubDisplayID(scope, event.TopicID), event.ActorID)
 	return err
 }
