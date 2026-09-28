@@ -99,6 +99,9 @@ jobs:
       - name: Test hub process delivery and store integrity
         run: go test ./internal/hubstore ./internal/commands -run "^(TestHubE2E|TestHubQuality|TestKilledWriter|TestKilledAfter|TestKilledDuringPrune|TestConcurrentArchiveAndSchemaRegistration|TestHubTopicList|TestListTopics|TestValidateTopicListRepo|TestPruneHub(Reconciles|Rejects|Preserves|Leaves|Recovers|Clears)|TestReservePruneBackupRejectsOccupiedPathWithoutDeletingUserFile|TestWritePruneIntentPreservesExistingMarkerOnPublishFailure|TestVacuumIntoAcceptsExclusivelyCreatedEmptyDestination|TestPruneRolloverKeepsOnlyLatestOwnedBackup)" -count=1
 
+      - name: Test home-global hub scope
+        run: go test ./internal/hubstore ./internal/commands -run "^(TestGlobal|TestConcurrentGlobal|TestEnrollGlobal|TestV6Migration|TestRepositoryTopicIsNotListedInGlobalScope|TestHub.*Global|TestOpenRejectsNewerFormat)" -count=1
+
   release-package:
     name: Release package smoke
     runs-on: ubuntu-latest
