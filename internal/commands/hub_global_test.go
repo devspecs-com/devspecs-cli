@@ -324,3 +324,82 @@ func TestHubSubscribeListGlobalSelectorShowsGlobalSubscriptions(t *testing.T) {
 	require.Len(t, response.Result, 1)
 	assert.Equal(t, sub.ID, response.Result[0].ID)
 }
+
+func TestHubTopicListGlobalSelectorRejectsExplicitRepo(t *testing.T) {
+	// Arrange
+	repo := hubRepoFixture(t)
+	cmd := NewHubCmd()
+	cmd.SetArgs([]string{"topic", "list", "global:", "--repo", repo})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	assert.ErrorContains(t, err, "--repo cannot be combined")
+}
+
+func TestHubTopicListRejectsUnknownScopeSelector(t *testing.T) {
+	// Arrange
+	_ = hubRepoFixture(t)
+	cmd := NewHubCmd()
+	cmd.SetArgs([]string{"topic", "list", "workspace:"})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	assert.ErrorContains(t, err, "scope selector must be")
+}
+
+func TestHubTopicShowRejectsEmptyGlobalAddress(t *testing.T) {
+	// Arrange
+	_ = hubRepoFixture(t)
+	cmd := NewHubCmd()
+	cmd.SetArgs([]string{"topic", "show", "global:"})
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	assert.ErrorContains(t, err, "global: address requires one ID")
+}
+
+func TestHubRelatedIDGlobalAddressInGlobalScopeReturnsID(t *testing.T) {
+	// Arrange
+	address := "global:abc123"
+
+	// Act
+	id, err := hubRelatedID(hubstore.GlobalScopeSelector, address)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, "abc123", id)
+}
+
+func TestHubRelatedIDGlobalAddressInRepoScopeRejects(t *testing.T) {
+	// Arrange
+	address := "global:abc123"
+
+	// Act
+	_, err := hubRelatedID(".", address)
+
+	// Assert
+	assert.ErrorContains(t, err, "global: ID requires a global: topic")
+}
+
+func TestHubRelatedIDNestedGlobalAddressRejects(t *testing.T) {
+	// Arrange
+	address := "global:global:abc123"
+
+	// Act
+	_, err := hubRelatedID(hubstore.GlobalScopeSelector, address)
+
+	// Assert
+	assert.ErrorContains(t, err, "global: address requires one ID")
+}

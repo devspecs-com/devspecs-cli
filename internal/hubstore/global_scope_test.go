@@ -27,6 +27,37 @@ func TestEnrollGlobalScopeCreatesOneUnboundScope(t *testing.T) {
 	assert.Zero(t, bindings)
 }
 
+func TestLookupGlobalScopeBeforeEnrollmentDoesNotCreateIt(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	d := testDB(t, filepath.Join(t.TempDir(), "home"), nil)
+
+	// Act
+	_, err := d.LookupRepo(ctx, GlobalScopeSelector)
+
+	// Assert
+	assert.ErrorIs(t, err, ErrNotFound)
+	var count int
+	require.NoError(t, d.sql.QueryRowContext(ctx, "SELECT COUNT(*) FROM repo_scopes WHERE kind='global'").Scan(&count))
+	assert.Zero(t, count)
+}
+
+func TestEnrollGlobalScopeReusesExistingScope(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	d := testDB(t, filepath.Join(t.TempDir(), "home"), nil)
+	first, err := d.EnrollRepo(ctx, GlobalScopeSelector)
+	require.NoError(t, err)
+
+	// Act
+	second, err := d.EnrollRepo(ctx, GlobalScopeSelector)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, first.ID, second.ID)
+	assert.Equal(t, "global", second.Kind)
+}
+
 func TestGlobalTopicIsNotListedInRepository(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
