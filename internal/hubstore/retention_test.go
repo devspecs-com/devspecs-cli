@@ -14,6 +14,223 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestVacuumIntoAcceptsExclusivelyCreatedEmptyDestination(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	ctx := context.Background()
+	backup := filepath.Join(filepath.Dir(f.d.Path()), "exclusive-vacuum.sqlite")
+	file, err := os.OpenFile(backup, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	require.NoError(t, err)
+	require.NoError(t, file.Close())
+	claim := backup + ".claim"
+	require.NoError(t, os.Link(backup, claim))
+
+	// Act
+	_, err = f.d.sql.ExecContext(ctx, "VACUUM INTO '"+strings.ReplaceAll(backup, "'", "''")+"'")
+
+	// Assert
+	require.NoError(t, err)
+	backupInfo, err := os.Lstat(backup)
+	require.NoError(t, err)
+	claimInfo, err := os.Lstat(claim)
+	require.NoError(t, err)
+	assert.True(t, os.SameFile(backupInfo, claimInfo))
+	assert.Positive(t, backupInfo.Size())
+}
+
+func TestPruneHubRecoversBackupFromFailedTransaction(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	ctx := context.Background()
+	f.post(t, "old", "old-key", nil)
+	*f.now = f.now.Add(2 * time.Minute)
+	cutoff := f.now.Add(-time.Minute)
+	var stranded string
+	err := f.d.write(ctx, func(_ *sql.Tx, _ int64) error {
+		var backupErr error
+		stranded, backupErr = f.d.backupForPrune(ctx)
+		if backupErr != nil {
+			return backupErr
+		}
+		return ErrConflict
+	})
+	require.ErrorIs(t, err, ErrConflict)
+	require.NotEmpty(t, stranded)
+
+	// Act
+	report, err := f.d.PruneHub(ctx, cutoff)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, 1, report.Entries)
+	_, err = os.Stat(stranded)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+	_, err = os.Stat(stranded + ".claim")
+	assert.ErrorIs(t, err, os.ErrNotExist)
+	_, err = os.Stat(stranded + ".pending")
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestPruneHubClearsPendingMarkerAfterPriorFailedCleanup(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	ctx := context.Background()
+	backup := filepath.Join(filepath.Dir(f.d.Path()), "hub-prune-aabbccddeeff00112233445566778899.sqlite")
+	require.NoError(t, f.d.reservePruneBackup(backup))
+	require.NoError(t, removeClaimedPruneBackup(backup))
+
+	// Act
+	_, err := f.d.PruneHub(ctx, f.now.Add(-time.Minute))
+
+	// Assert
+	require.NoError(t, err)
+	_, err = os.Stat(backup + ".pending")
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestPruneHubPreservesIncompletePendingBackupSurvivor(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	ctx := context.Background()
+	backup := filepath.Join(filepath.Dir(f.d.Path()), "hub-prune-11223344556677889900aabbccddeeff.sqlite")
+	require.NoError(t, f.d.reservePruneBackup(backup))
+	require.NoError(t, os.Remove(backup))
+
+	// Act
+	_, err := f.d.PruneHub(ctx, f.now.Add(-time.Minute))
+
+	// Assert
+	assert.ErrorIs(t, err, ErrUnsupportedFormat)
+	_, err = os.Stat(backup + ".claim")
+	assert.NoError(t, err)
+	_, err = os.Stat(backup + ".pending")
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestWritePruneIntentPreservesExistingMarkerOnPublishFailure(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	backup := filepath.Join(filepath.Dir(f.d.Path()), "hub-prune-8899aabbccddeeff0011223344556677.sqlite")
+	marker := backup + ".pending"
+	require.NoError(t, os.WriteFile(marker, []byte("user marker"), 0o600))
+
+	// Act
+	err := f.d.writePruneIntent(backup)
+
+	// Assert
+	require.Error(t, err)
+	contents, err := os.ReadFile(marker)
+	require.NoError(t, err)
+	assert.Equal(t, "user marker", string(contents))
+	_, err = os.Stat(marker + ".tmp")
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestPruneHubReconcilesOwnedOrphanBackup(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	ctx := context.Background()
+	backup := filepath.Join(filepath.Dir(f.d.Path()), "hub-prune-0123456789abcdef0123456789abcdef.sqlite")
+	require.NoError(t, f.d.reservePruneBackup(backup))
+	require.NoError(t, os.WriteFile(backup, []byte("interrupted snapshot"), 0o600))
+
+	// Act
+	_, err := f.d.PruneHub(ctx, f.now.Add(-time.Minute))
+
+	// Assert
+	require.NoError(t, err)
+	_, err = os.Stat(backup)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+	_, err = os.Stat(backup + ".pending")
+	assert.ErrorIs(t, err, os.ErrNotExist)
+	_, err = os.Stat(backup + ".claim")
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestPruneHubRejectsReplacedPendingBackupWithoutDeletingUserFile(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	ctx := context.Background()
+	backup := filepath.Join(filepath.Dir(f.d.Path()), "hub-prune-00112233445566778899aabbccddeeff.sqlite")
+	require.NoError(t, f.d.reservePruneBackup(backup))
+	require.NoError(t, os.Remove(backup))
+	require.NoError(t, os.WriteFile(backup, []byte("user replacement"), 0o600))
+
+	// Act
+	_, err := f.d.PruneHub(ctx, f.now.Add(-time.Minute))
+
+	// Assert
+	assert.ErrorIs(t, err, ErrUnsupportedFormat)
+	content, err := os.ReadFile(backup)
+	require.NoError(t, err)
+	assert.Equal(t, "user replacement", string(content))
+	_, err = os.Stat(backup + ".pending")
+	assert.NoError(t, err)
+}
+
+func TestReservePruneBackupRejectsOccupiedPathWithoutDeletingUserFile(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	backup := filepath.Join(filepath.Dir(f.d.Path()), "hub-prune-ffeeddccbbaa99887766554433221100.sqlite")
+	require.NoError(t, os.WriteFile(backup, []byte("user file"), 0o600))
+
+	// Act
+	err := f.d.reservePruneBackup(backup)
+
+	// Assert
+	require.Error(t, err)
+	content, err := os.ReadFile(backup)
+	require.NoError(t, err)
+	assert.Equal(t, "user file", string(content))
+	_, err = os.Stat(backup + ".pending")
+	assert.ErrorIs(t, err, os.ErrNotExist)
+	_, err = os.Stat(backup + ".claim")
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestPruneHubPreservesAuditedBackupDuringIntentReconciliation(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	ctx := context.Background()
+	f.post(t, "old", "old-key", nil)
+	*f.now = f.now.Add(2 * time.Minute)
+	cutoff := f.now.Add(-time.Minute)
+	first, err := f.d.PruneHub(ctx, cutoff)
+	require.NoError(t, err)
+	require.NotEmpty(t, first.BackupPath)
+	require.NoError(t, f.d.writePruneIntent(first.BackupPath))
+
+	// Act
+	_, err = f.d.PruneHub(ctx, cutoff)
+
+	// Assert
+	require.NoError(t, err)
+	_, err = os.Stat(first.BackupPath)
+	assert.NoError(t, err)
+	_, err = os.Stat(first.BackupPath + ".pending")
+	assert.ErrorIs(t, err, os.ErrNotExist)
+	var references int
+	require.NoError(t, f.d.sql.QueryRowContext(ctx, "SELECT COUNT(*) FROM prune_audit WHERE backup_path=? AND backup_available=1", first.BackupPath).Scan(&references))
+	assert.Equal(t, 1, references)
+}
+
+func TestPruneHubLeavesUnownedMatchingBackupUntouched(t *testing.T) {
+	// Arrange
+	f := newMessageFixture(t)
+	ctx := context.Background()
+	backup := filepath.Join(filepath.Dir(f.d.Path()), "hub-prune-fedcba9876543210fedcba9876543210.sqlite")
+	require.NoError(t, os.WriteFile(backup, []byte("unowned file"), 0o600))
+
+	// Act
+	_, err := f.d.PruneHub(ctx, f.now.Add(-time.Minute))
+
+	// Assert
+	require.NoError(t, err)
+	content, err := os.ReadFile(backup)
+	require.NoError(t, err)
+	assert.Equal(t, "unowned file", string(content))
+}
+
 func TestPruneDryRunAndActualPreserveHeadAndExposeGap(t *testing.T) {
 	// Arrange
 	f := newMessageFixture(t)
@@ -431,7 +648,11 @@ func TestPruneRolloverKeepsOnlyLatestOwnedBackup(t *testing.T) {
 	assert.NotEqual(t, firstReport.BackupPath, secondReport.BackupPath)
 	_, err = os.Stat(firstReport.BackupPath)
 	assert.ErrorIs(t, err, os.ErrNotExist)
+	_, err = os.Stat(firstReport.BackupPath + ".claim")
+	assert.ErrorIs(t, err, os.ErrNotExist)
 	_, err = os.Stat(secondReport.BackupPath)
+	assert.NoError(t, err)
+	_, err = os.Stat(secondReport.BackupPath + ".claim")
 	assert.NoError(t, err)
 	var available int
 	require.NoError(t, f.d.sql.QueryRow("SELECT COUNT(*) FROM prune_audit WHERE backup_available=1").Scan(&available))

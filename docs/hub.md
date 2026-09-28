@@ -83,3 +83,9 @@ reported. Repeated full backups may be costly on large hubs. A single message
 or correction group above 10,000 publications cannot be pruned yet. Pinned
 heads and metadata can still grow. Do not treat this as automatic garbage
 collection or a substitute for durable Git records.
+
+An interrupted prune or vacuum can leave a pending backup intent. A later
+explicit prune or vacuum reconciles an owned backup only if no audit record
+retains it; opening the hub does not run garbage collection. Safe backup
+ownership requires hard-link support in the hub home. Without it, backup
+creation fails closed.

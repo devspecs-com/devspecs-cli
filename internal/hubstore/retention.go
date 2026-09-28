@@ -86,6 +86,9 @@ func (d *DB) PruneHub(ctx context.Context, cutoff time.Time) (PruneReport, error
 	if !cutoff.Before(d.now().UTC()) {
 		return PruneReport{}, ErrInvalidInput
 	}
+	if err := d.reconcilePendingPruneBackups(ctx); err != nil {
+		return PruneReport{}, err
+	}
 	plan, err := d.PlanHubPrune(ctx, cutoff)
 	if err != nil {
 		return PruneReport{}, err
@@ -222,15 +225,10 @@ func (d *DB) PruneHub(ctx context.Context, cutoff time.Time) (PruneReport, error
 		return nil
 	})
 	if err != nil {
-		var committed int
-		if backup != "" {
-			if probeErr := d.sql.QueryRowContext(ctx, "SELECT COUNT(*) FROM prune_audit WHERE backup_path=?", backup).Scan(&committed); probeErr == nil && committed == 0 {
-				_ = os.Remove(backup)
-			}
-		}
 		return PruneReport{}, err
 	}
 	report.BackupPath = backup
+	_ = os.Remove(backup + ".pending")
 	d.cleanupPruneBackups(ctx, backup, report.RetentionEpoch)
 	return report, nil
 }
@@ -413,7 +411,15 @@ func (d *DB) cleanupPruneBackups(ctx context.Context, keep string, epoch int64) 
 		if _, err := hex.DecodeString(id); err != nil {
 			continue
 		}
-		if err := os.Remove(b.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		var removeErr error
+		if _, err := os.Lstat(b.path + ".claim"); err == nil {
+			removeErr = removeClaimedPruneBackup(b.path)
+		} else if errors.Is(err, os.ErrNotExist) {
+			removeErr = os.Remove(b.path)
+		} else {
+			removeErr = err
+		}
+		if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
 			continue
 		}
 		_, _ = d.sql.ExecContext(ctx, "UPDATE prune_audit SET backup_available=0 WHERE prune_id=? AND backup_path=?", b.id, b.path)
@@ -432,6 +438,9 @@ func (d *DB) VacuumHub(ctx context.Context) (VacuumReport, error) {
 	if err := d.probe(ctx); err != nil {
 		return VacuumReport{}, err
 	}
+	if err := d.reconcilePendingPruneBackups(ctx); err != nil {
+		return VacuumReport{}, err
+	}
 	if err := d.checkpointForVacuum(ctx); err != nil {
 		return VacuumReport{}, err
 	}
@@ -448,29 +457,29 @@ func (d *DB) VacuumHub(ctx context.Context) (VacuumReport, error) {
 	if !sufficientBackupHeadroom(free, uint64(info.Size())) {
 		return result, fmt.Errorf("hub vacuum needs disk headroom: %w", ErrBusyRetryable)
 	}
-	backup, err := d.backupForPrune(ctx)
-	if err != nil {
-		return result, err
-	}
-	result.BackupPath = backup
-	id, err := randomID()
-	if err != nil {
-		_ = os.Remove(backup)
-		result.BackupPath = ""
-		return result, err
-	}
+	var backup string
 	var backupEpoch int64
 	if err := d.write(ctx, func(tx *sql.Tx, now int64) error {
+		var err error
+		backup, err = d.backupForPrune(ctx)
+		if err != nil {
+			return err
+		}
+		var id string
+		id, err = randomID()
+		if err != nil {
+			return err
+		}
 		if err := tx.QueryRowContext(ctx, "SELECT retention_epoch FROM hub_meta WHERE singleton=1").Scan(&backupEpoch); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, "INSERT INTO prune_audit (prune_id,cutoff_at,pruned_at,backup_path,entry_count,payload_bytes,retention_epoch) VALUES (?,?,?,?,0,0,?)", id, now, now, backup, backupEpoch)
+		_, err = tx.ExecContext(ctx, "INSERT INTO prune_audit (prune_id,cutoff_at,pruned_at,backup_path,entry_count,payload_bytes,retention_epoch) VALUES (?,?,?,?,0,0,?)", id, now, now, backup, backupEpoch)
 		return err
 	}); err != nil {
-		_ = os.Remove(backup)
-		result.BackupPath = ""
 		return result, err
 	}
+	result.BackupPath = backup
+	_ = os.Remove(backup + ".pending")
 	if _, err := d.sql.ExecContext(ctx, "VACUUM"); err != nil {
 		return result, classifySQLite(err)
 	}
@@ -503,13 +512,146 @@ func (d *DB) checkpointForVacuum(ctx context.Context) error {
 	return nil
 }
 
-func (d *DB) backupForPrune(ctx context.Context) (out string, err error) {
-	var candidate string
-	defer func() {
-		if err != nil && candidate != "" {
-			_ = os.Remove(candidate)
+func (d *DB) writePruneIntent(candidate string) error {
+	marker := candidate + ".pending"
+	staging := marker + ".tmp"
+	file, err := os.OpenFile(staging, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(staging)
+	if _, err = file.WriteString("hub-prune-pending-v1\n" + d.authorityID + "\n"); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err = file.Sync(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err = file.Close(); err != nil {
+		return err
+	}
+	// Linking publishes only a complete intent and never replaces an existing one.
+	return os.Link(staging, marker)
+}
+
+func (d *DB) reservePruneBackup(candidate string) error {
+	file, err := os.OpenFile(candidate, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	owned, statErr := file.Stat()
+	closeErr := file.Close()
+	if statErr != nil || closeErr != nil {
+		return errors.Join(statErr, closeErr)
+	}
+	if err := os.Link(candidate, candidate+".claim"); err != nil {
+		return err
+	}
+	claim, err := os.Lstat(candidate + ".claim")
+	if err != nil || !os.SameFile(owned, claim) {
+		return fmt.Errorf("hub prune backup reservation changed: %w", ErrUnsupportedFormat)
+	}
+	if err := d.writePruneIntent(candidate); err != nil {
+		_ = removeClaimedPruneBackup(candidate)
+		return err
+	}
+	return nil
+}
+
+func removeClaimedPruneBackup(candidate string) error {
+	backup, err := os.Lstat(candidate)
+	if err != nil {
+		return fmt.Errorf("hub prune backup ownership unavailable: %w", ErrUnsupportedFormat)
+	}
+	claim, err := os.Lstat(candidate + ".claim")
+	if err != nil || !backup.Mode().IsRegular() || !claim.Mode().IsRegular() || !os.SameFile(backup, claim) {
+		return fmt.Errorf("hub prune backup ownership changed: %w", ErrUnsupportedFormat)
+	}
+	if err := os.Remove(candidate); err != nil {
+		return err
+	}
+	return os.Remove(candidate + ".claim")
+}
+
+func (d *DB) reconcilePendingPruneBackups(ctx context.Context) error {
+	// Both prune and vacuum create snapshots while holding this same writer slot.
+	// A killed writer releases it, making its complete intent safe to inspect.
+	return d.write(ctx, func(tx *sql.Tx, _ int64) error {
+		entries, err := os.ReadDir(filepath.Dir(d.path))
+		if err != nil {
+			return err
 		}
-	}()
+		for _, entry := range entries {
+			name := entry.Name()
+			if !strings.HasPrefix(name, "hub-prune-") || !strings.HasSuffix(name, ".sqlite.pending") {
+				continue
+			}
+			id := strings.TrimSuffix(strings.TrimPrefix(name, "hub-prune-"), ".sqlite.pending")
+			if len(id) != 32 {
+				continue
+			}
+			if _, err := hex.DecodeString(id); err != nil {
+				continue
+			}
+			marker := filepath.Join(filepath.Dir(d.path), name)
+			info, err := os.Lstat(marker)
+			if err != nil || !info.Mode().IsRegular() {
+				return fmt.Errorf("unsafe hub prune intent %s: %w", marker, ErrUnsupportedFormat)
+			}
+			want := "hub-prune-pending-v1\n" + d.authorityID + "\n"
+			if info.Size() != int64(len(want)) {
+				return fmt.Errorf("unsafe hub prune intent %s: %w", marker, ErrUnsupportedFormat)
+			}
+			contents, err := os.ReadFile(marker)
+			if err != nil || string(contents) != want {
+				return fmt.Errorf("unsafe hub prune intent %s: %w", marker, ErrUnsupportedFormat)
+			}
+			candidate := strings.TrimSuffix(marker, ".pending")
+			var references int
+			if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM prune_audit WHERE backup_path=?", candidate).Scan(&references); err != nil {
+				return classifySQLite(err)
+			}
+			if references == 0 {
+				backup, backupErr := os.Lstat(candidate)
+				claim, claimErr := os.Lstat(candidate + ".claim")
+				if errors.Is(backupErr, os.ErrNotExist) && errors.Is(claimErr, os.ErrNotExist) {
+					if err := os.Remove(marker); err != nil {
+						return err
+					}
+					continue
+				}
+				if (errors.Is(backupErr, os.ErrNotExist) && claimErr == nil && claim.Mode().IsRegular()) ||
+					(errors.Is(claimErr, os.ErrNotExist) && backupErr == nil && backup.Mode().IsRegular()) {
+					// The survivor cannot be proven owned. Preserve it, but do not let
+					// an incomplete pair poison every later maintenance attempt.
+					if err := os.Remove(marker); err != nil {
+						return err
+					}
+					return fmt.Errorf("incomplete hub prune backup %s; remaining file preserved: %w", candidate, ErrUnsupportedFormat)
+				}
+				if backupErr != nil || claimErr != nil || !backup.Mode().IsRegular() || !claim.Mode().IsRegular() || !os.SameFile(backup, claim) {
+					return fmt.Errorf("unsafe hub prune backup %s: %w", candidate, ErrUnsupportedFormat)
+				}
+				// Clear the intent first: a failed unlink must not leave a marker
+				// that permanently blocks future explicit maintenance.
+				if err := os.Remove(marker); err != nil {
+					return err
+				}
+				if err := removeClaimedPruneBackup(candidate); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := os.Remove(marker); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (d *DB) backupForPrune(ctx context.Context) (out string, err error) {
 	source, err := sql.Open("sqlite", sqliteDSN(d.path, "ro"))
 	if err != nil {
 		return "", err
@@ -550,7 +692,11 @@ func (d *DB) backupForPrune(ctx context.Context) (out string, err error) {
 	if err != nil {
 		return "", err
 	}
-	candidate = filepath.Join(filepath.Dir(d.path), "hub-prune-"+id+".sqlite")
+	path := filepath.Join(filepath.Dir(d.path), "hub-prune-"+id+".sqlite")
+	if err = d.reservePruneBackup(path); err != nil {
+		return "", err
+	}
+	candidate := path
 	quoted := strings.ReplaceAll(candidate, "'", "''")
 	if _, err = source.ExecContext(ctx, "VACUUM INTO '"+quoted+"'"); err != nil {
 		return "", classifySQLite(err)
