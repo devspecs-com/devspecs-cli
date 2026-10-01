@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.5.0 - 2026-10-01
+
 - Added experimental repo-scoped `ds hub` for local coordination: discoverable
   topics, free-text messages, owner-managed JSON Schema event types, validated
   events, and durable filtered pull/ack subscriptions. The hub has its own

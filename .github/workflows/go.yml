@@ -102,6 +102,9 @@ jobs:
       - name: Test home-global hub scope
         run: go test ./internal/hubstore ./internal/commands -run "^(TestGlobal|TestConcurrentGlobal|TestEnrollGlobal|TestV6Migration|TestRepositoryTopicIsNotListedInGlobalScope|TestHub.*Global|TestOpenRejectsNewerFormat)" -count=1
 
+      - name: Test cooperative hub leases and upgrade
+        run: go test ./internal/hubstore ./internal/commands -run "^(TestAcquireLease|TestShowLease|TestRenewLease|TestReleaseLease|TestHubLease|TestOpenMigratesPopulatedV7HubToLeases)" -count=1
+
   release-package:
     name: Release package smoke
     runs-on: ubuntu-latest
