@@ -314,9 +314,17 @@ func TestOpenMigratesV5AuthorityToVotes(t *testing.T) {
 	d, err := Open(context.Background(), Options{Home: home})
 	require.NoError(t, err)
 	id := d.AuthorityID()
+	_, err = d.sql.Exec("PRAGMA foreign_keys=OFF")
+	require.NoError(t, err)
 	tx, err := d.sql.Begin()
 	require.NoError(t, err)
 	_, err = tx.Exec(`
+DROP TABLE topic_leases;
+DROP INDEX repo_scopes_one_global;
+CREATE TABLE repo_scopes_v6 (scope_id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind='git'), enrolled_at INTEGER NOT NULL, low_water_sequence INTEGER NOT NULL DEFAULT 0 CHECK (low_water_sequence>=0));
+INSERT INTO repo_scopes_v6 SELECT scope_id,kind,enrolled_at,low_water_sequence FROM repo_scopes;
+DROP TABLE repo_scopes;
+ALTER TABLE repo_scopes_v6 RENAME TO repo_scopes;
 DROP TABLE message_votes;
 CREATE TABLE hub_meta_v5 (singleton INTEGER PRIMARY KEY CHECK (singleton=1), db_id TEXT NOT NULL, format_version INTEGER NOT NULL CHECK (format_version=5), retention_epoch INTEGER NOT NULL DEFAULT 0 CHECK (retention_epoch>=0));
 INSERT INTO hub_meta_v5 SELECT singleton,db_id,5,retention_epoch FROM hub_meta;
@@ -326,6 +334,8 @@ DELETE FROM schema_migrations WHERE version>=6;
 PRAGMA user_version=5;`)
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
+	_, err = d.sql.Exec("PRAGMA foreign_keys=ON")
+	require.NoError(t, err)
 	require.NoError(t, d.Close())
 
 	// Act
@@ -340,7 +350,7 @@ PRAGMA user_version=5;`)
 	require.NoError(t, versionErr)
 	require.NoError(t, tableErr)
 	assert.Equal(t, id, migrated.AuthorityID())
-	assert.Equal(t, 7, version)
+	assert.Equal(t, schemaVersion, version)
 	assert.Equal(t, 1, votesTable)
 	assert.NoError(t, migrated.CheckIntegrity(context.Background()))
 }

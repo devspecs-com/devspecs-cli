@@ -55,7 +55,7 @@ func (d *DB) Close() error        { return d.sql.Close() }
 func (d *DB) Path() string        { return d.path }
 func (d *DB) AuthorityID() string { return d.authorityID }
 
-// Open creates a v7 authority or migrates a verified older authority.
+// Open creates a v8 authority or migrates a verified older authority.
 func Open(ctx context.Context, opts Options) (*DB, error) { return open(ctx, opts, false) }
 
 // OpenReadOnly never creates a home, database, or repository marker.
@@ -333,6 +333,11 @@ func (d *DB) probeVersion(ctx context.Context, allowV1 bool) error {
 			return ErrUnsupportedFormat
 		}
 	}
+	if version >= 8 {
+		if err := tx.QueryRowContext(ctx, "SELECT digest FROM schema_migrations WHERE version=8").Scan(&digest); err != nil || digest != fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV8))) {
+			return ErrUnsupportedFormat
+		}
+	}
 	d.authorityID = id
 	return tx.Commit()
 }
@@ -478,14 +483,28 @@ func (d *DB) migrate(ctx context.Context) (resultErr error) {
 	} else if err := tx.QueryRowContext(ctx, "SELECT digest FROM schema_migrations WHERE version=6").Scan(&digest); err != nil || digest != fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV6))) {
 		return ErrUnsupportedFormat
 	}
-	if _, err := tx.ExecContext(ctx, schemaV7); err != nil {
+	if version < 7 {
+		if _, err := tx.ExecContext(ctx, schemaV7); err != nil {
+			return err
+		}
+		digest = fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV7)))
+		if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations VALUES (7, ?, ?)", digest, d.now().UTC().UnixMilli()); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "PRAGMA user_version=7"); err != nil {
+			return err
+		}
+	} else if err := tx.QueryRowContext(ctx, "SELECT digest FROM schema_migrations WHERE version=7").Scan(&digest); err != nil || digest != fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV7))) {
+		return ErrUnsupportedFormat
+	}
+	if _, err := tx.ExecContext(ctx, schemaV8); err != nil {
 		return err
 	}
-	digest = fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV7)))
-	if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations VALUES (7, ?, ?)", digest, d.now().UTC().UnixMilli()); err != nil {
+	digest = fmt.Sprintf("%x", sha256.Sum256([]byte(schemaV8)))
+	if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations VALUES (8, ?, ?)", digest, d.now().UTC().UnixMilli()); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "PRAGMA user_version=7"); err != nil {
+	if _, err := tx.ExecContext(ctx, "PRAGMA user_version=8"); err != nil {
 		return err
 	}
 	rows, err := tx.QueryContext(ctx, "PRAGMA foreign_key_check")

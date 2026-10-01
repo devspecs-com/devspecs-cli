@@ -25,8 +25,9 @@ func NewHubCmd() *cobra.Command {
 		Short: "Share repo or opt-in home-global coordination topics",
 		Long: `Share short-lived coordination in a local SQLite hub. Topics belong to a
 Git repository across its worktrees by default. Prefix a topic or subscription
-address with global: to opt into the home-local global scope. Global messages
-are advisory, not locks. Promote lasting decisions to Git or docs.`,
+address with global: to opt into the home-local global scope. Messages are
+advisory; cooperative leases serialize only participating agents. Promote
+lasting decisions to Git or docs.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -34,7 +35,7 @@ are advisory, not locks. Promote lasting decisions to Git or docs.`,
 	}
 	cmd.PersistentFlags().StringVar(&opts.repo, "repo", ".", "Repository path (default current directory; incompatible with global:)")
 	cmd.PersistentFlags().BoolVar(&opts.asJSON, "json", false, "Output machine-readable JSON")
-	cmd.AddCommand(newHubActorCmd(opts), newHubTopicCmd(opts), newHubMessageCmd(opts), newHubTypeCmd(opts), newHubEventCmd(opts), newHubConsumerCmd(opts), newHubSubscribeCmd(opts), newHubPullCmd(opts), newHubAckCmd(opts))
+	cmd.AddCommand(newHubActorCmd(opts), newHubTopicCmd(opts), newHubMessageCmd(opts), newHubTypeCmd(opts), newHubEventCmd(opts), newHubConsumerCmd(opts), newHubSubscribeCmd(opts), newHubPullCmd(opts), newHubAckCmd(opts), newHubLeaseCmd(opts))
 	return cmd
 }
 

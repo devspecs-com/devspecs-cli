@@ -320,6 +320,7 @@ func TestV6MigrationPreservesRepositoryPublication(t *testing.T) {
 	_, err = d.sql.ExecContext(ctx, "PRAGMA foreign_keys=OFF")
 	require.NoError(t, err)
 	_, err = d.sql.ExecContext(ctx, `
+DROP TABLE topic_leases;
 DROP INDEX repo_scopes_one_global;
 CREATE TABLE repo_scopes_v6 (scope_id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind='git'), enrolled_at INTEGER NOT NULL, low_water_sequence INTEGER NOT NULL DEFAULT 0 CHECK (low_water_sequence>=0));
 INSERT INTO repo_scopes_v6 SELECT scope_id,kind,enrolled_at,low_water_sequence FROM repo_scopes;
@@ -329,7 +330,7 @@ CREATE TABLE hub_meta_v6 (singleton INTEGER PRIMARY KEY CHECK (singleton=1), db_
 INSERT INTO hub_meta_v6 SELECT singleton,db_id,6,retention_epoch FROM hub_meta;
 DROP TABLE hub_meta;
 ALTER TABLE hub_meta_v6 RENAME TO hub_meta;
-DELETE FROM schema_migrations WHERE version=7;
+DELETE FROM schema_migrations WHERE version>=7;
 PRAGMA user_version=6;`)
 	require.NoError(t, err)
 	_, err = d.sql.ExecContext(ctx, "PRAGMA foreign_keys=ON")

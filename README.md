@@ -235,7 +235,7 @@ changes to Waspflow itself. Configuration alone never starts an agent.
   dispatch configuration, checkpoint handoffs, and the command map.
 - [Hub reference](docs/hub.md): repo-scoped topics with an opt-in `global:`
   address for one home-wide scope, messages, validated events, pull
-  subscriptions, and explicit history retention.
+  subscriptions, cooperative topic leases, and explicit history retention.
 - [Index maintenance](docs/index-maintenance.md): read-only diagnostics,
   backup-first recovery, and the v1.4.0 rebuild caveat.
 

@@ -484,6 +484,8 @@ func TestRootCmd_LiveSurfaceMatchesCLISurfaceSpec(t *testing.T) {
 	assertCommandSurface(t, "ds hub consumer", consumer, spec.Tree["ds"].Children["hub"].Children["consumer"].Children, nil, nil)
 	subscribe := mustFindCommand(t, hub, "subscribe")
 	assertCommandSurface(t, "ds hub subscribe", subscribe, spec.Tree["ds"].Children["hub"].Children["subscribe"].Children, nil, nil)
+	lease := mustFindCommand(t, hub, "lease")
+	assertCommandSurface(t, "ds hub lease", lease, spec.Tree["ds"].Children["hub"].Children["lease"].Children, nil, nil)
 }
 
 func TestRootCmd_NamedThreadsHaveNoTaskOrWorkspaceCommandDuplicate(t *testing.T) {

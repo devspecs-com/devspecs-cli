@@ -1,7 +1,7 @@
 package hubstore
 
 const applicationID = 0x44534842 // DSHB
-const schemaVersion = 7
+const schemaVersion = 8
 
 // v1 is deliberately hub-only. A later migration must advance user_version and
 // insert its digest in the same transaction.
@@ -356,4 +356,28 @@ INSERT INTO repo_scopes_v7 SELECT scope_id, kind, enrolled_at, low_water_sequenc
 DROP TABLE repo_scopes;
 ALTER TABLE repo_scopes_v7 RENAME TO repo_scopes;
 CREATE UNIQUE INDEX repo_scopes_one_global ON repo_scopes(kind) WHERE kind='global';
+`
+
+// v8 adds cooperative, time-bounded admission per topic. A released row keeps
+// its generation so a stale holder cannot become current again.
+const schemaV8 = `
+CREATE TABLE hub_meta_v8 (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  db_id TEXT NOT NULL,
+  format_version INTEGER NOT NULL CHECK (format_version = 8),
+  retention_epoch INTEGER NOT NULL DEFAULT 0 CHECK (retention_epoch >= 0)
+);
+INSERT INTO hub_meta_v8 SELECT singleton, db_id, 8, retention_epoch FROM hub_meta;
+DROP TABLE hub_meta;
+ALTER TABLE hub_meta_v8 RENAME TO hub_meta;
+CREATE TABLE topic_leases (
+  topic_id TEXT PRIMARY KEY REFERENCES topics(topic_id),
+  generation INTEGER NOT NULL CHECK (generation > 0),
+  actor_id TEXT REFERENCES actors(actor_id),
+  token_hash TEXT,
+  acquired_at INTEGER,
+  expires_at INTEGER,
+  CHECK ((actor_id IS NULL AND token_hash IS NULL AND acquired_at IS NULL AND expires_at IS NULL) OR
+         (actor_id IS NOT NULL AND token_hash IS NOT NULL AND acquired_at IS NOT NULL AND expires_at IS NOT NULL))
+);
 `

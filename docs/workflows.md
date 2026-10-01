@@ -236,7 +236,7 @@ instead of indexing every worktree as a new repository.
 | `ds dispatch <task:<id>\|change:<id>> [--detach]` | Run one frozen target through an explicitly configured provider; monitor to a receipt by default. Experimental. |
 | `ds task checkpoint <task-id\|target>` | Record files, tests, misses, noise, learnings, decision evidence, and next iteration. |
 | `ds compose adr\|rfc\|prd "<title>"` | Create and index a repo-owned durable draft using established repository conventions. Experimental. |
-| `ds hub topic/message/type/event/subscribe/pull/ack` | Share local repo-scoped coordination through discoverable topics, validated events, and pull subscriptions. Experimental; see [hub reference](hub.md). |
+| `ds hub topic/message/type/event/subscribe/pull/ack/lease` | Share local repo or opt-in home-global coordination through topics, validated events, pull subscriptions, and cooperative leases. Experimental; see [hub reference](hub.md). |
 | `ds task slice add <task-id> "<title>" --after A01 --reason improve` | Add an A01-1-style follow-up slice after an improve/rework gate. |
 | `ds task refresh <task-id>` | Recapture edited task artifacts into the local index without rewriting task docs. |
 | `ds workspace init/show/change/slice/trace` | Coordinate experimental workspace-level changes, repo-local task slices, and known change/task traces. |

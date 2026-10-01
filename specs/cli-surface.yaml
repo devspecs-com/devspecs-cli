@@ -54,7 +54,7 @@ tree:
             purpose: Remove a lane only while checkpoint history still permits the graph mutation.
       hub:
         status: experimental
-        purpose: Share short-lived repo-scoped coordination without replacing task checkpoints or Git-owned decisions.
+        purpose: Share short-lived repo or opt-in home-global coordination without replacing task checkpoints or Git-owned decisions.
         children:
           actor:
             status: experimental
@@ -200,6 +200,26 @@ tree:
             status: experimental
             usage: ds hub ack <subscription-id> --consumer <id> --prior <n> --next <n> --token <token>
             purpose: Advance one subscription cursor with a validated compare-and-swap acknowledgement.
+          lease:
+            status: experimental
+            purpose: Atomically coordinate participating workers on one topic; never contain or stop their jobs.
+            children:
+              acquire:
+                status: experimental
+                usage: ds hub lease acquire <topic-id> --actor <id> [--for 30m] [--wait 5m]
+                purpose: Admit one participating actor until a bounded deadline and return a bearer token.
+              show:
+                status: experimental
+                usage: ds hub lease show <topic-id>
+                purpose: Inspect the current holder and deadline without revealing its token.
+              renew:
+                status: experimental
+                usage: ds hub lease renew <topic-id> --actor <id> --token <token> [--for 30m]
+                purpose: Extend a live lease using its current bearer token.
+              release:
+                status: experimental
+                usage: ds hub lease release <topic-id> --actor <id> --token <token>
+                purpose: Clear only the current holder's lease.
       compose:
         status: experimental
         purpose: Create repo-owned ADR, RFC, and PRD drafts using existing repository conventions.

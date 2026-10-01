@@ -3,7 +3,7 @@
 | Location | Role | Commit? |
 | --- | --- | --- |
 | `~/.devspecs/devspecs.db` | Local SQLite index and cache. | No. |
-| `~/.devspecs/hub.sqlite` | Local, authoritative repo-scoped hub topics, messages, events, and subscription cursors. Not reconstructed from the index. | No. |
+| `~/.devspecs/hub.sqlite` | Local, authoritative repo and opt-in home-global hub topics, messages, events, subscription cursors, and cooperative leases. Not reconstructed from the index. | No. |
 | `~/.devspecs/hub-prune-*.sqlite` | Verified snapshot made before an explicit hub history prune; managed by the CLI. | No. |
 | `~/.devspecs/backups/index/` | Verified manual and automatic index recovery snapshots. | No. |
 | `~/.devspecs/dispatches/<dispatch-id>/` | Frozen dispatch requests, provider handles, and normalized receipts. | No. |

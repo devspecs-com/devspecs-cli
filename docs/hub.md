@@ -33,8 +33,37 @@ Unprefixed addresses remain repo-scoped. A global subscription cannot mix
 repo and global topics. `global:` is an address prefix, not part of the stored
 topic key, and it does not create a cross-machine service. Different
 `DEVSPECS_HOME` values have separate global scopes. Messages about heavy work
-are advisory; they do not reserve resources or block concurrent jobs. Use an
-external scheduler until a real lease/fencing mechanism is implemented.
+are advisory; they do not reserve resources or block concurrent jobs. Use
+`ds hub lease` when participating agents need atomic, cooperative admission.
+
+## Cooperative leases
+
+Create or select one topic for the shared resource. Every participating agent
+must acquire it before starting work, renew before the deadline if still
+working, and release afterward:
+
+```bash
+ds hub lease acquire global:<topic-id> --actor agent-a --for 30m --wait 5m --json
+ds hub lease show global:<topic-id>
+ds hub lease renew global:<topic-id> --actor agent-a --token <token> --for 30m
+ds hub lease release global:<topic-id> --actor agent-a --token <token>
+```
+
+Use an unprefixed topic ID for a repo-only lease. An acquisition returns a
+bearer token and a deadline; keep the token private. Only the current token
+can renew or release the lease. A competing acquire fails immediately unless
+`--wait` is set. Expired leases can be acquired by another agent, and old
+tokens cannot affect the new holder. Archiving a topic blocks new admissions;
+an existing holder can still release. Waiting polls locally and does not
+promise FIFO order. A lost token cannot be recovered; its lease becomes
+available at its deadline. The first write-capable open upgrades the hub to
+schema v8, which older CLIs cannot read.
+
+This coordinates only agents that follow the protocol. The CLI does not
+launch, stop, or contain their jobs. A job that continues past its lease
+deadline can overlap its successor, and direct commands that skip the lease
+are unaffected. Participants must stop work if renewal fails or the deadline
+passes. For hard workload exclusion, use an external scheduler.
 
 Topic IDs come from `topic create` or `topic list`. The topic owner can edit,
 archive, restore, and grant maintainers. Messages can be revised by their
