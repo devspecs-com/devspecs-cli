@@ -133,3 +133,32 @@ func TestHubLeaseReleaseWithAcquiredTokenMakesTopicAvailable(t *testing.T) {
 	assert.Equal(t, "available", released.Result["state"])
 	assert.Equal(t, topic.ID, released.Result["topic_id"])
 }
+
+func TestHubLeaseRenewWithCurrentTokenExtendsDeadline(t *testing.T) {
+	// Arrange
+	_, topic := hubGlobalTopicFixture(t)
+	db, err := hubstore.Open(context.Background(), hubstore.Options{})
+	require.NoError(t, err)
+	lease, err := db.AcquireLease(context.Background(), hubstore.GlobalScopeSelector, topic.ID, "agent-a", time.Minute)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+	cmd := NewHubCmd()
+	cmd.SetArgs([]string{"lease", "renew", "global:" + topic.ID, "--actor", "agent-a", "--token", lease.Token, "--for", "1h", "--json"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	// Act
+	err = cmd.Execute()
+	var response hubJSONResponse[hubstore.Lease]
+	decodeErr := json.Unmarshal(out.Bytes(), &response)
+
+	// Assert
+	require.NoError(t, err)
+	require.NoError(t, decodeErr)
+	assert.Equal(t, "global", response.ScopeKind)
+	assert.Equal(t, "held", response.Result.State)
+	assert.Equal(t, lease.Generation, response.Result.Generation)
+	require.NotNil(t, response.Result.ExpiresAt)
+	assert.True(t, response.Result.ExpiresAt.After(*lease.ExpiresAt))
+	assert.Empty(t, response.Result.Token)
+}
