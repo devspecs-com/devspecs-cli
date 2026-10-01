@@ -33,6 +33,17 @@ const (
 	taskManifestFilename    = "task.json"
 	taskProfileCodeChange   = "code-change"
 	taskProfileGreenfield   = "greenfield"
+
+	// taskSliceSlugBudget caps a generated slice slug, including any
+	// de-duplication suffix and the follow-up ordinal added to the slice ID.
+	taskSliceSlugBudget = 64
+	// Audit verdicts for out-of-scope paths, in ascending precedence order.
+	taskAuditVerdictPackMiss   = "pack_miss"
+	taskAuditVerdictNewSurface = "new_surface"
+	taskAuditVerdictDrift      = "drift"
+
+	// taskAuditGitMaxBytes bounds the HEAD-tracking git calls the audit makes.
+	taskAuditGitMaxBytes = 1 << 20
 )
 
 var taskLifecycleStages = []string{
@@ -140,7 +151,9 @@ type taskCheckpointOptions struct {
 	Stage            string
 	Decision         string
 	Note             string
+	NoteFile         string
 	Description      string
+	DescriptionFile  string
 	Goal             string
 	Resources        []string
 	FilesRead        []string
@@ -379,6 +392,10 @@ type taskAuditOutput struct {
 	InScopePaths    []string `json:"in_scope_paths,omitempty"`
 	ReviewPaths     []string `json:"review_paths,omitempty"`
 	OutOfScopePaths []string `json:"out_of_scope_paths,omitempty"`
+	PackMissPaths   []string `json:"pack_miss_paths,omitempty"`
+	NewSurfacePaths []string `json:"new_surface_paths,omitempty"`
+	DriftPaths      []string `json:"drift_paths,omitempty"`
+	Unclassified    []string `json:"unclassified_paths,omitempty"`
 	AllowedSurface  []string `json:"allowed_surface,omitempty"`
 	ReviewSurface   []string `json:"review_surface,omitempty"`
 	Checkpoints     []string `json:"checkpoints,omitempty"`
@@ -989,8 +1006,10 @@ func newTaskCheckpointCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.Slice, "slice", "", "Deprecated alias for --target")
 	cmd.Flags().StringVar(&opts.Stage, "stage", opts.Stage, "Lifecycle stage: packed, planned, started, implemented, validated, done, blocked, completed, split, superseded, cancelled, rolled_back")
 	cmd.Flags().StringVar(&opts.Decision, "decision", opts.Decision, "Decision gate: promote, improve, rework, rollback, block, complete, split, supersede, cancel, continue")
-	cmd.Flags().StringVar(&opts.Note, "note", "", "Short checkpoint note")
-	cmd.Flags().StringVar(&opts.Description, "description", "", "What changed or was learned")
+	cmd.Flags().StringVar(&opts.Note, "note", "", "Short checkpoint note; use - to read all of stdin")
+	cmd.Flags().StringVar(&opts.NoteFile, "note-file", "", "Read the checkpoint note from a file instead of --note")
+	cmd.Flags().StringVar(&opts.Description, "description", "", taskCheckpointDescriptionFlagUsage)
+	cmd.Flags().StringVar(&opts.DescriptionFile, "description-file", "", "Read the checkpoint description from a file instead of --description")
 	cmd.Flags().StringVar(&opts.Goal, "goal", "", "Checkpoint goal")
 	cmd.Flags().StringArrayVar(&opts.Resources, "resource", nil, "Resource link/path to record; may be repeated")
 	cmd.Flags().StringArrayVar(&opts.FilesRead, "file-read", nil, "File actually read; may be repeated")
@@ -2219,6 +2238,8 @@ func renderTaskAgentPrompt(ctx taskTargetContext, target taskTargetOutput, prior
 		checkpointCommand += " --repo " + commandArg(ctx.RepoArg)
 	}
 	fmt.Fprintf(&b, "Record the outcome in `%s` or with `%s`.\n", filepath.ToSlash(taskRelativePath(ctx.RepoRoot, target.ResultPath)), checkpointCommand)
+	fmt.Fprintln(&b, "Checkpoint fields that matter for handoff: `--next-target` and `--next-decision` record what should run next, `--missed-file` and `--noise-file` record what the packed context got wrong, and `--from-git` fills edited-file evidence from the worktree.")
+	fmt.Fprintf(&b, "Validated completion example: `%s --stage validated --decision promote --from-git --test-run \"<command>\"`\n", checkpointCommand)
 	fmt.Fprintln(&b, "Checklist edits are useful notes, but lifecycle state should be recorded with `ds task checkpoint`; legacy `finish` and `decide` shortcuts are compatibility-only.")
 	fmt.Fprintln(&b, "Command roles: use `ds find` to discover and pack evidence, `ds task status` to inspect lifecycle, `ds apply` to emit the current bounded prompt, and `ds workspace trace` only for known workspace change/task links. In trace output, `status` and `index_status` are separate signals.")
 	fmt.Fprintln(&b, "At the end, recommend exactly one decision: promote, improve, rework, rollback, or block.")
@@ -2255,6 +2276,8 @@ func renderTaskCloseoutPrompt(ctx taskTargetContext, target taskTargetOutput, pr
 	fmt.Fprintf(&b, "- none: `ds task checkpoint %s --target %s --stage completed --decision complete --durable-record none%s`\n", target.TaskID, target.Target, repoArg)
 	fmt.Fprintf(&b, "- recorded: create or finish repo-owned ADR/RFC/PRD files, then run `ds task checkpoint %s --target %s --stage completed --decision complete --durable-record recorded --durable-artifact <path>%s`\n", target.TaskID, target.Target, repoArg)
 	fmt.Fprintf(&b, "- deferred: `ds task checkpoint %s --target %s --stage completed --decision complete --durable-record deferred --next-target <target>%s`\n", target.TaskID, target.Target, repoArg)
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "Checkpoint fields that matter for handoff: `--durable-record` and `--durable-artifact` record where the institutional knowledge landed, `--next-target` and `--next-decision` record what should run next when the disposition is deferred, and `--missed-file` and `--noise-file` record what the packed context got wrong.")
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "Use `ds compose adr|rfc|prd \"<title>\" --from-task "+target.TaskID+" --target "+target.Target+repoArg+"` when a new durable draft is needed. Complete its placeholders before recording it.")
 	fmt.Fprintln(&b, "ADR formats: Nygard for compact records; MADR for explicit option comparison; Y-Statement for the shortest reviewable choice; Outcome-First for async alignment; ISO 42010 Companion for stakeholders, concerns, views, and traceability.")
@@ -2540,10 +2563,18 @@ func buildTaskAuditOutput(ctx taskTargetContext, includeCurrentGitDiff bool) (ta
 		}
 	}
 
+	split := classifyTaskAuditOutOfScopePaths(ctx, outOfScope, observed.MissedFiles)
+	notes = append(notes, split.Notes...)
+
 	recommendation := "pass"
-	if len(outOfScope) > 0 {
-		recommendation = "drift"
-	} else if len(review) > 0 {
+	switch {
+	case len(split.Drift) > 0:
+		recommendation = taskAuditVerdictDrift
+	case len(split.NewSurface) > 0:
+		recommendation = taskAuditVerdictNewSurface
+	case len(split.PackMiss) > 0:
+		recommendation = taskAuditVerdictPackMiss
+	case len(split.Unclassified) > 0 || len(review) > 0:
 		recommendation = "review"
 	}
 	if len(observedChanged) == 0 {
@@ -2568,11 +2599,195 @@ func buildTaskAuditOutput(ctx taskTargetContext, includeCurrentGitDiff bool) (ta
 		InScopePaths:    inScope,
 		ReviewPaths:     review,
 		OutOfScopePaths: outOfScope,
+		PackMissPaths:   split.PackMiss,
+		NewSurfacePaths: split.NewSurface,
+		DriftPaths:      split.Drift,
+		Unclassified:    split.Unclassified,
 		AllowedSurface:  allowed,
 		ReviewSurface:   reviewSurface,
 		Checkpoints:     checkpoints,
 		Notes:           uniqueStrings(notes),
 	}, nil
+}
+
+// taskAuditScopeSplit separates out-of-scope paths into the reasons they landed
+// there: a pack that failed to predict them, a surface this slice created,
+// genuine drift into an unrelated subsystem, or facts we could not establish.
+type taskAuditScopeSplit struct {
+	PackMiss     []string
+	NewSurface   []string
+	Drift        []string
+	Unclassified []string
+	Notes        []string
+}
+
+// classifyTaskAuditOutOfScopePaths labels every out-of-scope path, in the order
+// that puts the cheapest and strongest pack evidence first:
+//
+//  1. recorded with --missed-file for this target: pack miss;
+//  2. listed in the pack's own noise_risks: pack miss, and the strongest kind,
+//     because the pack looked at the file, called it a distraction, and the
+//     slice needed it anyway;
+//  3. not tracked at HEAD: new surface this slice created;
+//  4. tracked at HEAD inside a predicted relevant area: pack miss, because Go
+//     packages are directories and the pack named the subsystem but not the file;
+//  5. tracked at HEAD but shared surface no subsystem owns, such as a
+//     repository-root file or documentation: pack miss, because drift is a claim
+//     about code subsystems and these cannot be in one;
+//  6. tracked at HEAD outside every relevant area: drift, the one case where the
+//     slice reached a source subsystem the pack never identified as relevant.
+//
+// Neither fallback asserts blame. With no relevant areas recorded there is no
+// basis for a drift claim, so a tracked unpredicted path is a pack miss. When
+// HEAD tracking cannot be established the paths stay unclassified and the
+// verdict falls to review, because calling something drift on facts we could
+// not determine is the same error this split exists to remove.
+func classifyTaskAuditOutOfScopePaths(ctx taskTargetContext, outOfScope, missedFiles []string) taskAuditScopeSplit {
+	var split taskAuditScopeSplit
+	if len(outOfScope) == 0 {
+		return split
+	}
+	noiseRisks := predictedFilePaths(ctx.Manifest.Predicted.NoiseRisks)
+	var unresolved []string
+	for _, path := range outOfScope {
+		if containsPath(missedFiles, path) || containsPath(noiseRisks, path) {
+			split.PackMiss = appendNormalizedUnique(split.PackMiss, path)
+			continue
+		}
+		unresolved = append(unresolved, normalizeSinglePath(path))
+	}
+	if len(unresolved) == 0 {
+		return split
+	}
+	tracked, ok := taskAuditTrackedAtHead(ctx.RepoRoot, unresolved)
+	if !ok {
+		split.Unclassified = appendNormalizedUnique(split.Unclassified, unresolved...)
+		split.Notes = append(split.Notes, "Git HEAD tracking could not be determined, so these paths were left unclassified rather than reported as drift.")
+		return split
+	}
+	areas := taskAuditRelevantAreas(ctx)
+	for _, path := range unresolved {
+		switch {
+		case !tracked[path]:
+			split.NewSurface = appendNormalizedUnique(split.NewSurface, path)
+		case len(areas) == 0 || taskAuditPathInRelevantArea(areas, path):
+			split.PackMiss = appendNormalizedUnique(split.PackMiss, path)
+		case taskAuditPathIsSharedSurface(path):
+			split.PackMiss = appendNormalizedUnique(split.PackMiss, path)
+		default:
+			split.Drift = appendNormalizedUnique(split.Drift, path)
+		}
+	}
+	return split
+}
+
+// taskAuditRelevantAreas returns the subsystems the pack identified as relevant.
+func taskAuditRelevantAreas(ctx taskTargetContext) []string {
+	var areas []string
+	for _, area := range ctx.Manifest.Predicted.RelevantAreas {
+		area = strings.Trim(normalizeSinglePath(area), "/")
+		if area == "" || area == "." {
+			continue
+		}
+		areas = appendUniqueString(areas, area)
+	}
+	return areas
+}
+
+// taskAuditSharedSurfaceExtensions are the documentation and configuration file
+// types that are shared surface rather than a code subsystem.
+var taskAuditSharedSurfaceExtensions = map[string]bool{
+	".md":   true,
+	".rst":  true,
+	".txt":  true,
+	".adoc": true,
+	".yaml": true,
+	".yml":  true,
+	".json": true,
+	".toml": true,
+	".ini":  true,
+	".cfg":  true,
+}
+
+// taskAuditPathIsSharedSurface reports whether a path is shared surface that no
+// subsystem owns: a repository-root file, anything under a docs directory, or a
+// documentation or configuration file anywhere. Drift is a claim about code
+// subsystems, and none of these can be in one, so they cannot drift out of an
+// area. The pack has a dedicated docs_plans_config slot; when it predicts
+// nothing there and the slice needed documentation anyway, the pack missed.
+func taskAuditPathIsSharedSurface(path string) bool {
+	path = strings.Trim(normalizeSinglePath(path), "/")
+	if path == "" {
+		return false
+	}
+	if !strings.Contains(path, "/") {
+		return true
+	}
+	for _, segment := range strings.Split(path, "/") {
+		if strings.EqualFold(segment, "docs") {
+			return true
+		}
+	}
+	return taskAuditSharedSurfaceExtensions[strings.ToLower(filepath.Ext(path))]
+}
+
+// taskAuditPathInRelevantArea matches a path prefix at a path-segment boundary,
+// so "internal/commands" covers "internal/commands/task.go" but never
+// "internal/commandsfoo/x.go".
+func taskAuditPathInRelevantArea(areas []string, path string) bool {
+	path = strings.Trim(normalizeSinglePath(path), "/")
+	for _, area := range areas {
+		if path == area || strings.HasPrefix(path, area+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// taskAuditTrackedAtHead reports which of paths are tracked in the HEAD commit.
+// Pathspecs are literal so a recorded path containing a glob character cannot
+// match something it does not name. It runs one bounded `git ls-tree` per batch
+// of pathspecs, and falls back to a single `git rev-parse` only when that call
+// fails, so a repository without commits is told apart from a directory that is
+// not a git repository at all.
+// The second return value is false when tracking could not be determined.
+func taskAuditTrackedAtHead(repoRoot string, paths []string) (map[string]bool, bool) {
+	tracked := map[string]bool{}
+	const pathspecBatch = 100
+	for start := 0; start < len(paths); start += pathspecBatch {
+		end := start + pathspecBatch
+		if end > len(paths) {
+			end = len(paths)
+		}
+		args := []string{"--literal-pathspecs", "ls-tree", "-r", "-z", "--name-only", "--full-name", "HEAD", "--"}
+		args = append(args, paths[start:end]...)
+		output, truncated, err := runBoundedGitCommand(repoRoot, taskAuditGitMaxBytes, args...)
+		if err != nil {
+			return taskAuditEmptyHeadTree(repoRoot)
+		}
+		if truncated {
+			return nil, false
+		}
+		for _, name := range strings.Split(output, "\x00") {
+			name = normalizeSinglePath(name)
+			if name == "" {
+				continue
+			}
+			tracked[name] = true
+		}
+	}
+	return tracked, true
+}
+
+// taskAuditEmptyHeadTree decides what a failed HEAD listing means: inside a git
+// repository it means there is no commit yet, so nothing is tracked; anywhere
+// else tracking is simply unknown.
+func taskAuditEmptyHeadTree(repoRoot string) (map[string]bool, bool) {
+	output, _, err := runBoundedGitCommand(repoRoot, taskAuditGitMaxBytes, "rev-parse", "--is-inside-work-tree")
+	if err != nil || !strings.EqualFold(strings.TrimSpace(output), "true") {
+		return nil, false
+	}
+	return map[string]bool{}, true
 }
 
 func writeTaskAuditHuman(out io.Writer, audit taskAuditOutput) error {
@@ -2593,8 +2808,17 @@ func writeTaskAuditHuman(out io.Writer, audit taskAuditOutput) error {
 	if len(audit.OutOfScopePaths) > 0 {
 		fmt.Fprintln(out, "Out of scope:")
 		for _, path := range audit.OutOfScopePaths {
-			fmt.Fprintf(out, "  - %s\n", path)
+			fmt.Fprintf(out, "  - %s (%s)\n", path, taskAuditPathKindLabel(audit, path))
 		}
+	}
+	if len(audit.PackMissPaths) > 0 {
+		fmt.Fprintf(out, "The pack did not predict %d files this slice needed. Record the missing code files with --missed-file so later packs improve. This is not agent drift.\n", len(audit.PackMissPaths))
+	}
+	if len(audit.NewSurfacePaths) > 0 {
+		fmt.Fprintf(out, "This slice created %d files outside the predicted surface; confirm the slice title covers them.\n", len(audit.NewSurfacePaths))
+	}
+	if len(audit.DriftPaths) > 0 {
+		fmt.Fprintf(out, "This slice edited %d source files in subsystems outside every area the pack identified as relevant; confirm the slice should reach them.\n", len(audit.DriftPaths))
 	}
 	if len(audit.Notes) > 0 {
 		fmt.Fprintln(out, "Notes:")
@@ -2603,6 +2827,19 @@ func writeTaskAuditHuman(out io.Writer, audit taskAuditOutput) error {
 		}
 	}
 	return nil
+}
+
+func taskAuditPathKindLabel(audit taskAuditOutput, path string) string {
+	switch {
+	case containsPath(audit.PackMissPaths, path):
+		return "pack miss"
+	case containsPath(audit.NewSurfacePaths, path):
+		return "new surface"
+	case containsPath(audit.DriftPaths, path):
+		return "drift"
+	default:
+		return "unclassified"
+	}
 }
 
 func readTaskObservedPathsForTarget(workspace, targetID string) (taskObservedPaths, []string, error) {
@@ -2706,7 +2943,8 @@ func newTaskIterationArtifact(parent taskSliceArtifact, ordinal int, title, reas
 		ordinal = 1
 	}
 	id := fmt.Sprintf("%s-%d", parent.ID, ordinal)
-	return taskSliceArtifactWithSlug(id, title, uniqueTaskSliceSlug(title, usedSlugs), "iteration", parent.ID, reason)
+	budget := taskSliceSlugBudget - (len(id) - len(parent.ID))
+	return taskSliceArtifactWithSlug(id, title, uniqueTaskSliceSlugWithBudget(title, usedSlugs, budget), "iteration", parent.ID, reason)
 }
 
 func taskSliceArtifactWithSlug(id, title, slug, kind, parentID, reason string) taskSliceArtifact {
@@ -2808,13 +3046,24 @@ func normalizeTaskSliceTitles(query string, values []string) []string {
 }
 
 func uniqueTaskSliceSlug(title string, used map[string]int) string {
-	slug := sanitizeTaskFilename(title)
+	return uniqueTaskSliceSlugWithBudget(title, used, taskSliceSlugBudget)
+}
+
+// uniqueTaskSliceSlugWithBudget keeps the de-duplication suffix inside budget
+// so the generated file name never exceeds what the budget implies.
+func uniqueTaskSliceSlugWithBudget(title string, used map[string]int, budget int) string {
+	slug := wordSafeTaskSlug(title, budget)
 	seen := used[slug]
 	used[slug] = seen + 1
 	if seen == 0 {
 		return slug
 	}
-	return fmt.Sprintf("%s-%d", slug, seen+1)
+	suffix := fmt.Sprintf("-%d", seen+1)
+	remaining := budget - len(suffix)
+	if budget > 0 && remaining < 1 {
+		remaining = 1
+	}
+	return wordSafeTaskSlug(title, remaining) + suffix
 }
 
 func firstTaskSliceArtifact(paths taskArtifactPaths) taskSliceArtifact {
@@ -3004,12 +3253,48 @@ func taskSliceMatchesSelector(slice taskSliceArtifact, selector string) bool {
 		slice.Plan,
 		slice.Result,
 		sanitizeTaskFilename(slice.Title),
+		taskSliceRecordedSlug(slice),
 	} {
 		if strings.EqualFold(strings.TrimSpace(candidate), selector) {
 			return true
 		}
 	}
 	return false
+}
+
+// taskSliceRecordedSlug recovers the slug a slice actually carries in its
+// generated file names, so a caller can select the slice by the slug it can
+// see on disk. It strips the record's own ID prefix and the known artifact
+// suffix rather than splitting on the first hyphen, which would mangle a
+// follow-up ID such as "B01-1". Returns "" when no slug can be recovered;
+// callers treat that as no additional candidate.
+func taskSliceRecordedSlug(slice taskSliceArtifact) string {
+	id := strings.TrimSpace(slice.ID)
+	if id == "" {
+		return ""
+	}
+	prefix := id + "-"
+	for _, candidate := range [][2]string{
+		{slice.Plan, "-plan.md"},
+		{slice.Result, "-result.md"},
+	} {
+		path := strings.TrimSpace(candidate[0])
+		if path == "" {
+			continue
+		}
+		stem := filepath.Base(filepath.ToSlash(path))
+		if !strings.HasSuffix(stem, candidate[1]) {
+			continue
+		}
+		stem = strings.TrimSuffix(stem, candidate[1])
+		if len(stem) <= len(prefix) || !strings.EqualFold(stem[:len(prefix)], prefix) {
+			continue
+		}
+		if slug := strings.Trim(stem[len(prefix):], "-"); slug != "" {
+			return slug
+		}
+	}
+	return ""
 }
 
 type taskPreflight struct {
@@ -4870,6 +5155,10 @@ func taskAdvisorySourceLeads(files []taskAdvisoryFile) []taskAdvisoryFile {
 }
 
 func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOptions) error {
+	opts, err := resolveTaskCheckpointTextInputs(cmd, opts)
+	if err != nil {
+		return err
+	}
 	target, err := checkpointTargetFromOptions(opts)
 	if err != nil {
 		return err
@@ -5145,6 +5434,85 @@ func checkpointTargetFromOptions(opts taskCheckpointOptions) (string, error) {
 		return target, nil
 	}
 	return slice, nil
+}
+
+// taskCheckpointStdinToken is the --description/--note value that means "read
+// all of stdin".
+const taskCheckpointStdinToken = "-"
+
+const taskCheckpointDescriptionFlagUsage = `What changed or was learned; use - to read all of stdin
+PowerShell here-string:
+  @'
+  line one
+  line two
+  '@ | ds task checkpoint <task> --target <id> --description -
+bash heredoc:
+  ds task checkpoint <task> --target <id> --description - <<'EOF'
+  line one
+  line two
+  EOF`
+
+// resolveTaskCheckpointTextInputs resolves the free-text checkpoint fields that
+// may come from stdin or a file. Each field accepts exactly one source, and at
+// most one field may consume stdin per invocation.
+func resolveTaskCheckpointTextInputs(cmd *cobra.Command, opts taskCheckpointOptions) (taskCheckpointOptions, error) {
+	stdinOwner := ""
+
+	description, err := resolveTaskCheckpointTextInput(cmd, opts.Description, opts.DescriptionFile, "--description", "--description-file", &stdinOwner)
+	if err != nil {
+		return opts, err
+	}
+	note, err := resolveTaskCheckpointTextInput(cmd, opts.Note, opts.NoteFile, "--note", "--note-file", &stdinOwner)
+	if err != nil {
+		return opts, err
+	}
+	opts.Description = description
+	opts.DescriptionFile = ""
+	opts.Note = note
+	opts.NoteFile = ""
+	return opts, nil
+}
+
+func resolveTaskCheckpointTextInput(cmd *cobra.Command, value, file, valueFlag, fileFlag string, stdinOwner *string) (string, error) {
+	file = strings.TrimSpace(file)
+	if file != "" {
+		if strings.TrimSpace(value) != "" {
+			return "", fmt.Errorf("use either %s or %s for the checkpoint text, not both", valueFlag, fileFlag)
+		}
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return "", fmt.Errorf("read %s %s: %w", fileFlag, file, err)
+		}
+		text := normalizeTaskCheckpointText(string(data))
+		if strings.TrimSpace(text) == "" {
+			return "", fmt.Errorf("%s %s is empty; write the text into the file or drop the flag", fileFlag, file)
+		}
+		return text, nil
+	}
+	if strings.TrimSpace(value) != taskCheckpointStdinToken {
+		return normalizeTaskCheckpointText(value), nil
+	}
+	if *stdinOwner != "" {
+		return "", fmt.Errorf("stdin already consumed by %s", *stdinOwner)
+	}
+	*stdinOwner = valueFlag
+	data, err := io.ReadAll(cmd.InOrStdin())
+	if err != nil {
+		return "", fmt.Errorf("read %s from stdin: %w", valueFlag, err)
+	}
+	text := normalizeTaskCheckpointText(string(data))
+	if strings.TrimSpace(text) == "" {
+		return "", fmt.Errorf("%s - read empty stdin; pipe text or use %s <path>", valueFlag, fileFlag)
+	}
+	return text, nil
+}
+
+// normalizeTaskCheckpointText normalizes CRLF line endings to LF and trims at
+// most one trailing newline so a PowerShell here-string and a bash heredoc
+// produce byte-identical stored text. Interior newlines are preserved.
+func normalizeTaskCheckpointText(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	return strings.TrimSuffix(text, "\n")
 }
 
 func normalizeTaskCheckpointOptions(opts taskCheckpointOptions) taskCheckpointOptions {
@@ -5580,7 +5948,7 @@ func indexTaskCheckpointFact(ctx context.Context, repoRoot string, manifest task
 		return indexOperationError("task checkpoint writer wait", autoIndexDeadlineLabel, err)
 	}
 	defer func() { _ = lease.Release() }()
-	db, err := openDBAtPath(dbPath)
+	db, err := openDBAtPathWithWriterLease(waitCtx, dbPath)
 	if err != nil {
 		return err
 	}
@@ -5997,7 +6365,7 @@ func writeTaskCheckpointCompletionContract(b *strings.Builder, slice taskSliceAr
 	fmt.Fprintln(b, "## Completion Contract")
 	fmt.Fprintf(b, "- Attempted slice: `%s` - %s\n", slice.ID, slice.Title)
 	fmt.Fprintf(b, "- Gate tested: %s\n", emptyAsDash(opts.Decision))
-	fmt.Fprintf(b, "- What changed: %s\n", taskCheckpointChangeSummary(opts))
+	writeTaskCheckpointMarkdownField(b, "What changed", taskCheckpointChangeSummary(opts))
 	fmt.Fprintf(b, "- Evidence for decision: %s\n", taskCheckpointEvidenceSummary(opts))
 	fmt.Fprintf(b, "- What remains: %s\n", taskCheckpointRemainingSummary(opts))
 	fmt.Fprintf(b, "- Next iteration: %s\n", taskCheckpointNextSummary(slice, opts))
@@ -6128,9 +6496,9 @@ func renderTaskCheckpointResultAppend(checkpointPath, checkpointJSONPath, worksp
 	fmt.Fprintf(&b, "- Source: `%s`\n", rel)
 	fmt.Fprintf(&b, "- Structured Evidence: `%s`\n", jsonRel)
 	if strings.TrimSpace(opts.Note) != "" {
-		fmt.Fprintf(&b, "- Note: %s\n", strings.TrimSpace(opts.Note))
+		writeTaskCheckpointMarkdownField(&b, "Note", strings.TrimSpace(opts.Note))
 	}
-	fmt.Fprintf(&b, "- What changed: %s\n", taskCheckpointChangeSummary(opts))
+	writeTaskCheckpointMarkdownField(&b, "What changed", taskCheckpointChangeSummary(opts))
 	fmt.Fprintf(&b, "- Evidence for decision: %s\n", taskCheckpointEvidenceSummary(opts))
 	fmt.Fprintf(&b, "- What remains: %s\n", taskCheckpointRemainingSummary(opts))
 	fmt.Fprintf(&b, "- Next iteration: %s\n", taskCheckpointNextSummary(slice, opts))
@@ -6227,6 +6595,22 @@ func markdownHeadingIndex(body, heading string) int {
 			return start
 		}
 		searchFrom = after
+	}
+}
+
+func writeTaskCheckpointMarkdownField(b *strings.Builder, label, value string) {
+	if !strings.Contains(value, "\n") {
+		fmt.Fprintf(b, "- %s: %s\n", label, value)
+		return
+	}
+	fmt.Fprintf(b, "- %s:\n\n", label)
+	// Keep paragraphs, lists, and fenced blocks inside their parent list item.
+	for _, line := range strings.Split(value, "\n") {
+		if line == "" {
+			fmt.Fprintln(b)
+		} else {
+			fmt.Fprintf(b, "  %s\n", line)
+		}
 	}
 }
 
@@ -6622,6 +7006,16 @@ func generatedTaskID(query string, now time.Time) string {
 }
 
 func sanitizeTaskFilename(value string) string {
+	out := taskFilenameWords(value)
+	if len(out) > 48 {
+		out = strings.Trim(out[:48], "-")
+	}
+	return out
+}
+
+// taskFilenameWords lowercases value and joins its alphanumeric runs with
+// single hyphens. It applies no length budget; callers decide how to cut.
+func taskFilenameWords(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	var b strings.Builder
 	lastDash := false
@@ -6640,10 +7034,49 @@ func sanitizeTaskFilename(value string) string {
 	if out == "" {
 		out = "task"
 	}
-	if len(out) > 48 {
-		out = strings.Trim(out[:48], "-")
-	}
 	return out
+}
+
+// wordSafeTaskSlug renders value as a hyphenated slug of at most budget
+// characters, cutting at the last hyphen at or before the budget so the slug
+// never ends mid-word. A first word longer than the budget is cut hard so the
+// result is always non-empty.
+func wordSafeTaskSlug(value string, budget int) string {
+	out := taskFilenameWords(value)
+	if budget <= 0 {
+		return out
+	}
+	cut := taskSlugCutIndex(out, budget)
+	if cut >= len(out) {
+		return out
+	}
+	head := out[:cut]
+	if out[cut] != '-' {
+		if idx := strings.LastIndexByte(head, '-'); idx > 0 {
+			head = head[:idx]
+		}
+	}
+	head = strings.Trim(head, "-")
+	if head == "" {
+		head = strings.Trim(out[:cut], "-")
+	}
+	if head == "" {
+		head = "task"
+	}
+	return head
+}
+
+// taskSlugCutIndex returns the byte offset of the budget-th rune in value, or
+// len(value) when value is shorter. Cutting there never splits a rune.
+func taskSlugCutIndex(value string, budget int) int {
+	count := 0
+	for i := range value {
+		if count == budget {
+			return i
+		}
+		count++
+	}
+	return len(value)
 }
 
 func validateTaskID(taskID string) error {
@@ -6927,7 +7360,7 @@ func preflightTaskIndexMutation(cmd *cobra.Command) error {
 		return taskIndexPreflightError(dbPath, indexOperationError("task index preflight writer wait", autoIndexDeadlineLabel, err))
 	}
 	defer func() { _ = lease.Release() }()
-	db, err := openDBAtPath(dbPath)
+	db, err := openDBAtPathWithWriterLease(waitCtx, dbPath)
 	if err != nil {
 		return taskIndexPreflightError(dbPath, err)
 	}

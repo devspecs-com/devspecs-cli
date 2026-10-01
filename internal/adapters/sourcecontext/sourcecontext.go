@@ -525,7 +525,7 @@ func sourceLanguage(rel string) string {
 		return "julia"
 	case ".r":
 		return "r"
-	case ".sh", ".bash", ".zsh":
+	case ".sh", ".bash", ".zsh", ".bats":
 		return "shell"
 	case ".ps1":
 		return "powershell"

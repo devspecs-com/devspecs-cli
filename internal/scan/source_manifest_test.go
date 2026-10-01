@@ -3,6 +3,7 @@ package scan
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -78,6 +79,159 @@ func TestScan_SourceManifestPopulatesCompactRowsWithoutArtifacts(t *testing.T) {
 	var artifactCount int
 	require.NoError(t, db.QueryRow("SELECT COUNT(*) FROM artifacts WHERE repo_id = ?", repo.ID).Scan(&artifactCount))
 	assert.Zero(t, artifactCount)
+}
+
+func TestScan_SourceManifestAdmitsShellExtensionsFromFirstPartyRoots(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, "lib/providers/adapter.sh", "#!/bin/sh\necho adapter\n")
+	writeScanTestFile(t, repoRoot, "scripts/verify.bash", "#!/usr/bin/env bash\necho verify\n")
+	writeScanTestFile(t, repoRoot, "tests/smoke.zsh", "#!/usr/bin/env zsh\necho smoke\n")
+	writeScanTestFile(t, repoRoot, "lib/generated/ignored.sh", "#!/bin/sh\necho generated\n")
+	writeScanTestFile(t, repoRoot, "vendor/ignored.sh", "#!/bin/sh\necho vendor\n")
+	db := openScanManifestTestDB(t)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
+
+	_, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{UseTransaction: true, SourceManifest: true})
+	require.NoError(t, err)
+	snapshot := sourceManifestSnapshot(t, db)
+
+	require.Len(t, snapshot, 3)
+	assert.Contains(t, snapshot[0], "lib/providers/adapter.sh\x00")
+	assert.Contains(t, snapshot[0], "\x00shell\x00lib\x00implementation\x00")
+	assert.Contains(t, snapshot[1], "scripts/verify.bash\x00")
+	assert.Contains(t, snapshot[1], "\x00shell\x00scripts\x00test\x00")
+	assert.Contains(t, snapshot[2], "tests/smoke.zsh\x00")
+	assert.Contains(t, snapshot[2], "\x00shell\x00tests\x00test\x00")
+}
+
+func TestScan_SourceManifestAdmitsBatsAsShellBehaviorTest(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, "test/formatter.bats", "@test \"formats TAP output\" {\n  true\n}\n")
+	db := openScanManifestTestDB(t)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
+
+	_, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{UseTransaction: true, SourceManifest: true})
+	require.NoError(t, err)
+	snapshot := sourceManifestSnapshot(t, db)
+
+	require.Len(t, snapshot, 1)
+	assert.Contains(t, snapshot[0], "test/formatter.bats\x00")
+	assert.Contains(t, snapshot[0], "\x00shell\x00test\x00test\x00")
+	assert.Contains(t, snapshot[0], "formats TAP output")
+}
+
+func TestScan_SourceManifestPersistsShellSemanticRelationshipsAndRanges(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, "bin/tool.sh", "source \"$ROOT/lib/core.sh\"\ncmd_spawn() { true; }\ncase \"$1\" in\n  spawn) cmd_spawn \"$@\" ;;\nesac\n")
+	db := openScanManifestTestDB(t)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
+
+	_, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{UseTransaction: true, SourceManifest: true})
+	require.NoError(t, err)
+	var symbol, kind, parent, ftsSymbols string
+	var line, endLine int
+	require.NoError(t, db.QueryRow(`SELECT s.symbol, s.kind, s.parent, s.line, s.end_line, f.symbols
+		FROM source_manifest_symbols s
+		JOIN source_manifest_fts f ON f.file_id = s.file_id
+		WHERE s.kind = 'dispatch'`).Scan(&symbol, &kind, &parent, &line, &endLine, &ftsSymbols))
+	assert.Equal(t, "spawn", symbol)
+	assert.Equal(t, "dispatch", kind)
+	assert.Equal(t, "cmd_spawn", parent)
+	assert.Equal(t, 4, line)
+	assert.Equal(t, 4, endLine)
+	assert.Contains(t, ftsSymbols, "spawn -> cmd_spawn (line 4)")
+}
+
+func TestScan_SourceManifestPersistsShellImportRanges(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, "bin/tool.sh", "source \"$ROOT/lib/core.sh\"\n")
+	db := openScanManifestTestDB(t)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
+
+	_, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{UseTransaction: true, SourceManifest: true})
+	require.NoError(t, err)
+	var importRef, ftsImports string
+	var line, endLine int
+	require.NoError(t, db.QueryRow(`SELECT i.import_ref, i.line, i.end_line, f.imports
+		FROM source_manifest_imports i
+		JOIN source_manifest_fts f ON f.file_id = i.file_id`).Scan(&importRef, &line, &endLine, &ftsImports))
+	assert.Equal(t, "$ROOT/lib/core.sh", importRef)
+	assert.Equal(t, 1, line)
+	assert.Equal(t, 1, endLine)
+	assert.Contains(t, ftsImports, "$ROOT/lib/core.sh (line 1)")
+}
+
+func TestScan_SourceManifestWithInvalidShell_DoesNotPersistFallbackImports(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, "bin/tool.sh", "source ./lib/core.sh\nif then\n")
+	db := openScanManifestTestDB(t)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
+
+	_, scanErr := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{UseTransaction: true, SourceManifest: true})
+	var importCount int
+	queryErr := db.QueryRow(`SELECT COUNT(*) FROM source_manifest_imports`).Scan(&importCount)
+
+	require.NoError(t, scanErr)
+	require.NoError(t, queryErr)
+	assert.Zero(t, importCount)
+}
+
+func TestScan_SourceManifestAdmitsTrackedExecutableShellEntrypoint(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git executable not available")
+	}
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, "bin/tool", "#!/usr/bin/env bash\necho tool\n")
+	runGitCommand(t, repoRoot, "init")
+	runGitCommand(t, repoRoot, "add", "bin/tool")
+	runGitCommand(t, repoRoot, "update-index", "--chmod=+x", "bin/tool")
+	db := openScanManifestTestDB(t)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
+
+	_, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{UseTransaction: true, SourceManifest: true})
+	require.NoError(t, err)
+	snapshot := sourceManifestSnapshot(t, db)
+
+	require.Len(t, snapshot, 1)
+	assert.Contains(t, snapshot[0], "bin/tool\x00")
+	assert.Contains(t, snapshot[0], "\x00shell\x00bin\x00implementation\x00")
+}
+
+func TestScan_SourceManifestRejectsNonExecutableExtensionlessShellFile(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git executable not available")
+	}
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, "scripts/helper", "#!/bin/sh\necho helper\n")
+	runGitCommand(t, repoRoot, "init")
+	runGitCommand(t, repoRoot, "add", "scripts/helper")
+	db := openScanManifestTestDB(t)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
+
+	_, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{UseTransaction: true, SourceManifest: true})
+	require.NoError(t, err)
+	snapshot := sourceManifestSnapshot(t, db)
+
+	assert.Empty(t, snapshot)
+}
+
+func TestScan_SourceManifestRejectsExecutableExtensionlessNonShellFile(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git executable not available")
+	}
+	repoRoot := t.TempDir()
+	writeScanTestFile(t, repoRoot, "bin/tool", "#!/usr/bin/env python3\nprint('tool')\n")
+	runGitCommand(t, repoRoot, "init")
+	runGitCommand(t, repoRoot, "add", "bin/tool")
+	runGitCommand(t, repoRoot, "update-index", "--chmod=+x", "bin/tool")
+	db := openScanManifestTestDB(t)
+	scanner := New(db, idgen.NewFactory(), []adapters.Adapter{&sourcecontext.Adapter{}})
+
+	_, err := scanner.RunWithOptions(context.Background(), repoRoot, nil, RunOptions{UseTransaction: true, SourceManifest: true})
+	require.NoError(t, err)
+	snapshot := sourceManifestSnapshot(t, db)
+
+	assert.Empty(t, snapshot)
 }
 
 func TestScan_SourceManifestExtractionWithOneWorkerProducesCanonicalSnapshot(t *testing.T) {

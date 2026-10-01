@@ -4,13 +4,16 @@ kind: cli_surface_tree
 metadata:
   product: devspecs-cli
   binary: ds
-  audited_at: "2026-08-12"
+  audited_at: "2026-09-26"
   source:
-    - go run ./cmd/ds --help
-    - go run ./cmd/ds task --help
-    - go run ./cmd/ds workspace --help
-    - go run ./cmd/ds compose --help
-    - go run ./cmd/ds prune --help
+    - bash scripts/dev.sh --worktree -- go run ./cmd/ds --help
+    - bash scripts/dev.sh --worktree -- go run ./cmd/ds task --help
+    - bash scripts/dev.sh --worktree -- go run ./cmd/ds workspace --help
+    - bash scripts/dev.sh --worktree -- go run ./cmd/ds compose --help
+    - bash scripts/dev.sh --worktree -- go run ./cmd/ds dispatch --help
+    - bash scripts/dev.sh --worktree -- go run ./cmd/ds prune --help
+    - bash scripts/dev.sh --worktree -- go run ./cmd/ds doctor --help
+    - bash scripts/dev.sh --worktree -- go run ./cmd/ds hub --help
     - cmd/ds/main.go
     - internal/commands
   intent: >
@@ -49,6 +52,174 @@ tree:
             status: experimental
             usage: ds thread remove <owner> <key>
             purpose: Remove a lane only while checkpoint history still permits the graph mutation.
+      hub:
+        status: experimental
+        purpose: Share short-lived repo or opt-in home-global coordination without replacing task checkpoints or Git-owned decisions.
+        children:
+          actor:
+            status: experimental
+            children:
+              enroll:
+                status: experimental
+                usage: ds hub actor enroll [actor-id]
+                purpose: Enroll stable local attribution for topic ownership and publication.
+          topic:
+            status: experimental
+            children:
+              create:
+                status: experimental
+                usage: ds hub topic create <key> --actor <id> --name <name> --description <text>
+                purpose: Create one discoverable repository topic.
+              list:
+                status: experimental
+                usage: ds hub topic list [--query <text>] [--all]
+                purpose: Discover active repository topics and optionally inspect archived ones.
+              show:
+                status: experimental
+                usage: ds hub topic show <topic-id>
+                purpose: Inspect one exact repository topic.
+              edit:
+                status: experimental
+                usage: ds hub topic edit <topic-id> --actor <id> --generation <n>
+                purpose: Update discovery text or deadline with a policy compare-and-swap guard.
+              archive:
+                status: experimental
+                usage: ds hub topic archive <topic-id> --actor <id> --generation <n> --reason <text>
+                purpose: Stop new publication while retaining topic identity and history.
+              restore:
+                status: experimental
+                usage: ds hub topic restore <topic-id> --actor <id> --generation <n> --reason <text>
+                purpose: Reopen a topic with an auditable reason and valid deadline.
+              owner:
+                status: experimental
+                children:
+                  grant:
+                    status: experimental
+                    usage: ds hub topic owner grant <topic-id> <maintainer-actor-id> --actor <owner-id> --generation <n>
+                    purpose: Delegate metadata/schema/pin management to an enrolled actor.
+                  revoke:
+                    status: experimental
+                    usage: ds hub topic owner revoke <topic-id> <maintainer-actor-id> --actor <owner-id> --generation <n>
+                    purpose: Remove delegated maintainer rights.
+                  list:
+                    status: experimental
+                    usage: ds hub topic owner list <topic-id>
+                    purpose: Inspect current delegated maintainers.
+          message:
+            status: experimental
+            children:
+              post:
+                status: experimental
+                usage: ds hub message post <topic-id> --actor <id> --text <text> [--key <retry-key>]
+                purpose: Publish attributed freetext with optional expiry and idempotent retry.
+              list:
+                status: experimental
+                usage: ds hub message list <topic-id> [--ranked]
+                purpose: Read live current messages, pinned first; optional advisory score order within pin groups.
+              show:
+                status: experimental
+                usage: ds hub message show <topic-id> <message-id> [--historical]
+                purpose: Read one current message by exact ID.
+              history:
+                status: experimental
+                usage: ds hub message history <topic-id> <message-id>
+                purpose: Read retained attributed message revisions.
+              revise:
+                status: experimental
+                usage: ds hub message revise <topic-id> <message-id> --actor <id> --revision <n> --text <text>
+                purpose: Append an attributed correction without rewriting older publications.
+              pin:
+                status: experimental
+                usage: ds hub message pin <topic-id> <message-id> --actor <id> --generation <n> --revision <n>
+                purpose: Raise a live message in discovery without extending its expiry.
+              unpin:
+                status: experimental
+                usage: ds hub message unpin <topic-id> <message-id> --actor <id> --generation <n> --revision <n>
+                purpose: Remove a live message's discovery pin.
+              vote:
+                status: experimental
+                usage: ds hub message vote <topic-id> <message-id> --actor <id> --revision <n> --value up|down|clear
+                purpose: Replace or clear one actor's advisory vote on the exact current revision; score is upvotes minus downvotes.
+          type:
+            status: experimental
+            children:
+              register:
+                status: experimental
+                usage: ds hub type register <topic-id> <type-key> <version> --schema-file <path> --actor <id> --generation <n>
+                purpose: Register one immutable JSON Schema event version.
+              retire:
+                status: experimental
+                usage: ds hub type retire <topic-id> <type-key> <version> --actor <id> --generation <n>
+                purpose: Stop new events for a version while preserving its historical schema.
+              list:
+                status: experimental
+                usage: ds hub type list <topic-id>
+                purpose: Discover registered event types and versions.
+              show:
+                status: experimental
+                usage: ds hub type show <topic-id> <type-key> <version>
+                purpose: Inspect one exact registered schema.
+          event:
+            status: experimental
+            children:
+              publish:
+                status: experimental
+                usage: ds hub event publish <topic-id> --type <key> --version <n> --payload-file <path> --actor <id>
+                purpose: Validate and atomically publish a typed event.
+              show:
+                status: experimental
+                usage: ds hub event show <entry-id> [--historical]
+                purpose: Read an exact event, including retained history when requested.
+          consumer:
+            status: experimental
+            children:
+              enroll:
+                status: experimental
+                usage: ds hub consumer enroll [consumer-id]
+                purpose: Enroll a durable consumer identity that may be shared by cooperating workers.
+          subscribe:
+            status: experimental
+            children:
+              add:
+                status: experimental
+                usage: ds hub subscribe add --consumer <id> --topic <topic-id> [--kind message|event] [--event-type key@version]
+                purpose: Create a filtered durable subscription from current high-water or retained history.
+              list:
+                status: experimental
+                usage: ds hub subscribe list --consumer <id>
+                purpose: Inspect a consumer's repository subscriptions and cursors.
+              remove:
+                status: experimental
+                usage: ds hub subscribe remove <subscription-id> --consumer <id>
+                purpose: Stop a subscription without deleting hub publications.
+          pull:
+            status: experimental
+            usage: ds hub pull <subscription-id> --consumer <id> [--limit <n>]
+            purpose: Read a bounded page with entries, gaps and an ack token without advancing the cursor.
+          ack:
+            status: experimental
+            usage: ds hub ack <subscription-id> --consumer <id> --prior <n> --next <n> --token <token>
+            purpose: Advance one subscription cursor with a validated compare-and-swap acknowledgement.
+          lease:
+            status: experimental
+            purpose: Atomically coordinate participating workers on one topic; never contain or stop their jobs.
+            children:
+              acquire:
+                status: experimental
+                usage: ds hub lease acquire <topic-id> --actor <id> [--for 30m] [--wait 5m]
+                purpose: Admit one participating actor until a bounded deadline and return a bearer token.
+              show:
+                status: experimental
+                usage: ds hub lease show <topic-id>
+                purpose: Inspect the current holder and deadline without revealing its token.
+              renew:
+                status: experimental
+                usage: ds hub lease renew <topic-id> --actor <id> --token <token> [--for 30m]
+                purpose: Extend a live lease using its current bearer token.
+              release:
+                status: experimental
+                usage: ds hub lease release <topic-id> --actor <id> --token <token>
+                purpose: Clear only the current holder's lease.
       compose:
         status: experimental
         purpose: Create repo-owned ADR, RFC, and PRD drafts using existing repository conventions.
@@ -56,6 +227,23 @@ tree:
         status: core
         usage: ds apply [task-id|change-id|target] [--thread <key>]
         purpose: Emit one bounded prompt for an unambiguous legacy target or runnable named thread.
+      dispatch:
+        status: experimental
+        usage: ds dispatch <task:<id>|change:<id>> [--detach]
+        purpose: Run one bounded target through an explicitly configured orchestration provider without granting task lifecycle authority.
+        children:
+          status:
+            status: experimental
+            usage: ds dispatch status <dispatch-id>
+            purpose: Report provider-neutral state for one durable dispatch.
+          resume:
+            status: experimental
+            usage: ds dispatch resume <dispatch-id>
+            purpose: Resume monitoring and finalize one detached or interrupted dispatch.
+          receipt:
+            status: experimental
+            usage: ds dispatch receipt <dispatch-id|receipt-path>
+            purpose: Print one bounded normalized dispatch receipt.
       tldr:
         status: core
         purpose: Show LLM-oriented workflow quickstarts.
@@ -81,7 +269,13 @@ tree:
         purpose: Rescan repository intent docs, source, tests, and git evidence with progress and timing diagnostics.
       prune:
         status: maintenance
-        purpose: Remove missing-repository data and redundant capture history, and optionally compact the SQLite database.
+        purpose: Remove stale index data by default, or explicitly prune old local hub history with --hub and a cutoff.
+      doctor:
+        status: diagnostic
+        purpose: Inspect executable precedence, installation inference, local index compatibility, writer state, and repository identity without mutation.
+      index:
+        status: maintenance
+        purpose: Back up, safely rebuild, or exactly restore the local rebuildable SQLite index.
       config:
         status: maintenance
         purpose: Inspect or edit DevSpecs discovery config.
@@ -137,7 +331,7 @@ tree:
       audit:
         status: diagnostic
         usage: ds task audit <task-id|target>
-        purpose: Check whether observed edits stayed inside one task target.
+        purpose: Check whether observed edits stayed inside one task target, separating pack misses and newly created surface from drift into a source subsystem the pack never identified as relevant.
       evaluate:
         status: diagnostic
         usage: ds task evaluate <task-id>
@@ -168,6 +362,23 @@ tree:
       iteration:
         status: hidden_compat
         purpose: Compatibility alias; prefer ds task slice add --after.
+
+  ds index:
+    status: maintenance
+    purpose: Manage the rebuildable local SQLite substrate without changing repository files.
+    children:
+      backup:
+        status: maintenance
+        usage: ds index backup [--output <file>] [--json]
+        purpose: Create a verified schema-agnostic snapshot with SQLite online backup.
+      rebuild:
+        status: maintenance
+        usage: ds index rebuild [--path <repo>] [--json]
+        purpose: Full-scan and validate a staged current-schema index before replacing the active one.
+      restore:
+        status: maintenance
+        usage: ds index restore <backup-file> [--json]
+        purpose: Restore an exact snapshot while preserving the displaced active index.
 
   ds compose:
     status: experimental
@@ -252,8 +463,8 @@ tree:
     children:
       show:
         status: maintenance
-        usage: ds config show
-        purpose: Print effective configuration.
+        usage: ds config show [--json]
+        purpose: Print effective configuration, including opaque opt-in integration settings.
       paths:
         status: maintenance
         usage: ds config paths

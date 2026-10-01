@@ -52,9 +52,11 @@ ds map when you need subsystem boundaries.
 Human work setup: use ds task for repo-local bounded work, ds compose for
 repo-owned ADRs, RFCs, and PRDs, and ds workspace for explicit multi-repo
 coordination. Use ds thread only when one task or linked workspace change has
-multiple runnable execution lanes.
+multiple runnable execution lanes. Use ds hub for ephemeral repo-scoped
+coordination; preserve lasting decisions in Git or docs.
 
-AI execution: agents should consume bounded prompts with ds apply and record
+AI execution: agents should consume bounded prompts with ds apply or run one
+through an explicitly configured orchestration provider with ds dispatch. Record
 evidence with ds task checkpoint, ds task evaluate, or ds task audit. If apply
 is ambiguous, inspect ds thread and select one lane with ds apply --thread.
 
@@ -88,13 +90,17 @@ remotes, document text, or raw queries. Disable with DEVSPECS_TELEMETRY=0.`,
 	rootCmd.AddCommand(commands.NewThreadCmd())
 	rootCmd.AddCommand(commands.NewComposeCmd())
 	rootCmd.AddCommand(commands.NewApplyCmd())
+	rootCmd.AddCommand(commands.NewDispatchCmd())
 	rootCmd.AddCommand(commands.NewWorkspaceCmd())
+	rootCmd.AddCommand(commands.NewHubCmd())
 	addHiddenWorkspaceCompatibilityCommand(rootCmd, commands.NewChangeCmd(), "ds workspace change")
 	addHiddenWorkspaceCompatibilityCommand(rootCmd, commands.NewSliceCmd(), "ds workspace slice")
 	addHiddenWorkspaceCompatibilityCommand(rootCmd, commands.NewTraceCmd(), "ds workspace trace")
 	rootCmd.AddCommand(commands.NewTLDRCmd())
 	rootCmd.AddCommand(commands.NewUpdateCmd())
 	rootCmd.AddCommand(commands.NewPruneCmd())
+	rootCmd.AddCommand(commands.NewDoctorCmd())
+	rootCmd.AddCommand(commands.NewIndexCmd())
 	rootCmd.AddCommand(commands.NewResolveCmd())
 	rootCmd.AddCommand(commands.NewContextCmd())
 	rootCmd.AddCommand(commands.NewTodosCmd())
@@ -132,7 +138,9 @@ func assignRootCommandGroups(rootCmd *cobra.Command) {
 		"thread":    rootGroupHumanWorkSetup,
 		"compose":   rootGroupHumanWorkSetup,
 		"workspace": rootGroupHumanWorkSetup,
+		"hub":       rootGroupHumanWorkSetup,
 		"apply":     rootGroupAIExecution,
+		"dispatch":  rootGroupAIExecution,
 		"tldr":      rootGroupAIExecution,
 		"change":    rootGroupAdvanced,
 		"slice":     rootGroupAdvanced,
@@ -141,6 +149,8 @@ func assignRootCommandGroups(rootCmd *cobra.Command) {
 		"config":    rootGroupAdvanced,
 		"update":    rootGroupAdvanced,
 		"prune":     rootGroupAdvanced,
+		"doctor":    rootGroupAdvanced,
+		"index":     rootGroupAdvanced,
 		"version":   rootGroupAdvanced,
 	}
 	for _, cmd := range rootCmd.Commands() {

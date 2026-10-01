@@ -69,6 +69,68 @@ func decodeApplyPromptOutput(t *testing.T, buf *bytes.Buffer) applyPromptOutput 
 	return out
 }
 
+func TestApplyPrompt_WhenTargetIsLastSlice_ShowsValidatedCompletionWithoutNextTarget(t *testing.T) {
+	// Arrange
+	setupApplyTask(t, "apply-handoff-flags", "A", "only handoff slice")
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"next", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	out := decodeApplyPromptOutput(t, buf)
+	assert.Contains(t, out.Prompt, "Checkpoint fields that matter for handoff: `--next-target` and `--next-decision` record what should run next, `--missed-file` and `--noise-file` record what the packed context got wrong, and `--from-git` fills edited-file evidence from the worktree.",
+		"apply prompt missing checkpoint handoff flag guidance:\n%s", out.Prompt)
+	assert.Contains(t, out.Prompt, "Validated completion example: `ds task checkpoint apply-handoff-flags --target A01 --stage validated --decision promote --from-git --test-run \"<command>\"`",
+		"apply prompt missing copy-pasteable checkpoint example:\n%s", out.Prompt)
+	assert.NotContains(t, out.Prompt, "--next-target <next-target>")
+	assert.NotContains(t, out.Prompt, "--next-decision promote")
+}
+
+func TestApplyPrompt_WhenTargetIsNotLastSlice_ExampleDoesNotGuessNextTarget(t *testing.T) {
+	// Arrange
+	setupApplyTask(t, "apply-next-target-example", "A", "first handoff slice", "second handoff slice")
+	cmd := NewApplyCmd()
+	cmd.SetArgs([]string{"next", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	out := decodeApplyPromptOutput(t, buf)
+	assert.Equal(t, "A01", out.Target)
+	assert.Contains(t, out.Prompt, "Validated completion example: `ds task checkpoint apply-next-target-example --target A01 --stage validated --decision promote --from-git --test-run \"<command>\"`")
+	assert.NotContains(t, out.Prompt, "--next-target A02")
+	assert.NotContains(t, out.Prompt, "--decision continue")
+}
+
+func TestApplyPrompt_WhenRenderingBoundedSlice_MatchesGolden(t *testing.T) {
+	ctx := taskTargetContext{RepoRoot: "."}
+	target := taskTargetOutput{
+		TaskID:         "apply-golden",
+		Target:         "A01",
+		Title:          "First bounded slice",
+		Kind:           "slice",
+		PlanPath:       filepath.Join("devspecs", "tasks", "apply-golden", "A01-plan.md"),
+		ResultPath:     filepath.Join("devspecs", "tasks", "apply-golden", "A01-result.md"),
+		SiblingTargets: []string{"A02"},
+		PlanBody:       "# First slice\n\n- [ ] Validate the bounded change.",
+	}
+
+	prompt := renderTaskAgentPrompt(ctx, target, nil)
+
+	encoded, err := json.Marshal(prompt)
+	require.NoError(t, err)
+	assertGolden(t, "apply_prompt", encoded)
+}
+
 func TestApplyNextEmitsOneSlicePromptWithoutChangingState(t *testing.T) {
 	repoDir := setupApplyTask(t, "apply-next-test", "", "first apply slice", "second apply slice")
 	manifestPath := filepath.Join(repoDir, "devspecs", "tasks", "apply-next-test", taskManifestFilename)

@@ -112,6 +112,7 @@ func TestRootCmd_HelpGroupsCommandsByActor(t *testing.T) {
 		"Advanced and maintenance",
 		"  scan        Rescan repository intent docs, source, tests, and git evidence",
 		"  prune       Remove stale and redundant data from the local index",
+		"  index       Back up, rebuild, or restore the local index",
 	} {
 		require.Contains(t, got, want,
 			"expected grouped help to contain %q, got:\n%s", want, got)
@@ -171,6 +172,37 @@ func TestRootCmd_ApplyRegistered(t *testing.T) {
 	assert.Contains(t, got, "Emit an agent prompt for exactly one DevSpecs task target.")
 	assert.Contains(t, got, "apply [task-id|change-id|target]")
 	assert.Contains(t, got, "--thread string")
+}
+
+func TestRootCmd_DispatchRegisteredInAIExecutionGroup(t *testing.T) {
+	// Arrange
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"--help"})
+	var output bytes.Buffer
+	cmd.SetOut(&output)
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	assert.Contains(t, output.String(), "AI execution")
+	assert.Contains(t, output.String(), "dispatch")
+	assert.Contains(t, output.String(), "Run one bounded target")
+}
+
+func TestRootCmd_DoctorRegisteredInAdvancedGroup(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"--help"})
+	output := &bytes.Buffer{}
+	cmd.SetOut(output)
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	assert.Contains(t, output.String(), "Advanced and maintenance")
+	assert.Contains(t, output.String(), "doctor")
+	assert.Contains(t, output.String(), "Diagnose the active CLI")
 }
 
 func TestRootCmd_ComposeHelp_ExplainsTypeAndFormatBoundaries(t *testing.T) {
@@ -433,6 +465,27 @@ func TestRootCmd_LiveSurfaceMatchesCLISurfaceSpec(t *testing.T) {
 
 	config := mustFindCommand(t, root, "config")
 	assertCommandSurface(t, "ds config", config, spec.Tree["ds config"].Children, nil, nil)
+
+	hub := mustFindCommand(t, root, "hub")
+	assertCommandSurface(t, "ds hub", hub, spec.Tree["ds"].Children["hub"].Children, nil, nil)
+	actor := mustFindCommand(t, hub, "actor")
+	assertCommandSurface(t, "ds hub actor", actor, spec.Tree["ds"].Children["hub"].Children["actor"].Children, nil, nil)
+	topic := mustFindCommand(t, hub, "topic")
+	assertCommandSurface(t, "ds hub topic", topic, spec.Tree["ds"].Children["hub"].Children["topic"].Children, nil, nil)
+	owner := mustFindCommand(t, topic, "owner")
+	assertCommandSurface(t, "ds hub topic owner", owner, spec.Tree["ds"].Children["hub"].Children["topic"].Children["owner"].Children, nil, nil)
+	message := mustFindCommand(t, hub, "message")
+	assertCommandSurface(t, "ds hub message", message, spec.Tree["ds"].Children["hub"].Children["message"].Children, nil, nil)
+	eventType := mustFindCommand(t, hub, "type")
+	assertCommandSurface(t, "ds hub type", eventType, spec.Tree["ds"].Children["hub"].Children["type"].Children, nil, nil)
+	event := mustFindCommand(t, hub, "event")
+	assertCommandSurface(t, "ds hub event", event, spec.Tree["ds"].Children["hub"].Children["event"].Children, nil, nil)
+	consumer := mustFindCommand(t, hub, "consumer")
+	assertCommandSurface(t, "ds hub consumer", consumer, spec.Tree["ds"].Children["hub"].Children["consumer"].Children, nil, nil)
+	subscribe := mustFindCommand(t, hub, "subscribe")
+	assertCommandSurface(t, "ds hub subscribe", subscribe, spec.Tree["ds"].Children["hub"].Children["subscribe"].Children, nil, nil)
+	lease := mustFindCommand(t, hub, "lease")
+	assertCommandSurface(t, "ds hub lease", lease, spec.Tree["ds"].Children["hub"].Children["lease"].Children, nil, nil)
 }
 
 func TestRootCmd_NamedThreadsHaveNoTaskOrWorkspaceCommandDuplicate(t *testing.T) {

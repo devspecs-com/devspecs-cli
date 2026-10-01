@@ -233,7 +233,9 @@ CREATE TABLE IF NOT EXISTS source_manifest_symbols (
   file_id TEXT NOT NULL,
   symbol  TEXT NOT NULL,
   kind    TEXT NOT NULL DEFAULT '',
+  parent  TEXT NOT NULL DEFAULT '',
   line    INTEGER NOT NULL DEFAULT 0,
+  end_line INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY (file_id) REFERENCES source_manifest(file_id) ON DELETE CASCADE
 );
 
@@ -242,6 +244,7 @@ CREATE TABLE IF NOT EXISTS source_manifest_tests (
   test_name TEXT NOT NULL,
   parent    TEXT NOT NULL DEFAULT '',
   line      INTEGER NOT NULL DEFAULT 0,
+  end_line  INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY (file_id) REFERENCES source_manifest(file_id) ON DELETE CASCADE
 );
 
@@ -249,6 +252,7 @@ CREATE TABLE IF NOT EXISTS source_manifest_imports (
   file_id    TEXT NOT NULL,
   import_ref TEXT NOT NULL,
   line       INTEGER NOT NULL DEFAULT 0,
+  end_line   INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY (file_id) REFERENCES source_manifest(file_id) ON DELETE CASCADE
 );
 

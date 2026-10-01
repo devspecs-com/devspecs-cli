@@ -2,6 +2,129 @@
 
 ## Unreleased
 
+## v1.5.0 - 2026-10-01
+
+- Added experimental repo-scoped `ds hub` for local coordination: discoverable
+  topics, free-text messages, owner-managed JSON Schema event types, validated
+  events, and durable filtered pull/ack subscriptions. The hub has its own
+  SQLite authority and is not rebuilt from the source index or synchronized
+  across machines. One replaceable actor vote per message revision supplies
+  advisory up/down counts and optional ranked discovery without changing pull
+  order. Listener processes and workload-enforcing locks are not included.
+- Added opt-in `global:` hub topic and subscription addresses shared by
+  unrelated repositories using the same DevSpecs home. Bare repository
+  commands stay isolated; this is not a cross-machine service. Existing hub
+  data migrates transactionally.
+- Added experimental `ds hub lease acquire|show|renew|release` for atomic,
+  time-bounded cooperative admission on repo or explicit `global:` topics.
+  Holder tokens prevent stale renewal/release. Expired leases can be reclaimed,
+  so participants must stop or renew before their deadline; DevSpecs does not
+  contain jobs or block commands that skip the protocol. Hub schema v8
+  migrates older local authorities on first write-capable open.
+- Added explicit `ds prune --hub --before <RFC3339>` with dry-run, 10,000-entry
+  batches, a verified pre-deletion backup, and replay-gap preservation.
+  Default `ds prune` remains index-only. Optional `--vacuum` compacts the hub
+  file and reports measured bytes reclaimed. Explicit cutoff pruning now
+  includes old unpinned one-shot messages and complete old event correction
+  chains. Large-hub cost, retained metadata growth, and groups exceeding the
+  10,000-publication batch limit remain under review; this is not automatic
+  garbage collection.
+- Made `ds map` and `ds recent` fail with a bounded Git evidence error instead
+  of silently omitting receipts after a timeout or cancellation. Existing map
+  output caches are rebuilt so incomplete cached evidence is not reused.
+- Kept the top-ranked map key paths intact while adding at most two
+  complementary test anchors for concrete path boundaries when the ranked
+  path budget would hide them. Broad conceptual parents keep the original cap.
+- Hardened the opt-in fat-regression infrastructure: reject dirty corpus
+  checkouts and empty, incomplete, duplicate or incompatible result sets;
+  require preflight counts and observed successful command exits before
+  reporting a passing aggregate gate. This does not enable a runner or promote
+  changed output automatically.
+- Added repository-owned Git Bash and PowerShell development launchers with
+  deterministic named-channel or source-worktree homes under
+  `~/.devspecs-dev`. Local builds and cross-repo agent sessions can now avoid
+  the stable `~/.devspecs` database without adding public CLI surface or
+  inferring behavior from executable paths.
+- Changed activation evals, scan benchmarks, local pre-commit tests, and CI
+  jobs to use isolated DevSpecs homes with telemetry disabled. Disposable
+  benchmark homes no longer create production anonymous installation IDs.
+- Added a provider-neutral `integrations.orchestration` repository setting and
+  experimental `ds dispatch` workflow. Its first DevSpecs-owned driver uses
+  stock Waspflow commands to freeze an exact `ds apply` target, monitor it to a
+  normalized receipt by default, and support detached `status`, `resume`, and
+  `receipt` flows without changing Waspflow or automatically promoting a task.
+  Configuration alone never launches work, and release packages still ship one
+  `ds` binary.
+- Removed remote credentials from dispatch repository identities and included
+  untracked file contents in result-state digests. Orchestration provider
+  selections now normalize surrounding whitespace before dispatch.
+- Preserved case-distinct shell import paths, resolving case-folded references
+  only when unambiguous.
+- Added read-only `ds doctor` diagnostics for active binary and PATH
+  precedence, inferred install source, DevSpecs home, index size/schema/writer
+  state, repository identity, and explicitly configured orchestration-provider
+  readiness, with complete JSON output and structural `--redact` support for
+  shareable reports.
+- Added focused Linux, macOS, and Windows CI coverage for doctor executable
+  discovery and read-only SQLite inspection.
+- Added advanced `ds index backup|rebuild|restore` maintenance commands.
+  Backups are schema-agnostic and WAL-consistent, rebuilds stage and validate a
+  full cold index before publication, and restores preserve the displaced index
+  while publishing the selected snapshot exactly.
+- Changed supported index migrations to copy-on-write, backup-first upgrades.
+  The active database is replaced only after the staged migration and rollback
+  snapshot validate; interrupted recovery remains explicit and visible to
+  `ds doctor`.
+- Added real v1.3.0 schema-14 migration and rollback validation, synthetic
+  WAL-backed future-schema refusal/backup/rebuild coverage, and three-platform
+  file-swap recovery checks. The five-repository full-history activation corpus
+  remains exact after recovery.
+- Added file and stdin input for the free-text `ds task checkpoint` fields:
+  `--description -` and `--note -` read all of stdin, `--description-file` and
+  `--note-file` read a file. Each field takes exactly one source, only one flag
+  may consume stdin per invocation, CRLF is normalised to LF, one trailing
+  newline is trimmed, and interior newlines survive into the checkpoint JSON,
+  the Markdown twin, and `--draft` previews.
+  Multiline notes and descriptions remain nested under their Markdown field
+  in result history and completion contracts.
+- Pointed default telemetry at the canonical `www.devspecs.com` endpoint so each
+  usage event avoids the apex-host redirect. The shell and PowerShell installers
+  use the same endpoint. Command telemetry still uses a bounded synchronous
+  request; this does not remove network waiting from command completion.
+- Surfaced the existing checkpoint handoff flags where agents actually read
+  them. The bounded `ds apply` slice prompt and the closeout prompt now name
+  `--next-target`, `--next-decision`, `--missed-file`, `--noise-file`, and
+  `--from-git`, with a validated-completion example using the real task and
+  current target IDs without guessing the next lane. The `ds tldr handoff`
+  workflow lists the checkpoint command that
+  records the next target, and the generated Codex, Cursor, Claude, and
+  Windsurf adapters name the same flags. Text only: no command, flag, or
+  recorded field changed.
+- Generated task slice and follow-up slice file names now cut their slug at a
+  word boundary inside a 64-character budget instead of truncating mid-word at
+  48 characters, so plan and result names no longer read like
+  `...-with-environme-plan.md`. De-duplication and follow-up ordinal suffixes
+  count against the budget. Slugs already recorded in a `task.json` manifest
+  stay byte-identical; nothing on disk is renamed. Commands that take a slice
+  selector also accept the slug a slice actually carries in its file name, in
+  addition to every selector they accepted before.
+- Split the `ds task audit` verdict so a mispredicted pack no longer reads as
+  agent drift. Out-of-scope paths are classified as `pack_miss` (recorded with
+  `--missed-file`, listed in the pack's own `noise_risks`, or tracked at git
+  HEAD inside a predicted `relevant_areas` subsystem, or shared surface no
+  subsystem owns such as a repository-root file or documentation),
+  `new_surface` (not tracked at HEAD, so this slice created it), or `drift`
+  (a tracked source file outside every relevant area). `drift` now means the
+  slice reached a source subsystem the pack never identified as relevant,
+  rather than any edit the pack failed to name, so routine `CHANGELOG.md` and
+  docs updates no longer end every slice in a drift verdict.
+  `recommendation` gained the `pack_miss` and `new_surface` values, and
+  `--json` gained `pack_miss_paths`, `new_surface_paths`, `drift_paths`, and
+  `unclassified_paths` alongside the unchanged `out_of_scope_paths` union.
+  Neither fallback assigns blame: with no relevant areas recorded a tracked
+  unpredicted path is a `pack_miss`, and when HEAD tracking cannot be
+  determined the paths stay unclassified and the verdict falls to `review`.
+
 ## v1.4.0 - 2026-08-12
 
 - Added experimental repo-first named execution threads with `ds thread set`,

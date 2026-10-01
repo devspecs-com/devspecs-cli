@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,7 +29,10 @@ var sourceManifestImportPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?m)^\s*#include\s+[<"]([^>"]+)[>"]`),
 }
 
-const sourceManifestMaxImportsPerFile = 6
+const (
+	sourceManifestMaxImportsPerFile      = 6
+	sourceManifestMaxShellImportsPerFile = 16
+)
 
 var (
 	sourceManifestMaxFTSSymbolsPerFile       = 16
@@ -59,7 +63,7 @@ type sourceManifestExtractResult struct {
 	role          string
 }
 
-func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, now string, phaseTiming bool, workerCount int) (*SourceManifestDiagnostics, error) {
+func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, now string, inventory []fileInventoryEntry, phaseTiming bool, workerCount int) (*SourceManifestDiagnostics, error) {
 	diagnostics := &SourceManifestDiagnostics{
 		Enabled:         true,
 		IgnoredByReason: map[string]int{},
@@ -75,15 +79,8 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 			diagnostics.PhaseMS[name] = time.Since(started).Milliseconds()
 		}
 	}
-	phaseStarted := time.Now()
-	inventoryResult, err := collectFileInventory(ctx, repoRoot)
-	recordPhase("inventory", phaseStarted)
-	if err != nil {
-		return diagnostics, err
-	}
-	inventory := inventoryResult.files
 	diagnostics.InventoryFiles = len(inventory)
-	phaseStarted = time.Now()
+	phaseStarted := time.Now()
 	roots := detectFirstPartySourceRoots(inventory)
 	recordPhase("root_detection", phaseStarted)
 	phaseStarted = time.Now()
@@ -100,7 +97,7 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 			return diagnostics, err
 		}
 		rel := normalizeFirstPartySourceRel(file.relPath)
-		if rel == "" || !firstPartySourceLooksSourcePath(rel) {
+		if rel == "" || !firstPartyInventoryLooksSource(file) {
 			continue
 		}
 		diagnostics.SourceLikeFiles++
@@ -116,7 +113,7 @@ func (s *Scanner) rebuildSourceManifest(ctx context.Context, repoRoot, repoID, n
 			diagnostics.IgnoredByReason["no_source_root"]++
 			continue
 		}
-		role := firstPartySourceRole(rel)
+		role := firstPartySourceRoleForInventory(file)
 		if role == "" {
 			diagnostics.IgnoredByReason["missing_role"]++
 			continue
@@ -250,26 +247,44 @@ func extractSourceManifestCandidate(repoID string, candidate sourceManifestCandi
 	}
 	fileID := sourceManifestFileID(repoID, candidate.rel)
 	language := sourcecontext.LanguageForPath(candidate.rel)
+	if candidate.file.shellEntry {
+		language = "shell"
+	}
 	if language == "" {
 		language = strings.TrimPrefix(strings.ToLower(filepath.Ext(filepath.Base(candidate.rel))), ".")
 	}
 	if language == "" {
 		language = "unknown"
 	}
-	symbolValues := sourcecontext.ExtractSymbols(string(body))
-	symbols := make([]store.SourceManifestSymbolInput, 0, len(symbolValues))
-	for _, symbol := range symbolValues {
-		symbols = append(symbols, store.SourceManifestSymbolInput{FileID: fileID, Symbol: symbol, Kind: "symbol"})
-	}
-	testValues := sourcecontext.ExtractTestNames(string(body))
-	tests := make([]store.SourceManifestTestInput, 0, len(testValues))
-	for _, testName := range testValues {
-		tests = append(tests, store.SourceManifestTestInput{FileID: fileID, TestName: testName})
-	}
-	importValues := compactSourceManifestImports(extractSourceManifestImports(string(body)))
-	imports := make([]store.SourceManifestImportInput, 0, len(importValues))
-	for _, importRef := range importValues {
-		imports = append(imports, store.SourceManifestImportInput{FileID: fileID, ImportRef: importRef})
+	bodyText := string(body)
+	var symbols []store.SourceManifestSymbolInput
+	var tests []store.SourceManifestTestInput
+	var imports []store.SourceManifestImportInput
+	var symbolValues, testValues, importValues []string
+	if language == "shell" {
+		semantics, semanticErr := sourcecontext.ExtractShellSemantics(candidate.rel, candidate.role, bodyText)
+		if semanticErr != nil {
+			semantics.Imports = nil
+		}
+		symbols, symbolValues = shellManifestSymbols(fileID, semantics.Symbols)
+		tests, testValues = shellManifestTests(fileID, semantics.Tests)
+		imports, importValues = shellManifestImports(fileID, semantics.Imports)
+	} else {
+		symbolValues = sourcecontext.ExtractSymbols(bodyText)
+		symbols = make([]store.SourceManifestSymbolInput, 0, len(symbolValues))
+		for _, symbol := range symbolValues {
+			symbols = append(symbols, store.SourceManifestSymbolInput{FileID: fileID, Symbol: symbol, Kind: "symbol"})
+		}
+		testValues = sourcecontext.ExtractTestNames(bodyText)
+		tests = make([]store.SourceManifestTestInput, 0, len(testValues))
+		for _, testName := range testValues {
+			tests = append(tests, store.SourceManifestTestInput{FileID: fileID, TestName: testName})
+		}
+		importValues = compactSourceManifestImports(extractSourceManifestImports(bodyText))
+		imports = make([]store.SourceManifestImportInput, 0, len(importValues))
+		for _, importRef := range importValues {
+			imports = append(imports, store.SourceManifestImportInput{FileID: fileID, ImportRef: importRef})
+		}
 	}
 	return sourceManifestExtractResult{
 		file: store.SourceManifestFileInput{
@@ -303,6 +318,67 @@ func extractSourceManifestCandidate(repoID string, candidate sourceManifestCandi
 			Imports:    strings.Join(importValues, "\n"),
 		},
 	}
+}
+
+func shellManifestSymbols(fileID string, anchors []sourcecontext.ShellSemanticAnchor) ([]store.SourceManifestSymbolInput, []string) {
+	rows := make([]store.SourceManifestSymbolInput, 0, len(anchors))
+	values := make([]string, 0, len(anchors))
+	for _, anchor := range anchors {
+		rows = append(rows, store.SourceManifestSymbolInput{
+			FileID: fileID, Symbol: anchor.Name, Kind: anchor.Kind, Parent: anchor.Parent,
+			Line: anchor.Line, EndLine: anchor.EndLine,
+		})
+		value := anchor.Name
+		if anchor.Kind == "dispatch" && anchor.Parent != "" {
+			value += " -> " + anchor.Parent
+		}
+		values = append(values, value+shellManifestLineLabel(anchor.Line, anchor.EndLine))
+	}
+	return rows, values
+}
+
+func shellManifestTests(fileID string, anchors []sourcecontext.ShellSemanticAnchor) ([]store.SourceManifestTestInput, []string) {
+	rows := make([]store.SourceManifestTestInput, 0, len(anchors))
+	values := make([]string, 0, len(anchors))
+	for _, anchor := range anchors {
+		rows = append(rows, store.SourceManifestTestInput{
+			FileID: fileID, TestName: anchor.Name, Parent: anchor.Parent,
+			Line: anchor.Line, EndLine: anchor.EndLine,
+		})
+		values = append(values, anchor.Name+shellManifestLineLabel(anchor.Line, anchor.EndLine))
+	}
+	return rows, values
+}
+
+func shellManifestImports(fileID string, anchors []sourcecontext.ShellSemanticAnchor) ([]store.SourceManifestImportInput, []string) {
+	seen := map[string]bool{}
+	var rows []store.SourceManifestImportInput
+	var values []string
+	for _, anchor := range anchors {
+		value := normalizeSourceManifestImportRef(anchor.Name)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		rows = append(rows, store.SourceManifestImportInput{
+			FileID: fileID, ImportRef: value, Line: anchor.Line, EndLine: anchor.EndLine,
+		})
+		values = append(values, value+shellManifestLineLabel(anchor.Line, anchor.EndLine))
+		if len(rows) >= sourceManifestMaxShellImportsPerFile {
+			break
+		}
+	}
+	return rows, values
+}
+
+func shellManifestLineLabel(line, endLine int) string {
+	if line <= 0 {
+		return ""
+	}
+	if endLine <= line {
+		return fmt.Sprintf(" (line %d)", line)
+	}
+	return fmt.Sprintf(" (lines %d-%d)", line, endLine)
 }
 
 func sourceManifestFileID(repoID, rel string) string {

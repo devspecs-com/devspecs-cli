@@ -126,6 +126,31 @@ func TestTLDR_FilterAndJSON(t *testing.T) {
 
 }
 
+func TestTLDR_WhenHandoffWorkflowRequested_ListsCheckpointNextTargetWithoutAdvertisingDSHandoff(t *testing.T) {
+	// Arrange
+	cmd := NewTLDRCmd()
+	cmd.SetArgs([]string{"handoff", "--json"})
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	// Act
+	err := cmd.Execute()
+
+	// Assert
+	require.NoError(t, err)
+	var out tldrOutput
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out),
+		"tldr json: %s", buf.String())
+	require.Len(t, out.Workflows, 1, "expected only handoff workflow, got %#v", out.Workflows)
+	commands := strings.Join(out.Workflows[0].Commands, "\n")
+	assert.Contains(t, commands, "ds task checkpoint <task-id> --target <target> --next-target <next>",
+		"handoff workflow missing checkpoint next-target command: %#v", out.Workflows[0])
+	assert.Contains(t, out.Workflows[0].AgentRule, "--next-target",
+		"handoff agent rule should tell the agent to record the next target: %#v", out.Workflows[0])
+	assert.NotContains(t, buf.String(), "ds handoff",
+		"tldr must not advertise an unregistered ds handoff command:\n%s", buf.String())
+}
+
 func TestTLDR_UnknownWorkflowErrorsWithValidIDs(t *testing.T) {
 	cmd := NewTLDRCmd()
 	cmd.SetArgs([]string{"migration"})

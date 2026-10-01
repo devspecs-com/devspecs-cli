@@ -6,6 +6,7 @@
 #   quick (default) — go test -count=1 ./...  (no -race, faster)
 #   ci | full | race — same as CI unit test step (requires CGO for -race on some platforms)
 #   0 | false | skip | none — skip tests
+# DEVSPECS_TEST_TIMEOUT: Go's per-package deadline (default: 30m).
 
 set -e
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -13,6 +14,11 @@ for var in $(git rev-parse --local-env-vars); do
 	unset "$var"
 done
 cd "$REPO_ROOT"
+
+DEVSPECS_PRECOMMIT_HOME=$(mktemp -d "${TMPDIR:-/tmp}/devspecs-precommit.XXXXXX")
+trap 'rm -rf "$DEVSPECS_PRECOMMIT_HOME"' EXIT
+export DEVSPECS_HOME="$DEVSPECS_PRECOMMIT_HOME"
+export DEVSPECS_TELEMETRY=0
 
 echo "pre-commit: go vet ./..."
 go vet ./...
@@ -41,12 +47,12 @@ case "${DEVSPECS_PRECOMMIT_TESTS:-quick}" in
 	echo "pre-commit: skipping go test (DEVSPECS_PRECOMMIT_TESTS=$DEVSPECS_PRECOMMIT_TESTS)"
 	;;
 ci | full | race)
-	echo "pre-commit: go test -race -count=1 ./... (CI-like)"
-	go test -race -count=1 ./...
+	echo "pre-commit: go test -race -count=1 -timeout ${DEVSPECS_TEST_TIMEOUT:-30m} ./... (CI-like)"
+	go test -race -count=1 -timeout "${DEVSPECS_TEST_TIMEOUT:-30m}" ./...
 	;;
 *)
-	echo "pre-commit: go test -count=1 ./... (set DEVSPECS_PRECOMMIT_TESTS=ci for -race)"
-	go test -count=1 ./...
+	echo "pre-commit: go test -count=1 -timeout ${DEVSPECS_TEST_TIMEOUT:-30m} ./... (set DEVSPECS_PRECOMMIT_TESTS=ci for -race)"
+	go test -count=1 -timeout "${DEVSPECS_TEST_TIMEOUT:-30m}" ./...
 	;;
 esac
 

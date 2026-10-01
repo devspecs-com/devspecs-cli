@@ -1060,17 +1060,11 @@ func runActivationCommandIsolated(name string, args []string, repoPath, indexSta
 		return nil, nil, nil, fmt.Errorf("create activation matrix home: %w", err)
 	}
 	defer os.RemoveAll(tempHome)
-	oldHome, hadHome := os.LookupEnv("DEVSPECS_HOME")
-	if err := os.Setenv("DEVSPECS_HOME", tempHome); err != nil {
+	restoreEnvironment, err := setEvalHome(tempHome)
+	if err != nil {
 		return nil, nil, nil, err
 	}
-	defer func() {
-		if hadHome {
-			os.Setenv("DEVSPECS_HOME", oldHome)
-		} else {
-			os.Unsetenv("DEVSPECS_HOME")
-		}
-	}()
+	defer restoreEnvironment()
 	if normalizeActivationIndexState(indexState) == activationIndexStateWarm {
 		if err := runActivationWarmup(repoPath); err != nil {
 			return nil, nil, nil, err
@@ -1111,7 +1105,7 @@ func runExternalActivationCommandIsolated(binary, commandName string, args []str
 		}
 	}
 	cmd := exec.Command(binary, fullArgs...)
-	cmd.Env = append(os.Environ(), "DEVSPECS_HOME="+tempHome)
+	cmd.Env = evalChildEnvironment(tempHome)
 	if activationCommandRunsFromRepoRoot(commandName) {
 		cmd.Dir = repoPath
 	}
@@ -1155,7 +1149,7 @@ func runActivationWarmup(repoPath string) error {
 
 func runExternalActivationWarmup(binary, repoPath, devspecsHome string) ([]byte, []byte, error) {
 	cmd := exec.Command(binary, "scan", "--path", repoPath, "--quiet")
-	cmd.Env = append(os.Environ(), "DEVSPECS_HOME="+devspecsHome)
+	cmd.Env = evalChildEnvironment(devspecsHome)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

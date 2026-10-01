@@ -338,23 +338,17 @@ func activationScanCommandArgs(args []string, repoPath string) []string {
 }
 
 func runActivationScanCommandWithHome(args []string, devspecsHome string) ([]byte, []byte, error) {
-	oldHome, hadHome := os.LookupEnv("DEVSPECS_HOME")
-	if err := os.Setenv("DEVSPECS_HOME", devspecsHome); err != nil {
+	restoreEnvironment, err := setEvalHome(devspecsHome)
+	if err != nil {
 		return nil, nil, err
 	}
-	defer func() {
-		if hadHome {
-			os.Setenv("DEVSPECS_HOME", oldHome)
-		} else {
-			os.Unsetenv("DEVSPECS_HOME")
-		}
-	}()
+	defer restoreEnvironment()
 	cmd := NewScanCmd()
 	var stdout, stderr bytes.Buffer
 	cmd.SetArgs(args)
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	err := cmd.Execute()
+	err = cmd.Execute()
 	return stdout.Bytes(), stderr.Bytes(), err
 }
 

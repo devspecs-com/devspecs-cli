@@ -10,8 +10,16 @@ jobs:
   test:
     name: Lint & Test
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DEVSPECS_TELEMETRY: '0'
+      DEVSPECS_TEST_TIMEOUT: '30m'
     steps:
       - uses: actions/checkout@v4
+
+      - name: Configure isolated DevSpecs home
+        shell: bash
+        run: echo "DEVSPECS_HOME=$RUNNER_TEMP/devspecs-test-home" >> "$GITHUB_ENV"
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -40,7 +48,7 @@ jobs:
         run: go run ./scripts/ci/check-test-assertions
 
       - name: Unit tests
-        run: go test -v -race -coverprofile coverage.out ./...
+        run: go test -v -race -count=1 -timeout "$DEVSPECS_TEST_TIMEOUT" -coverprofile coverage.out ./...
 
       - name: Coverage floor (aggregate >=80%)
         env:
@@ -53,3 +61,71 @@ jobs:
         with:
           name: coverage
           path: coverage.out
+
+  maintenance-platform:
+    name: Doctor & index recovery (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    env:
+      DEVSPECS_TELEMETRY: '0'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure isolated DevSpecs home
+        shell: bash
+        run: echo "DEVSPECS_HOME=$RUNNER_TEMP/devspecs-maintenance-home" >> "$GITHUB_ENV"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Build installed CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          suffix=""
+          if [ "${{ runner.os }}" = "Windows" ]; then suffix=".exe"; fi
+          go build -o "$RUNNER_TEMP/ds${suffix}" ./cmd/ds
+          "$RUNNER_TEMP/ds${suffix}" --version
+
+      - name: Test doctor and index recovery platform behavior
+        run: go test ./internal/store ./internal/commands -run "^(TestInspectIndex|TestDoctorCommand|TestFindDoctorExecutableCandidates|TestSameDoctorExecutable|TestCreateIndexBackup|TestOpen_WithSupportedOlderSchema_PreservesVerifiedRollbackBackup|TestRestoreIndex|TestReplaceIndexWithStage|TestIndexBackupCommand|TestIndexRebuildCommand|TestScanRebuild)" -count=1
+
+      - name: Test hub process delivery and store integrity
+        run: go test ./internal/hubstore ./internal/commands -run "^(TestHubE2E|TestHubQuality|TestKilledWriter|TestKilledAfter|TestKilledDuringPrune|TestConcurrentArchiveAndSchemaRegistration|TestHubTopicList|TestListTopics|TestValidateTopicListRepo|TestPruneHub(Reconciles|Rejects|Preserves|Leaves|Recovers|Clears)|TestReservePruneBackupRejectsOccupiedPathWithoutDeletingUserFile|TestWritePruneIntentPreservesExistingMarkerOnPublishFailure|TestVacuumIntoAcceptsExclusivelyCreatedEmptyDestination|TestPruneRolloverKeepsOnlyLatestOwnedBackup)" -count=1
+
+      - name: Test home-global hub scope
+        run: go test ./internal/hubstore ./internal/commands -run "^(TestGlobal|TestConcurrentGlobal|TestEnrollGlobal|TestV6Migration|TestRepositoryTopicIsNotListedInGlobalScope|TestHub.*Global|TestOpenRejectsNewerFormat)" -count=1
+
+      - name: Test cooperative hub leases and upgrade
+        run: go test ./internal/hubstore ./internal/commands -run "^(TestAcquireLease|TestShowLease|TestRenewLease|TestReleaseLease|TestHubLease|TestOpenMigratesPopulatedV7HubToLeases)" -count=1
+
+  release-package:
+    name: Release package smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Build snapshot packages
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: v2.17.1
+          args: release --snapshot --clean
+
+      - name: Verify every release channel contains the ds binary
+        shell: bash
+        run: bash ./scripts/ci/verify-release-package.sh dist

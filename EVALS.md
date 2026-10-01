@@ -39,6 +39,10 @@ work on `ds recent`, `ds map`, and substrate consumers such as `ds find` and
 `ds task quick`. It runs a YAML or JSON manifest of repos and commands, forces
 result-safe flags where appropriate, normalizes local repo paths out of stdout,
 and compares result output against per-profile goldens or baseline binaries.
+Every in-process and external activation command receives a disposable
+`DEVSPECS_HOME` and `DEVSPECS_TELEMETRY=0`; benchmark traffic must never create
+production installation identities. Repository CI jobs also declare an
+ephemeral outer home as a defense against future test paths that omit a fixture.
 
 ### Pull Request Smoke Gate
 
@@ -281,8 +285,9 @@ Daily/VPS activation regression should run both pieces:
 
 Default hosted runners are acceptable for smoke checks and skinny output gates.
 Use a controlled VPS or self-hosted runner for fat/full performance thresholds:
-pin clone SHAs, keep full commit history, isolate `DEVSPECS_HOME`, upload raw
-artifacts, and evaluate rolling medians rather than one-off hosted-run timing.
+pin clone SHAs, keep full commit history, isolate `DEVSPECS_HOME`, force
+`DEVSPECS_TELEMETRY=0`, upload raw artifacts, and evaluate rolling medians
+rather than one-off hosted-run timing.
 
 ## Public Fixtures
 

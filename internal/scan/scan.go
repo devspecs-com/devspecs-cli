@@ -3,12 +3,14 @@
 package scan
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -166,12 +168,20 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 		SkipAuthoredAtLookup: opts.SkipAuthoredAtLookup,
 	})
 	phase = timing.start("shared_discovery", "")
-	sharedCandidates, traversal, err := s.discoverSharedFileCandidates(ctx, repoRoot, cfg, opts, progress)
+	sharedCandidates, inventory, traversal, err := s.discoverSharedFileCandidates(ctx, repoRoot, cfg, opts, progress)
 	phase.finish(candidateTimingCounts(sharedCandidates, traversal), statusTimingDetails(err))
 	if err != nil {
 		return nil, fmt.Errorf("shared file discovery: %w", err)
 	}
 	result.Traversal = traversal
+	if opts.FirstPartySourceContext || opts.SourceManifest {
+		phase = timing.start("shell_entrypoint_detection", "")
+		err = annotateShellEntrypoints(ctx, inventory)
+		phase.finish(nil, statusTimingDetails(err))
+		if err != nil {
+			return nil, fmt.Errorf("detect shell entrypoints: %w", err)
+		}
+	}
 	phase = timing.start("source_companion_admission", "")
 	if diagnostics, companions := buildTestSourceCompanionCandidates(ctx, repoRoot, sharedCandidates["test_case"], sharedCandidates["source_context"]); diagnostics != nil {
 		result.SourceCompanions = diagnostics
@@ -191,7 +201,7 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 	}
 	if opts.FirstPartySourceContext {
 		phase := timing.start("first_party_source_context", "")
-		if candidates := buildFirstPartySourceContextCandidates(ctx, repoRoot, sharedCandidates["source_context"]); len(candidates) > 0 {
+		if candidates := buildFirstPartySourceContextCandidatesFromInventory(ctx, repoRoot, inventory, sharedCandidates["source_context"]); len(candidates) > 0 {
 			sharedCandidates["source_context"] = append(sharedCandidates["source_context"], candidates...)
 			sortCandidates(sharedCandidates["source_context"])
 		}
@@ -487,7 +497,7 @@ func (s *Scanner) RunWithOptions(ctx context.Context, repoRoot string, cfg *conf
 			Event: "start",
 		})
 		phase := timing.start("source_manifest", "")
-		if diagnostics, err := s.rebuildSourceManifest(ctx, repoRoot, repoID, now, opts.PhaseTiming, opts.FileWorkerCount); err != nil {
+		if diagnostics, err := s.rebuildSourceManifest(ctx, repoRoot, repoID, now, inventory, opts.PhaseTiming, opts.FileWorkerCount); err != nil {
 			phase.finish(nil, statusTimingDetails(err))
 			return nil, fmt.Errorf("rebuild source manifest: %w", err)
 		} else {
@@ -634,6 +644,8 @@ type fileInventoryEntry struct {
 	primaryPath string
 	relPath     string
 	size        int64
+	mode        os.FileMode
+	shellEntry  bool
 }
 
 type fileInventoryResult struct {
@@ -768,7 +780,7 @@ func statusTimingDetails(err error) map[string]string {
 	return map[string]string{"status": "error"}
 }
 
-func (s *Scanner) discoverSharedFileCandidates(ctx context.Context, repoRoot string, cfg *config.RepoConfig, opts RunOptions, progress *progressReporter) (map[string][]adapters.Candidate, *TraversalDiagnostics, error) {
+func (s *Scanner) discoverSharedFileCandidates(ctx context.Context, repoRoot string, cfg *config.RepoConfig, opts RunOptions, progress *progressReporter) (map[string][]adapters.Candidate, []fileInventoryEntry, *TraversalDiagnostics, error) {
 	fileAdapters := make([]adapters.FileDiscoveryAdapter, 0)
 	for _, adapter := range s.adapters {
 		if fileAdapter, ok := adapter.(adapters.FileDiscoveryAdapter); ok {
@@ -777,11 +789,11 @@ func (s *Scanner) discoverSharedFileCandidates(ctx context.Context, repoRoot str
 	}
 	out := make(map[string][]adapters.Candidate, len(fileAdapters))
 	if len(fileAdapters) == 0 {
-		return out, nil, nil
+		return out, nil, nil, nil
 	}
 	inventoryResult, err := collectFileInventory(ctx, repoRoot)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	inventory := inventoryResult.files
 	traversal := inventoryResult.diagnostics()
@@ -797,15 +809,19 @@ func (s *Scanner) discoverSharedFileCandidates(ctx context.Context, repoRoot str
 	})
 	if hasCandidateLimits(fileAdapters, opts) || opts.FileWorkerCount == 1 {
 		candidates, err := discoverSharedFileCandidatesSequential(ctx, repoRoot, cfg, inventory, fileAdapters, opts, progress)
-		return candidates, traversal, err
+		return candidates, inventory, traversal, err
 	}
 	candidates, err := discoverSharedFileCandidatesParallel(ctx, repoRoot, cfg, inventory, fileAdapters, opts, progress)
-	return candidates, traversal, err
+	return candidates, inventory, traversal, err
 }
 
 func collectFileInventory(ctx context.Context, repoRoot string) (fileInventoryResult, error) {
 	var result fileInventoryResult
-	err := filepath.WalkDir(repoRoot, func(path string, d os.DirEntry, err error) error {
+	tracked, err := loadGitTrackedInventory(ctx, repoRoot)
+	if err != nil {
+		return result, err
+	}
+	err = filepath.WalkDir(repoRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -821,11 +837,15 @@ func collectFileInventory(ctx context.Context, repoRoot string) (fileInventoryRe
 			return nil
 		}
 		if m := ignore.FromContext(ctx); m != nil && m.ShouldSkip(rel, d.IsDir()) {
-			if d.IsDir() {
+			trackedPath := tracked.modes[rel] != "" || tracked.dirs[rel]
+			if trackedPath && !m.ShouldSkipTracked(rel, d.IsDir()) {
+				// Git ignore files do not hide paths already tracked by Git.
+			} else if d.IsDir() {
 				result.recordSkip(rel, "ignore_rules")
 				return filepath.SkipDir
+			} else {
+				return nil
 			}
-			return nil
 		}
 		if d.IsDir() {
 			if isSharedFileIgnoredDir(d.Name()) {
@@ -838,15 +858,56 @@ func collectFileInventory(ctx context.Context, repoRoot string) (fileInventoryRe
 		if statErr != nil || info.IsDir() {
 			return nil
 		}
+		mode := info.Mode()
+		if tracked.modes[rel] == "100755" {
+			mode |= 0o111
+		}
 		result.files = append(result.files, fileInventoryEntry{
 			primaryPath: path,
 			relPath:     rel,
 			size:        info.Size(),
+			mode:        mode,
 		})
 		return nil
 	})
 	sort.Slice(result.files, func(i, j int) bool { return result.files[i].relPath < result.files[j].relPath })
 	return result, err
+}
+
+type gitTrackedInventory struct {
+	modes map[string]string
+	dirs  map[string]bool
+}
+
+func loadGitTrackedInventory(ctx context.Context, repoRoot string) (gitTrackedInventory, error) {
+	tracked := gitTrackedInventory{modes: map[string]string{}, dirs: map[string]bool{}}
+	command := exec.CommandContext(ctx, "git", "-C", filepath.Clean(repoRoot), "ls-files", "--stage", "-z")
+	data, err := command.Output()
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return tracked, ctxErr
+		}
+		return tracked, nil
+	}
+	for _, record := range bytes.Split(data, []byte{0}) {
+		tab := bytes.IndexByte(record, '\t')
+		if tab <= 0 || tab+1 >= len(record) {
+			continue
+		}
+		fields := strings.Fields(string(record[:tab]))
+		if len(fields) < 3 || fields[2] != "0" {
+			continue
+		}
+		rel := normalizeFirstPartySourceRel(string(record[tab+1:]))
+		if rel == "" {
+			continue
+		}
+		tracked.modes[rel] = fields[0]
+		for _, dir := range firstPartyAncestorDirs(rel) {
+			tracked.dirs[dir] = true
+		}
+	}
+	return tracked, nil
 }
 
 func discoverSharedFileCandidatesSequential(ctx context.Context, repoRoot string, cfg *config.RepoConfig, inventory []fileInventoryEntry, fileAdapters []adapters.FileDiscoveryAdapter, opts RunOptions, progress *progressReporter) (map[string][]adapters.Candidate, error) {

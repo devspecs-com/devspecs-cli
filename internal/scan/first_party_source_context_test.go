@@ -3,10 +3,12 @@ package scan
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"github.com/devspecs-com/devspecs-cli/internal/adapters"
+	"github.com/devspecs-com/devspecs-cli/internal/ignore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -84,6 +86,26 @@ func TestFirstPartySourceContextDetectsNestedModuleRoots(t *testing.T) {
 		byPath[candidate.RelPath] = candidate
 	}
 	assert.Equal(t, "module_root", byPath["sdk/storage/blob/client.go"].Metadata["source_root_kind"])
+}
+
+func TestFirstPartySourceContextAdmitsTrackedSourceMatchingGitIgnore(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git executable not available")
+	}
+	root := t.TempDir()
+	writeFirstPartySourceTestFile(t, root, ".gitignore", "core.*\n")
+	writeFirstPartySourceTestFile(t, root, "lib/core.sh", "#!/bin/sh\necho core\n")
+	runGitCommand(t, root, "init")
+	runGitCommand(t, root, "add", ".gitignore")
+	runGitCommand(t, root, "add", "--force", "lib/core.sh")
+	matcher, err := ignore.NewMatcher(root)
+	require.NoError(t, err)
+	ctx := ignore.WithContext(context.Background(), matcher)
+
+	got := buildFirstPartySourceContextCandidates(ctx, root, nil)
+
+	require.Len(t, got, 1)
+	assert.Equal(t, "lib/core.sh", got[0].RelPath)
 }
 
 func firstPartySourceCandidatePaths(candidates []adapters.Candidate) map[string]bool {

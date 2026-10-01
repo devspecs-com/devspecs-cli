@@ -24,10 +24,12 @@ type SourceManifestFileInput struct {
 
 // SourceManifestSymbolInput is one extracted symbol for a source manifest file.
 type SourceManifestSymbolInput struct {
-	FileID string
-	Symbol string
-	Kind   string
-	Line   int
+	FileID  string
+	Symbol  string
+	Kind    string
+	Parent  string
+	Line    int
+	EndLine int
 }
 
 // SourceManifestTestInput is one extracted test name for a source manifest file.
@@ -36,6 +38,7 @@ type SourceManifestTestInput struct {
 	TestName string
 	Parent   string
 	Line     int
+	EndLine  int
 }
 
 // SourceManifestImportInput is one import-ish reference for a source manifest file.
@@ -43,6 +46,7 @@ type SourceManifestImportInput struct {
 	FileID    string
 	ImportRef string
 	Line      int
+	EndLine   int
 }
 
 // SourceManifestFTSInput is one searchable metadata row for source manifest FTS.
@@ -127,34 +131,34 @@ func (db *DB) ReplaceRepoSourceManifest(repoID string, files []SourceManifestFil
 		return rollback(err)
 	}
 	if err := db.execSourceManifestBatches("source_manifest_symbols",
-		`INSERT INTO source_manifest_symbols (file_id, symbol, kind, line) VALUES `,
-		4,
+		`INSERT INTO source_manifest_symbols (file_id, symbol, kind, parent, line, end_line) VALUES `,
+		6,
 		len(symbols),
 		func(i int) []any {
 			s := symbols[i]
-			return []any{s.FileID, s.Symbol, s.Kind, s.Line}
+			return []any{s.FileID, s.Symbol, s.Kind, s.Parent, s.Line, s.EndLine}
 		},
 	); err != nil {
 		return rollback(err)
 	}
 	if err := db.execSourceManifestBatches("source_manifest_tests",
-		`INSERT INTO source_manifest_tests (file_id, test_name, parent, line) VALUES `,
-		4,
+		`INSERT INTO source_manifest_tests (file_id, test_name, parent, line, end_line) VALUES `,
+		5,
 		len(tests),
 		func(i int) []any {
 			t := tests[i]
-			return []any{t.FileID, t.TestName, t.Parent, t.Line}
+			return []any{t.FileID, t.TestName, t.Parent, t.Line, t.EndLine}
 		},
 	); err != nil {
 		return rollback(err)
 	}
 	if err := db.execSourceManifestBatches("source_manifest_imports",
-		`INSERT INTO source_manifest_imports (file_id, import_ref, line) VALUES `,
-		3,
+		`INSERT INTO source_manifest_imports (file_id, import_ref, line, end_line) VALUES `,
+		4,
 		len(imports),
 		func(i int) []any {
 			row := imports[i]
-			return []any{row.FileID, row.ImportRef, row.Line}
+			return []any{row.FileID, row.ImportRef, row.Line, row.EndLine}
 		},
 	); err != nil {
 		return rollback(err)

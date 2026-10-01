@@ -42,12 +42,31 @@ func applyFindSourceManifestConsumptionV1Scout(db *store.DB, fp store.FilterPara
 		return base
 	}
 	additions := selectFindSourceManifestRecoveryCandidates(query, base, all, rows, findSourceManifestRecoveryMaxAdditions)
-	if len(additions) == 0 {
-		return base
+	if len(additions) > 0 {
+		base = append(base, additions...)
 	}
-	out := make([]retrieval.Candidate, 0, len(base)+len(additions))
-	out = append(out, base...)
-	out = append(out, additions...)
+	relationships := selectFindSourceManifestRelationshipCandidates(query, base, all, rows, findSourceManifestRelationshipMaxAdditions)
+	return mergeFindSourceManifestRelationshipCandidates(base, relationships)
+}
+
+func mergeFindSourceManifestRelationshipCandidates(base, relationships []retrieval.Candidate) []retrieval.Candidate {
+	out := append([]retrieval.Candidate(nil), base...)
+	indexes := map[string]int{}
+	for index, candidate := range out {
+		path := strings.ToLower(normalizeFindGitReceiptPath(candidate.Path))
+		if path != "" {
+			indexes[path] = index
+		}
+	}
+	for _, candidate := range relationships {
+		path := strings.ToLower(normalizeFindGitReceiptPath(candidate.Path))
+		if index, ok := indexes[path]; ok {
+			out[index] = candidate
+			continue
+		}
+		indexes[path] = len(out)
+		out = append(out, candidate)
+	}
 	return out
 }
 
@@ -462,6 +481,7 @@ func renderFindSourceManifestRecoveryBody(row findSourceTestManifestRow) string 
 	}
 	writeFindSourceManifestRecoveryBlock(&b, "Symbols", row.Symbols)
 	writeFindSourceManifestRecoveryBlock(&b, "Test names", row.TestNames)
+	writeFindSourceManifestRecoveryBlock(&b, "Imports", row.Imports)
 	return b.String()
 }
 

@@ -100,6 +100,15 @@ documented exception that cannot safely use Testify.
 
 ## Coverage
 
+`make test`, `make cover`, and the pre-commit hook use a 30-minute per-package
+deadline. The commands package includes real Git/SQLite integration tests and
+has exceeded Go's default 10-minute deadline on development machines. Override
+with `make test TEST_TIMEOUT=45m` or `DEVSPECS_TEST_TIMEOUT=45m git commit ...`
+when investigating a slow environment. Do not use an unlimited timeout.
+CI uses the same package deadline inside a 60-minute job budget. These test
+budgets do not change the CLI's indexing deadlines. Avoid concurrent full suites
+or benchmarks when collecting performance evidence.
+
 Run the aggregate report with `make cover` and enforce the release floor with
 `make cover-check`. Local and CI checks use exact covered/total statement counts
 from `coverage.out`; rounded `go tool cover` display percentages are not used for

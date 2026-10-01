@@ -89,6 +89,23 @@ func TestScanJSON_PhaseTimingIsOptIn(t *testing.T) {
 
 }
 
+func TestScanJSON_SourceManifestDiagnosticsAreOptIn(t *testing.T) {
+	setupE2ERepo(t)
+	require.NoError(t, NewInitCmd().Execute())
+	scanCmd := NewScanCmd()
+	scanCmd.SetArgs([]string{"--json"})
+	buf := &bytes.Buffer{}
+	scanCmd.SetOut(buf)
+
+	err := scanCmd.Execute()
+	require.NoError(t, err)
+	var out map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	_, ok := out["source_manifest"]
+
+	assert.False(t, ok, "default scan JSON should not include source_manifest diagnostics: %s", buf.String())
+}
+
 func TestScanJSON_PhaseTimingIncludesSourceManifestBreakdown(t *testing.T) {
 	repoDir := setupE2ERepo(t)
 	srcDir := filepath.Join(repoDir, "internal", "auth")
@@ -660,6 +677,17 @@ func TestLiveScanRunOptions_FreshIndexForEmptyOrUnindexedRepo(t *testing.T) {
 	assert.True(t, opts.SkipAuthoredAtLookup,
 		"fresh repo append should skip per-artifact authored_at lookup")
 
+}
+
+func TestLiveScanRunOptions_EnablesCompactSourceManifest(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "devspecs.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	opts, err := liveScanRunOptions(db, "/tmp/repo")
+	require.NoError(t, err)
+
+	assert.True(t, opts.SourceManifest, "live scan should populate the compact source manifest")
 }
 
 func TestScan_GitWorktreeReusesLogicalRepositoryIndex(t *testing.T) {

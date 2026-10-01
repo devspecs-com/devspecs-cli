@@ -162,8 +162,9 @@ func buildTLDRGuide() tldrOutput {
 					"ds apply <task-id>",
 					"ds thread task:<task-id>",
 					"ds task show <target>",
+					"ds task checkpoint <task-id> --target <target> --next-target <next>",
 				},
-				AgentRule: "Resume from lifecycle state, not broad rediscovery. If apply is ambiguous, inspect the owner with thread and select one lane explicitly. Use find only for missing evidence and workspace trace only for known workspace links.",
+				AgentRule: "Resume from lifecycle state, not broad rediscovery. If apply is ambiguous, inspect the owner with thread and select one lane explicitly. Use find only for missing evidence and workspace trace only for known workspace links. Record the next target and decision in the checkpoint with --next-target and --next-decision so a resumed session reads them instead of re-deriving them.",
 			},
 			{
 				ID:      "deep-dive",

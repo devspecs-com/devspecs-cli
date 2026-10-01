@@ -170,6 +170,8 @@ Goal: Trace existing digest behavior and tests
 
 Do not implement sibling slices, future slices, or the full task track. Stop after this target's acceptance checks are satisfied.
 Record the outcome in `devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md` or with `ds task checkpoint weekly-digest --target A01`.
+Checkpoint fields that matter for handoff: `--next-target` and `--next-decision` record what should run next, `--missed-file` and `--noise-file` record what the packed context got wrong, and `--from-git` fills edited-file evidence from the worktree.
+Example: `ds task checkpoint weekly-digest --target A01 --stage validated --decision continue --from-git --test-run "<command>" --next-target A02 --next-decision promote`
 Checklist edits are useful notes, but lifecycle state should be recorded with `ds task checkpoint`.
 Command roles: use `ds find` to discover and pack evidence, `ds task status`
 to inspect lifecycle, `ds apply` to emit the current bounded prompt, and
@@ -209,6 +211,38 @@ Recorded checkpoint: <repo>/devspecs/tasks/weekly-digest/checkpoints/20260609-13
 Structured checkpoint: <repo>/devspecs/tasks/weekly-digest/checkpoints/20260609-134754-validated.json
 Updated result: <repo>/devspecs/tasks/weekly-digest/A01-trace-existing-digest-behavior-and-tests-result.md
 ```
+
+Long descriptions do not have to survive shell quoting. `--description -` reads
+all of stdin, and `--description-file <path>` reads a file. The same pair exists
+for the note: `--note -` and `--note-file <path>`. Only one flag may read stdin
+per invocation, and a field takes exactly one source.
+
+PowerShell single-quoted here-string:
+
+```powershell
+@'
+Verified the existing digest builder and focused tests.
+
+- Scheduling contract is unchanged.
+- Windows CRLF fixtures were not exercised.
+'@ | ds task checkpoint weekly-digest --target A01 --stage validated --decision promote --description -
+```
+
+bash heredoc:
+
+```bash
+ds task checkpoint weekly-digest --target A01 --stage validated --decision promote --description - <<'EOF'
+Verified the existing digest builder and focused tests.
+
+- Scheduling contract is unchanged.
+- Windows CRLF fixtures were not exercised.
+EOF
+```
+
+Both forms store the same bytes: CRLF is normalised to LF, one trailing newline
+is trimmed, and interior newlines are preserved in the checkpoint JSON and the
+rendered Markdown. Add `--draft --json` to preview the record without writing
+any files.
 
 ```bash
 $ ds task status weekly-digest

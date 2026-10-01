@@ -52,7 +52,7 @@ func TestOpen_CreatesCurrentSchema(t *testing.T) {
 	assert.True(t, indexExists(t, db, "idx_sources_repo"))
 }
 
-func TestMigrate_V15ToV16CreatesThreadProjectionTables(t *testing.T) {
+func TestMigrate_FromV15CreatesThreadProjectionTables(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "devspecs.db")
 	db, err := Open(dbPath)
 	require.NoError(t, err)
@@ -75,7 +75,36 @@ func TestMigrate_V15ToV16CreatesThreadProjectionTables(t *testing.T) {
 	assertTableExists(t, db, "thread_projection_sources")
 	var version int
 	require.NoError(t, db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version))
-	assert.Equal(t, 16, version)
+	assert.Equal(t, SchemaVersion, version)
+}
+
+func TestMigrate_FromV16ExposesSourceSemanticRangeColumns(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "devspecs.db")
+	db, err := Open(dbPath)
+	require.NoError(t, err)
+	mustExecStoreTestSQL(t, db, `ALTER TABLE source_manifest_symbols DROP COLUMN parent`)
+	mustExecStoreTestSQL(t, db, `ALTER TABLE source_manifest_symbols DROP COLUMN end_line`)
+	mustExecStoreTestSQL(t, db, `ALTER TABLE source_manifest_tests DROP COLUMN end_line`)
+	mustExecStoreTestSQL(t, db, `ALTER TABLE source_manifest_imports DROP COLUMN end_line`)
+	mustExecStoreTestSQL(t, db, `UPDATE schema_migrations SET version = 16`)
+	require.NoError(t, db.Close())
+
+	db, err = Open(dbPath)
+
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	rows, err := db.Query(`SELECT parent, end_line FROM source_manifest_symbols LIMIT 0`)
+	require.NoError(t, err)
+	require.NoError(t, rows.Close())
+	rows, err = db.Query(`SELECT end_line FROM source_manifest_tests LIMIT 0`)
+	require.NoError(t, err)
+	require.NoError(t, rows.Close())
+	rows, err = db.Query(`SELECT end_line FROM source_manifest_imports LIMIT 0`)
+	require.NoError(t, err)
+	require.NoError(t, rows.Close())
+	var version int
+	require.NoError(t, db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version))
+	assert.Equal(t, SchemaVersion, version)
 }
 
 func TestMigrate_V14ToV15BackfillsRepositoryRoots(t *testing.T) {
@@ -193,7 +222,7 @@ func TestMigrate_FromV3ToV4(t *testing.T) {
 	assert.Equal(t, 2, columns)
 }
 
-func TestOpen_WithOldSchemaVersion_ReturnsRebuildGuidance(t *testing.T) {
+func TestOpen_WithUnsupportedOldSchemaVersion_ReturnsSafeRecoveryGuidance(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "devspecs.db")
 	db, err := Open(dbPath)
 	require.NoError(t, err)
@@ -204,7 +233,9 @@ func TestOpen_WithOldSchemaVersion_ReturnsRebuildGuidance(t *testing.T) {
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "schema v2")
-	assert.ErrorContains(t, err, "scan --rebuild")
+	assert.ErrorContains(t, err, "ds index backup")
+	assert.ErrorContains(t, err, "ds index rebuild")
+	assert.NotContains(t, err.Error(), "delete")
 }
 
 func TestOpen_WithNewerSchemaVersion_ReturnsTypedCompatibilityError(t *testing.T) {

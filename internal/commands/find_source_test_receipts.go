@@ -46,6 +46,7 @@ type findSourceTestManifestRow struct {
 	SourceRootKind string
 	Symbols        string
 	TestNames      string
+	Imports        string
 }
 
 type findSourceTestSourceContext struct {
@@ -237,7 +238,8 @@ func buildFindRelatedFileReceiptsFromRows(rows []findSourceTestManifestRow, ctx 
 func loadFindSourceTestManifestRows(db *store.DB, fp store.FilterParams) ([]findSourceTestManifestRow, error) {
 	query := `SELECT sm.file_id, sm.repo_id, sm.path, sm.language, sm.source_role, sm.source_root, sm.source_root_kind,
 			COALESCE(GROUP_CONCAT(DISTINCT sms.symbol), ''),
-			COALESCE(GROUP_CONCAT(DISTINCT smt.test_name), '')
+			COALESCE(GROUP_CONCAT(DISTINCT smt.test_name), ''),
+			COALESCE((SELECT GROUP_CONCAT(DISTINCT smi.import_ref) FROM source_manifest_imports smi WHERE smi.file_id = sm.file_id), '')
 		FROM source_manifest sm
 		LEFT JOIN source_manifest_symbols sms ON sms.file_id = sm.file_id
 		LEFT JOIN source_manifest_tests smt ON smt.file_id = sm.file_id`
@@ -272,7 +274,7 @@ func loadFindSourceTestManifestRows(db *store.DB, fp store.FilterParams) ([]find
 	var out []findSourceTestManifestRow
 	for rows.Next() {
 		var row findSourceTestManifestRow
-		if err := rows.Scan(&row.FileID, &row.RepoID, &row.Path, &row.Language, &row.SourceRole, &row.SourceRoot, &row.SourceRootKind, &row.Symbols, &row.TestNames); err != nil {
+		if err := rows.Scan(&row.FileID, &row.RepoID, &row.Path, &row.Language, &row.SourceRole, &row.SourceRoot, &row.SourceRootKind, &row.Symbols, &row.TestNames, &row.Imports); err != nil {
 			return nil, fmt.Errorf("scan source test receipt row: %w", err)
 		}
 		row.Path = filepath.ToSlash(row.Path)
@@ -459,6 +461,9 @@ func findSourceTestTutorialOrExamplePath(path string) bool {
 }
 
 func findSourceTestBehaviorTestRow(row findSourceTestManifestRow) bool {
+	if strings.Contains(strings.ToLower(strings.TrimSpace(row.SourceRole)), "test") {
+		return true
+	}
 	return findSourceTestLooksBehaviorTestPath(row.Path)
 }
 
@@ -471,6 +476,11 @@ func findSourceTestLooksBehaviorTestPath(path string) bool {
 	name := strings.TrimSuffix(base, filepath.Ext(base))
 	ext := strings.ToLower(filepath.Ext(base))
 	switch {
+	case ext == ".bats":
+		return true
+	case (ext == ".sh" || ext == ".bash" || ext == ".zsh" || ext == "") &&
+		(strings.HasPrefix(base, "test") || strings.HasPrefix(base, "verify") || strings.HasSuffix(name, "_test")):
+		return true
 	case ext == ".go" && strings.HasSuffix(base, "_test.go"):
 		return true
 	case ext == ".py" && (strings.HasPrefix(base, "test_") || strings.HasSuffix(name, "_test")):

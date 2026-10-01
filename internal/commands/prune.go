@@ -19,7 +19,8 @@ const pruneProgressDelay = 750 * time.Millisecond
 
 // NewPruneCmd creates the ds prune maintenance command.
 func NewPruneCmd() *cobra.Command {
-	var dryRun, vacuum, asJSON bool
+	var dryRun, vacuum, asJSON, hub bool
+	var before string
 	cmd := &cobra.Command{
 		Use:   "prune",
 		Short: "Remove stale and redundant data from the local index",
@@ -31,15 +32,31 @@ exist. Consecutive capture revisions with identical content are collapsed while
 preserving the current revision and distinct content transitions. Deleted
 SQLite pages are reusable immediately; pass --vacuum to compact the database
 file and return unused space to the filesystem. Prune never deletes files from
-a repository, including ADRs, RFCs, PRDs, or DevSpecs task artifacts.`,
+a repository, including ADRs, RFCs, PRDs, or DevSpecs task artifacts.
+
+Pass --hub --before <RFC3339> to target old local coordination history instead.
+Hub pruning is never part of default index pruning and requires a cutoff. Use
+--dry-run to preview eligible entries. Old unpinned messages and complete old
+event correction chains can be removed; pinned messages and topic identity
+remain. A verified hub backup is made before deletion. Add --vacuum to compact
+the hub file and report reclaimed bytes. Vacuum runs after deletion, so a
+vacuum error can leave the prune batch committed.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if hub {
+				return runHubPrune(cmd, before, dryRun, vacuum, asJSON)
+			}
+			if before != "" {
+				return fmt.Errorf("--before requires --hub")
+			}
 			return runPrune(cmd, dryRun, vacuum, asJSON)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report stale repositories without changing the index")
 	cmd.Flags().BoolVar(&vacuum, "vacuum", false, "Compact the database after pruning to reclaim filesystem space")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
+	cmd.Flags().BoolVar(&hub, "hub", false, "Prune old local hub history instead of the rebuildable index")
+	cmd.Flags().StringVar(&before, "before", "", "Required UTC cutoff for --hub (RFC3339)")
 	return cmd
 }
 
@@ -69,9 +86,11 @@ func runPrune(cmd *cobra.Command, dryRun, vacuum, asJSON bool) error {
 		return fmt.Errorf("inspect index: %w", err)
 	}
 	var lease *store.IndexWriterLease
+	operationCtx := cmd.Context()
 	if !dryRun {
-		waitCtx, cancel := context.WithTimeout(cmd.Context(), autoIndexDeadline)
+		waitCtx, cancel := context.WithTimeout(operationCtx, autoIndexDeadline)
 		defer cancel()
+		operationCtx = waitCtx
 		var noticeCmd *cobra.Command
 		if !asJSON {
 			noticeCmd = cmd
@@ -83,7 +102,12 @@ func runPrune(cmd *cobra.Command, dryRun, vacuum, asJSON bool) error {
 		defer func() { _ = lease.Release() }()
 	}
 	progress.setPhase("inspect")
-	db, err := openDBAtPath(dbPath)
+	var db *store.DB
+	if dryRun {
+		db, err = openDBAtPath(dbPath)
+	} else {
+		db, err = openDBAtPathWithWriterLease(operationCtx, dbPath)
+	}
 	if err != nil {
 		return err
 	}

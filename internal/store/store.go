@@ -2,8 +2,10 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	_ "embed"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,7 +19,7 @@ import (
 var schemaDDL string
 
 // SchemaVersion is the current schema version. Bump when schema.sql changes.
-const SchemaVersion = 16
+const SchemaVersion = 17
 
 // SQLiteBusyTimeoutMS is the fallback for short writes that contend outside the
 // process-level index writer queue. Command contexts own longer operation limits.
@@ -41,34 +43,92 @@ func (err *NewerSchemaError) Error() string {
 }
 
 // Open opens or creates the SQLite database at the given path.
-// It ensures the parent directory exists and applies migrations.
+// It ensures the parent directory exists and coordinates backup-first migrations.
 func Open(dbPath string) (*DB, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	return OpenContext(ctx, dbPath)
+}
+
+// OpenContext opens an index and bounds any coordinated forward migration by ctx.
+func OpenContext(ctx context.Context, dbPath string) (*DB, error) {
+	return openIndex(ctx, dbPath, false)
+}
+
+// OpenWithWriterLease opens an index while the caller holds its writer lease.
+// This avoids reacquiring the same process-wide lease during forward migration.
+func OpenWithWriterLease(dbPath string) (*DB, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	return OpenWithWriterLeaseContext(ctx, dbPath)
+}
+
+// OpenWithWriterLeaseContext opens an index while the caller holds its writer
+// lease and bounds any migration by ctx.
+func OpenWithWriterLeaseContext(ctx context.Context, dbPath string) (*DB, error) {
+	return openIndex(ctx, dbPath, true)
+}
+
+func openIndex(ctx context.Context, dbPath string, writerLeaseHeld bool) (*DB, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("open index: %w", err)
+	}
 	dir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
+	if err := blockPendingIndexRecovery(dbPath); err != nil {
+		return nil, err
+	}
 
+	db, err := openSQLiteIndex(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	maxVersion, err := existingSchemaVersion(db.DB)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("inspect schema version: %w", err)
+	}
+	if maxVersion > SchemaVersion {
+		db.Close()
+		return nil, &NewerSchemaError{DatabaseVersion: maxVersion, SupportedVersion: SchemaVersion}
+	}
+	if maxVersion > 0 && maxVersion < SchemaVersion {
+		if err := db.Close(); err != nil {
+			return nil, fmt.Errorf("close index before migration: %w", err)
+		}
+		if writerLeaseHeld {
+			if err := migrateIndexCopyOnWrite(ctx, dbPath); err != nil {
+				return nil, err
+			}
+		} else {
+			lease, err := AcquireIndexWriter(ctx, dbPath, nil)
+			if err != nil {
+				return nil, err
+			}
+			migrationErr := migrateIndexCopyOnWrite(ctx, dbPath)
+			releaseErr := lease.Release()
+			if err := errors.Join(migrationErr, releaseErr); err != nil {
+				return nil, err
+			}
+		}
+		return openIndex(ctx, dbPath, writerLeaseHeld)
+	}
+	if err := db.migrate(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	return db, nil
+}
+
+func openSQLiteIndex(dbPath string) (*DB, error) {
 	dsn := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=busy_timeout(%d)", dbPath, SQLiteBusyTimeoutMS)
 	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-
-	db := &DB{DB: sqlDB, path: dbPath}
-	maxVersion, err := existingSchemaVersion(sqlDB)
-	if err != nil {
-		sqlDB.Close()
-		return nil, fmt.Errorf("inspect schema version: %w", err)
-	}
-	if maxVersion > SchemaVersion {
-		sqlDB.Close()
-		return nil, &NewerSchemaError{DatabaseVersion: maxVersion, SupportedVersion: SchemaVersion}
-	}
-	if err := db.migrate(); err != nil {
-		sqlDB.Close()
-		return nil, fmt.Errorf("migrate: %w", err)
-	}
-	return db, nil
+	return &DB{DB: sqlDB, path: dbPath}, nil
 }
 
 func existingSchemaVersion(db *sql.DB) (int, error) {
@@ -194,9 +254,14 @@ func (db *DB) migrate() error {
 				return err
 			}
 			maxVersion = 16
+		case 16:
+			if err := db.migrate16To17(now); err != nil {
+				return err
+			}
+			maxVersion = 17
 		default:
 			return fmt.Errorf(
-				"index was created with schema v%d but this CLI requires v%d. Run 'ds scan --rebuild' or delete ~/.devspecs/devspecs.db and run 'ds scan' to rebuild",
+				"index was created with schema v%d but this CLI requires v%d. Run 'ds index backup', then 'ds index rebuild --path <repo>' to rebuild safely",
 				maxVersion, SchemaVersion,
 			)
 		}
@@ -516,6 +581,25 @@ func (db *DB) migrate15To16(now string) error {
 		return fmt.Errorf("migrate v15->v16 thread projections: %w", err)
 	}
 	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 16, now)
+	return err
+}
+
+func (db *DB) migrate16To17(now string) error {
+	statements := []struct {
+		label string
+		sql   string
+	}{
+		{label: "source symbol parent", sql: `ALTER TABLE source_manifest_symbols ADD COLUMN parent TEXT NOT NULL DEFAULT ''`},
+		{label: "source symbol end line", sql: `ALTER TABLE source_manifest_symbols ADD COLUMN end_line INTEGER NOT NULL DEFAULT 0`},
+		{label: "source test end line", sql: `ALTER TABLE source_manifest_tests ADD COLUMN end_line INTEGER NOT NULL DEFAULT 0`},
+		{label: "source import end line", sql: `ALTER TABLE source_manifest_imports ADD COLUMN end_line INTEGER NOT NULL DEFAULT 0`},
+	}
+	for _, statement := range statements {
+		if err := tryAlterTable(db.DB, statement.sql); err != nil {
+			return fmt.Errorf("migrate v16->v17 %s: %w", statement.label, err)
+		}
+	}
+	_, err := db.Exec("UPDATE schema_migrations SET version = ?, applied_at = ?", 17, now)
 	return err
 }
 

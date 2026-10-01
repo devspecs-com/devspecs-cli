@@ -5,7 +5,7 @@
 set -e
 
 REPO="devspecs-com/devspecs-cli"
-BINARY_NAME="ds"
+BINARY_NAMES="ds"
 INSTALL_DIR="${DEVSPECS_INSTALL_DIR:-/usr/local/bin}"
 
 RED='\033[0;31m'
@@ -64,7 +64,7 @@ telemetry_install_completed() {
         0|false|False|FALSE|off|Off|OFF|no|No|NO|disabled|Disabled|DISABLED) return 0 ;;
     esac
 
-    TELEMETRY_URL="${DEVSPECS_TELEMETRY_URL:-${DS_TELEMETRY_URL:-https://devspecs.com/api/telemetry}}"
+    TELEMETRY_URL="${DEVSPECS_TELEMETRY_URL:-${DS_TELEMETRY_URL:-https://www.devspecs.com/api/telemetry}}"
     PAYLOAD=$(printf '{"event":"install_completed","properties":{"install_method":"install.sh","install_os":"%s","install_arch":"%s","install_version":"%s"}}' "$OS" "$ARCH" "$VERSION")
 
     if command -v curl >/dev/null 2>&1; then
@@ -100,14 +100,24 @@ main() {
     info "Extracting..."
     tar -xzf "$TMP_DIR/$FILENAME" -C "$TMP_DIR"
 
+    for BINARY_NAME in $BINARY_NAMES; do
+        if [ ! -f "$TMP_DIR/$BINARY_NAME" ]; then
+            error "Release archive is missing $BINARY_NAME"
+        fi
+    done
+
     info "Installing to $INSTALL_DIR..."
     if [ -w "$INSTALL_DIR" ]; then
-        mv "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
-        chmod +x "$INSTALL_DIR/$BINARY_NAME"
+        for BINARY_NAME in $BINARY_NAMES; do
+            mv "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
+            chmod +x "$INSTALL_DIR/$BINARY_NAME"
+        done
     else
         warn "Permission denied. Trying with sudo..."
-        sudo mv "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
-        sudo chmod +x "$INSTALL_DIR/$BINARY_NAME"
+        for BINARY_NAME in $BINARY_NAMES; do
+            sudo mv "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
+            sudo chmod +x "$INSTALL_DIR/$BINARY_NAME"
+        done
     fi
 
     info "DevSpecs CLI installed successfully!"

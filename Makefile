@@ -4,6 +4,7 @@ BINARY := ds
 MODULE := github.com/devspecs-com/devspecs-cli
 VERSION_PKG := $(MODULE)/internal/version
 COVERAGE_FLOOR ?= 80.0
+TEST_TIMEOUT ?= 30m
 
 LDFLAGS := -s -w \
 	-X $(VERSION_PKG).Version=dev \
@@ -20,7 +21,7 @@ RACE :=
 endif
 
 test:
-	go test $(RACE) -count=1 ./...
+	go test $(RACE) -count=1 -timeout $(TEST_TIMEOUT) ./...
 
 test-policy:
 	go run ./scripts/ci/check-test-assertions
@@ -36,12 +37,12 @@ hooks:
 	@echo "Configured core.hooksPath=.githooks for this repository clone."
 
 cover:
-	go test $(RACE) -coverprofile coverage.out ./...
+	go test $(RACE) -timeout $(TEST_TIMEOUT) -coverprofile coverage.out ./...
 	go tool cover -func coverage.out
 
 # Aggregate statement coverage across ./... using exact profile counts. Per-package floors vary.
 cover-check:
-	go test $(RACE) -coverprofile coverage.out -covermode atomic ./...
+	go test $(RACE) -timeout $(TEST_TIMEOUT) -coverprofile coverage.out -covermode atomic ./...
 	go run ./scripts/ci/check-coverage --profile coverage.out --floor "$(COVERAGE_FLOOR)"
 
 snapshot:

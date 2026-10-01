@@ -39,6 +39,55 @@ func TestApply_WhenOneThreadIsRunnable_SelectsItImplicitly(t *testing.T) {
 	assert.Contains(t, output.Prompt, "- Thread: agent-a")
 }
 
+func TestApplyPrompt_WhenThreadTargetsAreNoncontiguous_DoesNotGuessNextTarget(t *testing.T) {
+	t.Setenv("DEVSPECS_HOME", filepath.Join(t.TempDir(), "home"))
+	repoRoot := setupApplyTask(t, "thread-apply", "F", "first lane", "other lane", "first lane continuation")
+	definition := validRepoThreadDefinitionForApply("thread-apply")
+	require.Len(t, definition.Threads, 2)
+	definition.Threads[0].Targets = []threadTargetReference{{Target: "F01"}, {Target: "F03"}}
+	writeApplyThreadDefinition(t, repoRoot, "thread-apply", definition)
+	cmd := NewApplyCmd()
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"thread-apply", "--thread", "agent-a", "--json"})
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	output := decodeApplyPromptOutput(t, stdout)
+	assert.Equal(t, "F01", output.Target)
+	require.NotNil(t, output.ThreadContext)
+	assert.Equal(t, "agent-a", output.ThreadContext.Key)
+	assert.Contains(t, output.Prompt, "--stage validated --decision promote --from-git --test-run \"<command>\"`\n")
+	assert.NotContains(t, output.Prompt, "--next-target F02")
+	assert.NotContains(t, output.Prompt, "--next-target F03")
+	assert.NotContains(t, output.Prompt, "--next-decision promote")
+}
+
+func TestApplyPrompt_WhenThreadEndsBeforeManifest_DoesNotAdvertiseAnotherLane(t *testing.T) {
+	t.Setenv("DEVSPECS_HOME", filepath.Join(t.TempDir(), "home"))
+	repoRoot := setupApplyTask(t, "thread-apply", "F", "only lane target", "other lane")
+	writeApplyThreadDefinition(t, repoRoot, "thread-apply", validRepoThreadDefinitionForApply("thread-apply"))
+	cmd := NewApplyCmd()
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"thread-apply", "--thread", "agent-a", "--json"})
+
+	err := cmd.Execute()
+
+	require.NoError(t, err)
+	output := decodeApplyPromptOutput(t, stdout)
+	assert.Equal(t, "F01", output.Target)
+	require.NotNil(t, output.ThreadContext)
+	assert.Equal(t, "agent-a", output.ThreadContext.Key)
+	assert.Contains(t, output.Prompt, "--stage validated --decision promote --from-git --test-run \"<command>\"`\n")
+	assert.NotContains(t, output.Prompt, "--next-target F02")
+	assert.NotContains(t, output.Prompt, "--next-target <next-target>")
+	assert.NotContains(t, output.Prompt, "--next-decision promote")
+}
+
 func TestApply_WhenMultipleThreadsAreRunnable_RequiresThreadSelection(t *testing.T) {
 	// Arrange
 	home := filepath.Join(t.TempDir(), "home")

@@ -476,17 +476,11 @@ func runLiveCommandEval(command, findRuntime, fixtureAbs string, cases []evalhar
 	}
 	defer os.RemoveAll(tempHome)
 
-	oldHome, hadHome := os.LookupEnv("DEVSPECS_HOME")
-	if err := os.Setenv("DEVSPECS_HOME", tempHome); err != nil {
+	restoreEnvironment, err := setEvalHome(tempHome)
+	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if hadHome {
-			os.Setenv("DEVSPECS_HOME", oldHome)
-		} else {
-			os.Unsetenv("DEVSPECS_HOME")
-		}
-	}()
+	defer restoreEnvironment()
 	mode, err := indexquery.ParseRuntimeMode(findRuntime)
 	if err != nil {
 		return nil, err

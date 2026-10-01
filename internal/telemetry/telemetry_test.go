@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -15,6 +16,24 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestInstallerTelemetry_WhenShellFallbackIsUsed_MatchesCanonicalEndpoint(t *testing.T) {
+	path := filepath.Join("..", "..", "install.sh")
+
+	body, err := os.ReadFile(path)
+
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `TELEMETRY_URL="${DEVSPECS_TELEMETRY_URL:-${DS_TELEMETRY_URL:-`+defaultEndpoint+`}}"`)
+}
+
+func TestInstallerTelemetry_WhenPowerShellFallbackIsUsed_MatchesCanonicalEndpoint(t *testing.T) {
+	path := filepath.Join("..", "..", "install.ps1")
+
+	body, err := os.ReadFile(path)
+
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `$url = if ($env:DEVSPECS_TELEMETRY_URL) { $env:DEVSPECS_TELEMETRY_URL } elseif ($env:DS_TELEMETRY_URL) { $env:DS_TELEMETRY_URL } else { "`+defaultEndpoint+`" }`)
+}
 
 func TestSanitizeProperties_WithSensitiveFields_KeepsOnlyAllowedCoarseFields(t *testing.T) {
 	input := map[string]any{
@@ -308,6 +327,101 @@ func TestDurationBucket_WithTwoMinutes_ReturnsOpenEndedSecondsBucket(t *testing.
 	assert.Equal(t, "120s+", bucket)
 }
 
+func TestRecord_WithPermanentRedirectEndpoint_DeliversPostBodyToFinalHandler(t *testing.T) {
+	received := make(chan telemetryRequest, 1)
+	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		received <- telemetryRequest{
+			Body:        body,
+			ReadError:   err,
+			Method:      r.Method,
+			ContentType: r.Header.Get("content-type"),
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(final.Close)
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, final.URL, http.StatusPermanentRedirect)
+	}))
+	t.Cleanup(redirector.Close)
+	enableTelemetryForTest(t, redirector.URL)
+
+	Record(context.Background(), "scan_completed", map[string]any{"command": "scan"})
+
+	request := <-received
+	require.NoError(t, request.ReadError)
+	assert.Equal(t, http.MethodPost, request.Method)
+	assert.Equal(t, "application/json", request.ContentType)
+	var event Event
+	require.NoError(t, json.Unmarshal(request.Body, &event))
+	assert.Equal(t, "scan_completed", event.Event)
+	require.Len(t, event.Properties, 1)
+	assert.Equal(t, "scan", event.Properties["command"])
+}
+
+func TestRecord_WithStallingEndpoint_ReturnsWithinTimeoutBudget(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		case <-time.After(30 * time.Second):
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { close(release) })
+	enableTelemetryForTest(t, server.URL)
+	started := time.Now()
+
+	Record(context.Background(), "scan_completed", map[string]any{"command": "scan"})
+
+	elapsed := time.Since(started)
+	assert.Less(t, elapsed, defaultTimeout+5*time.Second)
+}
+
+func TestRecord_WithUnreachableEndpoint_ReturnsWithoutWritingToStandardStreams(t *testing.T) {
+	closed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	endpoint := closed.URL
+	closed.Close()
+	enableTelemetryForTest(t, endpoint)
+	readStandardStreams := captureStandardStreams(t)
+
+	Record(context.Background(), "scan_completed", map[string]any{"command": "scan"})
+
+	assert.Empty(t, readStandardStreams())
+}
+
+func TestRecord_WithServerErrorResponse_ReturnsWithoutWritingToStandardStreams(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "telemetry is unavailable", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	enableTelemetryForTest(t, server.URL)
+	readStandardStreams := captureStandardStreams(t)
+
+	Record(context.Background(), "scan_completed", map[string]any{"command": "scan"})
+
+	assert.Empty(t, readStandardStreams())
+}
+
+func TestRecord_WithRedirectLoopEndpoint_ReturnsWithoutWritingToStandardStreams(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Redirect(w, r, r.URL.String(), http.StatusPermanentRedirect)
+	}))
+	t.Cleanup(server.Close)
+	enableTelemetryForTest(t, server.URL)
+	readStandardStreams := captureStandardStreams(t)
+
+	Record(context.Background(), "scan_completed", map[string]any{"command": "scan"})
+
+	assert.Empty(t, readStandardStreams())
+	assert.Positive(t, requests.Load())
+}
+
 type telemetryRequest struct {
 	Body        []byte
 	ReadError   error
@@ -325,6 +439,38 @@ func enableTelemetryForTest(t *testing.T, endpoint string) string {
 	t.Setenv("DEVSPECS_TELEMETRY_URL", endpoint)
 	t.Setenv("CI", "")
 	return home
+}
+
+// captureStandardStreams redirects os.Stdout and os.Stderr to a pipe and
+// returns a function that restores them and yields everything written.
+func captureStandardStreams(t *testing.T) func() string {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	originalStdout, originalStderr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = writer, writer
+
+	captured := make(chan string, 1)
+	go func() {
+		var buffer bytes.Buffer
+		_, _ = io.Copy(&buffer, reader)
+		captured <- buffer.String()
+	}()
+
+	restored := false
+	restore := func() string {
+		if restored {
+			return ""
+		}
+		restored = true
+		os.Stdout, os.Stderr = originalStdout, originalStderr
+		_ = writer.Close()
+		output := <-captured
+		_ = reader.Close()
+		return output
+	}
+	t.Cleanup(func() { restore() })
+	return restore
 }
 
 func setTelemetryProcessName(t *testing.T) {
