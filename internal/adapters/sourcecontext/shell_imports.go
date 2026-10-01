@@ -9,31 +9,42 @@ import (
 // ShellImportResolver resolves parser-extracted shell source references against
 // a repository manifest without evaluating variables or shell expressions.
 type ShellImportResolver struct {
-	files     map[string]string
-	suffixes  map[string]string
-	ambiguous map[string]bool
+	files           map[string]string
+	folded          map[string]string
+	foldedAmbiguous map[string]bool
+	suffixes        map[string]string
+	ambiguous       map[string]bool
 }
 
 // NewShellImportResolver builds a deterministic resolver for repository paths.
 func NewShellImportResolver(paths []string) ShellImportResolver {
 	resolver := ShellImportResolver{
-		files:     map[string]string{},
-		suffixes:  map[string]string{},
-		ambiguous: map[string]bool{},
+		files:           map[string]string{},
+		folded:          map[string]string{},
+		foldedAmbiguous: map[string]bool{},
+		suffixes:        map[string]string{},
+		ambiguous:       map[string]bool{},
 	}
 	for _, rawPath := range paths {
 		filePath := normalizeShellImportPath(rawPath)
 		if filePath == "" {
 			continue
 		}
-		resolver.files[strings.ToLower(filePath)] = filePath
+		resolver.files[filePath] = filePath
+		key := strings.ToLower(filePath)
+		if existing, ok := resolver.folded[key]; ok && existing != filePath {
+			delete(resolver.folded, key)
+			resolver.foldedAmbiguous[key] = true
+		} else if !resolver.foldedAmbiguous[key] {
+			resolver.folded[key] = filePath
+		}
 		parts := strings.Split(filePath, "/")
 		for i := range parts {
 			suffix := strings.ToLower(strings.Join(parts[i:], "/"))
 			if suffix == "" || resolver.ambiguous[suffix] {
 				continue
 			}
-			if existing, ok := resolver.suffixes[suffix]; ok && !strings.EqualFold(existing, filePath) {
+			if existing, ok := resolver.suffixes[suffix]; ok && existing != filePath {
 				delete(resolver.suffixes, suffix)
 				resolver.ambiguous[suffix] = true
 				continue
@@ -78,7 +89,12 @@ func (r ShellImportResolver) Resolve(fromPath, importRef string) string {
 	}
 
 	for _, candidate := range appendShellImportExtensions(candidates) {
-		if resolved := r.files[strings.ToLower(candidate)]; resolved != "" {
+		if resolved := r.files[candidate]; resolved != "" {
+			return resolved
+		}
+	}
+	for _, candidate := range appendShellImportExtensions(candidates) {
+		if resolved := r.folded[strings.ToLower(candidate)]; resolved != "" {
 			return resolved
 		}
 	}
@@ -168,7 +184,7 @@ func normalizeShellImportPath(value string) string {
 
 func appendUniqueShellImportString(values []string, value string) []string {
 	for _, existing := range values {
-		if strings.EqualFold(existing, value) {
+		if existing == value {
 			return values
 		}
 	}

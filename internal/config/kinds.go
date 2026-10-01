@@ -161,6 +161,7 @@ func ValidateRepoConfig(cfg *RepoConfig) error {
 	if provider != "" && !validIntegrationProvider(provider) {
 		return fmt.Errorf("integrations.orchestration.provider %q must use lowercase letters, digits, and hyphens", provider)
 	}
+	cfg.Integrations.Orchestration.Provider = provider
 	return nil
 }
 

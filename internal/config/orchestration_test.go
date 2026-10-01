@@ -79,3 +79,18 @@ integrations:
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "integrations.orchestration.provider")
 }
+
+func TestLoadRepoConfig_WithPaddedOrchestrationProvider_NormalizesSelection(t *testing.T) {
+	repoRoot := t.TempDir()
+	writeRepoConfigFixture(t, repoRoot, `version: 1
+sources: []
+integrations:
+  orchestration:
+    provider: " waspflow "
+`)
+
+	loaded, err := LoadRepoConfig(repoRoot)
+
+	require.NoError(t, err)
+	assert.Equal(t, "waspflow", loaded.Integrations.Orchestration.Provider)
+}

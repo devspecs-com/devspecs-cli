@@ -1,4 +1,4 @@
-# ADR-0002: Keep hub coordination separate from the source index
+# ADR-0003: Keep hub coordination separate from the source index
 
 ## Status
 

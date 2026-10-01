@@ -48,3 +48,35 @@ func TestShellImportResolver_AmbiguousBasename_ReturnsEmpty(t *testing.T) {
 
 	assert.Empty(t, got)
 }
+
+func TestShellImportResolver_CaseDistinctPaths_PreservesExactMatch(t *testing.T) {
+	resolver := NewShellImportResolver([]string{"lib/Core.sh", "lib/core.sh", "bin/tool"})
+
+	got := resolver.Resolve("bin/tool", "lib/Core.sh")
+
+	assert.Equal(t, "lib/Core.sh", got)
+}
+
+func TestShellImportResolver_AmbiguousCaseFoldedPath_ReturnsEmpty(t *testing.T) {
+	resolver := NewShellImportResolver([]string{"lib/Core.sh", "lib/core.sh", "bin/tool"})
+
+	got := resolver.Resolve("bin/tool", "lib/CORE.sh")
+
+	assert.Empty(t, got)
+}
+
+func TestShellImportResolver_UniqueCaseFoldedPath_ResolvesReference(t *testing.T) {
+	resolver := NewShellImportResolver([]string{"lib/Core.sh", "bin/tool"})
+
+	got := resolver.Resolve("bin/tool", "lib/CORE.sh")
+
+	assert.Equal(t, "lib/Core.sh", got)
+}
+
+func TestShellImportResolver_CaseDistinctSuffixes_ReturnsEmpty(t *testing.T) {
+	resolver := NewShellImportResolver([]string{"lib/Core.sh", "lib/core.sh", "bin/tool"})
+
+	got := resolver.Resolve("bin/tool", "$TOOL_LIB/CORE.sh")
+
+	assert.Empty(t, got)
+}

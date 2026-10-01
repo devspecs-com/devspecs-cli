@@ -60,7 +60,7 @@ make hooks
 ```
 
 The hook runs `go vet`, `staticcheck`, `gofmt -l`, and by default
-`go test -p 1 -count=1 -timeout 30m ./...` in a disposable DevSpecs home.
+`go test -count=1 -timeout 30m ./...` in a disposable DevSpecs home.
 
 ## Releasing
 

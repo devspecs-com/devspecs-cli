@@ -82,6 +82,10 @@ func TestMigrate_FromV16ExposesSourceSemanticRangeColumns(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "devspecs.db")
 	db, err := Open(dbPath)
 	require.NoError(t, err)
+	mustExecStoreTestSQL(t, db, `ALTER TABLE source_manifest_symbols DROP COLUMN parent`)
+	mustExecStoreTestSQL(t, db, `ALTER TABLE source_manifest_symbols DROP COLUMN end_line`)
+	mustExecStoreTestSQL(t, db, `ALTER TABLE source_manifest_tests DROP COLUMN end_line`)
+	mustExecStoreTestSQL(t, db, `ALTER TABLE source_manifest_imports DROP COLUMN end_line`)
 	mustExecStoreTestSQL(t, db, `UPDATE schema_migrations SET version = 16`)
 	require.NoError(t, db.Close())
 
@@ -92,6 +96,15 @@ func TestMigrate_FromV16ExposesSourceSemanticRangeColumns(t *testing.T) {
 	rows, err := db.Query(`SELECT parent, end_line FROM source_manifest_symbols LIMIT 0`)
 	require.NoError(t, err)
 	require.NoError(t, rows.Close())
+	rows, err = db.Query(`SELECT end_line FROM source_manifest_tests LIMIT 0`)
+	require.NoError(t, err)
+	require.NoError(t, rows.Close())
+	rows, err = db.Query(`SELECT end_line FROM source_manifest_imports LIMIT 0`)
+	require.NoError(t, err)
+	require.NoError(t, rows.Close())
+	var version int
+	require.NoError(t, db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version))
+	assert.Equal(t, SchemaVersion, version)
 }
 
 func TestMigrate_V14ToV15BackfillsRepositoryRoots(t *testing.T) {

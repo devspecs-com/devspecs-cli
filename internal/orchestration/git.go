@@ -1,8 +1,11 @@
 package orchestration
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -75,6 +78,37 @@ func resultRepositoryState(ctx context.Context, runner CommandRunner, path strin
 	state := append([]byte(commit+"\n"), status...)
 	state = append(state, diff...)
 	state = append(state, cached...)
+	untracked, err := runGitBytes(ctx, runner, path, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, "", err
+	}
+	for _, name := range bytes.Split(untracked, []byte{0}) {
+		if len(name) == 0 {
+			continue
+		}
+		filePath := filepath.Join(path, filepath.FromSlash(string(name)))
+		info, err := os.Lstat(filePath)
+		if err != nil {
+			return nil, "", fmt.Errorf("inspect untracked result: %w", err)
+		}
+		var contentHash string
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(filePath)
+			if err != nil {
+				return nil, "", fmt.Errorf("read untracked result link: %w", err)
+			}
+			contentHash = sha256Bytes([]byte(target))
+		} else {
+			contentHash, err = runGitText(ctx, runner, path, "hash-object", "--no-filters", "--", string(name))
+			if err != nil {
+				return nil, "", fmt.Errorf("hash untracked result: %w", err)
+			}
+		}
+		state = append(state, name...)
+		state = append(state, 0)
+		state = append(state, []byte(info.Mode().String()+":"+contentHash)...)
+		state = append(state, 0)
+	}
 	return &commit, sha256Bytes(state), nil
 }
 
@@ -96,13 +130,32 @@ func runGitBytes(ctx context.Context, runner CommandRunner, dir string, args ...
 
 func normalizeRemote(value string) string {
 	value = strings.TrimSpace(value)
-	value = strings.TrimSuffix(value, ".git")
-	if strings.HasPrefix(value, "git@") {
-		value = strings.TrimPrefix(value, "git@")
-		value = strings.Replace(value, ":", "/", 1)
-		return "https://" + value
+	if !strings.Contains(value, "://") {
+		if colon := strings.IndexByte(value, ':'); colon > 1 {
+			host := value[:colon]
+			if at := strings.LastIndexByte(host, '@'); at >= 0 {
+				host = host[at+1:]
+			}
+			value = "https://" + host + "/" + value[colon+1:]
+		} else if strings.Contains(value, "@") {
+			return "root"
+		} else {
+			return strings.TrimSuffix(value, ".git")
+		}
 	}
-	return value
+	remote, err := url.Parse(value)
+	if err != nil || remote.Host == "" {
+		return "root"
+	}
+	remote.User = nil
+	remote.RawQuery = ""
+	remote.Fragment = ""
+	remote.Path = strings.TrimSuffix(remote.Path, ".git")
+	remote.RawPath = ""
+	if remote.Scheme == "ssh" || remote.Scheme == "git" {
+		remote.Scheme = "https"
+	}
+	return remote.String()
 }
 
 func boundedMessage(data []byte) string {

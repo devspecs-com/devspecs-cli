@@ -55,6 +55,11 @@
   `receipt` flows without changing Waspflow or automatically promoting a task.
   Configuration alone never launches work, and release packages still ship one
   `ds` binary.
+- Removed remote credentials from dispatch repository identities and included
+  untracked file contents in result-state digests. Orchestration provider
+  selections now normalize surrounding whitespace before dispatch.
+- Preserved case-distinct shell import paths, resolving case-folded references
+  only when unambiguous.
 - Added read-only `ds doctor` diagnostics for active binary and PATH
   precedence, inferred install source, DevSpecs home, index size/schema/writer
   state, repository identity, and explicitly configured orchestration-provider
