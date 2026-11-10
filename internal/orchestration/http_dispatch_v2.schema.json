@@ -1,0 +1,1155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DevSpecs HTTP dispatch v2 (review draft)",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Capabilities"
+    },
+    {
+      "$ref": "#/$defs/Request"
+    },
+    {
+      "$ref": "#/$defs/Handle"
+    },
+    {
+      "$ref": "#/$defs/Status"
+    },
+    {
+      "$ref": "#/$defs/Receipt"
+    },
+    {
+      "$ref": "#/$defs/Error"
+    }
+  ],
+  "$defs": {
+    "Digest": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 71,
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "DispatchID": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 35,
+      "pattern": "^dispatch_[0-9A-HJKMNPQRSTVWXYZ]{26}$"
+    },
+    "Commit": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+    },
+    "HTTPSURL": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "format": "uri",
+      "pattern": "^https://[^@?#/]+(?:/[^?#]*)?$"
+    },
+    "RepoPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^[^/]+(?:/[^/]+)*$",
+      "allOf": [
+        {
+          "not": {
+            "pattern": "^[A-Za-z]:"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(?:^|/)\\.{1,2}(?:/|$)"
+          }
+        },
+        {
+          "not": {
+            "pattern": "[\\\\\\x00-\\x1f]"
+          }
+        }
+      ]
+    },
+    "ProviderRun": {
+      "type": "object",
+      "required": [
+        "name",
+        "run_id"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "additionalProperties": false
+    },
+    "Artifact": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "artifact_id",
+            "media_type",
+            "size_bytes",
+            "sha256",
+            "kind",
+            "content_base64"
+          ],
+          "properties": {
+            "artifact_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "media_type": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 33554432
+            },
+            "sha256": {
+              "$ref": "#/$defs/Digest"
+            },
+            "kind": {
+              "const": "inline"
+            },
+            "content_base64": {
+              "type": "string",
+              "contentEncoding": "base64",
+              "maxLength": 1398104
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "artifact_id",
+            "media_type",
+            "size_bytes",
+            "sha256",
+            "kind",
+            "url"
+          ],
+          "properties": {
+            "artifact_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "media_type": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 33554432
+            },
+            "sha256": {
+              "$ref": "#/$defs/Digest"
+            },
+            "kind": {
+              "const": "https"
+            },
+            "url": {
+              "$ref": "#/$defs/HTTPSURL"
+            },
+            "credential_ref": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PortableApply": {
+      "type": "object",
+      "required": [
+        "target",
+        "prompt"
+      ],
+      "properties": {
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1048576
+        }
+      },
+      "additionalProperties": false
+    },
+    "Usage": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "effort": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cached_input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "wall_time_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cost": {
+          "type": "object",
+          "required": [
+            "amount",
+            "currency"
+          ],
+          "properties": {
+            "amount": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32,
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,9})?$"
+            },
+            "currency": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 3,
+              "pattern": "^[A-Z]{3}$"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "Capabilities": {
+      "type": "object",
+      "required": [
+        "schema",
+        "schema_version",
+        "provider",
+        "ready",
+        "isolation",
+        "report",
+        "cancellation",
+        "verification_profiles",
+        "limits",
+        "idempotency_retention_seconds"
+      ],
+      "properties": {
+        "schema": {
+          "const": "devspecs.dispatch.capabilities"
+        },
+        "schema_version": {
+          "const": 2
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "isolation": {
+          "type": "boolean"
+        },
+        "report": {
+          "type": "boolean"
+        },
+        "cancellation": {
+          "type": "boolean"
+        },
+        "verification_profiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "key",
+              "strength"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "strength": {
+                "enum": [
+                  "smoke",
+                  "suite"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "maxItems": 32
+        },
+        "limits": {
+          "type": "object",
+          "required": [
+            "max_request_bytes",
+            "max_inline_bytes",
+            "max_artifact_bytes",
+            "max_timeout_seconds",
+            "max_attempts"
+          ],
+          "properties": {
+            "max_request_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2097152
+            },
+            "max_inline_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "max_artifact_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 33554432
+            },
+            "max_timeout_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600
+            },
+            "max_attempts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5
+            }
+          },
+          "additionalProperties": false
+        },
+        "idempotency_retention_seconds": {
+          "type": "integer",
+          "minimum": 86400,
+          "maximum": 2592000
+        }
+      },
+      "additionalProperties": false
+    },
+    "Request": {
+      "type": "object",
+      "required": [
+        "schema",
+        "schema_version",
+        "dispatch_id",
+        "created_at",
+        "target",
+        "repository",
+        "input",
+        "requirements",
+        "options"
+      ],
+      "properties": {
+        "schema": {
+          "const": "devspecs.dispatch.request"
+        },
+        "schema_version": {
+          "const": 2
+        },
+        "dispatch_id": {
+          "$ref": "#/$defs/DispatchID"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "target": {
+          "type": "object",
+          "required": [
+            "owner",
+            "slice",
+            "thread"
+          ],
+          "properties": {
+            "owner": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^(task|change):[^\\s]+$"
+            },
+            "slice": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "thread": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "repository": {
+          "type": "object",
+          "required": [
+            "logical_id",
+            "git_url",
+            "source_commit"
+          ],
+          "properties": {
+            "logical_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "git_url": {
+              "$ref": "#/$defs/HTTPSURL"
+            },
+            "source_commit": {
+              "$ref": "#/$defs/Commit"
+            },
+            "credential_ref": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "additionalProperties": false
+        },
+        "input": {
+          "type": "object",
+          "required": [
+            "apply_payload",
+            "apply_sha256",
+            "context_artifacts",
+            "execution_prompt_sha256",
+            "execution_policy"
+          ],
+          "properties": {
+            "apply_payload": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1048576,
+              "contentMediaType": "application/json",
+              "contentSchema": {
+                "$ref": "#/$defs/PortableApply"
+              }
+            },
+            "apply_sha256": {
+              "$ref": "#/$defs/Digest"
+            },
+            "context_artifacts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Artifact"
+              },
+              "maxItems": 64
+            },
+            "execution_prompt_sha256": {
+              "$ref": "#/$defs/Digest"
+            },
+            "execution_policy": {
+              "type": "object",
+              "required": [
+                "task_evidence",
+                "promotion"
+              ],
+              "properties": {
+                "task_evidence": {
+                  "const": "read_only"
+                },
+                "promotion": {
+                  "const": "caller_only"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "requirements": {
+          "type": "object",
+          "required": [
+            "timeout_seconds",
+            "max_attempts",
+            "isolation",
+            "cancellation",
+            "report",
+            "verification"
+          ],
+          "properties": {
+            "timeout_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600
+            },
+            "max_attempts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5
+            },
+            "isolation": {
+              "const": "required"
+            },
+            "cancellation": {
+              "enum": [
+                "required",
+                "optional"
+              ]
+            },
+            "report": {
+              "type": "object",
+              "required": [
+                "required"
+              ],
+              "properties": {
+                "required": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "verification": {
+              "type": "object",
+              "required": [
+                "required"
+              ],
+              "properties": {
+                "required": {
+                  "type": "boolean"
+                },
+                "profile": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "strength": {
+                  "enum": [
+                    "smoke",
+                    "suite"
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "required": {
+                        "const": true
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "profile",
+                      "strength"
+                    ]
+                  },
+                  "else": {
+                    "not": {
+                      "anyOf": [
+                        {
+                          "required": [
+                            "profile"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "strength"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "required": [
+            "agent_provider"
+          ],
+          "properties": {
+            "agent_provider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "effort": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "Handle": {
+      "type": "object",
+      "required": [
+        "schema",
+        "schema_version",
+        "dispatch_id",
+        "request_sha256",
+        "provider",
+        "accepted_at"
+      ],
+      "properties": {
+        "schema": {
+          "const": "devspecs.dispatch.handle"
+        },
+        "schema_version": {
+          "const": 2
+        },
+        "dispatch_id": {
+          "$ref": "#/$defs/DispatchID"
+        },
+        "request_sha256": {
+          "$ref": "#/$defs/Digest"
+        },
+        "provider": {
+          "$ref": "#/$defs/ProviderRun"
+        },
+        "accepted_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Status": {
+      "type": "object",
+      "required": [
+        "schema",
+        "schema_version",
+        "dispatch_id",
+        "request_sha256",
+        "provider",
+        "state",
+        "cancel_requested",
+        "observed_at"
+      ],
+      "properties": {
+        "schema": {
+          "const": "devspecs.dispatch.status"
+        },
+        "schema_version": {
+          "const": 2
+        },
+        "dispatch_id": {
+          "$ref": "#/$defs/DispatchID"
+        },
+        "request_sha256": {
+          "$ref": "#/$defs/Digest"
+        },
+        "provider": {
+          "$ref": "#/$defs/ProviderRun"
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "running",
+            "paused",
+            "succeeded",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "cancel_requested": {
+          "type": "boolean"
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "usage": {
+          "$ref": "#/$defs/Usage"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Receipt": {
+      "type": "object",
+      "required": [
+        "schema",
+        "schema_version",
+        "dispatch_id",
+        "request_sha256",
+        "provider",
+        "receipt_id",
+        "execution",
+        "repository",
+        "evidence",
+        "report",
+        "verification",
+        "cancellation"
+      ],
+      "properties": {
+        "schema": {
+          "const": "devspecs.dispatch.receipt"
+        },
+        "schema_version": {
+          "const": 2
+        },
+        "dispatch_id": {
+          "$ref": "#/$defs/DispatchID"
+        },
+        "request_sha256": {
+          "$ref": "#/$defs/Digest"
+        },
+        "provider": {
+          "$ref": "#/$defs/ProviderRun"
+        },
+        "receipt_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 34,
+          "pattern": "^receipt_[0-9A-HJKMNPQRSTVWXYZ]{26}$"
+        },
+        "execution": {
+          "type": "object",
+          "required": [
+            "state",
+            "attempts",
+            "started_at",
+            "ended_at",
+            "failure"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "succeeded",
+                "failed",
+                "cancelled"
+              ]
+            },
+            "attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 5
+            },
+            "started_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "ended_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "failure": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "class",
+                    "detail"
+                  ],
+                  "properties": {
+                    "class": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "detail": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "state": {
+                    "const": "succeeded"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "attempts": {
+                    "minimum": 1
+                  },
+                  "started_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "failure": {
+                    "type": "null"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "failure": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "repository": {
+          "type": "object",
+          "required": [
+            "logical_id",
+            "source_commit",
+            "result_commit"
+          ],
+          "properties": {
+            "logical_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "source_commit": {
+              "$ref": "#/$defs/Commit"
+            },
+            "result_commit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Commit"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "result_ref": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "pattern": "^refs/heads/.+$"
+            }
+          },
+          "additionalProperties": false
+        },
+        "evidence": {
+          "type": "object",
+          "required": [
+            "files_read",
+            "files_edited",
+            "paths_complete"
+          ],
+          "properties": {
+            "files_read": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RepoPath"
+              },
+              "maxItems": 128,
+              "uniqueItems": true
+            },
+            "files_edited": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RepoPath"
+              },
+              "maxItems": 128,
+              "uniqueItems": true
+            },
+            "paths_complete": {
+              "type": "boolean"
+            },
+            "paths_manifest": {
+              "$ref": "#/$defs/Artifact"
+            }
+          },
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "paths_complete": {
+                    "const": false
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "paths_manifest"
+                ]
+              }
+            }
+          ]
+        },
+        "report": {
+          "type": "object",
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "not_requested",
+                "produced",
+                "unavailable"
+              ]
+            },
+            "artifact": {
+              "$ref": "#/$defs/Artifact"
+            }
+          },
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "state": {
+                    "const": "produced"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "artifact"
+                ]
+              },
+              "else": {
+                "not": {
+                  "required": [
+                    "artifact"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "verification": {
+          "type": "object",
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "not_requested",
+                "passed",
+                "failed",
+                "unavailable"
+              ]
+            },
+            "strength": {
+              "enum": [
+                "smoke",
+                "suite"
+              ]
+            },
+            "test_output": {
+              "$ref": "#/$defs/Artifact"
+            }
+          },
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "state": {
+                    "enum": [
+                      "passed",
+                      "failed"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "strength",
+                  "test_output"
+                ]
+              }
+            }
+          ]
+        },
+        "cancellation": {
+          "type": "object",
+          "required": [
+            "supported",
+            "requested"
+          ],
+          "properties": {
+            "supported": {
+              "type": "boolean"
+            },
+            "requested": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "usage": {
+          "$ref": "#/$defs/Usage"
+        },
+        "model_substitution": {
+          "type": "object",
+          "required": [
+            "requested_model",
+            "effective_model",
+            "reason"
+          ],
+          "properties": {
+            "requested_model": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "effective_model": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "execution": {
+                "properties": {
+                  "state": {
+                    "const": "succeeded"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "repository": {
+                "properties": {
+                  "result_commit": {
+                    "$ref": "#/$defs/Commit"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Error": {
+      "type": "object",
+      "required": [
+        "schema",
+        "schema_version",
+        "code",
+        "message",
+        "retryable"
+      ],
+      "properties": {
+        "schema": {
+          "const": "devspecs.dispatch.error"
+        },
+        "schema_version": {
+          "const": 2
+        },
+        "code": {
+          "enum": [
+            "invalid_request",
+            "unauthenticated",
+            "forbidden",
+            "not_found",
+            "idempotency_conflict",
+            "receipt_not_ready",
+            "payload_too_large",
+            "unsupported_media_type",
+            "unsupported_version",
+            "unsupported_capability",
+            "rate_limited",
+            "unavailable",
+            "internal"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "dispatch_id": {
+          "$ref": "#/$defs/DispatchID"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
