@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DevSpecs checkpoint JSON write success output v1",
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "type": "string"
+    },
+    "series": {
+      "type": "string"
+    },
+    "slice": {
+      "type": "string"
+    },
+    "checkpoint_id": {
+      "type": "string"
+    },
+    "stage": {
+      "type": "string"
+    },
+    "decision": {
+      "type": "string"
+    },
+    "checkpoint_path": {
+      "type": "string"
+    },
+    "checkpoint_json_path": {
+      "type": "string"
+    },
+    "result_path": {
+      "type": "string"
+    },
+    "indexed_paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "git_diff_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "learning_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "fact_indexed": {
+      "type": "boolean"
+    },
+    "test_evidence_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "durable_record": {
+      "type": "string"
+    },
+    "durable_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "thread_projection": {
+      "type": "string"
+    },
+    "thread_warning": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "slice",
+    "checkpoint_id",
+    "stage",
+    "checkpoint_path",
+    "checkpoint_json_path",
+    "result_path"
+  ]
+}

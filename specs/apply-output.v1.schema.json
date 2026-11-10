@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DevSpecs apply JSON success output v1",
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string"
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string"
+    },
+    "prompt": {
+      "type": "string"
+    },
+    "target_context": {
+      "type": "object",
+      "required": [
+        "task_id",
+        "target",
+        "plan_path",
+        "result_path"
+      ],
+      "properties": {
+        "task_id": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "plan_path": {
+          "type": "string"
+        },
+        "result_path": {
+          "type": "string"
+        },
+        "plan_body": {
+          "type": "string"
+        }
+      }
+    },
+    "sibling_targets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "thread_context": {
+      "type": "object"
+    },
+    "prior_slice_evidence": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "input_budget": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "prompt_bytes",
+        "prompt_token_estimate",
+        "token_estimate_method",
+        "context_artifacts",
+        "omissions"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "prompt_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "prompt_token_estimate": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "token_estimate_method": {
+          "const": "ceil_utf8_bytes_div_4"
+        },
+        "context_artifacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "json_pointer",
+              "size_bytes",
+              "sha256",
+              "in_prompt"
+            ],
+            "properties": {
+              "json_pointer": {
+                "type": "string"
+              },
+              "size_bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "in_prompt": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "omissions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "command",
+    "task_id",
+    "target",
+    "prompt",
+    "target_context"
+  ]
+}
