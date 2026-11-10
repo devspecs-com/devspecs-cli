@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "DevSpecs HTTP dispatch v2 (review draft)",
+  "title": "DevSpecs HTTP dispatch v2 (review draft 2)",
   "oneOf": [
     {
       "$ref": "#/$defs/Capabilities"
@@ -33,6 +33,23 @@
       "minLength": 1,
       "maxLength": 35,
       "pattern": "^dispatch_[0-9A-HJKMNPQRSTVWXYZ]{26}$"
+    },
+    "Caller": {
+      "type": "object",
+      "required": ["principal_id", "credential_id"],
+      "properties": {
+        "principal_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "description": "Stable opaque identity from the provider's authorization namespace."
+        },
+        "credential_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "description": "Opaque non-secret identifier of the credential used for first acceptance."
+        }
+      },
+      "additionalProperties": false
     },
     "Commit": {
       "type": "string",
@@ -266,6 +283,7 @@
       "required": [
         "schema",
         "schema_version",
+        "contract_revision",
         "provider",
         "ready",
         "isolation",
@@ -281,6 +299,9 @@
         },
         "schema_version": {
           "const": 2
+        },
+        "contract_revision": {
+          "const": "2.0.0-draft.2"
         },
         "provider": {
           "type": "string",
@@ -377,6 +398,7 @@
         "schema_version",
         "dispatch_id",
         "created_at",
+        "caller",
         "target",
         "repository",
         "input",
@@ -396,6 +418,9 @@
         "created_at": {
           "type": "string",
           "format": "date-time"
+        },
+        "caller": {
+          "$ref": "#/$defs/Caller"
         },
         "target": {
           "type": "object",
@@ -729,6 +754,7 @@
         "dispatch_id",
         "request_sha256",
         "provider",
+        "caller",
         "receipt_id",
         "execution",
         "repository",
@@ -752,6 +778,9 @@
         },
         "provider": {
           "$ref": "#/$defs/ProviderRun"
+        },
+        "caller": {
+          "$ref": "#/$defs/Caller"
         },
         "receipt_id": {
           "type": "string",

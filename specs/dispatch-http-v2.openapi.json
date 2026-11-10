@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "DevSpecs HTTP dispatch provider",
-    "version": "2.0.0-draft",
+    "version": "2.0.0-draft.2",
     "description": "Review draft. No specs.place service dependency. Paths are relative to the explicitly configured provider base URL."
   },
   "servers": [
@@ -21,7 +21,7 @@
         "operationId": "getCapabilities",
         "responses": {
           "200": {
-            "description": "Version, supported features and configured-principal readiness.",
+            "description": "Wire version, exact contract revision, supported features and configured-principal readiness.",
             "content": {
               "application/json": {
                 "schema": {
@@ -114,7 +114,7 @@
             "schema": {
               "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/DispatchID"
             },
-            "description": "Equals request.dispatch_id. Scope by authenticated caller; compare exact request body digest."
+            "description": "Equals request.dispatch_id. Scope by authenticated stable principal, not token or credential ID; compare exact request body digest."
           }
         ],
         "requestBody": {
@@ -129,7 +129,7 @@
         },
         "responses": {
           "200": {
-            "description": "Exact replay; return original handle.",
+            "description": "Exact replay by the same authorized principal, including after rotation or restart; return the original handle without starting another attempt.",
             "content": {
               "application/json": {
                 "schema": {
@@ -139,7 +139,7 @@
             }
           },
           "201": {
-            "description": "Durably accepted one dispatch.",
+            "description": "First admission. The caller identity, exact request bytes and digest, handle and launch intent are durably committed before acknowledging or launching.",
             "content": {
               "application/json": {
                 "schema": {
@@ -179,7 +179,7 @@
             }
           },
           "409": {
-            "description": "Idempotency key reused with a different body.",
+            "description": "The same authorized principal reused its idempotency key with different bytes. Original run and receipt are unchanged.",
             "content": {
               "application/json": {
                 "schema": {

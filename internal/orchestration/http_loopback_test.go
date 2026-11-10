@@ -93,19 +93,12 @@ func TestLoopbackDispatchStart_WithReceiptForDifferentRequest_RejectsWithoutStor
 	badReceipt, err := json.Marshal(evidence)
 	require.NoError(t, err)
 	var receiptReads atomic.Int32
-	const runPath = "/v2/dispatches/" + testHTTPDispatchID
-	service := newLoopbackServiceTestPeer(t, home, withHTTPDispatchCapabilities(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/v2/dispatches":
-			writeHTTPDispatchMock(w, http.StatusCreated, string(handle))
-		case r.Method == http.MethodGet && r.URL.Path == runPath:
-			writeHTTPDispatchMock(w, http.StatusOK, string(status))
-		case r.Method == http.MethodGet && r.URL.Path == runPath+"/receipt":
+	respond := loopbackServiceEvidenceHandler(handle, status, badReceipt)
+	service := newLoopbackServiceTestPeer(t, home, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v2/dispatches/"+testHTTPDispatchID+"/receipt" {
 			receiptReads.Add(1)
-			writeHTTPDispatchMock(w, http.StatusOK, string(badReceipt))
-		default:
-			http.NotFound(w, r)
 		}
+		respond(w, r)
 	}))
 
 	// Act
@@ -119,6 +112,82 @@ func TestLoopbackDispatchStart_WithReceiptForDifferentRequest_RejectsWithoutStor
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
+func TestLoopbackDispatchObserve_WithOtherPrincipal_RejectsPendingResumeWithoutPosting(t *testing.T) {
+	// Arrange
+	home, checkout, frozen, _ := newLoopbackServiceTestRequest(t)
+	var requests atomic.Int32
+	peer := withLoopbackCLIPeer(t, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.NotFound(w, r)
+	}))
+	initial := newLoopbackServiceForPeer(t, home, "initial", peer)
+	writeLoopbackServiceTestPending(t, initial, checkout, frozen, time.Now().UTC().Add(time.Hour))
+	other := newLoopbackServiceForPeer(t, home, "other", peer)
+
+	// Act
+	result := other.Observe(t.Context(), "resume", testHTTPDispatchID)
+
+	// Assert
+	assert.Equal(t, "configuration_mismatch", result.Error)
+	assert.Empty(t, result.Receipt)
+	assert.Zero(t, requests.Load())
+}
+
+func TestLoopbackDispatchObserve_WithOtherPrincipal_RejectsCachedReceiptWithoutNetwork(t *testing.T) {
+	// Arrange
+	home, checkout, frozen, commit := newLoopbackServiceTestRequest(t)
+	handle, status, receipt := headlessDispatchResponseBodies(t, frozen, loopbackSource, commit)
+	var requests atomic.Int32
+	respond := loopbackServiceEvidenceHandler(handle, status, receipt)
+	peer := withLoopbackCLIPeer(t, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		respond(w, r)
+	}))
+	initial := newLoopbackServiceForPeer(t, home, "initial", peer)
+	first := initial.Start(t.Context(), loopbackServiceOwner, checkout, false, bytes.NewReader(frozen))
+	require.Empty(t, first.Error)
+	require.Equal(t, "succeeded", first.State)
+	require.NotEmpty(t, first.Receipt)
+	before := requests.Load()
+	other := newLoopbackServiceForPeer(t, home, "other", peer)
+
+	// Act
+	result := other.Observe(t.Context(), "receipt", testHTTPDispatchID)
+
+	// Assert
+	assert.Equal(t, "configuration_mismatch", result.Error)
+	assert.Empty(t, result.Receipt)
+	assert.Equal(t, before, requests.Load())
+}
+
+func TestLoopbackDispatchObserve_WithReceiptBoundToRotatedCredential_RejectsWithoutStoringEvidence(t *testing.T) {
+	// Arrange
+	home, checkout, frozen, commit := newLoopbackServiceTestRequest(t)
+	handle, status, receipt := headlessDispatchResponseBodies(t, frozen, loopbackSource, commit)
+	var evidence map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(receipt, &evidence))
+	caller, err := json.Marshal(httpDispatchCaller{PrincipalID: "principal_fixture", CredentialID: "credential_fixture_v2"})
+	require.NoError(t, err)
+	evidence["caller"] = caller
+	badReceipt, err := json.Marshal(evidence)
+	require.NoError(t, err)
+	peer := withLoopbackCLIPeer(t, nil, loopbackServiceEvidenceHandler(handle, status, badReceipt))
+	initial := newLoopbackServiceForPeer(t, home, "initial", peer)
+	first := initial.Start(t.Context(), loopbackServiceOwner, checkout, true, bytes.NewReader(frozen))
+	require.Empty(t, first.Error)
+	require.Equal(t, "accepted", first.State)
+	rotated := newLoopbackServiceForPeer(t, home, "rotated", peer)
+
+	// Act
+	result := rotated.Observe(t.Context(), "resume", testHTTPDispatchID)
+
+	// Assert
+	assert.Equal(t, "evidence_mismatch", result.Error)
+	assert.Empty(t, result.Receipt)
+	_, err = os.Lstat(filepath.Join(home, httpDispatchReceiptDir, testHTTPDispatchID+".receipt.json"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
 func TestLoopbackDispatchObserve_WithExpiredPending_RejectsResumeWithoutNetwork(t *testing.T) {
 	// Arrange
 	home, checkout, frozen, _ := newLoopbackServiceTestRequest(t)
@@ -127,6 +196,18 @@ func TestLoopbackDispatchObserve_WithExpiredPending_RejectsResumeWithoutNetwork(
 		requests.Add(1)
 		http.NotFound(w, r)
 	}))
+	writeLoopbackServiceTestPending(t, service, checkout, frozen, time.Now().UTC().Add(-time.Minute))
+
+	// Act
+	result := service.Observe(t.Context(), "resume", testHTTPDispatchID)
+
+	// Assert
+	assert.Equal(t, "recovery_expired", result.Error)
+	assert.Zero(t, requests.Load())
+}
+
+func writeLoopbackServiceTestPending(t *testing.T, service *LoopbackDispatch, checkout string, frozen []byte, expires time.Time) {
+	t.Helper()
 	_, err := service.store.writeHTTPDispatchPending(httpLoopbackPending{
 		DispatchID:    testHTTPDispatchID,
 		Request:       frozen,
@@ -135,16 +216,25 @@ func TestLoopbackDispatchObserve_WithExpiredPending_RejectsResumeWithoutNetwork(
 		TrustSHA256:   service.trustSHA256,
 		Provider:      "fixture-provider",
 		Checkout:      checkout,
-		ExpiresAt:     time.Now().UTC().Add(-time.Minute),
+		ExpiresAt:     expires,
 	})
 	require.NoError(t, err)
+}
 
-	// Act
-	result := service.Observe(t.Context(), "resume", testHTTPDispatchID)
-
-	// Assert
-	assert.Equal(t, "recovery_expired", result.Error)
-	assert.Zero(t, requests.Load())
+func loopbackServiceEvidenceHandler(handle, status, receipt []byte) http.HandlerFunc {
+	const runPath = "/v2/dispatches/" + testHTTPDispatchID
+	return withHTTPDispatchCapabilities(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v2/dispatches":
+			writeHTTPDispatchMock(w, http.StatusCreated, string(handle))
+		case r.Method == http.MethodGet && r.URL.Path == runPath:
+			writeHTTPDispatchMock(w, http.StatusOK, string(status))
+		case r.Method == http.MethodGet && r.URL.Path == runPath+"/receipt":
+			writeHTTPDispatchMock(w, http.StatusOK, string(receipt))
+		default:
+			http.NotFound(w, r)
+		}
+	})
 }
 
 func newLoopbackServiceTestRequest(t *testing.T) (home, checkout string, frozen []byte, commit string) {
@@ -163,13 +253,17 @@ func newLoopbackServiceTestRequest(t *testing.T) (home, checkout string, frozen 
 
 func newLoopbackServiceTestPeer(t *testing.T, home string, handler http.Handler) *LoopbackDispatch {
 	t.Helper()
-	env := withLoopbackCLIPeer(t, nil, handler)
+	return newLoopbackServiceForPeer(t, home, "", withLoopbackCLIPeer(t, nil, handler))
+}
+
+func newLoopbackServiceForPeer(t *testing.T, home, slot string, env headlessDispatchRunner) *LoopbackDispatch {
+	t.Helper()
 	require.Len(t, env, 2)
 	endpoint, ok := strings.CutPrefix(env[0], "DEVSPECS_HTTP_LOOPBACK_ENDPOINT=")
 	require.True(t, ok)
 	trust, ok := strings.CutPrefix(env[1], "DEVSPECS_HTTP_LOOPBACK_CA=")
 	require.True(t, ok)
-	service, err := NewLoopbackDispatch(home, endpoint, trust)
+	service, err := NewLoopbackDispatch(home, endpoint, trust, slot)
 	require.NoError(t, err)
 	return service
 }

@@ -17,7 +17,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-// G01 draft snapshot. RepoPath expresses its lookaheads as separate "not"
+// M1 draft 2 snapshot. RepoPath expresses its lookaheads as separate "not"
 // patterns so the existing validator can use Go's regular expression engine.
 //
 //go:embed http_dispatch_v2.schema.json
@@ -143,8 +143,14 @@ type httpDispatchRepository struct {
 	SourceCommit string `json:"source_commit"`
 }
 
+type httpDispatchCaller struct {
+	PrincipalID  string `json:"principal_id"`
+	CredentialID string `json:"credential_id"`
+}
+
 type httpDispatchRequest struct {
-	DispatchID string `json:"dispatch_id"`
+	DispatchID string             `json:"dispatch_id"`
+	Caller     httpDispatchCaller `json:"caller"`
 	Target     struct {
 		Slice string `json:"slice"`
 	} `json:"target"`
@@ -226,6 +232,7 @@ type httpDispatchHandle struct {
 
 	transport   *httpDispatchTransport
 	repository  httpDispatchRepository
+	caller      httpDispatchCaller
 	maxAttempts int
 }
 
@@ -239,6 +246,7 @@ type httpDispatchStatus struct {
 
 type httpDispatchReceipt struct {
 	httpDispatchCorrelation
+	Caller     httpDispatchCaller     `json:"caller"`
 	Repository httpDispatchRepository `json:"repository"`
 	Execution  struct {
 		Attempts  int        `json:"attempts"`

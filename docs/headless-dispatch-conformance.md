@@ -47,19 +47,23 @@ for the tested boundaries. Do not parse error prose as a stable protocol.
 The production build still has no HTTP provider. For a developer-only
 offline check, build both the Linux `ds` and the precompiled test runner
 with `-tags devspecs_http_loopback`, then use the same archive verifier.
-`TestHTTPDispatchLoopbackCLI_AfterCallerKilled_ResumesWithoutDuplicateExecution`
-starts a fixture provider, kills the first CLI process after admission,
-and exercises recovery through another installed CLI process.
+The caller-restart test starts a fixture provider, kills the first CLI
+process after admission, and exercises recovery with rotated synthetic
+credentials through another installed CLI process.
 
 In the tagged build only, select the experiment with
 `DEVSPECS_HTTP_LOOPBACK_ENDPOINT` (HTTPS literal loopback IP) and
 `DEVSPECS_HTTP_LOOPBACK_CA` (absolute path to the fixture's PEM trust anchor).
 Use an existing, disposable, absolute `DEVSPECS_HOME` and trusted fixture
 repositories in a network-disabled environment. Repo config cannot opt in.
-The fixture uses a fixed synthetic bearer; do not supply real credentials.
+In this tagged build only, `DEVSPECS_HTTP_LOOPBACK_CREDENTIAL` selects a
+built-in fixture slot: `initial` (default), `rotated` (same principal, new
+credential), or `other` (unrelated principal for denial tests). This is not
+a bearer-token input. Never use real credentials or customer data.
 
 `ds dispatch task:<id> --cwd <fixture-checkout> --detach` takes the
-exact reviewed v2 request on stdin. It does not send the local apply output,
+exact reviewed draft-2 v2 request on stdin, including the original
+`caller` binding. It does not send the local apply output,
 read the task repository, or use a Git remote for source approval. The
 request must use a synthetic `.invalid` source URL, the clean checkout's
 pinned commit, and only inline artifacts. Keep the dispatch ID before
@@ -68,6 +72,11 @@ and `dispatch receipt` with that ID; it adds no command or flag.
 
 Pending state is bounded, immutable, and written before POST. It binds the
 frozen bytes, digest, checkout, endpoint, trust anchor and provider name.
+The frozen principal must match the current fixture slot. Rotation changes
+only the Authorization header; the original credential ID stays in the
+request and the verified receipt. No bearer is stored. Missing or different
+capability revisions fail before POST. Use a fresh disposable home:
+draft-1 records do not carry the required draft-2 binding.
 `status` never submits. If no handle was stored, `resume` sends the exact
 original bytes and key, subject to a one-hour recovery deadline and a
 provider-advertised idempotency retention of at least one hour. If a handle

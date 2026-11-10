@@ -41,7 +41,8 @@ func runLoopbackDispatch(cmd *cobra.Command, operation, arg, endpoint string) er
 	case !validFlags:
 		result.Error = "unsupported_options"
 	default:
-		service, err := orchestration.NewLoopbackDispatch(os.Getenv("DEVSPECS_HOME"), endpoint, os.Getenv("DEVSPECS_HTTP_LOOPBACK_CA"))
+		service, err := orchestration.NewLoopbackDispatch(os.Getenv("DEVSPECS_HOME"), endpoint,
+			os.Getenv("DEVSPECS_HTTP_LOOPBACK_CA"), os.Getenv("DEVSPECS_HTTP_LOOPBACK_CREDENTIAL"))
 		if err != nil {
 			result.Error = "invalid_configuration"
 		} else if operation == "dispatch" {

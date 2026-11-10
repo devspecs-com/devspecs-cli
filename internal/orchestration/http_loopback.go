@@ -45,9 +45,10 @@ type LoopbackDispatch struct {
 	store       StateStore
 	transport   *httpDispatchTransport
 	trustSHA256 string
+	caller      httpDispatchCaller
 }
 
-func NewLoopbackDispatch(home, endpoint, trustPath string) (*LoopbackDispatch, error) {
+func NewLoopbackDispatch(home, endpoint, trustPath, credentialSlot string) (*LoopbackDispatch, error) {
 	if !filepath.IsAbs(home) || !filepath.IsAbs(trustPath) {
 		return nil, errLoopbackBinding
 	}
@@ -65,12 +66,29 @@ func NewLoopbackDispatch(home, endpoint, trustPath string) (*LoopbackDispatch, e
 	if err != nil || len(pem) > httpDispatchSmallBody || !roots.AppendCertsFromPEM(pem) {
 		return nil, errLoopbackBinding
 	}
-	// A fixture bearer, never a user or partner credential.
-	transport, err := newHTTPDispatchTransport(endpoint, "synthetic-mock-bearer", roots)
+	caller, bearer := loopbackCredential(credentialSlot)
+	transport, err := newHTTPDispatchTransport(endpoint, bearer, roots)
 	if err != nil {
 		return nil, errLoopbackBinding
 	}
-	return &LoopbackDispatch{store: StateStore{Root: home}, transport: transport, trustSHA256: httpDispatchDigest(pem)}, nil
+	return &LoopbackDispatch{
+		store: StateStore{Root: home}, transport: transport, trustSHA256: httpDispatchDigest(pem), caller: caller,
+	}, nil
+}
+
+// Slots select only built-in synthetic identities. No caller-supplied bearer
+// can enter this experiment.
+func loopbackCredential(slot string) (httpDispatchCaller, string) {
+	switch slot {
+	case "", "initial":
+		return httpDispatchCaller{"principal_fixture", "credential_fixture_v1"}, "synthetic-mock-bearer"
+	case "rotated":
+		return httpDispatchCaller{"principal_fixture", "credential_fixture_v2"}, "synthetic-mock-bearer-rotated"
+	case "other":
+		return httpDispatchCaller{"principal_other", "credential_other"}, "synthetic-mock-bearer-other"
+	default:
+		return httpDispatchCaller{}, ""
+	}
 }
 
 func (s *LoopbackDispatch) Start(ctx context.Context, target, checkout string, detach bool, in io.Reader) LoopbackResult {
@@ -87,6 +105,9 @@ func (s *LoopbackDispatch) Start(ctx context.Context, target, checkout string, d
 		wire.Repository.LogicalID != "git:"+wire.Repository.GitURL {
 		result.Error = "invalid_request"
 		return result
+	}
+	if request.Caller.PrincipalID != s.caller.PrincipalID {
+		return loopbackFailure(result, errLoopbackBinding)
 	}
 	source, _ := url.Parse(wire.Repository.GitURL)
 	inline, external, valid := request.validateInput()
@@ -117,11 +138,17 @@ func (s *LoopbackDispatch) Start(ctx context.Context, target, checkout string, d
 	prior, err := s.store.readHTTPDispatchPending(result.ID)
 	switch {
 	case err == nil:
+		if !s.matchesPendingPrincipal(prior) {
+			return loopbackFailure(result, errLoopbackBinding)
+		}
 		if prior.RequestSHA256 != pending.RequestSHA256 || prior.Checkout != checkout {
 			result.Error = "request_conflict"
 			return result
 		}
 	case errors.Is(err, os.ErrNotExist):
+		if request.Caller != s.caller {
+			return loopbackFailure(result, errLoopbackBinding)
+		}
 		if err := checkHTTPDispatchCheckout(ctx, ExecRunner{}, checkout, request.Repository.SourceCommit); err != nil {
 			return loopbackFailure(result, err)
 		}
@@ -141,6 +168,11 @@ func (s *LoopbackDispatch) Start(ctx context.Context, target, checkout string, d
 	return s.run(ctx, result, detach, caps)
 }
 
+func (s *LoopbackDispatch) matchesPendingPrincipal(p httpLoopbackPending) bool {
+	var request httpDispatchRequest
+	return decodeHTTPDispatch(p.Request, "Request", &request) && request.Caller.PrincipalID == s.caller.PrincipalID
+}
+
 func (s *LoopbackDispatch) Observe(ctx context.Context, operation, id string) LoopbackResult {
 	result := NewLoopbackResult(operation)
 	if !httpDispatchID.MatchString(id) {
@@ -156,8 +188,16 @@ func (s *LoopbackDispatch) run(ctx context.Context, result LoopbackResult, detac
 	if err != nil {
 		return loopbackFailure(result, err)
 	}
+	var request httpDispatchRequest
+	if !decodeHTTPDispatch(pending.Request, "Request", &request) || request.DispatchID != pending.DispatchID {
+		return loopbackFailure(result, errLoopbackState)
+	}
+	if pending.Endpoint != s.transport.base || pending.TrustSHA256 != s.trustSHA256 ||
+		request.Caller.PrincipalID != s.caller.PrincipalID {
+		return loopbackFailure(result, errLoopbackBinding)
+	}
 	result.RequestSHA256 = pending.RequestSHA256
-	receipt, state, err := s.storedReceipt(pending)
+	receipt, state, err := s.storedReceipt(pending, request.Caller)
 	if err == nil {
 		result.Receipt, result.State = receipt, state
 		return result
@@ -169,15 +209,8 @@ func (s *LoopbackDispatch) run(ctx context.Context, result LoopbackResult, detac
 		result.Error = "receipt_unavailable"
 		return result
 	}
-	if pending.Endpoint != s.transport.base || pending.TrustSHA256 != s.trustSHA256 {
-		return loopbackFailure(result, errLoopbackBinding)
-	}
 	if !time.Now().Before(pending.ExpiresAt) {
 		return loopbackFailure(result, errLoopbackExpired)
-	}
-	var request httpDispatchRequest
-	if !decodeHTTPDispatch(pending.Request, "Request", &request) || request.DispatchID != pending.DispatchID {
-		return loopbackFailure(result, errLoopbackState)
 	}
 	deadline := time.Now().Add(time.Duration(request.Requirements.TimeoutSeconds) * time.Second)
 	if pending.ExpiresAt.Before(deadline) {
@@ -213,7 +246,7 @@ func (s *LoopbackDispatch) loadHandle(p httpLoopbackPending, request httpDispatc
 		handle.RequestSHA256 != p.RequestSHA256 || handle.Provider.Name != p.Provider {
 		return nil, errLoopbackState
 	}
-	handle.transport, handle.repository, handle.maxAttempts = s.transport, request.Repository, request.Requirements.MaxAttempts
+	handle.transport, handle.repository, handle.caller, handle.maxAttempts = s.transport, request.Repository, request.Caller, request.Requirements.MaxAttempts
 	return &handle, nil
 }
 
@@ -285,7 +318,7 @@ func (s *LoopbackDispatch) monitor(ctx context.Context, p httpLoopbackPending, h
 			if _, err := s.store.writeHTTPDispatchReceipt(receipt); err != nil {
 				return loopbackFailure(result, errLoopbackState)
 			}
-			result.Receipt, result.State, err = s.storedReceipt(p)
+			result.Receipt, result.State, err = s.storedReceipt(p, handle.caller)
 			if err != nil {
 				return loopbackFailure(result, err)
 			}
@@ -300,7 +333,7 @@ func (s *LoopbackDispatch) monitor(ctx context.Context, p httpLoopbackPending, h
 	}
 }
 
-func (s *LoopbackDispatch) storedReceipt(p httpLoopbackPending) (json.RawMessage, string, error) {
+func (s *LoopbackDispatch) storedReceipt(p httpLoopbackPending, caller httpDispatchCaller) (json.RawMessage, string, error) {
 	raw, err := s.store.readHTTPDispatchStoredReceipt(p.DispatchID)
 	if err != nil {
 		return nil, "", err
@@ -310,8 +343,9 @@ func (s *LoopbackDispatch) storedReceipt(p httpLoopbackPending) (json.RawMessage
 		Version int    `json:"schema_version"`
 		httpDispatchAdmittedReceipt
 	}
-	if json.Unmarshal(raw, &record) != nil || record.Schema != httpDispatchReceiptSchema || record.Version != 1 ||
-		record.DispatchID != p.DispatchID || record.RequestSHA256 != p.RequestSHA256 || !terminalHTTPDispatchState(record.State) {
+	if json.Unmarshal(raw, &record) != nil || record.Schema != httpDispatchReceiptSchema || record.Version != httpDispatchReceiptVersion ||
+		record.DispatchID != p.DispatchID || record.RequestSHA256 != p.RequestSHA256 || record.Caller != caller ||
+		!terminalHTTPDispatchState(record.State) {
 		return nil, "", errLoopbackState
 	}
 	return raw, record.State, nil

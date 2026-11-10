@@ -273,6 +273,22 @@ func TestAdmitHTTPDispatchReceipt_WithLateTimeout_PreservesFailureEvidence(t *te
 	assert.NotContains(t, marshalHTTPDispatchAdmission(t, admitted), testHTTPDispatchToken)
 }
 
+func TestAdmitHTTPDispatchReceipt_WithInterruptedAttempt_PreservesFailureClass(t *testing.T) {
+	// Arrange
+	f := newHTTPDispatchAdmissionFixture(t)
+	f.fail("interrupted", "private worker recovery detail")
+
+	// Act
+	admitted, err := f.admit(t, nil)
+
+	// Assert
+	require.NoError(t, err)
+	require.NotNil(t, admitted.Failure)
+	assert.Equal(t, "interrupted", admitted.Failure.Class)
+	assert.Equal(t, "omitted", admitted.Failure.DetailDisposition)
+	assert.Equal(t, 1, admitted.Attempts)
+}
+
 func TestAdmitHTTPDispatchReceipt_WithFreeTextFailureClass_ProjectsOther(t *testing.T) {
 	f := newHTTPDispatchAdmissionFixture(t)
 	f.fail(testHTTPDispatchToken, "arbitrary failure detail")

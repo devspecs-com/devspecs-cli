@@ -153,6 +153,6 @@ func storedHTTPDispatchDigest(t *testing.T, path string) string {
 	}
 	require.NoError(t, json.Unmarshal(raw, &record))
 	assert.Equal(t, "devspecs.dispatch.http_receipt_evidence", record.Schema)
-	assert.Equal(t, 1, record.SchemaVersion)
+	assert.Equal(t, 2, record.SchemaVersion)
 	return record.WireSHA256
 }

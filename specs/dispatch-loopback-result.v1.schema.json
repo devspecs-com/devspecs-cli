@@ -9,15 +9,24 @@
     "operation": {"enum": ["dispatch", "status", "resume", "receipt"]},
     "dispatch_id": {"type": "string", "pattern": "^dispatch_[0-9A-HJKMNPQRSTVWXYZ]{26}$"},
     "request_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-    "state": {"enum": ["pending", "accepted", "queued", "running", "succeeded", "failed", "cancelled"]},
+    "state": {"enum": ["pending", "accepted", "queued", "running", "paused", "succeeded", "failed", "cancelled"]},
     "receipt": {
       "type": "object",
-      "required": ["schema", "schema_version", "dispatch_id", "receipt_id", "request_sha256", "wire_sha256", "state"],
+      "required": ["schema", "schema_version", "dispatch_id", "receipt_id", "caller", "request_sha256", "wire_sha256", "state"],
       "properties": {
         "schema": {"const": "devspecs.dispatch.http_receipt_evidence"},
-        "schema_version": {"const": 1},
+        "schema_version": {"const": 2},
         "dispatch_id": {"type": "string"},
         "receipt_id": {"type": "string"},
+        "caller": {
+          "type": "object",
+          "required": ["principal_id", "credential_id"],
+          "properties": {
+            "principal_id": {"type": "string"},
+            "credential_id": {"type": "string"}
+          },
+          "additionalProperties": false
+        },
         "request_sha256": {"type": "string"},
         "wire_sha256": {"type": "string"},
         "state": {"enum": ["succeeded", "failed", "cancelled"]}

@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	httpDispatchReceiptDir    = "dispatches-http-v2"
-	httpDispatchReceiptSchema = "devspecs.dispatch.http_receipt_evidence"
+	httpDispatchReceiptDir     = "dispatches-http-v2"
+	httpDispatchReceiptSchema  = "devspecs.dispatch.http_receipt_evidence"
+	httpDispatchReceiptVersion = 2
 )
 
 var errHTTPDispatchReceiptConflict = errors.New("refusing to replace an existing HTTP dispatch receipt")
@@ -28,7 +29,7 @@ func (s StateStore) writeHTTPDispatchReceipt(receipt *httpDispatchAdmittedReceip
 		Schema        string `json:"schema"`
 		SchemaVersion int    `json:"schema_version"`
 		*httpDispatchAdmittedReceipt
-	}{httpDispatchReceiptSchema, 1, receipt})
+	}{httpDispatchReceiptSchema, httpDispatchReceiptVersion, receipt})
 	if err != nil {
 		return "", errHTTPDispatchResponse
 	}

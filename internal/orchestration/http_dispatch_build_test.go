@@ -284,6 +284,7 @@ func portableFixtureSpec() httpDispatchBuildSpec {
 	thread := "Thread_01"
 	return httpDispatchBuildSpec{
 		DispatchID: testHTTPDispatchID, CreatedAt: time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC),
+		Caller:         httpDispatchCaller{PrincipalID: "principal_fixture", CredentialID: "credential_fixture_v1"},
 		Target:         Target{Owner: "task:portable-fixture", Slice: "G03", Thread: &thread},
 		Source:         &httpDispatchConfirmedSource{URL: portableFixtureURL, Commit: portableFixtureCommit},
 		ApprovedPrompt: portableFixturePrompt,

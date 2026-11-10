@@ -137,7 +137,9 @@ func TestHeadlessHTTPDispatchConformance(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(storedBefore), &stored))
 	require.Equal(t, httpDispatchReceiptSchema, stored.Schema)
-	require.Equal(t, 1, stored.Version)
+	require.Equal(t, 2, stored.Version)
+	require.Equal(t, "principal_fixture", stored.Caller.PrincipalID)
+	require.Equal(t, "credential_fixture_v1", stored.Caller.CredentialID)
 	require.Equal(t, "succeeded", stored.State)
 	require.Equal(t, testHTTPDispatchID, stored.DispatchID)
 	require.Equal(t, "receipt_01KZZW1KXP4AZ7TSB0NN68HJ86", stored.ReceiptID)

@@ -49,6 +49,7 @@ type httpDispatchVerificationProfile struct {
 type httpDispatchBuildSpec struct {
 	DispatchID           string
 	CreatedAt            time.Time
+	Caller               httpDispatchCaller
 	Target               Target
 	Source               *httpDispatchConfirmedSource
 	ApprovedPrompt       string
@@ -73,11 +74,12 @@ type httpDispatchPortableArtifact struct {
 }
 
 type httpDispatchPortableRequest struct {
-	Schema        string    `json:"schema"`
-	SchemaVersion int       `json:"schema_version"`
-	DispatchID    string    `json:"dispatch_id"`
-	CreatedAt     time.Time `json:"created_at"`
-	Target        Target    `json:"target"`
+	Schema        string             `json:"schema"`
+	SchemaVersion int                `json:"schema_version"`
+	DispatchID    string             `json:"dispatch_id"`
+	CreatedAt     time.Time          `json:"created_at"`
+	Caller        httpDispatchCaller `json:"caller"`
+	Target        Target             `json:"target"`
 	Repository    struct {
 		httpDispatchRepository
 		GitURL string `json:"git_url"`
@@ -151,7 +153,7 @@ func buildHTTPDispatchRequest(ctx context.Context, runner CommandRunner, checkou
 
 	var wire httpDispatchPortableRequest
 	wire.Schema, wire.SchemaVersion = DispatchRequestSchema, 2
-	wire.DispatchID, wire.CreatedAt, wire.Target = spec.DispatchID, spec.CreatedAt.UTC(), spec.Target
+	wire.DispatchID, wire.CreatedAt, wire.Caller, wire.Target = spec.DispatchID, spec.CreatedAt.UTC(), spec.Caller, spec.Target
 	wire.Repository.GitURL = spec.Source.URL
 	wire.Repository.LogicalID = "git:" + spec.Source.URL
 	wire.Repository.SourceCommit = spec.Source.Commit

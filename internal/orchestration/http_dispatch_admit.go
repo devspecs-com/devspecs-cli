@@ -31,6 +31,7 @@ type httpDispatchAdmittedReceipt struct {
 	WireSHA256                   string                    `json:"wire_sha256"`
 	RequestSHA256                string                    `json:"request_sha256"`
 	ReceiptID                    string                    `json:"receipt_id"`
+	Caller                       httpDispatchCaller        `json:"caller"`
 	SourceCommit                 string                    `json:"source_commit"`
 	ResultCommit                 *string                   `json:"result_commit"`
 	State                        string                    `json:"state"`
@@ -85,7 +86,8 @@ type httpDispatchCost struct {
 
 type httpDispatchReceiptAdmissionWire struct {
 	httpDispatchCorrelation
-	ReceiptID string `json:"receipt_id"`
+	Caller    httpDispatchCaller `json:"caller"`
+	ReceiptID string             `json:"receipt_id"`
 	Execution struct {
 		State     string     `json:"state"`
 		Attempts  int        `json:"attempts"`
@@ -150,6 +152,7 @@ func admitHTTPDispatchReceipt(ctx context.Context, runner CommandRunner, checkou
 	}
 	if handle == nil || status == nil || handle.DispatchID != request.DispatchID ||
 		handle.RequestSHA256 != httpDispatchDigest(frozen) || wire.Repository.httpDispatchRepository != request.Repository ||
+		wire.Caller != request.Caller ||
 		wire.httpDispatchCorrelation != handle.httpDispatchCorrelation || status.httpDispatchCorrelation != handle.httpDispatchCorrelation {
 		return nil, errHTTPDispatchCorrelation
 	}
@@ -181,7 +184,7 @@ func admitHTTPDispatchReceipt(ctx context.Context, runner CommandRunner, checkou
 	}
 	admitted := &httpDispatchAdmittedReceipt{
 		DispatchID: wire.DispatchID, WireSHA256: httpDispatchDigest(raw), RequestSHA256: wire.RequestSHA256,
-		ReceiptID: wire.ReceiptID, SourceCommit: wire.Repository.SourceCommit, ResultCommit: wire.Repository.ResultCommit,
+		ReceiptID: wire.ReceiptID, Caller: request.Caller, SourceCommit: wire.Repository.SourceCommit, ResultCommit: wire.Repository.ResultCommit,
 		State: execution.State, Attempts: execution.Attempts, EndedAt: execution.EndedAt.UTC(),
 		ProviderPathsComplete: wire.Evidence.Complete, PathClaimsDisposition: "omitted",
 		PathsManifest:  projectHTTPDispatchArtifact(wire.Evidence.Manifest),
@@ -200,7 +203,7 @@ func admitHTTPDispatchReceipt(ctx context.Context, runner CommandRunner, checkou
 		// The draft accepts free-form classes. Retain only known labels.
 		class := execution.Failure.Class
 		switch class {
-		case "cancelled", "timeout", "execution_failed", "verification_failed", "provider_error":
+		case "cancelled", "timeout", "interrupted", "execution_failed", "verification_failed", "provider_error":
 		default:
 			class = "other"
 		}

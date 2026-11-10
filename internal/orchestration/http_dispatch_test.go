@@ -38,6 +38,21 @@ func TestHTTPDispatchCapabilities_WithTLSMock_ReturnsCapabilities(t *testing.T) 
 	assert.Equal(t, "suite", caps.VerificationProfiles[0].Strength)
 }
 
+func TestHTTPDispatchCapabilities_WithoutDraftRevision_RejectsProvider(t *testing.T) {
+	// Arrange
+	old := strings.Replace(testHTTPDispatchCaps, `"contract_revision":"2.0.0-draft.2",`, "", 1)
+	transport := newTestHTTPDispatch(t, func(w http.ResponseWriter, r *http.Request) {
+		writeHTTPDispatchMock(w, http.StatusOK, old)
+	})
+
+	// Act
+	caps, err := transport.capabilities(t.Context())
+
+	// Assert
+	require.ErrorIs(t, err, errHTTPDispatchResponse)
+	assert.Nil(t, caps)
+}
+
 func TestHTTPDispatchSubmit_WithFrozenRequest_PostsExactBytes(t *testing.T) {
 	// Arrange
 	var posts atomic.Int32
@@ -545,20 +560,21 @@ func testHTTPDispatchError(code string, retryable bool) string {
 const (
 	testHTTPDispatchToken  = "synthetic-mock-bearer"
 	testHTTPDispatchID     = "dispatch_01KZZW1BBN55VK2GVYQNCQBZB9"
-	testHTTPDispatchDigest = "sha256:1b42181de264d66d006001e8c4561072527f4b704d112ae0dd55fc44719bde0b"
+	testHTTPDispatchDigest = "sha256:3ff354e91eef568e814ebbe3e762401a2f5f0a4e7d3decc6078888222cbe9a60"
 	testHTTPDispatchCore   = `"schema_version":2,"dispatch_id":"` + testHTTPDispatchID +
 		`","request_sha256":"` + testHTTPDispatchDigest + `","provider":{"name":"fixture-provider","run_id":"run_fixture_001"}`
 	testHTTPDispatchHandle  = `{"schema":"devspecs.dispatch.handle",` + testHTTPDispatchCore + `,"accepted_at":"2026-11-10T12:00:00Z"}`
 	testHTTPDispatchRunning = `{"schema":"devspecs.dispatch.status",` + testHTTPDispatchCore +
 		`,"state":"running","cancel_requested":false,"observed_at":"2026-11-10T12:00:02Z","usage":{"output_tokens":42}}`
 	testHTTPDispatchCaps = `{
-		"schema":"devspecs.dispatch.capabilities","schema_version":2,"provider":"fixture-provider",
+		"schema":"devspecs.dispatch.capabilities","schema_version":2,"contract_revision":"2.0.0-draft.2","provider":"fixture-provider",
 		"ready":true,"isolation":true,"report":true,"cancellation":true,
 		"verification_profiles":[{"key":"go-unit","strength":"suite"}],
 		"limits":{"max_request_bytes":2097152,"max_inline_bytes":1048576,"max_artifact_bytes":33554432,"max_timeout_seconds":3600,"max_attempts":1},
 		"idempotency_retention_seconds":86400
 	}`
 	testHTTPDispatchReceipt = `{"schema":"devspecs.dispatch.receipt",` + testHTTPDispatchCore + `,
+		"caller":{"principal_id":"principal_fixture","credential_id":"credential_fixture_v1"},
 		"receipt_id":"receipt_01KZZW1KXP4AZ7TSB0NN68HJ86",
 		"execution":{"state":"succeeded","attempts":1,"started_at":"2026-11-10T12:00:00Z","ended_at":"2026-11-10T12:00:05Z","failure":null},
 		"repository":{
@@ -578,12 +594,16 @@ const (
 	}`
 )
 
-// The LF-pinned G01 request fixture, including the final newline.
+// The LF-pinned draft 2 request fixture, including the final newline.
 const testHTTPDispatchRequest = `{
   "schema": "devspecs.dispatch.request",
   "schema_version": 2,
   "dispatch_id": "dispatch_01KZZW1BBN55VK2GVYQNCQBZB9",
   "created_at": "2026-11-10T12:00:00Z",
+  "caller": {
+    "principal_id": "principal_fixture",
+    "credential_id": "credential_fixture_v1"
+  },
   "target": {
     "owner": "task:fixture",
     "slice": "A01",

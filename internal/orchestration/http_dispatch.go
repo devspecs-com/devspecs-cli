@@ -124,6 +124,7 @@ func (t *httpDispatchTransport) submit(ctx context.Context, caps *httpDispatchCa
 	}
 	handle.transport = t
 	handle.repository = req.Repository
+	handle.caller = req.Caller
 	handle.maxAttempts = req.Requirements.MaxAttempts
 	return &handle, nil
 }
@@ -174,7 +175,7 @@ func (t *httpDispatchTransport) receipt(ctx context.Context, handle *httpDispatc
 	if !decodeHTTPDispatch(raw, "Receipt", &receipt) {
 		return nil, errHTTPDispatchResponse
 	}
-	if receipt.httpDispatchCorrelation != handle.httpDispatchCorrelation ||
+	if receipt.httpDispatchCorrelation != handle.httpDispatchCorrelation || receipt.Caller != handle.caller ||
 		receipt.Repository != handle.repository || receipt.Execution.Attempts > handle.maxAttempts ||
 		receipt.Execution.EndedAt.Before(handle.AcceptedAt) ||
 		(receipt.Execution.StartedAt != nil &&

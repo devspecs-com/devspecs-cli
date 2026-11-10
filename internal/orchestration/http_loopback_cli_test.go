@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -56,28 +57,85 @@ func TestHTTPDispatchLoopbackCLI_AfterCallerKilled_ResumesWithoutDuplicateExecut
 	spec.Artifacts = []httpDispatchInlineInput{{ID: "reviewed-plan", MediaType: "text/markdown", Content: []byte(apply.Context.Plan), SHA256: httpDispatchDigest([]byte(apply.Context.Plan))}}
 	checkout, frozen, commit := newLoopbackCLIFrozen(t, runner, spec)
 	handle, status, receipt := headlessDispatchResponseBodies(t, frozen, loopbackSource, commit)
-	var posts, executions atomic.Int32
+	type mockAdmission struct {
+		Request []byte
+		Key     string
+		Handle  []byte
+	}
+	admissionFile := filepath.Join(t.TempDir(), "admission.json")
+	var posts, executions, statusReads, receiptReads atomic.Int32
 	accepted := make(chan struct{})
+	const initialAuthorization = "Bearer " + testHTTPDispatchToken
+	const rotatedAuthorization = "Bearer synthetic-mock-bearer-rotated"
 	const runPath = "/v2/dispatches/" + testHTTPDispatchID
-	runner = withLoopbackCLIPeer(t, runner, withHTTPDispatchCapabilities(func(w http.ResponseWriter, r *http.Request) {
+	runner = withLoopbackCLIPeer(t, runner, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization := r.Header.Get("Authorization")
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v2/capabilities":
+			want := initialAuthorization
+			if posts.Load() != 0 {
+				want = rotatedAuthorization
+			}
+			if authorization != want {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			writeHTTPDispatchMock(w, http.StatusOK, testHTTPDispatchCaps)
 		case r.Method == http.MethodPost && r.URL.Path == "/v2/dispatches":
+			post := posts.Add(1)
 			body, err := io.ReadAll(io.LimitReader(r.Body, httpDispatchRequestBody+1))
-			if err != nil || !bytes.Equal(body, frozen) || r.Header.Get("Idempotency-Key") != testHTTPDispatchID ||
-				r.Header.Get("Authorization") != "Bearer "+testHTTPDispatchToken {
+			key := r.Header.Get("Idempotency-Key")
+			if err != nil || !bytes.Equal(body, frozen) || key != testHTTPDispatchID {
 				writeHTTPDispatchMock(w, http.StatusBadRequest, testHTTPDispatchError("invalid_request", false))
 				return
 			}
-			if posts.Add(1) == 1 {
+			switch post {
+			case 1:
+				if authorization != initialAuthorization {
+					w.WriteHeader(http.StatusUnauthorized)
+					return
+				}
+				admission, err := json.Marshal(mockAdmission{Request: body, Key: key, Handle: handle})
+				if !assert.NoError(t, err) || !assert.NoError(t, os.WriteFile(admissionFile, admission, 0o600)) {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
 				executions.Add(1)
 				close(accepted)
 				<-r.Context().Done()
+			case 2:
+				if authorization != rotatedAuthorization {
+					w.WriteHeader(http.StatusUnauthorized)
+					return
+				}
+				// Reload the mock's admission from disk instead of reconstructing it from the replay.
+				raw, err := os.ReadFile(admissionFile)
+				var admission mockAdmission
+				if !assert.NoError(t, err) || !assert.NoError(t, json.Unmarshal(raw, &admission)) {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				if !bytes.Equal(body, admission.Request) || key != admission.Key {
+					w.WriteHeader(http.StatusConflict)
+					return
+				}
+				writeHTTPDispatchMock(w, http.StatusOK, string(admission.Handle))
+			default:
+				w.WriteHeader(http.StatusConflict)
+			}
+		case r.Method == http.MethodGet && r.URL.Path == runPath:
+			if authorization != rotatedAuthorization {
+				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
-			writeHTTPDispatchMock(w, http.StatusOK, string(handle))
-		case r.Method == http.MethodGet && r.URL.Path == runPath:
+			statusReads.Add(1)
 			writeHTTPDispatchMock(w, http.StatusOK, string(status))
 		case r.Method == http.MethodGet && r.URL.Path == runPath+"/receipt":
+			if authorization != rotatedAuthorization {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			receiptReads.Add(1)
 			writeHTTPDispatchMock(w, http.StatusOK, string(receipt))
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -85,33 +143,53 @@ func TestHTTPDispatchLoopbackCLI_AfterCallerKilled_ResumesWithoutDuplicateExecut
 	}))
 
 	// Act
-	killLoopbackCLIAfterAdmission(t, runner, repo, ds, checkout, owner, frozen, accepted)
+	killLoopbackCLIAfterAdmission(t, append(runner, "DEVSPECS_HTTP_LOOPBACK_CREDENTIAL=initial"), repo, ds, checkout, owner, frozen, accepted)
+	rotated := append(runner, "DEVSPECS_HTTP_LOOPBACK_CREDENTIAL=rotated")
 	var pending LoopbackResult
-	runner.dsJSON(t, repo, ds, nil, &pending, "dispatch", "status", testHTTPDispatchID)
+	rotated.dsJSON(t, repo, ds, nil, &pending, "dispatch", "status", testHTTPDispatchID)
 	require.Equal(t, "pending", pending.State)
 	require.EqualValues(t, 1, posts.Load(), "status must not submit a request")
 	var resumed LoopbackResult
-	raw := runner.dsJSON(t, repo, ds, nil, &resumed, "dispatch", "resume", testHTTPDispatchID)
+	raw := rotated.dsJSON(t, repo, ds, nil, &resumed, "dispatch", "resume", testHTTPDispatchID)
 	requireHeadlessDispatchSchema(t, "dispatch-loopback-result.v1.schema.json", raw)
 
 	// Assert the recovery outcome before the caller grants write authority.
 	require.Equal(t, "succeeded", resumed.State)
 	assert.EqualValues(t, 2, posts.Load())
 	assert.EqualValues(t, 1, executions.Load())
+	var request httpDispatchRequest
+	require.NoError(t, json.Unmarshal(frozen, &request))
+	assert.Equal(t, testHTTPDispatchID, request.DispatchID)
+	assert.Equal(t, request.DispatchID, pending.ID)
+	assert.Equal(t, request.DispatchID, resumed.ID)
+	assert.Equal(t, httpDispatchCaller{PrincipalID: "principal_fixture", CredentialID: "credential_fixture_v1"}, request.Caller)
 	require.Equal(t, httpDispatchDigest(frozen), resumed.RequestSHA256)
 	var evidence httpDispatchAdmittedReceipt
 	require.NoError(t, json.Unmarshal(resumed.Receipt, &evidence))
-	require.Equal(t, testHTTPDispatchID, evidence.DispatchID)
+	require.Equal(t, request.DispatchID, evidence.DispatchID)
+	assert.Equal(t, request.Caller, evidence.Caller)
 	require.Equal(t, httpDispatchDigest(receipt), evidence.WireSHA256)
 	var stored LoopbackResult
-	runner.dsJSON(t, repo, ds, nil, &stored, "dispatch", "receipt", testHTTPDispatchID)
+	rotated.dsJSON(t, repo, ds, nil, &stored, "dispatch", "receipt", testHTTPDispatchID)
+	assert.Equal(t, request.DispatchID, stored.ID)
 	assert.JSONEq(t, string(resumed.Receipt), string(stored.Receipt))
+	assert.EqualValues(t, 1, statusReads.Load())
+	assert.EqualValues(t, 1, receiptReads.Load(), "receipt must read the cached evidence")
 	assert.Equal(t, manifestBefore, readHeadlessDispatchFile(t, task.Manifest))
 	assert.Equal(t, resultBefore, readHeadlessDispatchFile(t, task.Result))
 	_, err = os.Lstat(filepath.Join(filepath.Dir(task.Manifest), "checkpoints"))
 	require.ErrorIs(t, err, os.ErrNotExist)
-	pendingFile := filepath.Join(home, httpDispatchReceiptDir, testHTTPDispatchID+".pending.json")
-	assert.NotContains(t, readHeadlessDispatchFile(t, pendingFile), testHTTPDispatchToken)
+	recordPath := filepath.Join(home, httpDispatchReceiptDir, testHTTPDispatchID)
+	pendingJSON := readHeadlessDispatchFile(t, recordPath+".pending.json")
+	var pendingRecord httpLoopbackPending
+	require.NoError(t, json.Unmarshal([]byte(pendingJSON), &pendingRecord))
+	assert.Equal(t, frozen, pendingRecord.Request)
+	persisted := strings.Join([]string{
+		pendingJSON, string(pendingRecord.Request), readHeadlessDispatchFile(t, recordPath+".handle.json"),
+		readHeadlessDispatchFile(t, recordPath+".receipt.json"), readHeadlessDispatchFile(t, admissionFile),
+	}, "\n")
+	// The initial bearer is also the prefix of the other fixture bearers.
+	assert.NotContains(t, persisted, testHTTPDispatchToken)
 
 	input := loopbackCheckpointInput(t, task.ID, apply.Target, evidence)
 	args := []string{"task", "checkpoint", task.ID, "--input-json", "--json", "--index=false"}
