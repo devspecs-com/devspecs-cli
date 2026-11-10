@@ -181,6 +181,15 @@ task lifecycle. Each driver validates its own `options`, so another unchanged
 orchestrator can implement the same dispatch contract under a different
 provider key. Configuration alone never launches work.
 
+`ds apply --json` includes an additive `input_budget` (schema version 1).
+It measures the decoded prompt in UTF-8 bytes and estimates prompt tokens as
+bytes divided by four, rounded up. This is a heuristic, not a tokenizer or a
+provider limit. The ordered `context_artifacts` list points to separately
+addressable content already in the response, with byte lengths and SHA-256
+digests. A plan marked `in_prompt` is already counted; don't add it again.
+`omissions` names unmeasured referenced files and any unavailable plan body.
+This inventory does not fetch files or make the local prompt portable.
+
 `ds workspace trace` reports both lifecycle `status` and index-capture
 `index_status`. Keep them separate: `index_missing` means an artifact is not
 currently captured in the local index; it is not the same as `missing_result`.
