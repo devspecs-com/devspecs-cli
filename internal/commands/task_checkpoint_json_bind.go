@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -8,6 +9,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
+
+var errTaskCheckpointStaleHeads = errors.New("checkpoint input expected_heads is stale; refresh task status before retrying")
 
 func bindTaskCheckpointJSON(cmd *cobra.Command, taskID string, opts taskCheckpointOptions) (taskCheckpointOptions, error) {
 	var conflict string
@@ -65,7 +68,7 @@ func resolveCheckpointWriteHeads(events []taskCheckpointEvent, target string, op
 		return strings.Compare(strings.ToLower(a), strings.ToLower(b))
 	})
 	if !equalFoldedStrings(expected, heads) {
-		return nil, fmt.Errorf("checkpoint input expected_heads is stale; refresh task status before retrying")
+		return nil, errTaskCheckpointStaleHeads
 	}
 	return heads, nil
 }

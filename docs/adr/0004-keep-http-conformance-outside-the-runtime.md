@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted for mock conformance. Live provider admission is pending.
+Accepted for mock conformance. A build-tagged experiment may exercise
+the native CLI path. Live provider admission is pending.
 
 ## Context
 
@@ -25,10 +26,19 @@ can inspect the integration without a second executable or runtime provider
 registration. No live endpoint, credentials, or provider option is enabled
 by this proof.
 
+For caller-process recovery, a separate developer build can select the
+TLS loopback fixture explicitly. It uses the existing dispatch commands,
+binds immutable pending state to the verified transport before submitting,
+and resumes using the same request bytes and idempotency key. The production
+build does not recognize that opt-in. This does not make replay safe against
+a provider that violates its advertised idempotency window.
+
 ## Consequences
 
 - An offline Linux run can detect drift in the installed CLI and mock
   integration without giving the mock access to a real repository.
-- Native HTTP dispatch, pending-run recovery, and broader machine error
-  coverage still require proof. Passing loopback tests does not approve a
-  live provider or complete the end-to-end delivery milestone.
+- The tagged proof can validate caller recovery and the narrow headless
+  JSON interface without changing Waspflow or default CLI behavior.
+- Passing loopback tests does not approve a live provider. The provider's
+  durable replay, principal binding, and execution isolation still require
+  independent evidence.

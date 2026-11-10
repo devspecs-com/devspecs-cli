@@ -40,7 +40,49 @@ Use the [HTTP wire description](../specs/dispatch-http-v2.openapi.json),
 [apply success schema](../specs/apply-output.v1.schema.json),
 [checkpoint input schema](../specs/task-checkpoint-input.v1.schema.json),
 and [checkpoint write success schema](../specs/task-checkpoint-output.v1.schema.json)
-for the tested boundaries. The success schemas are additive and do not
-describe checkpoint drafts or error output. Do not parse error prose as a
-stable protocol. Native HTTP dispatch, cross-process resume, full machine
-error coverage, and live-provider acceptance are separate gates.
+for the tested boundaries. Do not parse error prose as a stable protocol.
+
+## Native loopback experiment
+
+The production build still has no HTTP provider. For a developer-only
+offline check, build both the Linux `ds` and the precompiled test runner
+with `-tags devspecs_http_loopback`, then use the same archive verifier.
+`TestHTTPDispatchLoopbackCLI_AfterCallerKilled_ResumesWithoutDuplicateExecution`
+starts a fixture provider, kills the first CLI process after admission,
+and exercises recovery through another installed CLI process.
+
+In the tagged build only, select the experiment with
+`DEVSPECS_HTTP_LOOPBACK_ENDPOINT` (HTTPS literal loopback IP) and
+`DEVSPECS_HTTP_LOOPBACK_CA` (absolute path to the fixture's PEM trust anchor).
+Use an existing, disposable, absolute `DEVSPECS_HOME` and trusted fixture
+repositories in a network-disabled environment. Repo config cannot opt in.
+The fixture uses a fixed synthetic bearer; do not supply real credentials.
+
+`ds dispatch task:<id> --cwd <fixture-checkout> --detach` takes the
+exact reviewed v2 request on stdin. It does not send the local apply output,
+read the task repository, or use a Git remote for source approval. The
+request must use a synthetic `.invalid` source URL, the clean checkout's
+pinned commit, and only inline artifacts. Keep the dispatch ID before
+submitting. The experiment reuses `dispatch status`, `dispatch resume`,
+and `dispatch receipt` with that ID; it adds no command or flag.
+
+Pending state is bounded, immutable, and written before POST. It binds the
+frozen bytes, digest, checkout, endpoint, trust anchor and provider name.
+`status` never submits. If no handle was stored, `resume` sends the exact
+original bytes and key, subject to a one-hour recovery deadline and a
+provider-advertised idempotency retention of at least one hour. If a handle
+was stored, `resume` only monitors. This proves caller process recovery,
+not provider crash recovery or power-loss durability. Expiration blocks
+replay; it does not delete state. Retain the archive and discard the
+disposable home when the proof is finished. Never recycle an expired ID.
+
+The tagged workflow's [dispatch result](../specs/dispatch-loopback-result.v1.schema.json)
+and guarded [checkpoint errors](../specs/task-checkpoint-error.v1.schema.json)
+use versioned JSON on stdout after CLI argument parsing, with exit 1 for
+handled errors. A valid terminal provider outcome (even failed or cancelled)
+is evidence and uses exit 0; check the state rather than treating it as a
+promotion. The [checkpoint draft](../specs/task-checkpoint-draft.v1.schema.json)
+is read-only and keeps its existing JSON shape. No provider can checkpoint.
+
+Do not ship the experimental tag or use this with a live provider. The
+ordinary Waspflow path and human output are unchanged.

@@ -55,7 +55,7 @@ export DEVSPECS_CONFORMANCE_SPECS="$root/specs"
 export PATH="$work/bin:$PATH"
 ds --version
 
-pattern='^(TestHeadlessHTTPDispatchConformance|TestHTTPDispatch|TestBuildHTTPDispatchRequest|TestAdmitHTTPDispatchReceipt|TestWriteHTTPDispatchReceipt)'
+pattern='^Test(HeadlessHTTPDispatchConformance|HTTPDispatch|BuildHTTPDispatchRequest|AdmitHTTPDispatchReceipt|WriteHTTPDispatch(Receipt|Pending|Handle)|ReadHTTPDispatch(Pending|Handle|StoredReceipt)|LoopbackDispatch)'
 if [ "$#" -eq 3 ]; then
   tests=$("$3" -test.list '^TestHeadlessHTTPDispatchConformance$')
   printf '%s\n' "$tests" | grep -qx TestHeadlessHTTPDispatchConformance

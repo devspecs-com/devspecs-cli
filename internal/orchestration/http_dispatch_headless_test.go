@@ -226,12 +226,35 @@ func TestHeadlessHTTPDispatchConformance(t *testing.T) {
 
 func newHeadlessDispatchMock(t *testing.T, frozen []byte, commit string) *httpDispatchTransport {
 	t.Helper()
+	handle, status, receipt := headlessDispatchResponseBodies(t, frozen, portableFixtureURL, commit)
+	const runPath = "/v2/dispatches/" + testHTTPDispatchID
+	return newTestHTTPDispatch(t, withHTTPDispatchCapabilities(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v2/dispatches":
+			body, err := io.ReadAll(io.LimitReader(r.Body, httpDispatchRequestBody+1))
+			if err != nil || !bytes.Equal(body, frozen) || r.Header.Get("Idempotency-Key") != testHTTPDispatchID {
+				writeHTTPDispatchMock(w, http.StatusBadRequest, testHTTPDispatchError("invalid_request", false))
+				return
+			}
+			writeHTTPDispatchMock(w, http.StatusCreated, string(handle))
+		case r.Method == http.MethodGet && r.URL.Path == runPath:
+			writeHTTPDispatchMock(w, http.StatusOK, string(status))
+		case r.Method == http.MethodGet && r.URL.Path == runPath+"/receipt":
+			writeHTTPDispatchMock(w, http.StatusOK, string(receipt))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+func headlessDispatchResponseBodies(t *testing.T, frozen []byte, sourceURL, commit string) ([]byte, []byte, []byte) {
+	t.Helper()
 	digest := httpDispatchDigest(frozen)
 	var receipt map[string]any
 	require.NoError(t, json.Unmarshal([]byte(testHTTPDispatchReceipt), &receipt))
 	receipt["request_sha256"] = digest
 	receipt["repository"] = map[string]string{
-		"logical_id": "git:" + portableFixtureURL, "source_commit": commit, "result_commit": commit,
+		"logical_id": "git:" + sourceURL, "source_commit": commit, "result_commit": commit,
 	}
 	receipt["evidence"] = map[string]any{"files_read": []string{}, "files_edited": []string{}, "paths_complete": true}
 	receiptBody, err := json.Marshal(receipt)
@@ -247,24 +270,7 @@ func newHeadlessDispatchMock(t *testing.T, frozen []byte, commit string) *httpDi
 		"cancel_requested": false, "observed_at": "2026-11-10T12:00:05Z",
 	})
 	require.NoError(t, err)
-	const runPath = "/v2/dispatches/" + testHTTPDispatchID
-	return newTestHTTPDispatch(t, withHTTPDispatchCapabilities(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/v2/dispatches":
-			body, err := io.ReadAll(io.LimitReader(r.Body, httpDispatchRequestBody+1))
-			if err != nil || !bytes.Equal(body, frozen) || r.Header.Get("Idempotency-Key") != testHTTPDispatchID {
-				writeHTTPDispatchMock(w, http.StatusBadRequest, testHTTPDispatchError("invalid_request", false))
-				return
-			}
-			writeHTTPDispatchMock(w, http.StatusCreated, string(handleBody))
-		case r.Method == http.MethodGet && r.URL.Path == runPath:
-			writeHTTPDispatchMock(w, http.StatusOK, string(statusBody))
-		case r.Method == http.MethodGet && r.URL.Path == runPath+"/receipt":
-			writeHTTPDispatchMock(w, http.StatusOK, string(receiptBody))
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
+	return handleBody, statusBody, receiptBody
 }
 
 // Keep the CLI and Git off the user's config, credential helpers, and index.

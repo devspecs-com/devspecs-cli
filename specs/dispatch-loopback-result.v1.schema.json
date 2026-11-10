@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DevSpecs experimental loopback dispatch result v1",
+  "type": "object",
+  "required": ["schema", "schema_version", "operation"],
+  "properties": {
+    "schema": {"const": "devspecs.dispatch.loopback_result"},
+    "schema_version": {"const": 1},
+    "operation": {"enum": ["dispatch", "status", "resume", "receipt"]},
+    "dispatch_id": {"type": "string", "pattern": "^dispatch_[0-9A-HJKMNPQRSTVWXYZ]{26}$"},
+    "request_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "state": {"enum": ["pending", "accepted", "queued", "running", "succeeded", "failed", "cancelled"]},
+    "receipt": {
+      "type": "object",
+      "required": ["schema", "schema_version", "dispatch_id", "receipt_id", "request_sha256", "wire_sha256", "state"],
+      "properties": {
+        "schema": {"const": "devspecs.dispatch.http_receipt_evidence"},
+        "schema_version": {"const": 1},
+        "dispatch_id": {"type": "string"},
+        "receipt_id": {"type": "string"},
+        "request_sha256": {"type": "string"},
+        "wire_sha256": {"type": "string"},
+        "state": {"enum": ["succeeded", "failed", "cancelled"]}
+      }
+    },
+    "error": {
+      "enum": [
+        "unsupported_options", "invalid_configuration", "invalid_request", "request_conflict",
+        "state_unavailable", "dispatch_not_found", "receipt_unavailable", "configuration_mismatch",
+        "recovery_expired", "incompatible_provider", "evidence_mismatch", "exchange_interrupted",
+        "provider_rejected"
+      ]
+    }
+  },
+  "if": {"required": ["error"]},
+  "then": {"not": {"required": ["receipt"]}},
+  "else": {"required": ["dispatch_id", "request_sha256", "state"]}
+}

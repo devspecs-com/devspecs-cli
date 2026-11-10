@@ -1045,6 +1045,7 @@ func newTaskCheckpointCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&opts.Draft, "draft", false, "Preview checkpoint markdown and JSON without writing files or updating lifecycle state")
 	cmd.Flags().BoolVar(&inputJSON, "input-json", false, "Read one versioned checkpoint request from stdin instead of checkpoint content flags")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
+	configureLoopbackCheckpoint(cmd)
 	return cmd
 }
 

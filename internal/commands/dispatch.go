@@ -58,7 +58,9 @@ type dispatchReceiptOutput struct {
 
 // NewDispatchCmd creates the opt-in orchestration dispatch command.
 func NewDispatchCmd() *cobra.Command {
-	return newDispatchCmd(newConfiguredDispatchService)
+	cmd := newDispatchCmd(newConfiguredDispatchService)
+	configureLoopbackDispatch(cmd)
+	return cmd
 }
 
 func newDispatchCmd(factory dispatchServiceFactory) *cobra.Command {
