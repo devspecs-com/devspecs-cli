@@ -318,7 +318,7 @@ tree:
         purpose: Show task, slice, follow-up, checkpoint, and decision state.
       checkpoint:
         status: core
-        usage: ds task checkpoint <task-id|target>
+        usage: ds task checkpoint <task-id|target> [--input-json]
         purpose: Record what happened, evidence, run logs, learnings, and the decision gate.
       decide:
         status: hidden_compat

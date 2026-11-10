@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added `ds task checkpoint --input-json` for bounded, caller-authored
+  checkpoint requests over stdin. Explicit target, decision, and expected
+  heads are required; a stale request does not append a checkpoint.
+  Existing flags, text stdin, and JSON output remain available.
+
 ## v1.5.0 - 2026-10-01
 
 - Added experimental repo-scoped `ds hub` for local coordination: discoverable

@@ -178,6 +178,7 @@ type taskCheckpointOptions struct {
 	Index            bool
 	Draft            bool
 	AsJSON           bool
+	expectedHeads    []string
 	gitEvidence      *taskGitDiffEvidence
 	runLogEvidence   []taskCommandRunEvidence
 }
@@ -986,6 +987,7 @@ func newTaskDecideCmd() *cobra.Command {
 
 func newTaskCheckpointCmd() *cobra.Command {
 	var opts taskCheckpointOptions
+	var inputJSON bool
 	opts.Dir = defaultTaskWorkspaceDir
 	opts.Stage = "implemented"
 	opts.Decision = "continue"
@@ -998,7 +1000,15 @@ func newTaskCheckpointCmd() *cobra.Command {
 		Short: "Record a task checkpoint and update the task result",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTaskCheckpoint(cmd, args[0], opts)
+			checkpoint := opts
+			if inputJSON {
+				var err error
+				checkpoint, err = bindTaskCheckpointJSON(cmd, args[0], checkpoint)
+				if err != nil {
+					return err
+				}
+			}
+			return runTaskCheckpoint(cmd, args[0], checkpoint)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Dir, "dir", defaultTaskWorkspaceDir, "Task workspace parent directory")
@@ -1033,6 +1043,7 @@ func newTaskCheckpointCmd() *cobra.Command {
 	cmd.Flags().IntVar(&opts.TestMax, "test-output-max-bytes", opts.TestMax, "Maximum bytes of captured test command output to keep")
 	cmd.Flags().BoolVar(&opts.Index, "index", true, "Capture the checkpoint into the DevSpecs index")
 	cmd.Flags().BoolVar(&opts.Draft, "draft", false, "Preview checkpoint markdown and JSON without writing files or updating lifecycle state")
+	cmd.Flags().BoolVar(&inputJSON, "input-json", false, "Read one versioned checkpoint request from stdin instead of checkpoint content flags")
 	cmd.Flags().BoolVar(&opts.AsJSON, "json", false, "Output as JSON")
 	return cmd
 }
@@ -5155,9 +5166,12 @@ func taskAdvisorySourceLeads(files []taskAdvisoryFile) []taskAdvisoryFile {
 }
 
 func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOptions) error {
-	opts, err := resolveTaskCheckpointTextInputs(cmd, opts)
-	if err != nil {
-		return err
+	if opts.expectedHeads == nil {
+		var err error
+		opts, err = resolveTaskCheckpointTextInputs(cmd, opts)
+		if err != nil {
+			return err
+		}
 	}
 	target, err := checkpointTargetFromOptions(opts)
 	if err != nil {
@@ -5208,6 +5222,9 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	if err != nil {
 		return err
 	}
+	if err := verifyTaskCheckpointJSONBinding(taskID, manifest, selectedSlice, opts); err != nil {
+		return err
+	}
 	opts, err = validateTaskDurabilityCheckpoint(repoRoot, workspace, manifest, selectedSlice, opts)
 	if err != nil {
 		return err
@@ -5217,6 +5234,16 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	}
 	now := time.Now().UTC()
 	if opts.Draft {
+		if opts.expectedHeads != nil {
+			events, err := readTaskCheckpointEvents(workspace, manifest.TaskID)
+			if err != nil {
+				return err
+			}
+			opts.Supersedes, err = resolveCheckpointWriteHeads(events, selectedSlice.ID, opts)
+			if err != nil {
+				return err
+			}
+		}
 		return runTaskCheckpointDraft(cmd, taskID, repoRoot, workspace, manifest, selectedSlice, opts, now)
 	}
 	if opts.Index {
@@ -5246,6 +5273,9 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	if err != nil {
 		return err
 	}
+	if err := verifyTaskCheckpointJSONBinding(taskID, manifest, selectedSlice, opts); err != nil {
+		return err
+	}
 	opts, err = validateTaskDurabilityCheckpoint(repoRoot, workspace, manifest, selectedSlice, opts)
 	if err != nil {
 		return err
@@ -5254,7 +5284,7 @@ func runTaskCheckpoint(cmd *cobra.Command, taskID string, opts taskCheckpointOpt
 	if err != nil {
 		return err
 	}
-	opts.Supersedes, err = checkpointSupersedesForWrite(events, selectedSlice.ID, opts.Supersedes)
+	opts.Supersedes, err = resolveCheckpointWriteHeads(events, selectedSlice.ID, opts)
 	if err != nil {
 		return err
 	}

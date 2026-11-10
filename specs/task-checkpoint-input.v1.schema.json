@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:devspecs:task-checkpoint-input:v1",
+  "title": "DevSpecs task checkpoint input v1",
+  "description": "A caller-authored checkpoint proposal, not a persisted checkpoint event or a provider receipt. The CLI requires one UTF-8 JSON object of at most 262144 bytes, with unique exact member names and a literal integer 1 for schema_version.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schema_version", "task_id", "target", "stage", "decision", "expected_heads"],
+  "properties": {
+    "schema": { "const": "devspecs.task.checkpoint_input" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "task_id": { "$ref": "#/$defs/id", "description": "Exact task ID, not a selector." },
+    "target": { "$ref": "#/$defs/id", "description": "Exact target ID, not a selector." },
+    "stage": {
+      "enum": ["packed", "planned", "started", "implemented", "validated", "done", "blocked", "completed", "split", "superseded", "cancelled", "rolled_back"]
+    },
+    "decision": { "$ref": "#/$defs/decision" },
+    "expected_heads": {
+      "$ref": "#/$defs/checkpoint_ids",
+      "description": "The caller's expected current heads for the target. An empty array expects no current heads; the CLI checks actual heads under lock."
+    },
+    "supersedes": {
+      "$ref": "#/$defs/checkpoint_ids",
+      "description": "Optional explicit checkpoint IDs for conflict resolution; the CLI checks actual heads under lock."
+    },
+    "goal": { "$ref": "#/$defs/prose" },
+    "description": { "$ref": "#/$defs/prose" },
+    "note": { "$ref": "#/$defs/prose" },
+    "resources": { "$ref": "#/$defs/evidence_list", "description": "Opaque evidence strings, not paths or URLs to open." },
+    "files_read": { "$ref": "#/$defs/path_list" },
+    "files_edited": { "$ref": "#/$defs/path_list" },
+    "tests_read": { "$ref": "#/$defs/path_list" },
+    "tests_run": { "$ref": "#/$defs/evidence_list", "description": "Inert reports of tests already run, never commands to execute." },
+    "missed_files": { "$ref": "#/$defs/path_list" },
+    "noise_files": { "$ref": "#/$defs/path_list" },
+    "tasks": { "$ref": "#/$defs/evidence_list" },
+    "learnings": { "$ref": "#/$defs/evidence_list" },
+    "next_target": { "type": "string", "maxLength": 128 },
+    "next_decision": { "$ref": "#/$defs/decision" },
+    "durable_record": { "enum": ["none", "recorded", "deferred"] },
+    "durable_artifacts": { "$ref": "#/$defs/path_list" },
+    "receipt_evidence": { "$ref": "#/$defs/receipt_evidence" }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^(?:[A-Za-z0-9._-]|[^\\x00-\\x7f])+$",
+      "not": { "anyOf": [{ "enum": [".", ".."] }, { "pattern": "\\n" }] },
+      "$comment": "For regex portability the schema permits non-ASCII characters here; the CLI requires each non-ASCII code point to be a Unicode letter or decimal digit."
+    },
+    "checkpoint_ids": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/id" },
+      "$comment": "The CLI additionally rejects duplicates after lowercasing, matching checkpoint graph identity."
+    },
+    "decision": {
+      "enum": ["promote", "improve", "rework", "rollback", "block", "blocked", "complete", "completed", "split", "supersede", "superseded", "cancel", "cancelled", "continue"]
+    },
+    "prose": { "type": "string", "maxLength": 16384 },
+    "evidence_list": {
+      "type": "array",
+      "maxItems": 256,
+      "items": { "type": "string", "minLength": 1, "maxLength": 4096 }
+    },
+    "path_list": {
+      "type": "array",
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/repo_path" }
+    },
+    "repo_path": {
+      "description": "A portable, slash-separated repository-relative path, with no dot segments, device names, or fragments. Validation is lexical; it does not resolve symlinks or inspect the filesystem.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^[^/]+(?:/[^/]+)*$",
+      "not": {
+        "anyOf": [
+          { "const": "-" },
+          { "pattern": "[\\\\:#<>\"|?*\\x00-\\x1f\\x7f-\\x9f]" },
+          { "pattern": "^[ \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]|[ \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]$" },
+          { "pattern": "[. ](?:/|$)" },
+          { "pattern": "(?:^|/)(?:[Cc][Oo][Nn]|[Pp][Rr][Nn]|[Aa][Uu][Xx]|[Nn][Uu][Ll]|[Cc][Oo][Mm][1-9\u00b9\u00b2\u00b3]|[Ll][Pp][Tt][1-9\u00b9\u00b2\u00b3]) *(?:[./]|$)" }
+        ]
+      }
+    },
+    "receipt_evidence": {
+      "description": "An opaque correlation claim recorded as a resource. It does not authenticate or authorize anything, and the CLI does not look up the receipt.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dispatch_id", "receipt_id", "request_sha256", "wire_sha256"],
+      "properties": {
+        "dispatch_id": { "type": "string", "maxLength": 35, "pattern": "^dispatch_[0-9A-HJKMNPQRSTVWXYZ]{26}$" },
+        "receipt_id": { "type": "string", "maxLength": 34, "pattern": "^receipt_[0-9A-HJKMNPQRSTVWXYZ]{26}$" },
+        "request_sha256": { "$ref": "#/$defs/digest" },
+        "wire_sha256": { "$ref": "#/$defs/digest" },
+        "result_commit": {
+          "type": "string",
+          "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$",
+          "not": { "pattern": "\\n" }
+        }
+      }
+    },
+    "digest": { "type": "string", "maxLength": 71, "pattern": "^sha256:[a-f0-9]{64}$" }
+  }
+}
