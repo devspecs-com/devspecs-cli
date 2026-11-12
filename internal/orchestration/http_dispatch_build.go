@@ -229,13 +229,16 @@ func validHTTPDispatchText(value string, maxRunes int) bool {
 }
 
 func validHTTPDispatchSource(source httpDispatchConfirmedSource) bool {
+	return httpDispatchCommit.MatchString(source.Commit) && validHTTPDispatchSourceURL(source.URL)
+}
+
+func validHTTPDispatchSourceURL(value string) bool {
 	// Leave space for the logical ID prefix; do not rewrite or redact a URL.
-	if len(source.URL) > 512-len("git:") || (len(source.Commit) != 40 && len(source.Commit) != 64) ||
-		!httpDispatchCommit.MatchString(source.Commit) || !strings.HasPrefix(source.URL, "https://") ||
-		strings.ContainsAny(source.URL, "@?#\\%") {
+	if len(value) > 512-len("git:") || !strings.HasPrefix(value, "https://") ||
+		strings.ContainsAny(value, "@?#\\%") {
 		return false
 	}
-	u, err := url.Parse(source.URL)
+	u, err := url.Parse(value)
 	return err == nil && u.Hostname() != "" && strings.HasPrefix(u.Path, "/") && u.Path != "/" &&
 		u.EscapedPath() == u.Path && path.Clean(u.Path) == u.Path
 }

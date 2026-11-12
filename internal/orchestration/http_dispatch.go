@@ -36,7 +36,7 @@ var (
 	errHTTPDispatchPreflight   = errors.New("HTTP dispatch v2 capabilities do not meet requirements")
 )
 
-// This transport is loopback-only and deliberately not registered as a Driver.
+// This transport is deliberately not registered as a production Driver.
 type httpDispatchTransport struct {
 	base        string
 	bearer      string
@@ -45,16 +45,29 @@ type httpDispatchTransport struct {
 }
 
 func newHTTPDispatchTransport(endpoint, token string, roots *x509.CertPool) (*httpDispatchTransport, error) {
-	u, err := url.Parse(endpoint)
-	if err != nil || u.Scheme != "https" || u.User != nil || strings.ContainsAny(endpoint, "?#") ||
-		u.EscapedPath() != u.Path || strings.Contains(u.Path, "//") ||
-		(u.Path != "" && u.Path != "/" && path.Clean(u.Path) != strings.TrimSuffix(u.Path, "/")) {
-		return nil, errors.New("invalid HTTP dispatch mock endpoint")
+	u, err := parseHTTPDispatchEndpoint(endpoint)
+	if err != nil {
+		return nil, err
 	}
 	ip, err := netip.ParseAddr(u.Hostname())
 	if err != nil || !ip.IsLoopback() || ip.Zone() != "" {
 		return nil, errors.New("HTTP dispatch mock endpoint must use a loopback IP")
 	}
+	return newHTTPDispatchClient(u, token, roots)
+}
+
+func parseHTTPDispatchEndpoint(endpoint string) (*url.URL, error) {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || strings.ContainsAny(endpoint, "?#") ||
+		u.EscapedPath() != u.Path || strings.Contains(u.Path, "//") ||
+		(u.Path != "" && u.Path != "/" && path.Clean(u.Path) != strings.TrimSuffix(u.Path, "/")) {
+		return nil, errors.New("invalid HTTP dispatch endpoint")
+	}
+	return u, nil
+}
+
+// Callers must validate and authorize the endpoint before supplying credentials.
+func newHTTPDispatchClient(u *url.URL, token string, roots *x509.CertPool) (*httpDispatchTransport, error) {
 	if token == "" || strings.ContainsFunc(token, func(r rune) bool { return r <= ' ' || r >= 0x7f }) {
 		return nil, errors.New("invalid HTTP dispatch mock bearer")
 	}

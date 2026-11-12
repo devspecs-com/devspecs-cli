@@ -46,6 +46,8 @@ type LoopbackDispatch struct {
 	transport   *httpDispatchTransport
 	trustSHA256 string
 	caller      httpDispatchCaller
+	sourceURL   string
+	readOnly    bool
 }
 
 func NewLoopbackDispatch(home, endpoint, trustPath, credentialSlot string) (*LoopbackDispatch, error) {
@@ -111,7 +113,11 @@ func (s *LoopbackDispatch) Start(ctx context.Context, target, checkout string, d
 	}
 	source, _ := url.Parse(wire.Repository.GitURL)
 	inline, external, valid := request.validateInput()
-	if !strings.HasSuffix(strings.ToLower(source.Hostname()), ".invalid") || !valid || external != 0 || inline > httpDispatchMaxInline {
+	sourceAllowed := strings.HasSuffix(strings.ToLower(source.Hostname()), ".invalid")
+	if s.sourceURL != "" {
+		sourceAllowed = wire.Repository.GitURL == s.sourceURL
+	}
+	if !sourceAllowed || !valid || external != 0 || inline > httpDispatchMaxInline {
 		result.Error = "invalid_request"
 		return result
 	}
@@ -195,6 +201,12 @@ func (s *LoopbackDispatch) run(ctx context.Context, result LoopbackResult, detac
 	if pending.Endpoint != s.transport.base || pending.TrustSHA256 != s.trustSHA256 ||
 		request.Caller.PrincipalID != s.caller.PrincipalID {
 		return loopbackFailure(result, errLoopbackBinding)
+	}
+	if s.sourceURL != "" {
+		var wire httpDispatchPortableRequest
+		if json.Unmarshal(pending.Request, &wire) != nil || wire.Repository.GitURL != s.sourceURL {
+			return loopbackFailure(result, errLoopbackBinding)
+		}
 	}
 	result.RequestSHA256 = pending.RequestSHA256
 	receipt, state, err := s.storedReceipt(pending, request.Caller)
@@ -315,6 +327,9 @@ func (s *LoopbackDispatch) monitor(ctx context.Context, p httpLoopbackPending, h
 			if err != nil {
 				return loopbackFailure(result, err)
 			}
+			if s.readOnly && !readOnlyHTTPPilotReceipt(receipt) {
+				return loopbackFailure(result, errHTTPDispatchCorrelation)
+			}
 			if _, err := s.store.writeHTTPDispatchReceipt(receipt); err != nil {
 				return loopbackFailure(result, errLoopbackState)
 			}
@@ -348,7 +363,17 @@ func (s *LoopbackDispatch) storedReceipt(p httpLoopbackPending, caller httpDispa
 		!terminalHTTPDispatchState(record.State) {
 		return nil, "", errLoopbackState
 	}
+	if s.readOnly && !readOnlyHTTPPilotReceipt(&record.httpDispatchAdmittedReceipt) {
+		return nil, "", errLoopbackState
+	}
 	return raw, record.State, nil
+}
+
+func readOnlyHTTPPilotReceipt(receipt *httpDispatchAdmittedReceipt) bool {
+	if receipt.ResultCommit == nil {
+		return receipt.State != "succeeded"
+	}
+	return *receipt.ResultCommit == receipt.SourceCommit
 }
 
 func loopbackFailure(result LoopbackResult, err error) LoopbackResult {

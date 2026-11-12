@@ -44,6 +44,11 @@ for the tested boundaries. Do not parse error prose as a stable protocol.
 
 ## Native loopback experiment
 
+The same experimental build also contains the explicitly configured
+[read-only pilot client](http-pilot-client.md). Offline pilot tests select
+their own local TLS endpoint and synthetic credentials; they do not call
+Fly or establish live provider readiness.
+
 The production build still has no HTTP provider. For a developer-only
 offline check, build both the Linux `ds` and the precompiled test runner
 with `-tags devspecs_http_loopback`, then use the same archive verifier.

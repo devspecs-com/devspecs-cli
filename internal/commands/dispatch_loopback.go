@@ -12,24 +12,26 @@ import (
 )
 
 const loopbackEndpointEnv = "DEVSPECS_HTTP_LOOPBACK_ENDPOINT"
+const pilotConfigEnv = "DEVSPECS_HTTP_PILOT_CONFIG"
 
 func configureLoopbackDispatch(root *cobra.Command) {
 	endpoint, enabled := os.LookupEnv(loopbackEndpointEnv)
-	if !enabled {
+	pilotConfig, pilotEnabled := os.LookupEnv(pilotConfigEnv)
+	if !enabled && !pilotEnabled {
 		return
 	}
 	root.RunE = func(cmd *cobra.Command, args []string) error {
-		return runLoopbackDispatch(cmd, "dispatch", args[0], endpoint)
+		return runLoopbackDispatch(cmd, "dispatch", args[0], endpoint, pilotConfig, enabled && pilotEnabled)
 	}
 	for _, child := range root.Commands() {
 		operation := child.Name()
 		child.RunE = func(cmd *cobra.Command, args []string) error {
-			return runLoopbackDispatch(cmd, operation, args[0], endpoint)
+			return runLoopbackDispatch(cmd, operation, args[0], endpoint, pilotConfig, enabled && pilotEnabled)
 		}
 	}
 }
 
-func runLoopbackDispatch(cmd *cobra.Command, operation, arg, endpoint string) error {
+func runLoopbackDispatch(cmd *cobra.Command, operation, arg, endpoint, pilotConfig string, ambiguous bool) error {
 	result := orchestration.NewLoopbackResult(operation)
 	validFlags := true
 	cmd.Flags().Visit(func(flag *pflag.Flag) {
@@ -38,11 +40,19 @@ func runLoopbackDispatch(cmd *cobra.Command, operation, arg, endpoint string) er
 		}
 	})
 	switch {
+	case ambiguous:
+		result.Error = "invalid_configuration"
 	case !validFlags:
 		result.Error = "unsupported_options"
 	default:
-		service, err := orchestration.NewLoopbackDispatch(os.Getenv("DEVSPECS_HOME"), endpoint,
-			os.Getenv("DEVSPECS_HTTP_LOOPBACK_CA"), os.Getenv("DEVSPECS_HTTP_LOOPBACK_CREDENTIAL"))
+		var service *orchestration.LoopbackDispatch
+		var err error
+		if _, pilot := os.LookupEnv(pilotConfigEnv); pilot {
+			service, err = orchestration.NewPilotDispatch(os.Getenv("DEVSPECS_HOME"), pilotConfig)
+		} else {
+			service, err = orchestration.NewLoopbackDispatch(os.Getenv("DEVSPECS_HOME"), endpoint,
+				os.Getenv("DEVSPECS_HTTP_LOOPBACK_CA"), os.Getenv("DEVSPECS_HTTP_LOOPBACK_CREDENTIAL"))
+		}
 		if err != nil {
 			result.Error = "invalid_configuration"
 		} else if operation == "dispatch" {
@@ -63,7 +73,9 @@ func runLoopbackDispatch(cmd *cobra.Command, operation, arg, endpoint string) er
 }
 
 func configureLoopbackCheckpoint(cmd *cobra.Command) {
-	if _, enabled := os.LookupEnv(loopbackEndpointEnv); !enabled {
+	_, loopback := os.LookupEnv(loopbackEndpointEnv)
+	_, pilot := os.LookupEnv(pilotConfigEnv)
+	if !loopback && !pilot {
 		return
 	}
 	checkpoint := cmd.RunE

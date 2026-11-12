@@ -13,6 +13,7 @@ import (
 func TestDispatchCmd_WhenNormalBuildHasLoopbackEnv_UsesOrdinaryValidation(t *testing.T) {
 	// Arrange
 	t.Setenv("DEVSPECS_HTTP_LOOPBACK_ENDPOINT", "https://127.0.0.1:1/v2")
+	t.Setenv("DEVSPECS_HTTP_PILOT_CONFIG", "must-not-be-read")
 	t.Setenv("DEVSPECS_TELEMETRY", "0")
 	cmd := NewDispatchCmd()
 	var out bytes.Buffer
