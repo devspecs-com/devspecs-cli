@@ -25,7 +25,7 @@ func main() {
 	defer stop()
 	rootCmd := newRootCmd()
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		commands.PrintCommandError(os.Stderr, err, os.Args[1:])
 		os.Exit(1)
 	}
 }
@@ -111,6 +111,9 @@ remotes, document text, or raw queries. Disable with DEVSPECS_TELEMETRY=0.`,
 	rootCmd.AddCommand(commands.NewVersionCmd())
 	rootCmd.AddCommand(commands.NewResumeCmd())
 	rootCmd.AddCommand(commands.NewConfigCmd())
+	rootCmd.AddCommand(commands.NewRemoteCmd())
+	rootCmd.AddCommand(commands.NewLoginCmd())
+	rootCmd.AddCommand(commands.NewLogoutCmd())
 	rootCmd.AddCommand(commands.NewTagCmd())
 	rootCmd.AddCommand(commands.NewUntagCmd())
 	rootCmd.AddCommand(commands.NewEvalCmd())
@@ -152,6 +155,9 @@ func assignRootCommandGroups(rootCmd *cobra.Command) {
 		"doctor":    rootGroupAdvanced,
 		"index":     rootGroupAdvanced,
 		"version":   rootGroupAdvanced,
+		"remote":    rootGroupAdvanced,
+		"login":     rootGroupAdvanced,
+		"logout":    rootGroupAdvanced,
 	}
 	for _, cmd := range rootCmd.Commands() {
 		name := strings.TrimSpace(cmd.Name())

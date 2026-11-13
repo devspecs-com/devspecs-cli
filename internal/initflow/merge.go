@@ -10,7 +10,10 @@ import (
 // MergeSelectedProfiles merges built-in profile selections and optional custom markdown paths/rules
 // into a copy of base. Empty selectedIDs leaves base unchanged (aside from custom additions).
 func MergeSelectedProfiles(base *config.RepoConfig, selectedIDs []string, customPaths []string, customRules []config.SourceRule) (*config.RepoConfig, error) {
-	cfg := cloneRepoConfig(base)
+	cfg := config.CloneRepoConfig(base)
+	if cfg.Version == 0 {
+		cfg.Version = 1
+	}
 	if len(selectedIDs) == 0 && len(customPaths) == 0 && len(customRules) == 0 {
 		return cfg, nil
 	}
@@ -61,26 +64,6 @@ func MergeSelectedProfiles(base *config.RepoConfig, selectedIDs []string, custom
 		return nil, err
 	}
 	return cfg, nil
-}
-
-func cloneRepoConfig(base *config.RepoConfig) *config.RepoConfig {
-	if base == nil {
-		return config.DefaultRepoConfig()
-	}
-	out := &config.RepoConfig{Version: base.Version}
-	for _, s := range base.Sources {
-		ns := config.SourceConfig{
-			Type:  s.Type,
-			Path:  s.Path,
-			Paths: append([]string(nil), s.Paths...),
-			Rules: append([]config.SourceRule(nil), s.Rules...),
-		}
-		out.Sources = append(out.Sources, ns)
-	}
-	if out.Version == 0 {
-		out.Version = 1
-	}
-	return out
 }
 
 func findOrCreateMarkdown(cfg *config.RepoConfig) *config.SourceConfig {

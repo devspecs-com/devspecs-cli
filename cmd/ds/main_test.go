@@ -465,6 +465,8 @@ func TestRootCmd_LiveSurfaceMatchesCLISurfaceSpec(t *testing.T) {
 
 	config := mustFindCommand(t, root, "config")
 	assertCommandSurface(t, "ds config", config, spec.Tree["ds config"].Children, nil, nil)
+	remote := mustFindCommand(t, root, "remote")
+	assertCommandSurface(t, "ds remote", remote, spec.Tree["ds"].Children["remote"].Children, nil, nil)
 
 	hub := mustFindCommand(t, root, "hub")
 	assertCommandSurface(t, "ds hub", hub, spec.Tree["ds"].Children["hub"].Children, nil, nil)

@@ -52,6 +52,30 @@ tree:
             status: experimental
             usage: ds thread remove <owner> <key>
             purpose: Remove a lane only while checkpoint history still permits the graph mutation.
+      remote:
+        status: experimental
+        purpose: Manage opt-in hosted metadata without network or credential access.
+        children:
+          add:
+            status: experimental
+            usage: ds remote add <name> <url> --tenant-id <uuid> --repo-id <uuid> [--json]
+            purpose: Atomically add version-1 HTTPS remote metadata to repository config.
+          list:
+            status: experimental
+            usage: ds remote list [--json]
+            purpose: List local metadata without reading the vault or contacting a service.
+          remove:
+            status: experimental
+            usage: ds remote remove <name> [--json]
+            purpose: Remove metadata only; explicit logout is separate.
+      login:
+        status: experimental
+        usage: ds login <remote> [--confirm-url <exact-base-url>] [--json]
+        purpose: Explicitly authenticate through an interactive device flow or an exact operator environment pair.
+      logout:
+        status: experimental
+        usage: ds logout <remote> [--confirm-url <exact-base-url>] [--json]
+        purpose: Confirm server session revocation before deleting its saved credential.
       hub:
         status: experimental
         purpose: Share short-lived repo or opt-in home-global coordination without replacing task checkpoints or Git-owned decisions.

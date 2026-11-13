@@ -16,6 +16,7 @@ type RepoConfig struct {
 	Artifacts    ArtifactConfig    `yaml:"artifacts,omitempty" json:"artifacts,omitempty"`
 	Experiments  ExperimentConfig  `yaml:"experiments,omitempty" json:"experiments,omitempty"`
 	Integrations IntegrationConfig `yaml:"integrations,omitempty" json:"integrations,omitempty"`
+	Remotes      []RemoteConfig    `yaml:"remotes,omitempty" json:"remotes,omitempty"`
 }
 
 // IntegrationConfig holds explicitly enabled DevSpecs integrations.
@@ -129,6 +130,7 @@ func CloneRepoConfig(cfg *RepoConfig) *RepoConfig {
 		cfg = DefaultRepoConfig()
 	}
 	out := *cfg
+	out.Remotes = append([]RemoteConfig(nil), cfg.Remotes...)
 	if cfg.Experiments.IntentCandidateDiscovery != nil {
 		out.Experiments.IntentCandidateDiscovery = boolPtr(*cfg.Experiments.IntentCandidateDiscovery)
 	}

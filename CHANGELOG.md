@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Added experimental Advanced `ds remote add|list|remove`, `ds login` and
+  `ds logout` in the existing binary. Version-1 repository metadata contains no
+  credentials; interactive server-managed device login requires exact endpoint
+  confirmation and uses a lazy native OS vault, with no plaintext fallback.
+  Explicit headless URL/token pairs never fall back to the vault or device flow.
+  New commands have versioned JSON results/errors, bounded verified HTTPS, safe
+  session compensation and confirmed-server-logout-before-local-delete behavior.
+  This is offline-tested authentication/configuration, not live OAuth evidence,
+  hosted sync, remote task lifecycle authority or production acceptance.
+- Preserved artifacts, experiments, integrations and remote metadata when init
+  profile merging clones existing configuration through the shared copy helper.
+
 - Added `ds task checkpoint --input-json` for bounded, caller-authored
   checkpoint requests over stdin. Explicit target, decision, and expected
   heads are required; a stale request does not append a checkpoint.

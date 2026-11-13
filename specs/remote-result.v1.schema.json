@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DevSpecs experimental remote command result v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema", "schema_version", "status"],
+  "properties": {
+    "schema": {"const": "devspecs.remote.result"},
+    "schema_version": {"const": 1},
+    "status": {"enum": ["added", "listed", "removed", "authenticated", "logged_out", "error"]},
+    "remote": {"$ref": "remote-config.v1.schema.json#/$defs/remote"},
+    "remotes": {"type": "array", "maxItems": 16, "items": {"$ref": "remote-config.v1.schema.json#/$defs/remote"}},
+    "credential_source": {"enum": ["environment", "os_vault"]},
+    "identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["principal_id", "tenant_id", "repo_id", "scope"],
+      "properties": {
+        "principal_id": {"$ref": "remote-config.v1.schema.json#/$defs/id"},
+        "credential_id": {"$ref": "remote-config.v1.schema.json#/$defs/id"},
+        "session_id": {"$ref": "remote-config.v1.schema.json#/$defs/id"},
+        "tenant_id": {"$ref": "remote-config.v1.schema.json#/$defs/id"},
+        "repo_id": {"$ref": "remote-config.v1.schema.json#/$defs/id"},
+        "scope": {"const": "repo:metadata:read"},
+        "role": {"enum": ["owner", "member", "read_only"]},
+        "expires_at": {"type": "string", "format": "date-time"}
+      },
+      "oneOf": [
+        {"required": ["credential_id"], "not": {"required": ["session_id"]}},
+        {"required": ["session_id", "role", "expires_at"], "not": {"required": ["credential_id"]}}
+      ]
+    },
+    "error": {
+      "type": "object", "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {"code": {"type": "string", "pattern": "^[a-z_]+$"}, "message": {"type": "string", "maxLength": 512}}
+    }
+  },
+  "allOf": [
+    {"if": {"properties": {"status": {"const": "listed"}}}, "then": {"required": ["remotes"]}},
+    {"if": {"properties": {"status": {"enum": ["added", "removed", "authenticated", "logged_out"]}}}, "then": {"required": ["remote"]}},
+    {"if": {"properties": {"status": {"const": "authenticated"}}}, "then": {"required": ["identity", "credential_source"]}},
+    {"if": {"properties": {"status": {"const": "logged_out"}}}, "then": {"required": ["credential_source"]}},
+    {"if": {"properties": {"status": {"const": "error"}}}, "then": {"required": ["error"]}}
+  ]
+}

@@ -16,6 +16,10 @@ change exists, what passed, what was superseded, and where to continue.
 
 Local-first. No account. No cloud sync. No LLM calls. No code upload.
 
+Advanced opt-in: experimental `ds remote add|list|remove`, `ds login` and
+`ds logout` provide explicit hosted authentication and metadata configuration.
+They do not add sync or change local-only use. See [hosted authentication](docs/hosted-auth.md).
+
 <p>
   <a href="https://devspecs.com">
     <img src="https://devspecs.com/demo/fastapi-recent-gate-v1-1.gif" alt="DevSpecs recovering recent FastAPI work" width="900">

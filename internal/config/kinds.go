@@ -149,6 +149,9 @@ func ValidateRepoConfig(cfg *RepoConfig) error {
 	if cfg == nil {
 		return nil
 	}
+	if err := ValidateRemotes(cfg.Remotes); err != nil {
+		return err
+	}
 	for si, src := range cfg.Sources {
 		if src.Type != "markdown" {
 			continue
