@@ -63,6 +63,10 @@ ds logout hosted --confirm-url https://hub.example/base --json
 Verify the endpoint independently before confirming it. A repository edit cannot
 silently select an origin for an ambient credential. Interactive vault access
 requires a TTY and exact endpoint confirmation on every explicit login/logout.
+Native Windows consoles and Git Bash/MSYS2/Cygwin terminals (including mintty)
+are supported. Redirected stdin from ordinary pipes or files remains
+noninteractive, regardless of terminal environment variables, and requires the
+explicit headless URL/token pair below.
 Only explicit interactive `ds login` initiates the server-managed GitHub device
 flow. It prints the exact `https://github.com/login/device` URL and user code to
 stderr; opening a browser is optional and is not automated. The CLI never accepts

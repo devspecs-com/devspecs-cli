@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -242,6 +243,99 @@ func TestRemoteLogin_NoninteractiveWithoutPair_DoesNotReadVaultOrStartFlow(t *te
 	assert.Zero(t, v.gets)
 	assert.Zero(t, a.logins)
 	assert.Zero(t, a.metadataReads)
+}
+
+func remoteAuthStdin(t *testing.T, stdin *os.File) {
+	t.Helper()
+	original := os.Stdin
+	os.Stdin = stdin
+	t.Cleanup(func() { os.Stdin = original })
+}
+
+func TestRemoteLogin_WithRegularFileStdin_RequiresExplicitPair(t *testing.T) {
+	// Arrange
+	a, v, deps := remoteAuthFixture(t)
+	stdin, err := os.CreateTemp(t.TempDir(), "stdin")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = stdin.Close() })
+	remoteAuthStdin(t, stdin)
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("MSYSTEM", "MINGW64")
+	deps.interactive = nativeRemoteAuthDeps().interactive
+	stdout, stderr, execute := authCommand(t, false, deps)
+
+	// Act
+	err = execute(context.Background())
+
+	// Assert
+	var failure remoteFailure
+	require.ErrorAs(t, err, &failure)
+	assert.Equal(t, "interactive_required", failure.Code)
+	assert.Zero(t, v.gets)
+	assert.Zero(t, v.sets)
+	assert.Zero(t, v.deletes)
+	assert.Zero(t, a.logins)
+	assert.Zero(t, a.metadataReads)
+	assert.Empty(t, a.logoutTokens)
+	assert.Empty(t, stdout.String())
+	assert.Empty(t, stderr.String())
+}
+
+func TestRemoteLogin_WithOrdinaryPipeStdin_RequiresExplicitPair(t *testing.T) {
+	// Arrange
+	a, v, deps := remoteAuthFixture(t)
+	stdin, writer, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = stdin.Close(); _ = writer.Close() })
+	remoteAuthStdin(t, stdin)
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("MSYSTEM", "MINGW64")
+	deps.interactive = nativeRemoteAuthDeps().interactive
+	stdout, stderr, execute := authCommand(t, false, deps)
+
+	// Act
+	err = execute(context.Background())
+
+	// Assert
+	var failure remoteFailure
+	require.ErrorAs(t, err, &failure)
+	assert.Equal(t, "interactive_required", failure.Code)
+	assert.Zero(t, v.gets)
+	assert.Zero(t, v.sets)
+	assert.Zero(t, v.deletes)
+	assert.Zero(t, a.logins)
+	assert.Zero(t, a.metadataReads)
+	assert.Empty(t, a.logoutTokens)
+	assert.Empty(t, stdout.String())
+	assert.Empty(t, stderr.String())
+}
+
+func TestRemoteLogout_WithOrdinaryPipeStdin_RequiresExplicitPair(t *testing.T) {
+	// Arrange
+	a, v, deps := remoteAuthFixture(t)
+	v.getErr = nil
+	v.credential = a.credential
+	stdin, writer, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = stdin.Close(); _ = writer.Close() })
+	remoteAuthStdin(t, stdin)
+	deps.interactive = nativeRemoteAuthDeps().interactive
+	stdout, stderr, execute := authCommand(t, true, deps)
+
+	// Act
+	err = execute(context.Background())
+
+	// Assert
+	var failure remoteFailure
+	require.ErrorAs(t, err, &failure)
+	assert.Equal(t, "interactive_required", failure.Code)
+	assert.Zero(t, v.gets)
+	assert.Zero(t, v.sets)
+	assert.Zero(t, v.deletes)
+	assert.Empty(t, a.logoutTokens)
+	assert.Equal(t, a.credential.Token, v.credential.Token)
+	assert.Empty(t, stdout.String())
+	assert.Empty(t, stderr.String())
 }
 
 func TestRemoteLogin_WithoutExactConfirmation_DoesNotReadVault(t *testing.T) {

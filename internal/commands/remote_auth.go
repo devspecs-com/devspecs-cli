@@ -33,9 +33,12 @@ type remoteAuthDeps struct {
 
 func nativeRemoteAuthDeps() remoteAuthDeps {
 	return remoteAuthDeps{
-		client:      func(url string) (hostedAuthClient, error) { return hosted.NewClient(url, nil) },
-		vault:       func() hosted.Vault { return hosted.OSVault{} },
-		interactive: func() bool { return isatty.IsTerminal(os.Stdin.Fd()) }, getenv: os.Getenv,
+		client: func(url string) (hostedAuthClient, error) { return hosted.NewClient(url, nil) },
+		vault:  func() hosted.Vault { return hosted.OSVault{} },
+		interactive: func() bool {
+			fd := os.Stdin.Fd()
+			return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
+		}, getenv: os.Getenv,
 	}
 }
 
