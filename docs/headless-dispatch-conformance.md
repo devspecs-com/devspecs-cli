@@ -2,8 +2,8 @@
 
 This developer check uses an installed `ds` for `apply --json` and
 `task checkpoint --input-json --json`. The intervening HTTP exchange is
-test-only and runs on TLS loopback. There is no supported HTTP provider
-configuration or live partner access implied by the check.
+test-only and runs on TLS loopback. This offline fixture check implies no
+live partner access or readiness.
 
 ## Run on Linux
 
@@ -23,6 +23,12 @@ for an x86-64 image). Pass it as the third argument. Mount the inputs,
 including the script at its checkout-relative path and the sibling
 `specs/` directory, read-only. Provide an executable temporary directory; no outbound
 network, TTY, credentials, or existing DevSpecs home are required.
+
+The Go workflow runs the tagged check on pushes and pull requests to `main`.
+It builds the archive and test runner first, then invokes the verifier with
+its 150-second test timeout in a fresh Linux network namespace. Only loopback
+is enabled; the cleared environment contains no live-provider configuration
+or secrets. Ordinary release packaging remains untagged.
 
 ## What it checks
 
@@ -98,5 +104,7 @@ is evidence and uses exit 0; check the state rather than treating it as a
 promotion. The [checkpoint draft](../specs/task-checkpoint-draft.v1.schema.json)
 is read-only and keeps its existing JSON shape. No provider can checkpoint.
 
-Do not ship the experimental tag or use this with a live provider. The
-ordinary Waspflow path and human output are unchanged.
+Loopback fixture mode is offline and must never target a live provider.
+The tagged caller-selected pilot configuration is a separate path, usable
+with a live provider only under separate explicit approval. Ordinary releases
+remain untagged with no HTTP provider; Waspflow and human output are unchanged.
