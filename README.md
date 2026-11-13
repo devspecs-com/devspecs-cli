@@ -18,7 +18,10 @@ Local-first. No account. No cloud sync. No LLM calls. No code upload.
 
 Advanced opt-in: experimental `ds remote add|list|remove`, `ds login` and
 `ds logout` provide explicit hosted authentication and metadata configuration.
-They do not add sync or change local-only use. See [hosted authentication](docs/hosted-auth.md).
+`ds remote push` explicitly publishes an operator-approved committed record
+subset; it is not Git push or automatic sync. Local-only use is unchanged.
+See [hosted authentication](docs/hosted-auth.md) and
+[committed publishing](docs/hosted-publishing.md).
 
 <p>
   <a href="https://devspecs.com">
@@ -234,6 +237,9 @@ Opt-in `ds dispatch` freezes one apply target and uses the configured
 orchestrator to produce a receipt. It does not automatically checkpoint or
 promote the task. The first driver uses stock Waspflow without requiring
 changes to Waspflow itself. Configuration alone never starts an agent.
+The experimental [HTTP driver](docs/http-dispatch.md) uses an explicitly trusted
+provider endpoint and verified result bundles in the same binary. Direct
+dispatch does not depend on a hosted hub or publish records automatically.
 
 - [Workflow reference](docs/workflows.md): threads, workspaces, compose,
   dispatch configuration, checkpoint handoffs, and the command map.

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,7 +80,7 @@ func (s StateStore) LoadHandle(identifier string) (DispatchHandle, DispatchReque
 		return DispatchHandle{}, DispatchRequest{}, fmt.Errorf("unsupported dispatch handle")
 	}
 	var request DispatchRequest
-	requestData, err := os.ReadFile(handle.Request.Value)
+	requestData, err := readOrchestrationFile(handle.Request.Value)
 	if err != nil {
 		return DispatchHandle{}, DispatchRequest{}, fmt.Errorf("read dispatch request: %w", err)
 	}
@@ -138,14 +139,27 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 }
 
 func readJSONFile(path string, target any) error {
-	data, err := os.ReadFile(path)
+	data, err := readOrchestrationFile(path)
 	if err != nil {
 		return err
 	}
-	if len(data) > maxDispatchFileBytes {
-		return fmt.Errorf("file exceeds 2 MiB")
-	}
 	return json.Unmarshal(data, target)
+}
+
+func readOrchestrationFile(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxDispatchFileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxDispatchFileBytes {
+		return nil, fmt.Errorf("file exceeds 2 MiB")
+	}
+	return data, nil
 }
 
 func sha256Bytes(data []byte) string {

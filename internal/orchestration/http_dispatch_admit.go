@@ -131,6 +131,12 @@ type httpDispatchReceiptAdmissionWire struct {
 // The caller supplies the accepted handle and terminal observation from the
 // same authorized endpoint, a trusted local checkout, and repo-relative roots.
 func admitHTTPDispatchReceipt(ctx context.Context, runner CommandRunner, checkout string, frozen []byte, handle *httpDispatchHandle, status *httpDispatchStatus, raw []byte, protectedPaths []string) (*httpDispatchAdmittedReceipt, error) {
+	return admitHTTPDispatchReceiptUsing(ctx, runner, checkout, frozen, handle, status, raw, protectedPaths, nil)
+}
+
+// A normal bundle consumer validates correlated metadata before downloading,
+// then invokes the default verifier again against its isolated object store.
+func admitHTTPDispatchReceiptUsing(ctx context.Context, runner CommandRunner, checkout string, frozen []byte, handle *httpDispatchHandle, status *httpDispatchStatus, raw []byte, protectedPaths []string, verify func(*httpDispatchReceiptAdmissionWire) error) (*httpDispatchAdmittedReceipt, error) {
 	if len(frozen) > httpDispatchRequestBody || len(raw) > httpDispatchReceiptBody {
 		return nil, errHTTPDispatchLimit
 	}
@@ -179,7 +185,12 @@ func admitHTTPDispatchReceipt(ctx context.Context, runner CommandRunner, checkou
 	if err != nil {
 		return nil, err
 	}
-	if err := wire.verifyPaths(ctx, runner, checkout, protectedPaths); err != nil {
+	if verify == nil {
+		verify = func(wire *httpDispatchReceiptAdmissionWire) error {
+			return wire.verifyPaths(ctx, runner, checkout, protectedPaths)
+		}
+	}
+	if err := verify(&wire); err != nil {
 		return nil, err
 	}
 	admitted := &httpDispatchAdmittedReceipt{
@@ -356,7 +367,11 @@ func verifyHTTPDispatchResult(ctx context.Context, runner CommandRunner, checkou
 	}
 	grafts, err := git("rev-parse", "--path-format=absolute", "--git-path", "info/grafts")
 	graftPath := strings.TrimRight(string(grafts), "\r\n")
-	if err != nil || !filepath.IsAbs(graftPath) || os.Getenv("GIT_GRAFT_FILE") != "" {
+	ambientGraft := os.Getenv("GIT_GRAFT_FILE")
+	if _, ok := runner.(*httpDriverGit); ok {
+		ambientGraft = ""
+	}
+	if err != nil || !filepath.IsAbs(graftPath) || ambientGraft != "" {
 		return errHTTPDispatchResult
 	}
 	if _, err := os.Lstat(graftPath); !os.IsNotExist(err) {

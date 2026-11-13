@@ -36,12 +36,13 @@ var (
 	errHTTPDispatchPreflight   = errors.New("HTTP dispatch v2 capabilities do not meet requirements")
 )
 
-// This transport is deliberately not registered as a production Driver.
+// The normal Driver and tagged pilots share transport validation only.
 type httpDispatchTransport struct {
 	base        string
 	bearer      string
 	client      *http.Client
 	callTimeout time.Duration
+	authorize   func(context.Context) error
 }
 
 func newHTTPDispatchTransport(endpoint, token string, roots *x509.CertPool) (*httpDispatchTransport, error) {
@@ -211,6 +212,11 @@ func (t *httpDispatchTransport) dispatchPath(handle *httpDispatchHandle, suffix 
 func (t *httpDispatchTransport) exchange(ctx context.Context, method, route string, body []byte, key, dispatchID string, limit int, success ...int) (int, []byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, t.callTimeout)
 	defer cancel()
+	if t.authorize != nil {
+		if err := t.authorize(ctx); err != nil {
+			return 0, nil, err
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, method, t.base+route, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, errHTTPDispatchRequest

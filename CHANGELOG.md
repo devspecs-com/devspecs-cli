@@ -14,8 +14,24 @@
   Explicit headless URL/token pairs never fall back to the vault or device flow.
   New commands have versioned JSON results/errors, bounded verified HTTPS, safe
   session compensation and confirmed-server-logout-before-local-delete behavior.
-  This is offline-tested authentication/configuration, not live OAuth evidence,
-  hosted sync, remote task lifecycle authority or production acceptance.
+  Hosted authentication remains opt-in; it does not grant content permissions,
+  remote task lifecycle authority or production acceptance.
+- Added an experimental HTTP driver to the normal `ds dispatch` workflow,
+  without a second binary or automatic provider selection. Explicit read-only
+  and edited goals use a caller-trusted external profile, frozen replay-safe
+  requests and stable-principal token rotation. Edited results require bounded,
+  digest-checked Git bundle transfer and independent quarantined verification;
+  no caller checkout, index, refs or task lifecycle are changed. Native
+  Waspflow defaults remain unchanged. This is controlled trusted-provider
+  functionality, not hostile-bundle resource isolation or customer readiness.
+- Added experimental `ds remote push` for the complete operator-approved subset
+  of committed task, thread, checkpoint, workspace/change and composed-document
+  records. It requires a full commit, approved ref and exact endpoint confirmation,
+  reads Git objects rather than dirty or untracked files, and returns an authorized
+  snapshot URL. Content access requires separately granted permissions; existing
+  metadata-only grants do not expand. This is not Git push, automatic sync or
+  remote task mutation. Service source enrollment and production/recovery gates
+  remain explicit.
 - Preserved artifacts, experiments, integrations and remote metadata when init
   profile merging clones existing configuration through the shared copy helper.
 

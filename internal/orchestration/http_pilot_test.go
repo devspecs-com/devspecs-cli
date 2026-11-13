@@ -163,10 +163,8 @@ func TestNewPilotDispatch_WithRelativeConfigPath_RejectsConfiguration(t *testing
 	// Arrange
 	t.Setenv(pilotTestTokenEnv, pilotTestToken)
 	absPath := writePilotTestConfig(t, pilotTestConfig())
-	cwd, err := os.Getwd()
-	require.NoError(t, err)
-	configPath, err := filepath.Rel(cwd, absPath)
-	require.NoError(t, err)
+	t.Chdir(filepath.Dir(absPath))
+	configPath := filepath.Base(absPath)
 	require.False(t, filepath.IsAbs(configPath))
 
 	// Act

@@ -6,7 +6,8 @@
   "properties": {
     "schema": {"const": "devspecs.remote.result"},
     "schema_version": {"const": 1},
-    "status": {"enum": ["added", "listed", "removed", "authenticated", "logged_out", "error"]},
+    "status": {"enum": ["added", "listed", "removed", "authenticated", "logged_out", "published", "error"]},
+    "url": {"type": "string", "format": "uri", "maxLength": 1024, "pattern": "^https://[^/?#@]+(?:/[^?#]*)?/v1/tenants/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/repos/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/snapshots/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"},
     "remote": {"$ref": "remote-config.v1.schema.json#/$defs/remote"},
     "remotes": {"type": "array", "maxItems": 16, "items": {"$ref": "remote-config.v1.schema.json#/$defs/remote"}},
     "credential_source": {"enum": ["environment", "os_vault"]},
@@ -35,6 +36,7 @@
     }
   },
   "allOf": [
+    {"if": {"properties": {"status": {"const": "published"}}}, "then": {"required": ["remote", "url", "credential_source"], "not": {"anyOf": [{"required": ["identity"]}, {"required": ["remotes"]}, {"required": ["error"]}]}}, "else": {"not": {"required": ["url"]}}},
     {"if": {"properties": {"status": {"const": "listed"}}}, "then": {"required": ["remotes"]}},
     {"if": {"properties": {"status": {"enum": ["added", "removed", "authenticated", "logged_out"]}}}, "then": {"required": ["remote"]}},
     {"if": {"properties": {"status": {"const": "authenticated"}}}, "then": {"required": ["identity", "credential_source"]}},

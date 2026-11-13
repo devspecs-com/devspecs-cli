@@ -1,0 +1,11 @@
+schema_version: 1
+revision: 1
+owner:
+    kind: task
+    task_id: y03-real-fixture
+threads:
+    - key: verify
+      name: Verify immutable snapshots
+      targets:
+        - target: Q01
+        - target: Q02

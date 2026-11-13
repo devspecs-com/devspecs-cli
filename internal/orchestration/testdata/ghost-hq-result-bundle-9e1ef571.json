@@ -1,0 +1,53 @@
+{
+  "schema": "devspecs.dispatch.receipt",
+  "schema_version": 2,
+  "dispatch_id": "dispatch_01KZZW1BBN55VK2GVYQNCQBZB9",
+  "request_sha256": "sha256:2fe784b0d2911744e76efa456fb28b13ee979cbf0e84cb44272c3cbcc1e8a823",
+  "provider": {
+    "name": "ghost-hq",
+    "run_id": "run_01KZZW1BBN55VK2GVYQNCQBZBA"
+  },
+  "caller": {
+    "principal_id": "principal_devspecs_pilot",
+    "credential_id": "cred_01KZZW1BBN55VK2GVYQNCQBZBB"
+  },
+  "receipt_id": "receipt_01KZZW1BBN55VK2GVYQNCQBZBC",
+  "execution": {
+    "state": "succeeded",
+    "attempts": 1,
+    "started_at": "2026-11-13T12:00:01.000Z",
+    "ended_at": "2026-11-13T12:00:09.000Z",
+    "failure": null
+  },
+  "repository": {
+    "logical_id": "git:https://github.com/kalo-build/dispatch-pilot-fixture.git@4f742c33bf546637a8d1877ec6d2c77f12ed2a56",
+    "source_commit": "4f742c33bf546637a8d1877ec6d2c77f12ed2a56",
+    "result_commit": "1111111111111111111111111111111111111111",
+    "result_tree": "2222222222222222222222222222222222222222",
+    "result_bundle": {
+      "artifact_id": "result-bundle",
+      "kind": "https",
+      "media_type": "application/x-git-bundle",
+      "size_bytes": 512,
+      "sha256": "sha256:365fe1383fd85eb1f68bf1184b41d71efd5cbb00b52ae8745c25a0fc3d864753",
+      "url": "https://ghost-dispatch-pilot.fly.dev/devspecs/v2/dispatches/dispatch_01KZZW1BBN55VK2GVYQNCQBZB9/artifacts/result-bundle"
+    }
+  },
+  "evidence": {
+    "files_read": [],
+    "files_edited": [
+      "DISPATCH_MOCK.md"
+    ],
+    "paths_complete": true
+  },
+  "report": {
+    "state": "not_requested"
+  },
+  "verification": {
+    "state": "not_requested"
+  },
+  "cancellation": {
+    "supported": false,
+    "requested": false
+  }
+}

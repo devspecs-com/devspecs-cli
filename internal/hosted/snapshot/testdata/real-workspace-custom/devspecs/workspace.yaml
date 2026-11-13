@@ -1,0 +1,6 @@
+id: y03-cli-workspace-custom-fixture
+name: Y03-CLI-WORKSPACE-CUSTOM-FIXTURE
+artifact_dir: planning
+repos:
+    app:
+        path: ./app

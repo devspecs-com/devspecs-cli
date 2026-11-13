@@ -35,6 +35,7 @@ type remoteResult struct {
 	Remotes          *[]config.RemoteConfig `json:"remotes,omitempty"`
 	Identity         *hosted.Identity       `json:"identity,omitempty"`
 	CredentialSource string                 `json:"credential_source,omitempty"`
+	URL              string                 `json:"url,omitempty"`
 	Error            *remoteFailure         `json:"error,omitempty"`
 }
 
@@ -88,7 +89,9 @@ func outputRemote(cmd *cobra.Command, asJSON bool, result remoteResult) error {
 		}
 		return nil
 	}
-	if result.Remotes != nil {
+	if result.URL != "" {
+		fmt.Fprintln(cmd.OutOrStdout(), result.URL)
+	} else if result.Remotes != nil {
 		for _, r := range *result.Remotes {
 			fmt.Fprintf(cmd.OutOrStdout(), "%s  %s  tenant=%s repo=%s\n", r.Name, r.URL, r.TenantID, r.RepoID)
 		}
@@ -122,6 +125,10 @@ func loadRemoteDocument() (remoteDocument, error) {
 		return remoteDocument{}, remoteError("repository_unavailable", "unable to inspect the Git repository within the remote configuration deadline")
 	}
 	path := config.RepoConfigPath(repository.RootPath)
+	return loadRemoteDocumentFile(path)
+}
+
+func loadRemoteDocumentFile(path string) (remoteDocument, error) {
 	if err := guardRemoteConfigPath(path); err != nil {
 		return remoteDocument{}, err
 	}
@@ -221,7 +228,7 @@ func configuredRemote(name string) (config.RemoteConfig, error) {
 }
 
 func NewRemoteCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "remote", Short: "Manage opt-in hosted remote metadata (no synchronization)"}
+	cmd := &cobra.Command{Use: "remote", Short: "Manage opt-in hosted remotes and explicitly publish committed snapshots"}
 	var addJSON, listJSON, removeJSON bool
 	var tenant, repo string
 	add := &cobra.Command{Use: "add <name> <url>", Short: "Add explicit HTTPS remote metadata without contacting it", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
@@ -273,6 +280,6 @@ func NewRemoteCmd() *cobra.Command {
 		return remoteError("remote_missing", "named hosted remote is not configured")
 	}}
 	remove.Flags().BoolVar(&removeJSON, "json", false, "Output versioned JSON")
-	cmd.AddCommand(add, list, remove)
+	cmd.AddCommand(add, list, remove, newRemotePushCmd(nativeRemotePushDeps))
 	return cmd
 }
