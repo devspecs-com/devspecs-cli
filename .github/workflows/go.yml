@@ -105,6 +105,25 @@ jobs:
       - name: Test cooperative hub leases and upgrade
         run: go test ./internal/hubstore ./internal/commands -run "^(TestAcquireLease|TestShowLease|TestRenewLease|TestReleaseLease|TestHubLease|TestOpenMigratesPopulatedV7HubToLeases)" -count=1
 
+      - name: Test development-home isolation and launcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime_root="$RUNNER_TEMP/devhome-isolation-tests"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            runtime_root="$(cygpath -m "$RUNNER_TEMP")/devhome-isolation-tests"
+          fi
+          mkdir -p "$runtime_root/home" "$runtime_root/temp" "$runtime_root/go-tmp"
+          export DEVSPECS_HOME="$runtime_root/home"
+          export DEVSPECS_TELEMETRY=0
+          export GOMAXPROCS=2
+          export GOTMPDIR="$runtime_root/go-tmp"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            export TEMP="$runtime_root/temp"
+            export TMP="$runtime_root/temp"
+          fi
+          go test -p 1 -parallel 1 -count=1 -timeout 5m ./scripts/internal/devhome ./scripts/dev-env
+
   headless-dispatch:
     name: Tagged headless dispatch conformance
     runs-on: ubuntu-latest

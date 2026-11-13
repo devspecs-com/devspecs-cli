@@ -78,7 +78,7 @@ func Resolve(opts Options) (Selection, error) {
 		return Selection{}, err
 	}
 	stableRoot := filepath.Join(userHome, stableRootName)
-	insideStable, err := pathIsSameOrDescendant(devRoot, stableRoot)
+	insideStable, err := stableHomeContains(devRoot, stableRoot)
 	if err != nil {
 		return Selection{}, fmt.Errorf("compare development and stable homes: %w", err)
 	}
@@ -256,12 +256,69 @@ func sourceSlug(root string) string {
 	return slug
 }
 
+// This is lexical only; live homes first use stableHomeContains to resolve aliases.
 func pathIsSameOrDescendant(path, parent string) (bool, error) {
+	pathVolume, parentVolume := filepath.VolumeName(path), filepath.VolumeName(parent)
+	if filepath.IsAbs(path) && filepath.IsAbs(parent) && pathVolume != "" && parentVolume != "" && !strings.EqualFold(pathVolume, parentVolume) {
+		return false, nil
+	}
 	relative, err := filepath.Rel(parent, path)
 	if err != nil {
 		return false, err
 	}
 	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))), nil
+}
+
+func stableHomeContains(path, parent string) (bool, error) {
+	canonical, err := comparisonPath(path)
+	if err != nil {
+		return false, err
+	}
+	canonicalParent, err := comparisonPath(parent)
+	if err != nil {
+		return false, err
+	}
+	return pathIsSameOrDescendant(canonical, canonicalParent)
+}
+
+// Comparison paths are safety-only: preserve printed paths and hash namespaces.
+// Resolve the deepest existing ancestor before appending any missing components.
+func comparisonPath(value string) (string, error) {
+	abs, err := filepath.Abs(value)
+	if err != nil {
+		return "", err
+	}
+	current := filepath.Clean(abs)
+	var missing []string
+	for {
+		_, err := os.Lstat(current)
+		if err == nil {
+			info, err := os.Stat(current)
+			if err != nil {
+				return "", err
+			}
+			if len(missing) > 0 && !info.IsDir() {
+				return "", fmt.Errorf("development home comparison ancestor is not a directory")
+			}
+			resolved, err := comparisonAncestor(current)
+			if err != nil {
+				return "", err
+			}
+			for i := len(missing) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missing[i])
+			}
+			return filepath.Clean(resolved), nil
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", err
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
 }
 
 func validateSelection(selection Selection) error {

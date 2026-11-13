@@ -159,6 +159,37 @@ func TestResolve_WithStableRootOverride_ReturnsError(t *testing.T) {
 	assert.ErrorContains(t, err, "must not be the stable home")
 }
 
+func TestPathIsSameOrDescendant_WithRelativeCandidate_PreservesComparisonError(t *testing.T) {
+	// Arrange
+	parent := t.TempDir()
+
+	// Act
+	inside, err := pathIsSameOrDescendant("relative", parent)
+
+	// Assert
+	require.Error(t, err)
+	assert.False(t, inside)
+}
+
+func TestResolve_WithNonDirectoryDevelopmentAncestor_FailsClosed(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	file := filepath.Join(root, "file")
+	require.NoError(t, os.WriteFile(file, []byte("fixture"), 0o600))
+	opts := Options{Channel: "preview", SourceRoot: createSourceRoot(t), UserHome: t.TempDir(), DevRoot: filepath.Join(file, "future")}
+
+	// Act
+	selection, err := Resolve(opts)
+
+	// Assert
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "compare development and stable homes")
+	assert.Empty(t, selection)
+	data, readErr := os.ReadFile(file)
+	require.NoError(t, readErr)
+	assert.Equal(t, "fixture", string(data))
+}
+
 func TestSourceRootHash_WithWindowsPathCase_UsesSameIdentity(t *testing.T) {
 	// Arrange
 	upperPath := `C:\Source\DevSpecs-CLI`

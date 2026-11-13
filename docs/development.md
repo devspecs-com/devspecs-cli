@@ -45,6 +45,13 @@ Existing custom homes remain valid when selected explicitly with
 `DEVSPECS_HOME`; setup does not move, adopt, delete, or downgrade them. Run
 `ds doctor` before deciding whether an older custom home is compatible.
 
+The development-root safety check resolves existing ancestors on both the
+candidate and stable-home paths before comparing missing suffixes. On Windows,
+read-only volume-GUID paths distinguish physical volumes without trusting drive
+letters or aliases; a path whose physical identity cannot be verified fails
+closed. These comparison-only paths do not change printed selections or source
+hashes. Cross-drive development roots remain supported when proven disjoint.
+
 Useful checks:
 
 ```bash

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fixed cross-drive development-home overrides on Windows without weakening
+  stable-home isolation. Safety comparisons resolve physical volumes and existing
+  path ancestors; printed paths and worktree hashes are unchanged. Added native
+  junction coverage and development-home checks to the three-OS CI matrix.
+
 - Added experimental Advanced `ds remote add|list|remove`, `ds login` and
   `ds logout` in the existing binary. Version-1 repository metadata contains no
   credentials; interactive server-managed device login requires exact endpoint
