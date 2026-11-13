@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DevSpecs experimental guarded checkpoint error v1",
+  "type": "object",
+  "required": ["schema", "schema_version", "error"],
+  "properties": {
+    "schema": {"const": "devspecs.task.checkpoint_error"},
+    "schema_version": {"const": 1},
+    "error": {"enum": ["stale_heads", "checkpoint_rejected"]}
+  }
+}

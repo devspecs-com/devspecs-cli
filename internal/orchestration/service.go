@@ -39,6 +39,7 @@ func NewService(home string) *Service {
 	registry.Register("waspflow", func(options map[string]any) (Driver, error) {
 		return NewWaspflowDriver(runner, options)
 	})
+	registerHTTPDriver(registry, StateStore{Root: home})
 	return &Service{
 		Store:        StateStore{Root: home},
 		Runner:       runner,
@@ -69,6 +70,14 @@ func (s *Service) Dispatch(ctx context.Context, opts DispatchOptions) (DispatchH
 	if err != nil {
 		return DispatchHandle{}, "", err
 	}
+	if (opts.ReadOnly || opts.AllowEdits) && driver.Name() != "http" {
+		return DispatchHandle{}, "", fmt.Errorf("explicit HTTP goals require the HTTP orchestration provider")
+	}
+	if d, ok := driver.(*httpDriver); ok {
+		if err := d.prepare(ctx, opts); err != nil {
+			return DispatchHandle{}, "", err
+		}
+	}
 	capabilities, err := driver.Preflight(ctx)
 	if err != nil {
 		return DispatchHandle{}, "", err
@@ -76,12 +85,39 @@ func (s *Service) Dispatch(ctx context.Context, opts DispatchOptions) (DispatchH
 	if !capabilities.Isolation {
 		return DispatchHandle{}, "", fmt.Errorf("provider %q does not support required isolation", driver.Name())
 	}
-	repository, err := inspectRepository(ctx, s.Runner, executionRepo)
+	inspectionRunner := s.Runner
+	if _, ok := driver.(*httpDriver); ok {
+		inspectionRunner, err = newHTTPDriverLocalGit()
+		if err != nil {
+			return DispatchHandle{}, "", err
+		}
+	}
+	repository, err := inspectRepository(ctx, inspectionRunner, executionRepo)
 	if err != nil {
 		return DispatchHandle{}, "", err
 	}
-	applyData, apply, err := s.captureApply(ctx, opts)
+	captureRunner := s.Runner
+	captureCtx := ctx
+	if d, ok := driver.(*httpDriver); ok {
+		cfg, _, _, err := loadHTTPDriverProfile(d.checkout, opts.TaskRepo)
+		if err != nil {
+			return DispatchHandle{}, "", err
+		}
+		if _, realExec := s.Runner.(ExecRunner); realExec {
+			captureRunner = httpDriverCaptureExec{tokenEnv: cfg.TokenEnv}
+		}
+		var cancel context.CancelFunc
+		captureCtx, cancel = context.WithTimeout(ctx, time.Duration(opts.TimeoutSeconds)*time.Second)
+		defer cancel()
+	}
+	applyData, apply, err := s.captureApplyUsing(captureCtx, opts, captureRunner)
 	if err != nil {
+		if driver.Name() == "http" {
+			if captureCtx.Err() != nil {
+				return DispatchHandle{}, "", captureCtx.Err()
+			}
+			return DispatchHandle{}, "", errHTTPDriverGoal
+		}
 		return DispatchHandle{}, "", err
 	}
 	executionPrompt := orchestrationPrompt(apply.Prompt)
@@ -150,6 +186,11 @@ func (s *Service) Status(ctx context.Context, identifier string) (DispatchStatus
 			Name:  handle.Provider.Name,
 			RunID: handle.Provider.RunID,
 		},
+	}
+	if handle.Provider.Name == "http" {
+		if err := s.validateHTTPRecovery(ctx, handle, request); err != nil {
+			return DispatchStatus{}, err
+		}
 	}
 	receiptPath := s.Store.ReceiptPath(handle.DispatchID)
 	if _, statErr := os.Stat(receiptPath); statErr == nil {
@@ -228,6 +269,9 @@ func (s *Service) Finalize(ctx context.Context, identifier string) (DispatchRece
 		Cancellation: ReceiptCancellation{Supported: result.CancellationSupported, State: "not_requested"},
 		Artifacts:    []ArtifactRef{},
 	}
+	if len(result.Artifacts) > 0 {
+		receipt.Artifacts = append(receipt.Artifacts, result.Artifacts...)
+	}
 	path, err := s.Store.WriteReceipt(receipt)
 	if err != nil {
 		return DispatchReceipt{}, "", err
@@ -239,6 +283,15 @@ func (s *Service) Resume(ctx context.Context, identifier string) (DispatchReceip
 	receiptPath := s.Store.ReceiptPath(identifier)
 	if _, err := os.Stat(receiptPath); err == nil {
 		receipt, receiptErr := s.Receipt(receiptPath)
+		if receiptErr == nil && receipt.Provider.Name == "http" {
+			handle, request, err := s.Store.LoadHandle(receipt.DispatchID)
+			if err != nil {
+				return DispatchReceipt{}, "", err
+			}
+			if err := s.validateHTTPRecovery(ctx, handle, request); err != nil {
+				return DispatchReceipt{}, "", err
+			}
+		}
 		return receipt, receiptPath, receiptErr
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return DispatchReceipt{}, "", err
@@ -292,10 +345,34 @@ func (s *Service) driverForRepo(executionRepo string) (Driver, error) {
 	if cfg == nil || strings.TrimSpace(cfg.Integrations.Orchestration.Provider) == "" {
 		return nil, fmt.Errorf("orchestration is disabled; configure integrations.orchestration.provider explicitly")
 	}
-	return s.Registry.Driver(cfg.Integrations.Orchestration.Provider, cfg.Integrations.Orchestration.Options)
+	driver, err := s.Registry.Driver(cfg.Integrations.Orchestration.Provider, cfg.Integrations.Orchestration.Options)
+	if err == nil {
+		bindHTTPDriver(driver, repoRoot)
+	}
+	return driver, err
 }
 
-func (s *Service) captureApply(ctx context.Context, opts DispatchOptions) ([]byte, applyOutput, error) {
+func (s *Service) validateHTTPRecovery(ctx context.Context, handle DispatchHandle, request DispatchRequest) error {
+	driver, err := s.driverForRepo(request.Repository.RequestedRoot)
+	if err != nil {
+		return err
+	}
+	d, ok := driver.(*httpDriver)
+	if !ok {
+		return errHTTPDriverBinding
+	}
+	p, err := d.pending(handle.Provider)
+	if err != nil {
+		return err
+	}
+	_, trust, _, err := loadHTTPDriverProfile(p.Checkout, p.TaskRepo)
+	if err != nil || trust != p.Trust {
+		return errHTTPDriverBinding
+	}
+	return checkHTTPDriverBinding(ctx, p.Checkout, trust)
+}
+
+func (s *Service) captureApplyUsing(ctx context.Context, opts DispatchOptions, runner CommandRunner) ([]byte, applyOutput, error) {
 	dsExecutable, err := resolveDSExecutable(opts.DSExecutable)
 	if err != nil {
 		return nil, applyOutput{}, err
@@ -308,7 +385,7 @@ func (s *Service) captureApply(ctx context.Context, opts DispatchOptions) ([]byt
 	if opts.Thread != "" {
 		args = append(args, "--thread", opts.Thread)
 	}
-	result, err := s.Runner.Run(ctx, opts.TaskRepo, dsExecutable, args...)
+	result, err := runner.Run(ctx, opts.TaskRepo, dsExecutable, args...)
 	if err != nil {
 		return nil, applyOutput{}, err
 	}

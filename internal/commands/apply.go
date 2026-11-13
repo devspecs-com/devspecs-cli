@@ -31,6 +31,7 @@ type applyPromptOutput struct {
 	SiblingTargets     []string            `json:"sibling_targets,omitempty"`
 	PriorSliceEvidence []taskAdvisoryFile  `json:"prior_slice_evidence,omitempty"`
 	ThreadContext      *applyThreadContext `json:"thread_context,omitempty"`
+	InputBudget        applyInputBudget    `json:"input_budget"`
 }
 
 type applyThreadContext struct {
@@ -141,6 +142,7 @@ func writeApplyPrompt(cmd *cobra.Command, ctx taskTargetContext, command string,
 		ThreadContext:      thread,
 	}
 	if asJSON {
+		out.InputBudget = measureApplyInput(prompt, target)
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)

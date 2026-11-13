@@ -15,8 +15,8 @@ import (
 
 func TestRun_WithJSONChannel_PrintsSelectionAndCreatesMarker(t *testing.T) {
 	// Arrange
-	devRoot := filepath.Join(t.TempDir(), "development")
-	sourceRoot := filepath.Join(t.TempDir(), "devspecs-cli")
+	devRoot := filepath.Join(physicalTempDir(t), "development")
+	sourceRoot := filepath.Join(physicalTempDir(t), "devspecs-cli")
 	require.NoError(t, os.MkdirAll(sourceRoot, 0o755))
 	t.Setenv("DEVSPECS_DEV_HOME_ROOT", devRoot)
 	stdout := &bytes.Buffer{}
@@ -54,14 +54,14 @@ func TestRun_WithJSONAndChildCommand_ReturnsUsageError(t *testing.T) {
 
 func TestRun_WithChildCommand_PassesIsolatedEnvironmentWithoutChangingParent(t *testing.T) {
 	// Arrange
-	devRoot := filepath.Join(t.TempDir(), "development")
-	sourceRoot := filepath.Join(t.TempDir(), "devspecs-cli")
-	childDir := filepath.Join(t.TempDir(), "target-repo")
-	capturePath := filepath.Join(t.TempDir(), "environment.json")
+	devRoot := filepath.Join(physicalTempDir(t), "development")
+	sourceRoot := filepath.Join(physicalTempDir(t), "devspecs-cli")
+	childDir := filepath.Join(physicalTempDir(t), "target-repo")
+	capturePath := filepath.Join(physicalTempDir(t), "environment.json")
 	require.NoError(t, os.MkdirAll(sourceRoot, 0o755))
 	require.NoError(t, os.MkdirAll(childDir, 0o755))
 	t.Setenv("DEVSPECS_DEV_HOME_ROOT", devRoot)
-	t.Setenv("DEVSPECS_HOME", filepath.Join(t.TempDir(), "stable"))
+	t.Setenv("DEVSPECS_HOME", filepath.Join(physicalTempDir(t), "stable"))
 	t.Setenv("DEVSPECS_TELEMETRY", "")
 	t.Setenv("DEVSPECS_DEV_ENV_CAPTURE", capturePath)
 	parentHome := os.Getenv("DEVSPECS_HOME")
@@ -115,4 +115,11 @@ func mustWorkingDirectory(t *testing.T) string {
 	workingDirectory, err := os.Getwd()
 	require.NoError(t, err)
 	return workingDirectory
+}
+
+func physicalTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	return dir
 }

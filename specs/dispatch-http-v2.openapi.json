@@ -1,0 +1,624 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "DevSpecs HTTP dispatch provider",
+    "version": "2.0.0-draft.2",
+    "description": "Review draft. No specs.place service dependency. Paths are relative to the explicitly configured provider base URL."
+  },
+  "servers": [
+    {
+      "url": "https://provider.example/devspecs/v2"
+    }
+  ],
+  "security": [
+    {
+      "ProviderToken": []
+    }
+  ],
+  "paths": {
+    "/capabilities": {
+      "get": {
+        "operationId": "getCapabilities",
+        "responses": {
+          "200": {
+            "description": "Wire version, exact contract revision, supported features and configured-principal readiness.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Capabilities"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks permission for this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited; retry only after Retry-After within the caller deadline.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3600
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service temporarily unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Other provider error; fail closed for unknown status or error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dispatches": {
+      "post": {
+        "operationId": "submitDispatch",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/DispatchID"
+            },
+            "description": "Equals request.dispatch_id. Scope by authenticated stable principal, not token or credential ID; compare exact request body digest."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exact replay by the same authorized principal, including after rotation or restart; return the original handle without starting another attempt.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Handle"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "First admission. The caller identity, exact request bytes and digest, handle and launch intent are durably committed before acknowledging or launching.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Handle"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks permission for this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The same authorized principal reused its idempotency key with different bytes. Original run and receipt are unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body or inline artifact exceeds a limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Not UTF-8 application/json with identity content encoding.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unsupported protocol or required capability.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited; retry only after Retry-After within the caller deadline.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3600
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service temporarily unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Other provider error; fail closed for unknown status or error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dispatches/{dispatch_id}": {
+      "parameters": [
+        {
+          "name": "dispatch_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/DispatchID"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getDispatchStatus",
+        "responses": {
+          "200": {
+            "description": "Current status; a terminal status has a retrievable receipt.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Status"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks permission for this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No visible dispatch.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited; retry only after Retry-After within the caller deadline.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3600
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service temporarily unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Other provider error; fail closed for unknown status or error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dispatches/{dispatch_id}/receipt": {
+      "parameters": [
+        {
+          "name": "dispatch_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/DispatchID"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getDispatchReceipt",
+        "responses": {
+          "200": {
+            "description": "Immutable terminal receipt.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Receipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks permission for this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No visible dispatch.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Dispatch exists but receipt is not ready.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited; retry only after Retry-After within the caller deadline.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3600
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service temporarily unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Other provider error; fail closed for unknown status or error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dispatches/{dispatch_id}/cancel": {
+      "parameters": [
+        {
+          "name": "dispatch_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/DispatchID"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "cancelDispatch",
+        "responses": {
+          "200": {
+            "description": "Dispatch is already terminal; no mutation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Status"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Cancellation requested, not necessarily completed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Status"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed or invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer credential.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller lacks permission for this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No visible dispatch.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Provider does not support cancellation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited; retry only after Retry-After within the caller deadline.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3600
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service temporarily unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Other provider error; fail closed for unknown status or error code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../internal/orchestration/http_dispatch_v2.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ProviderToken": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

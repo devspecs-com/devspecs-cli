@@ -1,0 +1,6 @@
+id: y03-cli-workspace-continue-fixture
+name: Y03-CLI-WORKSPACE-CONTINUE-FIXTURE
+artifact_dir: devspecs
+repos:
+    app:
+        path: ./app

@@ -1,0 +1,34 @@
+{
+  "schema_version": 3,
+  "event_kind": "task_checkpoint",
+  "checkpoint_id": "cp_20261113T123704Z_e01_started",
+  "task_id": "normal-edited-proof",
+  "target": "E01",
+  "series": "E",
+  "query": "Implement a synthetic edited-result proof: add and export subtract(a, b) in src/sum.js while preserving sum. Add one descriptive Node test in test/sum.test.js proving subtract(5, 3) equals 2. Run npm test. Do not touch devspecs, .devspecs, package metadata, or any other file. The provider commits the implementation result only; the caller alone manages task checkpoints.",
+  "slice": "E01",
+  "slice_title": "Implement a synthetic edited-result proof: add and export subtract(a, b) in src/sum.js while preserving sum. Add one descriptive Node test in test/sum.test.js proving subtract(5, 3) equals 2. Run npm test. Do not touch devspecs, .devspecs, package metadata, or any other file. The provider commits the implementation result only; the caller alone manages task checkpoints.",
+  "parent_slice": "E01",
+  "stage": "started",
+  "decision": "continue",
+  "created_at": "2026-11-13T12:37:04Z",
+  "goal": "Record progress for `Implement a synthetic edited-result proof: add and export subtract(a, b) in src/sum.js while preserving sum. Add one descriptive Node test in test/sum.test.js proving subtract(5, 3) equals 2. Run npm test. Do not touch devspecs, .devspecs, package metadata, or any other file. The provider commits the implementation result only; the caller alone manages task checkpoints.`.",
+  "description": "Prepared the approved synthetic source pin and normal-CLI proof harness. No remote dispatch has been submitted. Continue with offline adapter verification before arming the joint edited case.",
+  "resources": [
+    "../E00-index.md",
+    "../E01-implement-a-synthetic-edited-result-proof-add-and-export-plan.md",
+    "../E01-implement-a-synthetic-edited-result-proof-add-and-export-result.md",
+    "../task.json"
+  ],
+  "actual_context": {},
+  "predicted_context_feedback": {},
+  "evidence": {
+    "plan_refs": [
+      "../E00-index.md",
+      "../E01-implement-a-synthetic-edited-result-proof-add-and-export-plan.md",
+      "../E01-implement-a-synthetic-edited-result-proof-add-and-export-result.md",
+      "../task.json"
+    ]
+  },
+  "next": {}
+}

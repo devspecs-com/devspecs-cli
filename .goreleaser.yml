@@ -5,6 +5,10 @@ version: 2
 
 project_name: devspecs
 
+git:
+  ignore_tags:
+    - experimental-http-pilot-20261112
+
 before:
   hooks:
     - go mod tidy

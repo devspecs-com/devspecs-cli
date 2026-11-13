@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DevSpecs experimental repository remote metadata v1",
+  "type": "object",
+  "required": ["version", "remotes"],
+  "properties": {
+    "version": {"const": 1},
+    "remotes": {
+      "type": "array", "maxItems": 16,
+      "items": {"$ref": "#/$defs/remote"}
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "remote": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "name", "url", "tenant_id", "repo_id"],
+      "properties": {
+        "version": {"const": 1},
+        "name": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$"},
+        "url": {"type": "string", "format": "uri", "pattern": "^https://", "maxLength": 512},
+        "tenant_id": {"$ref": "#/$defs/id"},
+        "repo_id": {"$ref": "#/$defs/id"}
+      }
+    },
+    "id": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"}
+  }
+}

@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -46,7 +47,7 @@ func validateTaskDurabilityCheckpoint(repoRoot, workspace string, manifest taskM
 		if opts.NextTarget != "" {
 			return opts, fmt.Errorf("durable record disposition recorded does not accept --next-target")
 		}
-		artifacts, err := validateDurableArtifacts(repoRoot, workspace, opts.DurableArtifacts)
+		artifacts, err := validateDurableArtifacts(repoRoot, workspace, opts.DurableArtifacts, opts.expectedHeads != nil)
 		if err != nil {
 			return opts, err
 		}
@@ -64,7 +65,7 @@ func validateTaskDurabilityCheckpoint(repoRoot, workspace string, manifest taskM
 	return opts, nil
 }
 
-func validateDurableArtifacts(repoRoot, workspace string, artifacts []string) ([]string, error) {
+func validateDurableArtifacts(repoRoot, workspace string, artifacts []string, bounded bool) ([]string, error) {
 	var validated []string
 	for _, artifact := range artifacts {
 		path := strings.TrimSpace(artifact)
@@ -79,14 +80,23 @@ func validateDurableArtifacts(repoRoot, workspace string, artifacts []string) ([
 		if relWorkspace, err := filepath.Rel(workspace, path); err == nil && relWorkspace != ".." && !strings.HasPrefix(relWorkspace, ".."+string(filepath.Separator)) {
 			return nil, fmt.Errorf("durable artifact must stay outside the DevSpecs task corpus: %s", filepath.ToSlash(rel))
 		}
-		info, err := os.Stat(path)
-		if err != nil {
-			return nil, fmt.Errorf("durable artifact %s: %w", filepath.ToSlash(rel), err)
+		isMarkdown := strings.EqualFold(filepath.Ext(path), ".md")
+		var body []byte
+		if bounded {
+			if !isMarkdown {
+				return nil, fmt.Errorf("durable artifact must be a Markdown file: %s", filepath.ToSlash(rel))
+			}
+			body, err = readJSONCheckpointDurableArtifact(repoRoot, rel)
+		} else {
+			info, statErr := os.Stat(path)
+			if statErr != nil {
+				return nil, fmt.Errorf("durable artifact %s: %w", filepath.ToSlash(rel), statErr)
+			}
+			if info.IsDir() || !isMarkdown {
+				return nil, fmt.Errorf("durable artifact must be a Markdown file: %s", filepath.ToSlash(rel))
+			}
+			body, err = os.ReadFile(path)
 		}
-		if info.IsDir() || !strings.EqualFold(filepath.Ext(path), ".md") {
-			return nil, fmt.Errorf("durable artifact must be a Markdown file: %s", filepath.ToSlash(rel))
-		}
-		body, err := os.ReadFile(path)
 		if err != nil {
 			return nil, fmt.Errorf("read durable artifact %s: %w", filepath.ToSlash(rel), err)
 		}
@@ -100,6 +110,32 @@ func validateDurableArtifacts(repoRoot, workspace string, artifacts []string) ([
 		validated = appendUniqueString(validated, rel)
 	}
 	return validated, nil
+}
+
+func readJSONCheckpointDurableArtifact(repoRoot, rel string) ([]byte, error) {
+	const maxBytes = 1 << 20
+	root, err := os.OpenRoot(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	info, err := root.Stat(rel)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > maxBytes {
+		return nil, fmt.Errorf("checkpoint input requires a regular Markdown artifact of at most 1 MiB")
+	}
+	file, err := root.Open(rel)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	body, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err == nil && len(body) > maxBytes {
+		return nil, fmt.Errorf("checkpoint input durable artifact exceeds 1 MiB")
+	}
+	return body, err
 }
 
 func durableArtifactRecognized(path, body string) bool {

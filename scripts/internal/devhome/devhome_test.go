@@ -14,7 +14,7 @@ import (
 
 func TestResolve_WithPreviewChannel_UsesPersistentChannelHome(t *testing.T) {
 	// Arrange
-	userHome := t.TempDir()
+	userHome := createUserHome(t)
 	sourceRoot := createSourceRoot(t)
 
 	// Act
@@ -36,7 +36,7 @@ func TestResolve_WithPreviewChannel_UsesPersistentChannelHome(t *testing.T) {
 
 func TestResolve_WithReservedChannel_ReturnsError(t *testing.T) {
 	// Arrange
-	userHome := t.TempDir()
+	userHome := createUserHome(t)
 	sourceRoot := createSourceRoot(t)
 
 	// Act
@@ -53,7 +53,7 @@ func TestResolve_WithReservedChannel_ReturnsError(t *testing.T) {
 
 func TestResolve_WithInvalidChannel_ReturnsError(t *testing.T) {
 	// Arrange
-	userHome := t.TempDir()
+	userHome := createUserHome(t)
 	sourceRoot := createSourceRoot(t)
 
 	// Act
@@ -70,7 +70,7 @@ func TestResolve_WithInvalidChannel_ReturnsError(t *testing.T) {
 
 func TestResolve_WithChannelAndWorktree_ReturnsError(t *testing.T) {
 	// Arrange
-	userHome := t.TempDir()
+	userHome := createUserHome(t)
 	sourceRoot := createSourceRoot(t)
 
 	// Act
@@ -88,7 +88,7 @@ func TestResolve_WithChannelAndWorktree_ReturnsError(t *testing.T) {
 
 func TestResolve_WithWorktree_UsesDeterministicSourceKey(t *testing.T) {
 	// Arrange
-	userHome := t.TempDir()
+	userHome := createUserHome(t)
 	sourceRoot := createSourceRoot(t)
 	expectedHash := sourceRootHash(sourceRoot, runtime.GOOS == "windows")
 	expectedKey := sourceSlug(sourceRoot) + "-" + expectedHash
@@ -109,7 +109,7 @@ func TestResolve_WithWorktree_UsesDeterministicSourceKey(t *testing.T) {
 
 func TestResolve_WithSameWorktree_ReturnsSameHome(t *testing.T) {
 	// Arrange
-	userHome := t.TempDir()
+	userHome := createUserHome(t)
 	sourceRoot := createSourceRoot(t)
 	first, err := Resolve(Options{Worktree: true, SourceRoot: sourceRoot, UserHome: userHome})
 	require.NoError(t, err)
@@ -125,7 +125,7 @@ func TestResolve_WithSameWorktree_ReturnsSameHome(t *testing.T) {
 
 func TestResolve_WithDifferentWorktree_UsesDifferentHome(t *testing.T) {
 	// Arrange
-	userHome := t.TempDir()
+	userHome := createUserHome(t)
 	firstSourceRoot := createNamedSourceRoot(t, "first")
 	secondSourceRoot := createNamedSourceRoot(t, "second")
 	first, err := Resolve(Options{Worktree: true, SourceRoot: firstSourceRoot, UserHome: userHome})
@@ -142,7 +142,7 @@ func TestResolve_WithDifferentWorktree_UsesDifferentHome(t *testing.T) {
 
 func TestResolve_WithStableRootOverride_ReturnsError(t *testing.T) {
 	// Arrange
-	userHome := t.TempDir()
+	userHome := createUserHome(t)
 	sourceRoot := createSourceRoot(t)
 	stableRoot := filepath.Join(userHome, ".devspecs")
 
@@ -157,6 +157,37 @@ func TestResolve_WithStableRootOverride_ReturnsError(t *testing.T) {
 	// Assert
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "must not be the stable home")
+}
+
+func TestPathIsSameOrDescendant_WithRelativeCandidate_PreservesComparisonError(t *testing.T) {
+	// Arrange
+	parent := t.TempDir()
+
+	// Act
+	inside, err := pathIsSameOrDescendant("relative", parent)
+
+	// Assert
+	require.Error(t, err)
+	assert.False(t, inside)
+}
+
+func TestResolve_WithNonDirectoryDevelopmentAncestor_FailsClosed(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	file := filepath.Join(root, "file")
+	require.NoError(t, os.WriteFile(file, []byte("fixture"), 0o600))
+	opts := Options{Channel: "preview", SourceRoot: createSourceRoot(t), UserHome: createUserHome(t), DevRoot: filepath.Join(file, "future")}
+
+	// Act
+	selection, err := Resolve(opts)
+
+	// Assert
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "compare development and stable homes")
+	assert.Empty(t, selection)
+	data, readErr := os.ReadFile(file)
+	require.NoError(t, readErr)
+	assert.Equal(t, "fixture", string(data))
 }
 
 func TestSourceRootHash_WithWindowsPathCase_UsesSameIdentity(t *testing.T) {
@@ -294,11 +325,20 @@ func createSourceRoot(t *testing.T) string {
 	return createNamedSourceRoot(t, "devspecs-cli")
 }
 
+func createUserHome(t *testing.T) string {
+	t.Helper()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	return home
+}
+
 func createNamedSourceRoot(t *testing.T, name string) string {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), name)
 	require.NoError(t, os.MkdirAll(root, 0o755))
-	return root
+	resolved, err := filepath.EvalSymlinks(root)
+	require.NoError(t, err)
+	return resolved
 }
 
 func channelSelection(t *testing.T) Selection {
@@ -306,7 +346,7 @@ func channelSelection(t *testing.T) Selection {
 	selection, err := Resolve(Options{
 		Channel:    "preview",
 		SourceRoot: createSourceRoot(t),
-		UserHome:   t.TempDir(),
+		UserHome:   createUserHome(t),
 	})
 	require.NoError(t, err)
 	return selection

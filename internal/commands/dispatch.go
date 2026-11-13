@@ -11,9 +11,13 @@ import (
 	"github.com/devspecs-com/devspecs-cli/internal/orchestration"
 	"github.com/devspecs-com/devspecs-cli/internal/telemetry"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 type dispatchOptions struct {
+	ReadOnly              bool
+	AllowEdits            bool
+	ExplicitNativeFlags   []string
 	TaskRepo              string
 	ExecutionRepo         string
 	Thread                string
@@ -58,7 +62,9 @@ type dispatchReceiptOutput struct {
 
 // NewDispatchCmd creates the opt-in orchestration dispatch command.
 func NewDispatchCmd() *cobra.Command {
-	return newDispatchCmd(newConfiguredDispatchService)
+	cmd := newDispatchCmd(newConfiguredDispatchService)
+	configureLoopbackDispatch(cmd)
+	return cmd
 }
 
 func newDispatchCmd(factory dispatchServiceFactory) *cobra.Command {
@@ -72,7 +78,12 @@ configured orchestration provider.
 Dispatch waits for provider completion and writes a normalized receipt by
 default. Use --detach to return after startup, then inspect or continue the run
 with ds dispatch status or ds dispatch resume. Providers cannot checkpoint,
-promote, or otherwise mutate the DevSpecs task lifecycle.`,
+promote, or otherwise mutate the DevSpecs task lifecycle.
+
+The HTTP provider requires a caller-selected trusted profile and an explicit
+goal: --read-only for inspection goals only, not implementation tasks, or
+--allow-edits for verified result-bundle transfer. Neither mode promotes the
+DevSpecs lifecycle.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			start := time.Now()
@@ -91,6 +102,15 @@ promote, or otherwise mutate the DevSpecs task lifecycle.`,
 }
 
 func runDispatch(cmd *cobra.Command, factory dispatchServiceFactory, opts dispatchOptions, target string) error {
+	if (opts.ReadOnly || opts.AllowEdits) && !cmd.Flags().Changed("mcp") {
+		opts.MCP = ""
+	}
+	cmd.Flags().Visit(func(flag *pflag.Flag) {
+		switch flag.Name {
+		case "op", "lane", "mcp", "report", "verify", "verify-name", "verify-timeout", "verify-strength", "prepare", "provider-arg", "auto", "ack-deprecated", "accept-provider-default":
+			opts.ExplicitNativeFlags = append(opts.ExplicitNativeFlags, flag.Name)
+		}
+	})
 	service, err := factory()
 	if err != nil {
 		return err
@@ -189,6 +209,9 @@ func defaultDispatchOptions() dispatchOptions {
 }
 
 func bindDispatchFlags(cmd *cobra.Command, opts *dispatchOptions) {
+	cmd.Flags().BoolVar(&opts.ReadOnly, "read-only", false, "Explicitly select an inspection-only goal for experimental HTTP dispatch")
+	cmd.Flags().BoolVar(&opts.AllowEdits, "allow-edits", false, "Explicitly allow HTTP implementation results through verified bundle transfer")
+	cmd.MarkFlagsMutuallyExclusive("read-only", "allow-edits")
 	cmd.Flags().StringVar(&opts.TaskRepo, "task-repo", opts.TaskRepo, "Repository or local planning workspace that owns the target")
 	cmd.Flags().StringVar(&opts.ExecutionRepo, "cwd", opts.ExecutionRepo, "Clean Git repository in which the provider should work")
 	cmd.Flags().StringVar(&opts.Thread, "thread", "", "Named DevSpecs execution thread")
@@ -214,6 +237,8 @@ func bindDispatchFlags(cmd *cobra.Command, opts *dispatchOptions) {
 
 func (o dispatchOptions) serviceOptions(target string) orchestration.DispatchOptions {
 	return orchestration.DispatchOptions{
+		ReadOnly:   o.ReadOnly,
+		AllowEdits: o.AllowEdits, ExplicitNativeFlags: o.ExplicitNativeFlags,
 		TaskRepo: o.TaskRepo, Target: target, Thread: o.Thread,
 		ExecutionRepo: o.ExecutionRepo, Lane: o.Lane,
 		AgentProvider: o.AgentProvider, Operation: o.Operation,

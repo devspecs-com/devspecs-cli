@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DevSpecs checkpoint JSON draft success output v1",
+  "type": "object",
+  "required": [
+    "task_id", "stage", "draft", "mutates", "checkpoint_id", "checkpoint_path_hint",
+    "checkpoint_json_path_hint", "result_path", "checkpoint_markdown", "checkpoint_record", "result_append_markdown"
+  ],
+  "properties": {
+    "task_id": {"type": "string"},
+    "slice": {"type": "string"},
+    "stage": {"type": "string"},
+    "decision": {"type": "string"},
+    "draft": {"const": true},
+    "mutates": {"const": false},
+    "checkpoint_id": {"type": "string"},
+    "checkpoint_path_hint": {"type": "string"},
+    "checkpoint_json_path_hint": {"type": "string"},
+    "result_path": {"type": "string"},
+    "checkpoint_markdown": {"type": "string"},
+    "checkpoint_record": {"type": "object"},
+    "result_append_markdown": {"type": "string"}
+  }
+}

@@ -132,6 +132,7 @@ type DispatchStatus struct {
 }
 
 type ProviderResult struct {
+	Artifacts                []ArtifactRef
 	ProviderVersion          string
 	RunID                    string
 	ExecutionState           string
@@ -212,6 +213,10 @@ type DispatchReceipt struct {
 }
 
 type DispatchOptions struct {
+	// ReadOnly explicitly selects an inspection-only goal, never an editing task.
+	ReadOnly              bool
+	AllowEdits            bool
+	ExplicitNativeFlags   []string
 	TaskRepo              string
 	Target                string
 	Thread                string

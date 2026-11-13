@@ -4,13 +4,14 @@ kind: cli_surface_tree
 metadata:
   product: devspecs-cli
   binary: ds
-  audited_at: "2026-09-26"
+  audited_at: "2026-11-13"
   source:
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds --help
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds task --help
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds workspace --help
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds compose --help
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds dispatch --help
+    - bash scripts/dev.sh --worktree -- go run ./cmd/ds remote --help
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds prune --help
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds doctor --help
     - bash scripts/dev.sh --worktree -- go run ./cmd/ds hub --help
@@ -52,6 +53,34 @@ tree:
             status: experimental
             usage: ds thread remove <owner> <key>
             purpose: Remove a lane only while checkpoint history still permits the graph mutation.
+      remote:
+        status: experimental
+        purpose: Configure opt-in hosted remotes locally and explicitly publish committed records.
+        children:
+          add:
+            status: experimental
+            usage: ds remote add <name> <url> --tenant-id <uuid> --repo-id <uuid> [--json]
+            purpose: Atomically add version-1 HTTPS remote metadata to repository config.
+          list:
+            status: experimental
+            usage: ds remote list [--json]
+            purpose: List local metadata without reading the vault or contacting a service.
+          remove:
+            status: experimental
+            usage: ds remote remove <name> [--json]
+            purpose: Remove metadata only; explicit logout is separate.
+          push:
+            status: experimental
+            usage: ds remote push <name> --commit <full-oid> --ref <approved-ref> --confirm-url <exact-base-url> [--json]
+            purpose: Publish the complete operator-approved committed record subset without Git push, worktree writes or automatic synchronization.
+      login:
+        status: experimental
+        usage: ds login <remote> [--confirm-url <exact-base-url>] [--json]
+        purpose: Explicitly authenticate through an interactive device flow or an exact operator environment pair.
+      logout:
+        status: experimental
+        usage: ds logout <remote> [--confirm-url <exact-base-url>] [--json]
+        purpose: Confirm server session revocation before deleting its saved credential.
       hub:
         status: experimental
         purpose: Share short-lived repo or opt-in home-global coordination without replacing task checkpoints or Git-owned decisions.
@@ -229,7 +258,7 @@ tree:
         purpose: Emit one bounded prompt for an unambiguous legacy target or runnable named thread.
       dispatch:
         status: experimental
-        usage: ds dispatch <task:<id>|change:<id>> [--detach]
+        usage: ds dispatch <task:<id>|change:<id>> [--detach] [--read-only | --allow-edits]
         purpose: Run one bounded target through an explicitly configured orchestration provider without granting task lifecycle authority.
         children:
           status:
@@ -318,7 +347,7 @@ tree:
         purpose: Show task, slice, follow-up, checkpoint, and decision state.
       checkpoint:
         status: core
-        usage: ds task checkpoint <task-id|target>
+        usage: ds task checkpoint <task-id|target> [--input-json]
         purpose: Record what happened, evidence, run logs, learnings, and the decision gate.
       decide:
         status: hidden_compat

@@ -51,6 +51,45 @@ ds task "Fix discount rounding in invoice totals" --quick
 Use full `ds task` when you want durable slices and handoff receipts. Add
 `--quick` when the ceremony would outweigh the change.
 
+### Checkpoint JSON Input
+
+`ds task checkpoint <task-id> --input-json` reads one request (up to 256 KiB)
+from stdin. `--json` still selects output format. For a target with no prior
+checkpoint:
+
+```bash
+ds task checkpoint index-reliability --input-json --json <<'JSON'
+{
+  "schema": "devspecs.task.checkpoint_input",
+  "schema_version": 1,
+  "task_id": "index-reliability",
+  "target": "A01",
+  "stage": "validated",
+  "decision": "improve",
+  "expected_heads": [],
+  "description": "The focused suite passed; keep the concurrency gate open.",
+  "tests_run": ["go test ./internal/store"]
+}
+JSON
+```
+
+Use the exact task and slice IDs. For an existing checkpoint, supply the
+target's current head ID from `ds task status --json`. Conflicts require
+both the full `expected_heads` list and explicit `supersedes` naming those
+heads. A stale request fails rather than appending to a newer head.
+`ds` checks heads under the task write lock in the configured DevSpecs home;
+writers to the same task should share that home.
+`--draft` previews without writing. Do not mix JSON input with checkpoint
+content flags, including `--note -`, `--description -`, or
+`--capture-test-output`. Listed tests are evidence, never commands to run.
+
+See the [request schema](../specs/task-checkpoint-input.v1.schema.json).
+Optional `receipt_evidence` is a caller-supplied correlation reference, not
+a receipt import, verification of the provider, or permission to promote.
+The caller supplies the lifecycle decision.
+For a recorded series closeout, durable Markdown artifacts must resolve
+within the repository and be regular files no larger than 1 MiB.
+
 ## Named Execution Threads
 
 Named threads are experimental scheduling lanes over existing task slices.
@@ -180,6 +219,15 @@ workspace, but it cannot checkpoint, promote, or otherwise mutate the DevSpecs
 task lifecycle. Each driver validates its own `options`, so another unchanged
 orchestrator can implement the same dispatch contract under a different
 provider key. Configuration alone never launches work.
+
+`ds apply --json` includes an additive `input_budget` (schema version 1).
+It measures the decoded prompt in UTF-8 bytes and estimates prompt tokens as
+bytes divided by four, rounded up. This is a heuristic, not a tokenizer or a
+provider limit. The ordered `context_artifacts` list points to separately
+addressable content already in the response, with byte lengths and SHA-256
+digests. A plan marked `in_prompt` is already counted; don't add it again.
+`omissions` names unmeasured referenced files and any unavailable plan body.
+This inventory does not fetch files or make the local prompt portable.
 
 `ds workspace trace` reports both lifecycle `status` and index-capture
 `index_status`. Keep them separate: `index_missing` means an artifact is not
